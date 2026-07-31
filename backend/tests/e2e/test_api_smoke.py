@@ -7,7 +7,9 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
+from app.engine.phases import Phase
 from app.main import app
+from app.sessions.store import get_session_store
 
 client = TestClient(app)
 
@@ -72,3 +74,24 @@ def test_view_is_filtered_but_debug_is_not():
 
     debug = client.get(f"/api/games/{session_id}/debug").json()
     assert "role" in debug["players"][0]
+
+
+def test_analysis_transcript_is_available_only_after_game_over():
+    resp = client.post("/api/games", json={"human_name": "Analyst", "seed": 9})
+    session_id = resp.json()["session_id"]
+
+    before_game_over = client.get(f"/api/games/{session_id}/transcript")
+    assert before_game_over.status_code == 409
+
+    session = get_session_store().get(session_id)
+    assert session is not None
+    session.controller.state.phase = Phase.GAME_OVER
+
+    transcript = client.get(f"/api/games/{session_id}/transcript")
+    assert transcript.status_code == 200
+    body = transcript.json()
+    assert body["seed"] == 9
+    assert body["provider"] == "MockProvider"
+    assert len(body["names"]) == 17
+    assert len(body["roles"]) == 17
+    assert body["final_state"]["phase"] == "game_over"

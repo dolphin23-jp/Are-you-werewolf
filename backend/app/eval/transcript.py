@@ -67,8 +67,7 @@ class GameTranscript:
 
 
 class TranscriptRecorder:
-    """Attached to an AICoordinator; a no-op when absent, so normal gameplay
-    carries no recording cost."""
+    """Captures AI decisions for evaluation runs and post-game play analysis."""
 
     def __init__(self) -> None:
         self.transcript = GameTranscript()
