@@ -59,7 +59,9 @@ def _drive_human_vote(controller: GameController, rng: random.Random) -> None:
     human = state.players[HUMAN_ID]
     if not human.alive:
         return
-    candidates = [pid for pid in state.alive_ids() if pid != HUMAN_ID]
+    # votable_ids, not alive_ids: in a runoff only the tied players are legal
+    # targets, and the engine now rejects anyone else.
+    candidates = state.votable_ids(HUMAN_ID)
     if candidates:
         controller.vote(HUMAN_ID, rng.choice(candidates))
 
@@ -67,11 +69,15 @@ def _drive_human_vote(controller: GameController, rng: random.Random) -> None:
 async def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--seed", type=int, default=1)
-    parser.add_argument("--provider", choices=["mock", "luna"], default="mock")
+    # No default: an explicit kwarg to Settings outranks the environment, so a
+    # CLI *default* of "mock" would silently beat a WEREWOLF_LLM_PROVIDER the
+    # operator deliberately set. Settings supplies the real default instead.
+    parser.add_argument("--provider", choices=["mock", "luna"], default=None)
     parser.add_argument("--max-loops", type=int, default=200)
     args = parser.parse_args()
 
-    settings = Settings(werewolf_llm_provider=args.provider)
+    overrides = {"werewolf_llm_provider": args.provider} if args.provider else {}
+    settings = Settings(**overrides)
     provider = build_llm_provider(settings, seed=args.seed)
 
     specs = [PlayerSpec(player_id=f"p{i}", name=f"P{i}", is_human=(i == 0)) for i in range(17)]
@@ -85,7 +91,7 @@ async def main() -> None:
         discussion_lock=asyncio.Lock(),
     )
 
-    print(f"=== seed={args.seed} provider={args.provider} ===")
+    print(f"=== seed={args.seed} provider={settings.werewolf_llm_provider} ===")
     for p in specs:
         role = ROLE_DEFINITIONS[controller.state.players[p.player_id].role]
         print(f"  {p.player_id} {p.name}: {role.label_ja}")

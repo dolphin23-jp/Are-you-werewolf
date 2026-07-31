@@ -70,3 +70,18 @@ def test_defaults_are_safe_when_no_env_file_exists(tmp_path: Path, monkeypatch):
     # a paid API call by accident.
     assert settings.werewolf_llm_provider == "mock"
     assert settings.luna_api_key == ""
+
+
+def test_explicit_kwarg_outranks_the_environment(monkeypatch):
+    """The precedence that made an evaluation run silently use the mock
+    provider: a CLI flag passed as a kwarg beats WEREWOLF_LLM_PROVIDER. That
+    is correct for an *explicit* flag -- the scripts must therefore pass no
+    kwarg at all when the flag is omitted (see the next test)."""
+    monkeypatch.setenv("WEREWOLF_LLM_PROVIDER", "luna")
+    assert Settings(werewolf_llm_provider="mock").werewolf_llm_provider == "mock"
+
+
+def test_omitted_flag_leaves_the_environment_in_charge(monkeypatch):
+    monkeypatch.setenv("WEREWOLF_LLM_PROVIDER", "luna")
+    overrides: dict[str, str] = {}  # what the scripts build when --provider is absent
+    assert Settings(**overrides).werewolf_llm_provider == "luna"

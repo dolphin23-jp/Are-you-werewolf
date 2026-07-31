@@ -123,6 +123,16 @@ class GameState:
     pending_guard: tuple[str, str] | None = None  # (hunter_id, target_id)
     pending_attack: tuple[str, str] | None = None  # (wolf_id, target_id)
     pending_votes: dict[str, str] = field(default_factory=dict)  # voter_id -> target_id
+    # In a runoff, only the players tied for the most votes remain eligible.
+    # Empty means an ordinary round where anyone alive can be voted for.
+    # Without this a runoff is just "vote again over the whole field", which
+    # rarely converges and burns through max_vote_rounds into a false draw.
+    runoff_candidates: list[str] = field(default_factory=list)
+
+    def votable_ids(self, voter_id: str) -> list[str]:
+        """Who this player may vote for right now."""
+        pool = self.runoff_candidates or self.alive_ids()
+        return [pid for pid in pool if pid != voter_id and self.players[pid].alive]
 
     def alive_players(self) -> list[PlayerState]:
         return [p for p in self.players.values() if p.alive]
@@ -182,6 +192,7 @@ class GameState:
             "phase": self.phase,
             "day": self.day,
             "vote_round": self.vote_round,
+            "runoff_candidates": list(self.runoff_candidates),
             "your_player_id": viewer_id,
             "your_role": viewer.role if viewer else None,
             "allies": allies,
@@ -210,6 +221,7 @@ class GameState:
             "phase": self.phase,
             "day": self.day,
             "vote_round": self.vote_round,
+            "runoff_candidates": list(self.runoff_candidates),
             "players": [
                 {
                     "player_id": p.player_id,

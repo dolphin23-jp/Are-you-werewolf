@@ -74,10 +74,12 @@ def _submit_night_actions(controller, rng: random.Random) -> None:
 
 
 def _submit_votes(controller, rng: random.Random) -> None:
-    alive_ids = controller.state.alive_ids()
-    for voter in alive_ids:
-        candidates = [pid for pid in alive_ids if pid != voter]
-        controller.vote(voter, rng.choice(candidates))
+    # votable_ids rather than alive_ids: in a runoff only the tied players are
+    # legal targets, and the engine rejects anything else.
+    for voter in controller.state.alive_ids():
+        candidates = controller.state.votable_ids(voter)
+        if candidates:
+            controller.vote(voter, rng.choice(candidates))
 
 
 def test_random_games_always_terminate():

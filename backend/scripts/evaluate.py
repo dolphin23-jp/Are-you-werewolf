@@ -131,7 +131,9 @@ async def play_one_game(seed: int, settings: Settings, metrics: MetricsCollector
             controller.end_discussion()
         elif phase in (Phase.VOTING, Phase.RUNOFF):
             if controller.state.players[HUMAN_ID].alive:
-                candidates = [pid for pid in controller.state.alive_ids() if pid != HUMAN_ID]
+                # votable_ids, not alive_ids: a runoff only accepts the tied
+                # players as targets.
+                candidates = controller.state.votable_ids(HUMAN_ID)
                 if candidates:
                     controller.vote(HUMAN_ID, rng.choice(candidates))
             await coordinator.generate_all_votes(session)
@@ -146,7 +148,11 @@ async def play_one_game(seed: int, settings: Settings, metrics: MetricsCollector
 async def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--games", type=int, default=1)
-    parser.add_argument("--provider", choices=["mock", "luna"], default="mock")
+    # No default: passing one explicitly to Settings would override
+    # WEREWOLF_LLM_PROVIDER from the environment, so a CLI *default* would
+    # silently beat an env var the operator deliberately set. Settings
+    # supplies the real default (mock) when this is omitted.
+    parser.add_argument("--provider", choices=["mock", "luna"], default=None)
     parser.add_argument("--seed", type=int, default=1, help="最初のゲームのシード")
     parser.add_argument("--out", type=Path, default=Path("eval-out"))
     parser.add_argument("--judge", action="store_true", help="日本語/人格をLLMで採点する(追加費用)")
@@ -155,7 +161,10 @@ async def main() -> int:
     parser.add_argument("--price-out", type=float, default=0.0, help="出力100万トークンあたり単価")
     args = parser.parse_args()
 
-    settings = Settings(werewolf_llm_provider=args.provider)
+    overrides = {"werewolf_llm_provider": args.provider} if args.provider else {}
+    settings = Settings(**overrides)
+    provider_name = settings.werewolf_llm_provider
+    print(f"==> LLM プロバイダ: {provider_name}", flush=True)
     metrics = MetricsCollector()
     args.out.mkdir(parents=True, exist_ok=True)
 
@@ -182,9 +191,7 @@ async def main() -> int:
         print("==> LLM判定を実行中", flush=True)
         judge_settings = settings
         if args.judge_model:
-            judge_settings = Settings(
-                werewolf_llm_provider=args.provider, luna_model=args.judge_model
-            )
+            judge_settings = Settings(**overrides, luna_model=args.judge_model)
         # Judge calls are deliberately kept out of `metrics`, so the game's
         # own cost/latency numbers are not polluted by evaluation overhead.
         judge_provider = build_llm_provider(judge_settings, seed=args.seed)
@@ -198,14 +205,14 @@ async def main() -> int:
         metrics_summary=metrics_summary,
         judge_summary=judge_summary,
         provider=games[0][0].provider if games else "unknown",
-        model=settings.luna_model if args.provider == "luna" else "(mock)",
+        model=settings.luna_model if provider_name == "luna" else "(mock)",
     )
     (args.out / "report.md").write_text(report, encoding="utf-8")
     (args.out / "summary.json").write_text(
         json.dumps(
             {
-                "provider": args.provider,
-                "model": settings.luna_model if args.provider == "luna" else "(mock)",
+                "provider": provider_name,
+                "model": settings.luna_model if provider_name == "luna" else "(mock)",
                 "games": args.games,
                 "metrics": metrics_summary,
                 "judge": {"summary": judge_summary, "per_player": judge_detail},

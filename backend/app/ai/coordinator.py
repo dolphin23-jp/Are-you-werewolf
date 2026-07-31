@@ -202,7 +202,9 @@ class AICoordinator:
             await self._generate_day_summary(controller, state)
 
     async def _cast_vote(self, controller: object, state: GameState, player_id: str) -> None:
-        candidates = [pid for pid in state.alive_ids() if pid != player_id]
+        # In a runoff this is narrowed to the tied players, so the AI is not
+        # offered choices the engine would reject.
+        candidates = state.votable_ids(player_id)
         if not candidates:
             return
         system, messages = self._context.build_vote_context(state, player_id, candidates)

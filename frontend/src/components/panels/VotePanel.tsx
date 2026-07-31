@@ -36,7 +36,15 @@ export function VotePanel() {
     );
   }
 
-  const candidates = view.players.filter((p) => p.alive && p.player_id !== view.your_player_id);
+  // A runoff only accepts the tied players; offering anyone else would just
+  // produce a server-side rejection.
+  const runoffOnly = new Set(view.runoff_candidates);
+  const candidates = view.players.filter(
+    (p) =>
+      p.alive &&
+      p.player_id !== view.your_player_id &&
+      (runoffOnly.size === 0 || runoffOnly.has(p.player_id)),
+  );
 
   const handleVote = async () => {
     if (!target) return;
@@ -56,6 +64,9 @@ export function VotePanel() {
   return (
     <div className="panel vote-panel">
       <h3>{view.phase === "runoff" ? `決選投票 (${view.vote_round}回目)` : "投票"}</h3>
+      {runoffOnly.size > 0 && (
+        <p className="vote-panel__note">同数だったプレイヤーのみが投票先になります。</p>
+      )}
       <select value={target} onChange={(e) => setTarget(e.target.value)} disabled={submitting}>
         <option value="">投票先を選択...</option>
         {candidates.map((p) => (
