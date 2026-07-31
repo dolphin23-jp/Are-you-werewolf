@@ -84,6 +84,7 @@ class ContextBuilder:
         wolf_deception: WolfDeceptionAssignment,
         madman_fake_role: RoleName | None,
         fake_claim_guard: FakeClaimGuard,
+        observer_player_ids: set[str] | None = None,
     ) -> None:
         self._personalities = personalities
         self._day_summaries = day_summaries
@@ -91,6 +92,7 @@ class ContextBuilder:
         self._wolf_deception = wolf_deception
         self._madman_fake_role = madman_fake_role
         self._fake_claim_guard = fake_claim_guard
+        self._observer_player_ids = observer_player_ids or set()
 
     # -- layer [A] --
 
@@ -99,12 +101,17 @@ class ContextBuilder:
         personality = self._personalities[player_id]
         return (
             f"あなたは人狼ゲームに参加しているプレイヤー「{player.name}」です。\n"
+            f"あなた自身のplayer_idは {player_id} です。"
+            f"「{player.name}({player_id})」はあなた自身であり、別人ではありません。\n"
             "17人参加のオンラインチャット型人狼ゲームです。\n"
             f"{personality.to_prompt_section()}\n"
             "【重要な制約】\n"
             "- 「AIとして」「言語モデルとして」「プロンプト」等のメタ発言は絶対に禁止です\n"
             "- 発言は200文字以内を目安にしてください\n"
-            "- 他のプレイヤーの発言内容に具体的に言及してください"
+            "- 他のプレイヤーの発言内容に具体的に言及してください\n"
+            "- 自分自身を疑い先・処刑先・能力対象として扱ってはいけません\n"
+            "- 名指しの質問には1回だけ追加返信の機会があります。返信前の相手を"
+            "『答えられない』と評価せず、同じ要求を繰り返さないでください"
         )
 
     # -- layer [B] --
@@ -145,6 +152,24 @@ class ContextBuilder:
             ]
             lines.append(f"共有者の相方: {'、'.join(partners) if partners else 'なし'}")
 
+        divine_results = [r for r in state.divine_records if r.seer_id == player_id]
+        if divine_results:
+            rendered = [
+                f"{r.day}日目 {player_label(state, r.target_id)}="
+                f"{'人狼' if r.is_werewolf else '人狼ではない'}"
+                for r in divine_results
+            ]
+            lines.append("【あなただけが知る占い結果】" + "、".join(rendered))
+
+        medium_results = [r for r in state.medium_records if r.medium_id == player_id]
+        if medium_results:
+            rendered = [
+                f"{r.day}日目 {player_label(state, r.target_id)}="
+                f"{'人狼' if r.is_werewolf else '人狼ではない'}"
+                for r in medium_results
+            ]
+            lines.append("【あなただけが知る霊媒結果】" + "、".join(rendered))
+
         return "\n".join(lines)
 
     # -- layer [C] --
@@ -152,6 +177,18 @@ class ContextBuilder:
     def _layer_c_state(self, state: GameState, player_id: str, extra_guides: list[str]) -> str:
         analysis = self._analyzer.analyze(state)
         parts = [render_board_analysis(analysis, state)]
+        observers = [
+            player_label(state, pid)
+            for pid in sorted(self._observer_player_ids)
+            if pid in state.players
+        ]
+        if observers:
+            parts.append(
+                "【非参戦席】"
+                + "、".join(observers)
+                + "は評価用の無言席で、発言・投票をしません。"
+                "沈黙や未回答を疑い理由にせず、返答も求めないでください。"
+            )
         parts.extend(extra_guides)
         return "\n\n".join(parts)
 
@@ -166,7 +203,10 @@ class ContextBuilder:
         todays = [m for m in state.chat_log if m.channel == channel and m.day == state.day]
         if not todays:
             return "【当日のログ】(まだ発言はありません)"
-        lines = [f"{state.players[m.author_id].name}: {m.content}" for m in todays]
+        lines = [
+            f"{player_label(state, m.author_id)}: {m.content}"
+            for m in todays
+        ]
         return "【当日のログ】\n" + "\n".join(lines)
 
     def _assemble(

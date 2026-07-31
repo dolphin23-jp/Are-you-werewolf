@@ -19,14 +19,17 @@ _CHECK_LABELS = {
     "result_claim_without_role": "役職に無い占い/霊媒結果の主張",
     "co_role_mismatch": "役職と異なるCO",
     "co_role_changed": "CO役職の変更(明確な矛盾)",
-    "references_dead_player": "死亡済みプレイヤーへの言及",
+    "treats_dead_player_as_active": "死亡済みプレイヤーを現在の行動対象として扱う",
     "vote_contradicts_stated_intent": "思考メモと投票先の不一致",
-    "wolf_named_teammate_with_wolf_word": "人狼が仲間を疑う発言",
-    "wolf_voted_teammate": "人狼が仲間に投票",
+    "wolf_named_teammate_with_wolf_word": "人狼が仲間を明示的に狼視",
+    "wolf_voted_teammate": "人狼の仲間投票(戦略観測)",
     "assigned_faker_never_claimed": "騙り担当がCOしなかった",
     "lurker_broke_cover": "潜伏担当がCOした",
     "meta_phrase_leaked": "メタ発言の漏れ",
     "low_japanese_ratio": "日本語比率が低い発言",
+    "self_treated_as_other_player": "自分自身を他プレイヤーとして扱う",
+    "claimed_p0_identity": "p0ではないプレイヤーがp0本人を主張",
+    "true_role_result_conflict": "真役職が実際と逆の判定結果を主張",
 }
 
 

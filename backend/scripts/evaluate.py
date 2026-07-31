@@ -24,7 +24,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
-import random
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -45,6 +44,7 @@ from app.eval.report import render_report, render_transcript  # noqa: E402
 from app.eval.transcript import GameTranscript, TranscriptRecorder  # noqa: E402
 
 HUMAN_ID = "p0"
+OBSERVER_NAME = "観戦席"
 MAX_LOOPS = 200
 
 AI_NAMES = [
@@ -68,74 +68,52 @@ AI_NAMES = [
 
 
 def _make_specs() -> list[PlayerSpec]:
-    specs = [PlayerSpec(player_id=HUMAN_ID, name="あなた", is_human=True)]
+    specs = [PlayerSpec(player_id=HUMAN_ID, name=OBSERVER_NAME, is_human=True)]
     specs += [
         PlayerSpec(player_id=f"p{i}", name=AI_NAMES[i - 1], is_human=False) for i in range(1, 17)
     ]
     return specs
 
 
-def _drive_human_night(controller: GameController, rng: random.Random) -> None:
-    """Stands in for the single human seat so the AI sees a realistic
-    16-AI-plus-1-human table rather than an all-AI one."""
-    state = controller.state
-    human = state.players[HUMAN_ID]
-    if not human.alive:
-        return
-    candidates = [pid for pid in state.alive_ids() if pid != HUMAN_ID]
-    if not candidates:
-        return
-    if state.day == 0:
-        if human.role == RoleName.SEER:
-            controller.submit_night_action(HUMAN_ID, "divine", rng.choice(candidates))
-        return
-    if human.role == RoleName.SEER:
-        controller.submit_night_action(HUMAN_ID, "divine", rng.choice(candidates))
-    elif human.role == RoleName.HUNTER:
-        controller.submit_night_action(HUMAN_ID, "guard", rng.choice(candidates))
-    elif human.role == RoleName.WEREWOLF and controller.alpha_wolf_id == HUMAN_ID:
-        prey = [pid for pid in candidates if state.players[pid].role != RoleName.WEREWOLF]
-        if prey:
-            controller.submit_night_action(HUMAN_ID, "attack", rng.choice(prey))
-
-
 async def play_one_game(seed: int, settings: Settings, metrics: MetricsCollector) -> GameTranscript:
     provider = build_llm_provider(settings, seed=seed, metrics=metrics)
     specs = _make_specs()
-    controller = GameController(session_id=f"eval-{seed}", player_specs=specs, seed=seed)
+    controller = GameController(
+        session_id=f"eval-{seed}",
+        player_specs=specs,
+        seed=seed,
+        forced_roles={HUMAN_ID: RoleName.VILLAGER},
+        inactive_player_ids={HUMAN_ID},
+    )
     ai_ids = [s.player_id for s in specs if not s.is_human]
     recorder = TranscriptRecorder()
-    coordinator = AICoordinator(controller.state, ai_ids, provider, seed=seed, recorder=recorder)
+    coordinator = AICoordinator(
+        controller.state,
+        ai_ids,
+        provider,
+        seed=seed,
+        recorder=recorder,
+        observer_player_ids={HUMAN_ID},
+    )
     session = SimpleNamespace(
         controller=controller,
         human_id=HUMAN_ID,
         coordinator=coordinator,
         discussion_lock=asyncio.Lock(),
     )
-    rng = random.Random(seed)
-
     controller.start_game()
     for _ in range(MAX_LOOPS):
         phase = controller.state.phase
         if phase == Phase.GAME_OVER:
             break
         if phase == Phase.NIGHT:
-            _drive_human_night(controller, rng)
             await coordinator.run_night_phase(session)
         elif phase == Phase.DAWN:
             controller.start_discussion()
         elif phase == Phase.DISCUSSION:
-            if controller.state.players[HUMAN_ID].alive:
-                controller.chat(HUMAN_ID, "よろしくお願いします。", "public")
             await coordinator.run_discussion_round(session)
             controller.end_discussion()
         elif phase in (Phase.VOTING, Phase.RUNOFF):
-            if controller.state.players[HUMAN_ID].alive:
-                # votable_ids, not alive_ids: a runoff only accepts the tied
-                # players as targets.
-                candidates = controller.state.votable_ids(HUMAN_ID)
-                if candidates:
-                    controller.vote(HUMAN_ID, rng.choice(candidates))
             await coordinator.generate_all_votes(session)
         elif phase == Phase.VOTE_RESULT:
             controller.start_night()

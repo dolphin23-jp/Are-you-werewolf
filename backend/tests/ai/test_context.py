@@ -15,11 +15,12 @@ from app.ai.personalities import assign_personalities
 from app.ai.strategy import StrategyAnalyzer, render_board_analysis
 from app.engine.phases import Phase
 from app.engine.roles import RoleName
+from app.engine.state import DivineRecord, MediumRecord
 from app.engine.vote import VoteManager
 from tests.conftest import make_controller
 
 
-def _builder(state) -> ContextBuilder:
+def _builder(state, observer_player_ids: set[str] | None = None) -> ContextBuilder:
     wolf_ids = [p.player_id for p in state.players_by_role(RoleName.WEREWOLF)]
     return ContextBuilder(
         personalities=assign_personalities(list(state.players), seed=1),
@@ -32,6 +33,7 @@ def _builder(state) -> ContextBuilder:
         ),
         madman_fake_role=None,
         fake_claim_guard=FakeClaimGuard(wolf_team_ids=set(wolf_ids)),
+        observer_player_ids=observer_player_ids,
     )
 
 
@@ -95,3 +97,48 @@ def test_ordinary_round_does_not_mention_a_runoff():
     _, messages = builder.build_vote_context(state, "p1", ["p2", "p3"])
 
     assert "決選投票" not in messages[0].content
+
+
+def test_role_owner_receives_private_results_but_other_player_does_not():
+    controller = make_controller(seed=4)
+    state = controller.state
+    seer = state.players_by_role(RoleName.SEER)[0]
+    medium = state.players_by_role(RoleName.MEDIUM)[0]
+    role_owner_ids = {seer.player_id, medium.player_id}
+    target = next(p for p in state.alive_players() if p.player_id not in role_owner_ids)
+    state.divine_records.append(DivineRecord(seer.player_id, target.player_id, 1, True))
+    state.medium_records.append(MediumRecord(medium.player_id, target.player_id, 1, False))
+    builder = _builder(state)
+
+    seer_system, _ = builder.build_discussion_context(state, seer.player_id)
+    medium_system, _ = builder.build_discussion_context(state, medium.player_id)
+    other_system, _ = builder.build_discussion_context(state, target.player_id)
+
+    assert "占い結果" in seer_system and "=人狼" in seer_system
+    assert "霊媒結果" in medium_system and "=人狼ではない" in medium_system
+    assert "占い結果" not in other_system
+    assert "霊媒結果" not in other_system
+
+
+def test_private_divine_target_stays_in_public_gray_list():
+    controller = make_controller(seed=4)
+    state = controller.state
+    seer = state.players_by_role(RoleName.SEER)[0]
+    target = next(p for p in state.alive_players() if p.player_id != seer.player_id)
+    state.divine_records.append(DivineRecord(seer.player_id, target.player_id, 1, False))
+
+    analysis = StrategyAnalyzer().analyze(state)
+
+    assert target.player_id in analysis.gray_player_ids
+
+
+def test_prompt_anchors_self_identity_and_marks_observer():
+    controller = make_controller(seed=4)
+    state = controller.state
+    builder = _builder(state, {"p0"})
+
+    system, messages = builder.build_discussion_context(state, "p1")
+
+    assert "Player1(p1)」はあなた自身" in system
+    assert "非参戦席" in messages[0].content
+    assert "Player0(p0)" in messages[0].content
