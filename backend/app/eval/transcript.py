@@ -27,6 +27,10 @@ class Utterance:
     text: str = ""
     target: str | None = None
     reasoning_memo: dict[str, Any] | None = None
+    public_claim_role: str | None = None
+    public_results: list[dict[str, Any]] = field(default_factory=list)
+    directed_question_targets: list[str] = field(default_factory=list)
+    ready_to_vote: bool | None = None
     used_fallback: bool = False
 
 

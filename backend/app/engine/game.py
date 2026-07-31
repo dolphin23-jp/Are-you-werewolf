@@ -32,13 +32,43 @@ class GameError(ValueError):
 
 class GameController:
     def __init__(
-        self, session_id: str, player_specs: list[PlayerSpec], seed: int | None = None
+        self,
+        session_id: str,
+        player_specs: list[PlayerSpec],
+        seed: int | None = None,
+        forced_roles: dict[str, RoleName] | None = None,
+        inactive_player_ids: set[str] | None = None,
     ) -> None:
         if len(player_specs) != 17:
             raise GameError(f"expected 17 players, got {len(player_specs)}")
 
         self._assigner = RoleAssigner(seed=seed)
         assignment = self._assigner.assign([p.player_id for p in player_specs])
+        # Evaluation can reserve a non-participating human seat as an ordinary
+        # villager without changing the overall 17-player composition. Partial
+        # overrides are implemented as deterministic swaps, never by adding or
+        # removing a role.
+        for player_id, role in (forced_roles or {}).items():
+            if player_id not in assignment:
+                raise GameError(f"cannot force role for unknown player {player_id}")
+            if assignment[player_id] == role:
+                continue
+            swap_id = next(
+                (
+                    pid
+                    for pid, assigned in assignment.items()
+                    if assigned == role and pid != player_id
+                ),
+                None,
+            )
+            if swap_id is None:
+                raise GameError(f"role {role} is not present in the assignment")
+            assignment[player_id], assignment[swap_id] = assignment[swap_id], assignment[player_id]
+
+        inactive_ids = inactive_player_ids or set()
+        unknown_inactive = inactive_ids - set(assignment)
+        if unknown_inactive:
+            raise GameError(f"unknown inactive players: {sorted(unknown_inactive)}")
 
         players = {
             spec.player_id: PlayerState(
@@ -46,6 +76,7 @@ class GameController:
                 name=spec.name,
                 role=assignment[spec.player_id],
                 is_human=spec.is_human,
+                alive=spec.player_id not in inactive_ids,
             )
             for spec in player_specs
         }
@@ -83,9 +114,10 @@ class GameController:
 
     def start_game(self) -> None:
         self._transition(PhaseEvent.START_GAME)
-        self._first_victim_id = self._assigner.pick_first_victim(
-            {pid: p.role for pid, p in self.state.players.items()}
-        )
+        active_assignment = {
+            pid: player.role for pid, player in self.state.players.items() if player.alive
+        }
+        self._first_victim_id = self._assigner.pick_first_victim(active_assignment)
 
     def resolve_night(self) -> None:
         if self.state.phase != Phase.NIGHT:

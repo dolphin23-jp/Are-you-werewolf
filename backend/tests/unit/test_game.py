@@ -6,11 +6,42 @@ from __future__ import annotations
 
 import random
 
+from app.engine.game import GameController
 from app.engine.phases import Phase
 from app.engine.roles import RoleName
-from tests.conftest import make_controller
+from tests.conftest import make_controller, make_player_specs
 
 MAX_LOOPS = 150
+
+
+def test_forced_role_swaps_without_changing_composition():
+    baseline = make_controller(seed=1)
+    controller = GameController(
+        session_id="forced-role",
+        player_specs=make_player_specs(),
+        seed=1,
+        forced_roles={"p0": RoleName.VILLAGER},
+    )
+
+    assert controller.state.players["p0"].role == RoleName.VILLAGER
+    assert sorted(p.role for p in controller.state.players.values()) == sorted(
+        p.role for p in baseline.state.players.values()
+    )
+
+
+def test_inactive_observer_is_not_alive_or_selected_as_first_victim():
+    controller = GameController(
+        session_id="observer",
+        player_specs=make_player_specs(),
+        seed=1,
+        forced_roles={"p0": RoleName.VILLAGER},
+        inactive_player_ids={"p0"},
+    )
+
+    assert "p0" not in controller.state.alive_ids()
+    controller.start_game()
+    controller.resolve_night()
+    assert all(record.player_id != "p0" for record in controller.state.death_records)
 
 
 def _play_random_game(seed: int) -> None:

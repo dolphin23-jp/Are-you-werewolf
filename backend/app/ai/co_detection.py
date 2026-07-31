@@ -26,8 +26,8 @@ import re
 from app.engine.roles import RoleName
 
 _ROLE_WORDS: dict[RoleName, str] = {
-    RoleName.SEER: "占い師",
-    RoleName.MEDIUM: "霊媒師",
+    RoleName.SEER: "(?:占い師|占い)",
+    RoleName.MEDIUM: "(?:霊媒師|霊媒)",
     RoleName.HUNTER: "狩人",
     RoleName.FREEMASON: "共有者",
 }
@@ -36,7 +36,7 @@ _ROLE_WORDS: dict[RoleName, str] = {
 # to the role word.
 _CLAIM_SUFFIX = (
     r"(?:"
-    r"[\s、，,]{0,2}(?:CO|ＣＯ|ｃｏ|co|カミングアウト)"
+    r"[\s、，,]{0,2}(?:CO|ＣＯ|ｃｏ|co|カミングアウト)(?!の|を|が|は|者|数)"
     r"|です(?![かね？?])"
     r"|でした"
     r"|だ(?![とがけろうねよ])"
