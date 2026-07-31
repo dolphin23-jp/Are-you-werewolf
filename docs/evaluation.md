@@ -2,6 +2,24 @@
 
 `backend/scripts/evaluate.py` がN戦を実行し、レポートと対戦記録を出力します。
 
+## まず接続確認(1回の呼び出しだけ)
+
+いきなり評価を回すと1戦で数百回の呼び出しが発生します。その前に、キー・URL・
+モデル名・構造化出力の対応状況を **1回の呼び出し** で確認してください。
+
+```bash
+cd backend
+python scripts/check_llm.py
+```
+
+`LUNA_API_KEY` が空、`LUNA_BASE_URL` がプレースホルダーのまま、URLの誤り、
+認証エラーは、それぞれ具体的な対処つきで表示されます。
+
+> Codespaces secrets は登録しただけでは反映されません。**Codespace の再起動**
+> (または作り直し)が必要です。
+
+## 評価の実行
+
 ```bash
 cd backend
 
