@@ -1,7 +1,20 @@
 import type { CreateGameResponse, DebugView, GameView } from "./types";
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
-export const WS_BASE = import.meta.env.VITE_WS_BASE_URL ?? "ws://localhost:8000";
+/** Default to same-origin: in production the FastAPI backend serves this
+ * built frontend itself, and in `pnpm dev` Vite proxies /api and /ws to the
+ * backend (see vite.config.ts). Same-origin also means the WebSocket
+ * inherits the page's scheme, which is what makes Codespaces' HTTPS port
+ * forwarding work (it requires wss://, not ws://). Override only when
+ * deploying frontend and backend as genuinely separate hosts. */
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
+
+function sameOriginWsBase(): string {
+  if (typeof window === "undefined") return "ws://localhost:8000";
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return `${protocol}//${window.location.host}`;
+}
+
+export const WS_BASE = import.meta.env.VITE_WS_BASE_URL ?? sameOriginWsBase();
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {

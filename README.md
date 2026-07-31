@@ -29,35 +29,97 @@ are-you-werewolf/
 | 妖狐 | 1 | 妖狐陣営 |
 | 共有者 | 2 | 村人陣営 |
 
-## セットアップ
+## 遊び方(GitHub Codespaces / ローカル環境不要)
 
-### バックエンド
+ブラウザだけで完結します。パソコンへのインストールは一切不要です。
+
+1. GitHub のリポジトリページで **Code → Codespaces → Create codespace** をクリック
+2. ブラウザ上で VS Code が開き、自動セットアップが走る(数分)
+3. ターミナルで次を実行
+
+   ```bash
+   bash .devcontainer/start.sh
+   ```
+
+4. 下部の **ポート** タブに出る **8000番** のURLを開くと遊べます
+
+APIキーを設定しなくても、**モックAI相手にそのまま遊べます**(通信費ゼロ)。
+実際の gpt-5.6-luna を使う場合は次項へ。
+
+## APIキーの入力手順(GitHub の設定画面)
+
+> **このリポジトリは公開(public)です。APIキーはリポジトリのファイルには絶対に書きません。**
+> GitHub の Secrets 画面に入力すると、Codespace に環境変数として渡されます。
+
+1. GitHub の **Settings**(自分のアカウント設定)→ **Codespaces** →
+   **Codespaces secrets** → **New secret** を開く
+2. 次の3つを登録し、いずれも Repository access でこのリポジトリを許可する
+
+   | Name | Value |
+   |---|---|
+   | `WEREWOLF_LLM_PROVIDER` | `luna` |
+   | `LUNA_API_KEY` | 発行された実際のキー |
+   | `LUNA_BASE_URL` | gpt-5.6-luna のOpenAI互換エンドポイントURL |
+
+3. **Codespace を再起動**(または作り直す)と反映されます
+4. 反映確認は `/api/health` を開き、`"llm_provider": "luna"` になっていればOK
+
+キーを入れずに `WEREWOLF_LLM_PROVIDER=luna` だけ設定した場合は、
+誤って課金APIを叩く前に起動時の警告とエラーで止まります。
+
+### ローカルで動かす場合(任意)
 
 ```bash
 cd backend
-python3.12 -m venv .venv
-source .venv/bin/activate
+python3.12 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-cp .env.example .env   # 必要に応じて編集(デフォルトは mock プロバイダ)
-uvicorn app.main:app --reload
+cp .env.example .env      # ここにキーを書く(.env は gitignore 済み)
+cd ../frontend && pnpm install && pnpm build
+cd ../backend && uvicorn app.main:app --reload
 ```
 
-`WEREWOLF_LLM_PROVIDER=mock`(デフォルト)ならAPIキー不要でネットワーク費用ゼロで動作します。
-実際に gpt-5.6-luna を使う場合は `WEREWOLF_LLM_PROVIDER=luna` にして
-`LUNA_API_KEY` / `LUNA_BASE_URL` / `LUNA_MODEL` を設定してください
-(`.env.example` の値はプレースホルダーです)。
-
-### フロントエンド
+`.env` が git から見えないことは次で確認できます(**何も出なければ安全**)。
 
 ```bash
-cd frontend
-pnpm install
-cp .env.example .env.local   # 必要に応じて編集
-pnpm dev
+git status --porcelain backend/.env
 ```
 
-`http://localhost:5173` を開くとブラウザで遊べます(バックエンドは
-`http://localhost:8000` で起動している前提)。
+   キーが未設定のまま `luna` を選ぶと、誤って課金APIを叩く前に起動時エラーで止まります。
+
+### なぜ公開リポジトリでも安全か
+
+- キーはリポジトリのファイルに一切書きません。GitHub の Secrets 画面(または
+  gitignore 済みの `backend/.env`)にだけ入力します。
+- APIキーは**バックエンドのプロセス内のみ**で使われます。フロントエンドは
+  自分と同じオリジンにリクエストするだけで、キーを一切知りません。
+- **`VITE_` 接頭辞の変数にキーを書かないでください。** Viteは `VITE_*` を
+  ブラウザ向けバンドルに埋め込むため、書くと全訪問者にキーが露出します。
+  LLMのキーは常にバックエンド側(`LUNA_*`)に置いてください。
+- 実環境変数は `.env` より優先されます。Codespaces や各種ホスティングの
+  環境変数設定に登録すれば、コードも `.env` も不要です。
+
+万一キーをコミットしてしまった場合は、履歴から消すより先に
+**発行元でそのキーを失効(revoke)させ、新しいキーを再発行**してください。
+
+## 構成上のポイント: 単一ポート
+
+バックエンド(FastAPI)がビルド済みのフロントエンドも配信します。
+API・画面・WebSocket がすべて同一オリジンなので:
+
+- 転送するポートが1つで済む(Codespaces のポート転送と相性が良い)
+- CORS 設定が不要
+- WebSocket はページのスキームを継承するため、Codespaces の HTTPS 転送でも
+  `wss://` が自動的に使われる
+
+フロントエンドを開発サーバーで動かす場合(`pnpm dev`)も、Vite が `/api` と
+`/ws` をバックエンドへプロキシするので、コード側は常に同一オリジン前提の
+1経路だけで済みます。
+
+```bash
+# 画面のホットリロードが欲しいときだけ、2つ起動する
+cd backend && uvicorn app.main:app --reload   # ターミナル1
+cd frontend && pnpm dev                        # ターミナル2 → localhost:5173
+```
 
 ## テスト
 

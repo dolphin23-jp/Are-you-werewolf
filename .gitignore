@@ -1,3 +1,15 @@
+# --- Secrets ---
+# APIキー等は絶対にコミットしない。パスにスラッシュを含めないことで
+# リポジトリ内のどの階層の .env / .env.local / .env.production 等も
+# まとめて無視する。プレースホルダーの .env.example のみ追跡する。
+.env
+.env.*
+!.env.example
+!.env.*.example
+secrets.json
+*.pem
+*.key
+
 # --- Python / backend ---
 __pycache__/
 *.pyc
@@ -7,13 +19,10 @@ venv/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
-backend/.env
 
 # --- Node / frontend ---
 node_modules/
 dist/
-frontend/.env
-frontend/.env.local
 *.tsbuildinfo
 
 # --- Editors / OS ---
