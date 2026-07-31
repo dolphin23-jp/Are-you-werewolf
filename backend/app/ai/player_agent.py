@@ -20,6 +20,7 @@ from app.ai.personalities import Personality
 from app.ai.provider.base import LLMProvider, Message, SchemaT
 from app.ai.schemas import (
     DiscussionOutput,
+    MorningIntentOutput,
     NightActionOutput,
     SummaryOutput,
     VoteOutput,
@@ -59,6 +60,12 @@ class AIPlayerAgent:
             return DiscussionOutput(public_message=self._personality.get_fallback_message())
         result.public_message = self._sanitize(result.public_message, max_len=200)
         return result
+
+    async def generate_morning_intent(
+        self, system: str, messages: list[Message]
+    ) -> MorningIntentOutput:
+        result = await self._generate_with_retry(system, messages, MorningIntentOutput)
+        return result or MorningIntentOutput()
 
     async def generate_vote(
         self, system: str, messages: list[Message], valid_targets: list[str]

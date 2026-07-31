@@ -16,7 +16,7 @@ stays emergent rather than scripted.
 from __future__ import annotations
 
 import asyncio
-from collections import deque
+from collections import Counter, deque
 
 from app.ai.co_detection import detect_claimed_role
 from app.ai.context import ContextBuilder, DaySummaryManager
@@ -24,6 +24,7 @@ from app.ai.deception import FakeClaimGuard, assign_madman_strategy, assign_wolf
 from app.ai.personalities import assign_personalities
 from app.ai.player_agent import AIPlayerAgent
 from app.ai.provider.base import LLMProvider
+from app.ai.schemas import DiscussionOutput, MorningIntentOutput
 from app.engine.phases import Phase
 from app.engine.roles import RoleName
 from app.engine.state import GameState
@@ -44,6 +45,7 @@ class AICoordinator:
         self._ai_player_ids = list(ai_player_ids)
         self._observer_player_ids = observer_player_ids or set()
         self._max_discussion_followups = max(0, max_discussion_followups)
+        self._discussion_started_days: set[int] = set()
 
         self._personalities = assign_personalities(self._ai_player_ids, seed=seed)
 
@@ -119,6 +121,10 @@ class AICoordinator:
         target: str | None = None,
         reasoning_memo: object = None,
         used_fallback: bool = False,
+        public_claim_role: str | None = None,
+        public_results: list[dict[str, object]] | None = None,
+        directed_question_targets: list[str] | None = None,
+        ready_to_vote: bool | None = None,
     ) -> None:
         if self._recorder is None:
             return
@@ -138,6 +144,10 @@ class AICoordinator:
                 text=text,
                 target=target,
                 reasoning_memo=memo,
+                public_claim_role=public_claim_role,
+                public_results=public_results or [],
+                directed_question_targets=directed_question_targets or [],
+                ready_to_vote=ready_to_vote,
                 used_fallback=used_fallback,
             )
         )
@@ -152,47 +162,125 @@ class AICoordinator:
     # -- discussion --
 
     async def run_discussion_round(self, session: object) -> None:
-        """Run one finite discussion turn.
-
-        Every living AI speaks once in seating order. Direct questions to an
-        AI that already spoke enqueue at most one reply for that player. The
-        global follow-up cap guarantees that an AI exchange always terminates
-        and returns control to the human even if generated messages keep
-        mentioning one another.
-        """
+        """Run a finite morning -> initial views -> rebuttal discussion."""
         async with session.discussion_lock:  # type: ignore[attr-defined]
             controller = session.controller  # type: ignore[attr-defined]
             state = controller.state
-            spoken: set[str] = set()
-            replied: set[str] = set()
+            alive = [pid for pid in self._ai_player_ids if state.players[pid].alive]
+            if not alive:
+                return
+            if state.day in self._discussion_started_days:
+                await self._run_human_followup(controller, state, alive)
+                return
+            self._discussion_started_days.add(state.day)
+
+            intents = await asyncio.gather(*(self._morning_intent(state, pid) for pid in alive))
+            priority = {"immediate": 0, "after_results": 1, "normal": 2, "hold": 3}
+            intent_by_id = dict(zip(alive, intents, strict=True))
+            order = sorted(
+                alive,
+                key=lambda pid: (
+                    priority.get(intent_by_id[pid].timing, 2),
+                    0 if intent_by_id[pid].intent == "publish_result" else 1,
+                    alive.index(pid),
+                ),
+            )
+
+            outputs: list[tuple[str, DiscussionOutput]] = []
+            speech_counts: Counter[str] = Counter()
             reply_queue: deque[str] = deque()
-            for pid in self._ai_player_ids:
-                player = state.players.get(pid)
-                if player is None or not player.alive:
-                    continue
+            queued: set[str] = set()
+            for pid in order:
                 if state.phase != Phase.DISCUSSION:
                     return
-                message = await self._speak(controller, state, pid)
-                spoken.add(pid)
-                if message is not None:
-                    self._enqueue_direct_replies(state, pid, message, spoken, replied, reply_queue)
+                output = await self._speak(controller, state, pid, "initial_view")
+                if output is not None:
+                    outputs.append((pid, output))
+                    speech_counts[pid] += 1
 
-            followups = 0
-            while reply_queue and followups < self._max_discussion_followups:
+            order_index = {pid: index for index, pid in enumerate(order)}
+            for speaker, output in outputs:
+                for question in output.directed_questions:
+                    if order_index.get(question.target_id, len(order)) < order_index[speaker]:
+                        self._queue_reply(
+                            state, question.target_id, speech_counts, reply_queue, queued
+                        )
+
+            execution_targets = [
+                target
+                for _pid, output in outputs
+                if isinstance((target := output.reasoning_memo.execution_target), str)
+                and target in state.players
+            ]
+            pressure: Counter[str] = Counter(execution_targets)
+            major_targets = [pid for pid, _count in pressure.most_common(2)]
+            for pid in major_targets:
+                self._queue_reply(state, pid, speech_counts, reply_queue, queued)
+            for pid, output in outputs:
+                if not output.ready_to_vote or output.needs_another_statement:
+                    self._queue_reply(state, pid, speech_counts, reply_queue, queued)
+
+            max_total = max(len(alive) + self._max_discussion_followups, int(len(alive) * 2.5))
+            total = len(outputs)
+            while reply_queue and total < max_total:
                 pid = reply_queue.popleft()
-                if pid in replied or not state.players[pid].alive:
+                queued.discard(pid)
+                per_player_limit = 4 if pid in major_targets else 3
+                if not state.players[pid].alive or speech_counts[pid] >= per_player_limit:
                     continue
-                message = await self._speak(controller, state, pid)
-                replied.add(pid)
-                followups += 1
-                if message is not None:
-                    self._enqueue_direct_replies(state, pid, message, spoken, replied, reply_queue)
+                output = await self._speak(controller, state, pid, "rebuttal_or_reassessment")
+                if output is None:
+                    continue
+                outputs.append((pid, output))
+                speech_counts[pid] += 1
+                total += 1
+                for question in output.directed_questions:
+                    self._queue_reply(
+                        state, question.target_id, speech_counts, reply_queue, queued
+                    )
+                if output.needs_another_statement:
+                    self._queue_reply(state, pid, speech_counts, reply_queue, queued)
 
-    async def _speak(self, controller: object, state: GameState, player_id: str) -> str | None:
+                ready = sum(1 for _p, item in outputs[-len(alive) :] if item.ready_to_vote)
+                major_replied = all(speech_counts[target] >= 2 for target in major_targets)
+                if ready / max(min(len(alive), len(outputs)), 1) >= 0.8 and major_replied:
+                    if not reply_queue:
+                        break
+
+    async def _run_human_followup(
+        self, controller: object, state: GameState, alive: list[str]
+    ) -> None:
+        public = [m for m in state.chat_log if m.channel.value == "public" and m.day == state.day]
+        latest = public[-1].content if public else ""
+        named = [pid for pid in alive if state.players[pid].name in latest]
+        speakers = (named + [pid for pid in alive if pid not in named])[
+            : self._max_discussion_followups
+        ]
+        for pid in speakers:
+            await self._speak(controller, state, pid, "human_followup")
+
+    async def _morning_intent(self, state: GameState, player_id: str) -> MorningIntentOutput:
+        system, messages = self._context.build_morning_intent_context(state, player_id)
+        output = await self._agents[player_id].generate_morning_intent(system, messages)
+        player = state.players[player_id]
+        has_divine = any(r.seer_id == player_id for r in state.divine_records)
+        has_medium = any(r.medium_id == player_id for r in state.medium_records)
+        if (player.role == RoleName.SEER and has_divine) or (
+            player.role == RoleName.MEDIUM and has_medium
+        ):
+            output.timing = "immediate"
+            output.intent = "publish_result"
+            output.public_claim_role = player.role.value
+        return output
+
+    async def _speak(
+        self, controller: object, state: GameState, player_id: str, stage: str
+    ) -> DiscussionOutput | None:
         if state.phase != Phase.DISCUSSION:
             return None
-        system, messages = self._context.build_discussion_context(state, player_id)
+        system, messages = self._context.build_discussion_context(state, player_id, stage)
         output = await self._agents[player_id].generate_discussion(system, messages)
+        self._context.set_reasoning_memo(player_id, output.reasoning_memo.model_dump())
         self._record(
             state,
             player_id,
@@ -200,36 +288,34 @@ class AICoordinator:
             text=output.public_message,
             reasoning_memo=output.reasoning_memo,
             used_fallback=self._is_fallback(player_id, output.public_message),
+            public_claim_role=output.public_claim_role,
+            public_results=[item.model_dump() for item in output.public_results],
+            directed_question_targets=[item.target_id for item in output.directed_questions],
+            ready_to_vote=output.ready_to_vote,
         )
         try:
             controller.chat(player_id, output.public_message, "public")  # type: ignore[attr-defined]
         except Exception:
             return None
-        self._maybe_register_co(controller, player_id, output.public_message)
-        return output.public_message
+        self._register_public_claim(controller, player_id, output)
+        return output
 
-    def _enqueue_direct_replies(
-        self,
+    @staticmethod
+    def _queue_reply(
         state: GameState,
-        speaker_id: str,
-        message: str,
-        spoken: set[str],
-        replied: set[str],
+        target_id: str,
+        speech_counts: Counter[str],
         queue: deque[str],
+        queued: set[str],
     ) -> None:
-        # A name alone may merely be analysis. Require question/request
-        # language so ordinary references do not explode the queue.
-        request_markers = ("?", "？", "答え", "説明", "示して", "聞きたい")
-        if not any(marker in message for marker in request_markers):
-            return
-        queued = set(queue)
-        for pid in self._ai_player_ids:
-            if pid == speaker_id or pid not in spoken or pid in replied or pid in queued:
-                continue
-            player = state.players[pid]
-            if player.alive and player.name in message:
-                queue.append(pid)
-                queued.add(pid)
+        if (
+            target_id in state.players
+            and state.players[target_id].alive
+            and speech_counts[target_id] > 0
+            and target_id not in queued
+        ):
+            queue.append(target_id)
+            queued.add(target_id)
 
     def _is_fallback(self, player_id: str, text: str) -> bool:
         """The agent substitutes a personality-specific canned line when the
@@ -238,14 +324,22 @@ class AICoordinator:
         types unchanged."""
         return text.strip() == self._personalities[player_id].get_fallback_message()
 
-    def _maybe_register_co(self, controller: object, player_id: str, message: str) -> None:
+    def _register_public_claim(
+        self, controller: object, player_id: str, output: DiscussionOutput
+    ) -> None:
         state = controller.state  # type: ignore[attr-defined]
         already = any(c.player_id == player_id for c in state.co_declarations)
         if already:
             return
+        if output.public_claim_role is None:
+            return
+        try:
+            role = RoleName(output.public_claim_role)
+        except ValueError:
+            return
         other_names = [p.name for pid, p in state.players.items() if pid != player_id]
-        role = detect_claimed_role(message, other_names)
-        if role is None:
+        detected = detect_claimed_role(output.public_message, other_names)
+        if detected != role:
             return
         try:
             controller.co(player_id, role.value)  # type: ignore[attr-defined]
@@ -262,7 +356,13 @@ class AICoordinator:
         while state.phase in (Phase.VOTING, Phase.RUNOFF):
             human = state.players[human_id]
             observer = human_id in self._observer_player_ids
-            if human.alive and not observer and human_id not in state.pending_votes:
+            waiting_for_human = (
+                human.is_human
+                and human.alive
+                and not observer
+                and human_id not in state.pending_votes
+            )
+            if waiting_for_human:
                 return  # wait for the human's vote this round
 
             alive_ai = [pid for pid in self._ai_player_ids if state.players[pid].alive]

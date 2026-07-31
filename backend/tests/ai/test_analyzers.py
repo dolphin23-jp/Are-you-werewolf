@@ -48,19 +48,40 @@ def _say(player_id: str, text: str, day: int = 1, **kwargs) -> Utterance:
 
 
 def test_villager_claiming_a_divination_result_is_flagged():
-    t = _transcript(utterances=[_say("p0", "ユイを占った結果、人狼でした。")])
+    result = {"result_type": "seer", "target_id": "p3", "is_werewolf": True}
+    t = _transcript(
+        utterances=[_say("p0", "ユイを占った結果、人狼でした。", public_results=[result])]
+    )
     assert analyze(t).count("result_claim_without_role") == 1
 
 
 def test_real_seer_reporting_a_result_is_not_flagged():
-    t = _transcript(utterances=[_say("p1", "ユイを占った結果、人狼ではありませんでした。")])
+    result = {"result_type": "seer", "target_id": "p3", "is_werewolf": False}
+    t = _transcript(
+        utterances=[
+            _say(
+                "p1",
+                "ユイを占った結果、人狼ではありませんでした。",
+                public_results=[result],
+            )
+        ]
+    )
     assert analyze(t).count("result_claim_without_role") == 0
 
 
 def test_assigned_fake_seer_reporting_a_result_is_not_flagged():
     """p2 is a wolf pre-committed to faking seer -- that is the plan working,
     not an inconsistency."""
-    t = _transcript(utterances=[_say("p2", "占い師CO。ユイを占った結果、白でした。")])
+    public_result = {"result_type": "seer", "target_id": "p3", "is_werewolf": False}
+    t = _transcript(
+        utterances=[
+            _say(
+                "p2",
+                "占い師CO。ユイを占った結果、白でした。",
+                public_results=[public_result],
+            )
+        ]
+    )
     result = analyze(t)
     assert result.count("result_claim_without_role") == 0
     assert result.count("co_role_mismatch") == 0
@@ -125,7 +146,14 @@ def test_historical_reference_to_dead_player_is_not_flagged():
 
 def test_asking_a_dead_player_to_answer_is_flagged():
     t = _transcript(
-        utterances=[_say("p0", "アカリは投票理由を説明してください。", day=3)],
+        utterances=[
+            _say(
+                "p0",
+                "アカリは投票理由を説明してください。",
+                day=3,
+                directed_question_targets=["p1"],
+            )
+        ],
         final_state={"death_records": [{"player_id": "p1", "cause": "executed", "day": 2}]},
     )
     assert analyze(t).count("treats_dead_player_as_active") == 1
@@ -147,7 +175,15 @@ def test_remote_black_word_does_not_turn_teammate_reference_into_accusation():
 
 
 def test_self_treated_as_another_player_is_flagged():
-    t = _transcript(utterances=[_say("p0", "あなたを今日は処刑したいです。")])
+    t = _transcript(
+        utterances=[
+            _say(
+                "p0",
+                "自分自身は処刑対象にできません。",
+                reasoning_memo={"suspects": [], "execution_target": "p0"},
+            )
+        ]
+    )
     assert analyze(t).count("self_treated_as_other_player") == 1
 
 
@@ -158,7 +194,15 @@ def test_non_p0_claiming_p0_identity_is_flagged():
 
 def test_true_seer_claiming_opposite_result_is_flagged():
     t = _transcript(
-        utterances=[_say("p1", "ユイを占った結果、白でした。")],
+        utterances=[
+            _say(
+                "p1",
+                "ユイを占った結果、白でした。",
+                public_results=[
+                    {"result_type": "seer", "target_id": "p3", "is_werewolf": False}
+                ],
+            )
+        ],
         final_state={
             "death_records": [],
             "divine_records": [
@@ -172,7 +216,15 @@ def test_true_seer_claiming_opposite_result_is_flagged():
 
 def test_true_seer_claiming_matching_result_is_not_flagged():
     t = _transcript(
-        utterances=[_say("p1", "ユイを占った結果、人狼でした。")],
+        utterances=[
+            _say(
+                "p1",
+                "ユイを占った結果、人狼でした。",
+                public_results=[
+                    {"result_type": "seer", "target_id": "p3", "is_werewolf": True}
+                ],
+            )
+        ],
         final_state={
             "death_records": [],
             "divine_records": [

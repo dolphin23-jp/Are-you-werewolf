@@ -22,6 +22,7 @@ _CHECK_LABELS = {
     "treats_dead_player_as_active": "死亡済みプレイヤーを現在の行動対象として扱う",
     "vote_contradicts_stated_intent": "思考メモと投票先の不一致",
     "wolf_named_teammate_with_wolf_word": "人狼が仲間を明示的に狼視",
+    "wolf_memo_suspects_teammate": "人狼の非公開メモで仲間を疑い先に指定",
     "wolf_voted_teammate": "人狼の仲間投票(戦略観測)",
     "assigned_faker_never_claimed": "騙り担当がCOしなかった",
     "lurker_broke_cover": "潜伏担当がCOした",
@@ -247,6 +248,27 @@ def render_transcript(transcript: GameTranscript) -> str:
             lines.append(f"- `[{u.kind}]` {speaker}: {u.text}")
         elif u.kind == "summary":
             lines.append(f"- _要約_: {u.text}")
+
+    lines.append("\n## システム記録\n")
+    names = transcript.names
+    for death in transcript.final_state.get("death_records", []):
+        pid = death["player_id"]
+        lines.append(
+            f"- {death['day']}日目: {names.get(pid, pid)}({pid})が"
+            f"{death['cause']}で死亡"
+        )
+    guards = {
+        (record["day"], record["target_id"])
+        for record in transcript.final_state.get("guard_records", [])
+    }
+    for attack in transcript.final_state.get("attack_records", []):
+        target = attack["target_id"]
+        guarded = (attack["day"], target) in guards
+        outcome = "護衛され失敗" if guarded else ("成功" if attack["succeeded"] else "失敗")
+        lines.append(
+            f"- {attack['day']}日目夜: {names.get(attack['wolf_id'], attack['wolf_id'])}が"
+            f"{names.get(target, target)}({target})を襲撃 → {outcome}"
+        )
 
     winner = transcript.final_state.get("winner")
     reason = transcript.final_state.get("victory_reason", "")

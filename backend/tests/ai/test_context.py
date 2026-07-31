@@ -142,3 +142,28 @@ def test_prompt_anchors_self_identity_and_marks_observer():
     assert "Player1(p1)」はあなた自身" in system
     assert "非参戦席" in messages[0].content
     assert "Player0(p0)" in messages[0].content
+
+
+def test_dead_private_ally_is_labeled_dead_in_role_context():
+    controller = make_controller(seed=4)
+    state = controller.state
+    wolves = state.players_by_role(RoleName.WEREWOLF)
+    wolves[1].alive = False
+    wolves[1].death_day = 2
+    builder = _builder(state)
+
+    system, _ = builder.build_discussion_context(state, wolves[0].player_id)
+
+    assert f"{wolves[1].name}({wolves[1].player_id})[2日目死亡済み]" in system
+
+
+def test_previous_private_reasoning_memo_is_reused():
+    controller = make_controller(seed=4)
+    state = controller.state
+    builder = _builder(state)
+    builder.set_reasoning_memo("p1", {"execution_target": "p2", "overall_thought": "継続思考"})
+
+    _, messages = builder.build_discussion_context(state, "p1")
+
+    assert "前回の非公開思考メモ" in messages[0].content
+    assert "継続思考" in messages[0].content

@@ -37,17 +37,16 @@ from app.ai.provider.factory import build_llm_provider  # noqa: E402
 from app.config import Settings  # noqa: E402
 from app.engine.game import GameController, PlayerSpec  # noqa: E402
 from app.engine.phases import Phase  # noqa: E402
-from app.engine.roles import RoleName  # noqa: E402
 from app.eval.analyzers import AnalysisResult, analyze  # noqa: E402
 from app.eval.judge import judge_transcript  # noqa: E402
 from app.eval.report import render_report, render_transcript  # noqa: E402
 from app.eval.transcript import GameTranscript, TranscriptRecorder  # noqa: E402
 
 HUMAN_ID = "p0"
-OBSERVER_NAME = "観戦席"
 MAX_LOOPS = 200
 
 AI_NAMES = [
+    "マコト",
     "アカリ",
     "ハルト",
     "ユイ",
@@ -68,24 +67,16 @@ AI_NAMES = [
 
 
 def _make_specs() -> list[PlayerSpec]:
-    specs = [PlayerSpec(player_id=HUMAN_ID, name=OBSERVER_NAME, is_human=True)]
-    specs += [
-        PlayerSpec(player_id=f"p{i}", name=AI_NAMES[i - 1], is_human=False) for i in range(1, 17)
+    return [
+        PlayerSpec(player_id=f"p{i}", name=AI_NAMES[i], is_human=False) for i in range(17)
     ]
-    return specs
 
 
 async def play_one_game(seed: int, settings: Settings, metrics: MetricsCollector) -> GameTranscript:
     provider = build_llm_provider(settings, seed=seed, metrics=metrics)
     specs = _make_specs()
-    controller = GameController(
-        session_id=f"eval-{seed}",
-        player_specs=specs,
-        seed=seed,
-        forced_roles={HUMAN_ID: RoleName.VILLAGER},
-        inactive_player_ids={HUMAN_ID},
-    )
-    ai_ids = [s.player_id for s in specs if not s.is_human]
+    controller = GameController(session_id=f"eval-{seed}", player_specs=specs, seed=seed)
+    ai_ids = [s.player_id for s in specs]
     recorder = TranscriptRecorder()
     coordinator = AICoordinator(
         controller.state,
@@ -93,7 +84,6 @@ async def play_one_game(seed: int, settings: Settings, metrics: MetricsCollector
         provider,
         seed=seed,
         recorder=recorder,
-        observer_player_ids={HUMAN_ID},
     )
     session = SimpleNamespace(
         controller=controller,
