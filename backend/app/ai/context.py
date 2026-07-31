@@ -246,9 +246,7 @@ class ContextBuilder:
         ]
         if observers:
             parts.append(
-                "【非参戦席】"
-                + "、".join(observers)
-                + "は評価用の無言席で、発言・投票をしません。"
+                "【非参戦席】" + "、".join(observers) + "は評価用の無言席で、発言・投票をしません。"
                 "沈黙や未回答を疑い理由にせず、返答も求めないでください。"
             )
         parts.extend(extra_guides)
@@ -265,10 +263,7 @@ class ContextBuilder:
         todays = [m for m in state.chat_log if m.channel == channel and m.day == state.day]
         if not todays:
             return "【当日のログ】(まだ発言はありません)"
-        lines = [
-            f"{player_label(state, m.author_id)}: {m.content}"
-            for m in todays
-        ]
+        lines = [f"{player_label(state, m.author_id)}: {m.content}" for m in todays]
         return "【当日のログ】\n" + "\n".join(lines)
 
     def _layer_private_history(self, state: GameState, channel: ChatChannel) -> str:
