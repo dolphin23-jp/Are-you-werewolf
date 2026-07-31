@@ -1,0 +1,279 @@
+"""Central game state: single source of truth, no LLM knowledge."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from enum import StrEnum
+from typing import Any
+
+from app.engine.phases import Phase
+from app.engine.roles import ROLE_DEFINITIONS, RoleName, Team
+
+
+class DeathCause(StrEnum):
+    EXECUTED = "executed"
+    ATTACKED = "attacked"
+    CURSED = "cursed"
+    FIRST_VICTIM = "first_victim"
+
+
+class ChatChannel(StrEnum):
+    PUBLIC = "public"
+    WOLF = "wolf"
+    FREEMASON = "freemason"
+
+
+@dataclass
+class PlayerState:
+    player_id: str
+    name: str
+    role: RoleName
+    is_human: bool = False
+    alive: bool = True
+    death_cause: DeathCause | None = None
+    death_day: int | None = None
+
+    @property
+    def team(self) -> Team:
+        return ROLE_DEFINITIONS[self.role].team
+
+
+@dataclass
+class ChatMessage:
+    author_id: str
+    content: str
+    channel: ChatChannel
+    day: int
+
+
+@dataclass
+class DivineRecord:
+    seer_id: str
+    target_id: str
+    day: int
+    is_werewolf: bool
+
+
+@dataclass
+class MediumRecord:
+    medium_id: str
+    target_id: str
+    day: int
+    is_werewolf: bool
+
+
+@dataclass
+class GuardRecord:
+    hunter_id: str
+    target_id: str
+    day: int
+
+
+@dataclass
+class AttackRecord:
+    wolf_id: str
+    target_id: str
+    day: int
+    succeeded: bool
+
+
+@dataclass
+class VoteRecord:
+    voter_id: str
+    target_id: str
+    day: int
+    round: int
+
+
+@dataclass
+class DeathRecord:
+    player_id: str
+    cause: DeathCause
+    day: int
+
+
+@dataclass
+class CoDeclaration:
+    player_id: str
+    claimed_role: RoleName
+    day: int
+
+
+@dataclass
+class GameState:
+    session_id: str
+    players: dict[str, PlayerState]
+    phase: Phase = Phase.WAITING
+    day: int = 0
+    vote_round: int = 1
+    chat_log: list[ChatMessage] = field(default_factory=list)
+    divine_records: list[DivineRecord] = field(default_factory=list)
+    medium_records: list[MediumRecord] = field(default_factory=list)
+    guard_records: list[GuardRecord] = field(default_factory=list)
+    attack_records: list[AttackRecord] = field(default_factory=list)
+    vote_records: list[VoteRecord] = field(default_factory=list)
+    death_records: list[DeathRecord] = field(default_factory=list)
+    co_declarations: list[CoDeclaration] = field(default_factory=list)
+    winner: Team | None = None
+    victory_reason: str = ""
+    is_draw: bool = False
+
+    # -- pending per-night submissions (cleared after resolution) --
+    pending_divine: tuple[str, str] | None = None  # (seer_id, target_id)
+    pending_guard: tuple[str, str] | None = None  # (hunter_id, target_id)
+    pending_attack: tuple[str, str] | None = None  # (wolf_id, target_id)
+    pending_votes: dict[str, str] = field(default_factory=dict)  # voter_id -> target_id
+
+    def alive_players(self) -> list[PlayerState]:
+        return [p for p in self.players.values() if p.alive]
+
+    def alive_ids(self) -> list[str]:
+        return [p.player_id for p in self.alive_players()]
+
+    def players_by_role(self, role: RoleName) -> list[PlayerState]:
+        return [p for p in self.players.values() if p.role == role]
+
+    def alive_by_team(self, team: Team) -> list[PlayerState]:
+        return [p for p in self.alive_players() if p.team == team]
+
+    def get_player_view(self, viewer_id: str) -> dict[str, Any]:
+        """Per-viewer filtered view: wolves see wolves, freemasons see their
+        partner, everyone else only sees public information."""
+        viewer = self.players.get(viewer_id)
+        public_players = [
+            {
+                "player_id": p.player_id,
+                "name": p.name,
+                "alive": p.alive,
+                "death_cause": p.death_cause,
+                "death_day": p.death_day,
+            }
+            for p in self.players.values()
+        ]
+
+        allies: list[str] = []
+        if viewer is not None:
+            if viewer.role == RoleName.WEREWOLF:
+                allies = [
+                    p.player_id
+                    for p in self.players_by_role(RoleName.WEREWOLF)
+                    if p.player_id != viewer_id
+                ]
+            elif viewer.role == RoleName.FREEMASON:
+                allies = [
+                    p.player_id
+                    for p in self.players_by_role(RoleName.FREEMASON)
+                    if p.player_id != viewer_id
+                ]
+
+        public_chat = [m for m in self.chat_log if m.channel == ChatChannel.PUBLIC]
+        private_chat: list[ChatMessage] = []
+        if viewer is not None:
+            if viewer.role == RoleName.WEREWOLF:
+                private_chat += [m for m in self.chat_log if m.channel == ChatChannel.WOLF]
+            if viewer.role == RoleName.FREEMASON:
+                private_chat += [m for m in self.chat_log if m.channel == ChatChannel.FREEMASON]
+
+        my_divine = [r for r in self.divine_records if viewer and r.seer_id == viewer_id]
+        my_medium = [r for r in self.medium_records if viewer and r.medium_id == viewer_id]
+
+        return {
+            "session_id": self.session_id,
+            "phase": self.phase,
+            "day": self.day,
+            "vote_round": self.vote_round,
+            "your_player_id": viewer_id,
+            "your_role": viewer.role if viewer else None,
+            "allies": allies,
+            "players": public_players,
+            "public_chat": [_chat_dict(m) for m in public_chat],
+            "private_chat": [_chat_dict(m) for m in private_chat],
+            "your_divine_results": [_divine_dict(r) for r in my_divine],
+            "your_medium_results": [_medium_dict(r) for r in my_medium],
+            "co_declarations": [
+                {"player_id": c.player_id, "claimed_role": c.claimed_role, "day": c.day}
+                for c in self.co_declarations
+            ],
+            "vote_history": [
+                {"voter_id": v.voter_id, "target_id": v.target_id, "day": v.day, "round": v.round}
+                for v in self.vote_records
+            ],
+            "winner": self.winner,
+            "victory_reason": self.victory_reason,
+            "is_draw": self.is_draw,
+        }
+
+    def get_debug_view(self) -> dict[str, Any]:
+        """Full, unfiltered spectator/debug dump."""
+        return {
+            "session_id": self.session_id,
+            "phase": self.phase,
+            "day": self.day,
+            "vote_round": self.vote_round,
+            "players": [
+                {
+                    "player_id": p.player_id,
+                    "name": p.name,
+                    "role": p.role,
+                    "team": p.team,
+                    "alive": p.alive,
+                    "death_cause": p.death_cause,
+                    "death_day": p.death_day,
+                    "is_human": p.is_human,
+                }
+                for p in self.players.values()
+            ],
+            "chat_log": [_chat_dict(m) for m in self.chat_log],
+            "divine_records": [_divine_dict(r) for r in self.divine_records],
+            "medium_records": [_medium_dict(r) for r in self.medium_records],
+            "guard_records": [
+                {"hunter_id": r.hunter_id, "target_id": r.target_id, "day": r.day}
+                for r in self.guard_records
+            ],
+            "attack_records": [
+                {
+                    "wolf_id": r.wolf_id,
+                    "target_id": r.target_id,
+                    "day": r.day,
+                    "succeeded": r.succeeded,
+                }
+                for r in self.attack_records
+            ],
+            "vote_records": [
+                {"voter_id": v.voter_id, "target_id": v.target_id, "day": v.day, "round": v.round}
+                for v in self.vote_records
+            ],
+            "death_records": [
+                {"player_id": d.player_id, "cause": d.cause, "day": d.day}
+                for d in self.death_records
+            ],
+            "co_declarations": [
+                {"player_id": c.player_id, "claimed_role": c.claimed_role, "day": c.day}
+                for c in self.co_declarations
+            ],
+            "winner": self.winner,
+            "victory_reason": self.victory_reason,
+            "is_draw": self.is_draw,
+        }
+
+
+def _chat_dict(m: ChatMessage) -> dict[str, Any]:
+    return {"author_id": m.author_id, "content": m.content, "channel": m.channel, "day": m.day}
+
+
+def _divine_dict(r: DivineRecord) -> dict[str, Any]:
+    return {
+        "seer_id": r.seer_id,
+        "target_id": r.target_id,
+        "day": r.day,
+        "is_werewolf": r.is_werewolf,
+    }
+
+
+def _medium_dict(r: MediumRecord) -> dict[str, Any]:
+    return {
+        "medium_id": r.medium_id,
+        "target_id": r.target_id,
+        "day": r.day,
+        "is_werewolf": r.is_werewolf,
+    }

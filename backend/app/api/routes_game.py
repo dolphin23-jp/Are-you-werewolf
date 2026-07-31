@@ -1,0 +1,225 @@
+"""REST routes for game session lifecycle and player actions.
+
+Every mutating action accepts an optional `player_id` query parameter,
+defaulting to the session's human player. This lets a single human-vs-AI
+game be driven purely via curl/Swagger during development (by explicitly
+passing each of the 17 player_ids) even before any AI is wired up (M2), and
+is also how the AI coordinator (M3+) or a debug UI could act on behalf of
+any seat if ever needed. In normal frontend use the field is simply omitted.
+"""
+
+from __future__ import annotations
+
+import uuid
+from typing import Any
+
+from fastapi import APIRouter, HTTPException, Query
+
+from app.ai.coordinator import AICoordinator
+from app.ai.provider.factory import LLMProviderConfigError, build_llm_provider
+from app.api import orchestrator
+from app.api.schemas import (
+    ChatRequest,
+    CoRequest,
+    CreateGameRequest,
+    CreateGameResponse,
+    NightActionRequest,
+    OkResponse,
+    VoteRequest,
+)
+from app.api.ws_hub import SessionWSHub
+from app.config import get_settings
+from app.engine.game import GameController, GameError, PlayerSpec
+from app.sessions.models import GameSession
+from app.sessions.store import get_session_store
+
+router = APIRouter(prefix="/api/games", tags=["games"])
+
+AI_NAME_POOL = [
+    "アカリ",
+    "ハルト",
+    "ユイ",
+    "ソウタ",
+    "ミオ",
+    "レン",
+    "サクラ",
+    "カイト",
+    "ノゾミ",
+    "リク",
+    "ツムギ",
+    "ダイキ",
+    "ホノカ",
+    "シオン",
+    "アオイ",
+    "ケント",
+]
+
+
+def _new_session_id() -> str:
+    return uuid.uuid4().hex[:12]
+
+
+def _get_session(session_id: str) -> GameSession:
+    session = get_session_store().get(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="game not found")
+    session.touch()
+    return session
+
+
+def _resolve_player_id(session: GameSession, player_id: str | None) -> str:
+    return player_id or session.human_id
+
+
+def _run(fn: object, *args: object, **kwargs: object) -> None:
+    try:
+        fn(*args, **kwargs)  # type: ignore[operator]
+    except GameError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("", response_model=CreateGameResponse)
+def create_game(req: CreateGameRequest) -> CreateGameResponse:
+    settings = get_settings()
+    session_id = _new_session_id()
+    human_id = "p0"
+    specs = [PlayerSpec(player_id=human_id, name=req.human_name, is_human=True)]
+    ai_ids: list[str] = []
+    for i in range(1, 17):
+        pid = f"p{i}"
+        ai_ids.append(pid)
+        specs.append(PlayerSpec(player_id=pid, name=AI_NAME_POOL[i - 1], is_human=False))
+
+    seed = req.seed if req.seed is not None else settings.werewolf_rng_seed
+    try:
+        controller = GameController(session_id=session_id, player_specs=specs, seed=seed)
+    except GameError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    ws_hub = SessionWSHub()
+    controller.events.subscribe(ws_hub.on_event)
+
+    try:
+        provider = build_llm_provider(settings, seed=seed)
+        coordinator: AICoordinator | None = AICoordinator(
+            controller.state, ai_ids, provider, seed=seed
+        )
+    except LLMProviderConfigError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    session = GameSession(
+        session_id=session_id,
+        controller=controller,
+        human_id=human_id,
+        ai_player_ids=ai_ids,
+        ws_hub=ws_hub,
+        coordinator=coordinator,
+    )
+    get_session_store().create(session)
+    return CreateGameResponse(
+        session_id=session_id,
+        human_player_id=human_id,
+        player_names={s.player_id: s.name for s in specs},
+    )
+
+
+@router.post("/{session_id}/start", response_model=OkResponse)
+async def start_game(session_id: str) -> OkResponse:
+    session = _get_session(session_id)
+    _run(session.controller.start_game)
+    await orchestrator.after_night_phase_entered(session)
+    return OkResponse()
+
+
+@router.get("/{session_id}/view")
+def get_view(session_id: str, player_id: str | None = Query(default=None)) -> dict[str, Any]:
+    session = _get_session(session_id)
+    viewer = _resolve_player_id(session, player_id)
+    return session.controller.get_player_view(viewer)
+
+
+@router.get("/{session_id}/debug")
+def get_debug(session_id: str) -> dict[str, Any]:
+    session = _get_session(session_id)
+    return session.controller.get_debug_view()
+
+
+@router.post("/{session_id}/chat", response_model=OkResponse)
+async def chat(
+    session_id: str, req: ChatRequest, player_id: str | None = Query(default=None)
+) -> OkResponse:
+    session = _get_session(session_id)
+    author = _resolve_player_id(session, player_id)
+    _run(session.controller.chat, author, req.content, req.channel)
+    if req.channel == "public":
+        await orchestrator.after_human_chat(session)
+    return OkResponse()
+
+
+@router.post("/{session_id}/vote", response_model=OkResponse)
+async def vote(
+    session_id: str, req: VoteRequest, player_id: str | None = Query(default=None)
+) -> OkResponse:
+    session = _get_session(session_id)
+    voter = _resolve_player_id(session, player_id)
+    _run(session.controller.vote, voter, req.target_id)
+    await orchestrator.after_human_vote(session)
+    return OkResponse()
+
+
+@router.post("/{session_id}/night-action", response_model=OkResponse)
+async def night_action(
+    session_id: str, req: NightActionRequest, player_id: str | None = Query(default=None)
+) -> OkResponse:
+    session = _get_session(session_id)
+    actor = _resolve_player_id(session, player_id)
+    _run(session.controller.submit_night_action, actor, req.action_type, req.target_id)
+    await orchestrator.after_human_night_action(session)
+    return OkResponse()
+
+
+@router.post("/{session_id}/co", response_model=OkResponse)
+async def co(
+    session_id: str, req: CoRequest, player_id: str | None = Query(default=None)
+) -> OkResponse:
+    session = _get_session(session_id)
+    claimant = _resolve_player_id(session, player_id)
+    _run(session.controller.co, claimant, req.claimed_role)
+    return OkResponse()
+
+
+@router.post("/{session_id}/end-discussion", response_model=OkResponse)
+async def end_discussion(session_id: str) -> OkResponse:
+    session = _get_session(session_id)
+    _run(session.controller.end_discussion)
+    await orchestrator.after_voting_phase_entered(session)
+    return OkResponse()
+
+
+@router.post("/{session_id}/start-night", response_model=OkResponse)
+async def start_night(session_id: str) -> OkResponse:
+    session = _get_session(session_id)
+    _run(session.controller.start_night)
+    await orchestrator.after_night_phase_entered(session)
+    return OkResponse()
+
+
+@router.post("/{session_id}/resolve-night", response_model=OkResponse)
+async def resolve_night(session_id: str) -> OkResponse:
+    session = _get_session(session_id)
+    _run(session.controller.resolve_night)
+    return OkResponse()
+
+
+@router.post("/{session_id}/resolve-votes", response_model=OkResponse)
+async def resolve_votes(session_id: str) -> OkResponse:
+    session = _get_session(session_id)
+    _run(session.controller.resolve_votes)
+    return OkResponse()
+
+
+@router.post("/{session_id}/start-discussion", response_model=OkResponse)
+async def start_discussion(session_id: str) -> OkResponse:
+    session = _get_session(session_id)
+    _run(session.controller.start_discussion)
+    return OkResponse()
