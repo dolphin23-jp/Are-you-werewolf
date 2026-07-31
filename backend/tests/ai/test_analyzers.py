@@ -115,12 +115,73 @@ def test_lurker_that_claims_is_flagged():
     assert analyze(t).count("lurker_broke_cover") == 1
 
 
-def test_referencing_a_player_who_already_died_is_flagged():
+def test_historical_reference_to_dead_player_is_not_flagged():
     t = _transcript(
         utterances=[_say("p0", "アカリの意見に賛成です。", day=3)],
         final_state={"death_records": [{"player_id": "p1", "cause": "executed", "day": 2}]},
     )
-    assert analyze(t).count("references_dead_player") == 1
+    assert analyze(t).count("treats_dead_player_as_active") == 0
+
+
+def test_asking_a_dead_player_to_answer_is_flagged():
+    t = _transcript(
+        utterances=[_say("p0", "アカリは投票理由を説明してください。", day=3)],
+        final_state={"death_records": [{"player_id": "p1", "cause": "executed", "day": 2}]},
+    )
+    assert analyze(t).count("treats_dead_player_as_active") == 1
+
+
+def test_medium_result_about_dead_player_is_not_flagged():
+    t = _transcript(
+        utterances=[_say("p0", "アカリの霊媒結果は白でした。", day=3)],
+        final_state={"death_records": [{"player_id": "p1", "cause": "executed", "day": 2}]},
+    )
+    assert analyze(t).count("treats_dead_player_as_active") == 0
+
+
+def test_remote_black_word_does_not_turn_teammate_reference_into_accusation():
+    t = _transcript(
+        utterances=[_say("p2", "ユイ吊りは妥当。ただアカリの自己黒判定は破綻です。")]
+    )
+    assert analyze(t).count("wolf_named_teammate_with_wolf_word") == 0
+
+
+def test_self_treated_as_another_player_is_flagged():
+    t = _transcript(utterances=[_say("p0", "あなたを今日は処刑したいです。")])
+    assert analyze(t).count("self_treated_as_other_player") == 1
+
+
+def test_non_p0_claiming_p0_identity_is_flagged():
+    t = _transcript(utterances=[_say("p1", "私がp0本人です。")])
+    assert analyze(t).count("claimed_p0_identity") == 1
+
+
+def test_true_seer_claiming_opposite_result_is_flagged():
+    t = _transcript(
+        utterances=[_say("p1", "ユイを占った結果、白でした。")],
+        final_state={
+            "death_records": [],
+            "divine_records": [
+                {"seer_id": "p1", "target_id": "p3", "day": 0, "is_werewolf": True}
+            ],
+            "medium_records": [],
+        },
+    )
+    assert analyze(t).count("true_role_result_conflict") == 1
+
+
+def test_true_seer_claiming_matching_result_is_not_flagged():
+    t = _transcript(
+        utterances=[_say("p1", "ユイを占った結果、人狼でした。")],
+        final_state={
+            "death_records": [],
+            "divine_records": [
+                {"seer_id": "p1", "target_id": "p3", "day": 0, "is_werewolf": True}
+            ],
+            "medium_records": [],
+        },
+    )
+    assert analyze(t).count("true_role_result_conflict") == 0
 
 
 def test_meta_phrase_leak_is_flagged():

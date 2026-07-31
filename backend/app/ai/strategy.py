@@ -53,12 +53,12 @@ class StrategyAnalyzer:
         alive_ids = {p.player_id for p in alive}
 
         claimed_ids = {c.player_id for c in state.co_declarations}
-        named_ids = {r.target_id for r in state.divine_records} | {
-            r.target_id for r in state.medium_records
-        }
         # Seating order, not sorted(): lexicographic ids read as
         # "p0、p1、p10、p11、…、p2" once rendered into the prompt.
-        excluded = claimed_ids | named_ids
+        # Private divine/medium records must never influence a public board
+        # analysis. A result only becomes public once its owner says it in the
+        # public chat; until then every non-CO living player remains gray.
+        excluded = claimed_ids
         gray_ids = [p.player_id for p in alive if p.player_id not in excluded]
 
         # From a village-side vantage point the true wolf count is hidden;
