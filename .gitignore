@@ -32,3 +32,7 @@ dist/
 
 # --- Logs ---
 *.log
+
+# --- Evaluation output (transcripts/reports are run artifacts) ---
+eval-out/
+backend/eval-out/

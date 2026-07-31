@@ -16,8 +16,8 @@ stays emergent rather than scripted.
 from __future__ import annotations
 
 import asyncio
-import re
 
+from app.ai.co_detection import detect_claimed_role
 from app.ai.context import ContextBuilder, DaySummaryManager
 from app.ai.deception import FakeClaimGuard, assign_madman_strategy, assign_wolf_deception
 from app.ai.personalities import assign_personalities
@@ -26,13 +26,7 @@ from app.ai.provider.base import LLMProvider
 from app.engine.phases import Phase
 from app.engine.roles import RoleName
 from app.engine.state import GameState
-
-_CO_PATTERNS: dict[RoleName, re.Pattern[str]] = {
-    RoleName.SEER: re.compile(r"占い師.{0,6}(CO|です|であ|カミングアウト)"),
-    RoleName.MEDIUM: re.compile(r"霊媒師.{0,6}(CO|です|であ|カミングアウト)"),
-    RoleName.HUNTER: re.compile(r"狩人.{0,6}(CO|です|であ|カミングアウト)"),
-    RoleName.FREEMASON: re.compile(r"共有者.{0,6}(CO|です|であ|カミングアウト)"),
-}
+from app.eval.transcript import TranscriptRecorder, Utterance
 
 
 class AICoordinator:
@@ -42,6 +36,7 @@ class AICoordinator:
         ai_player_ids: list[str],
         provider: LLMProvider,
         seed: int | None = None,
+        recorder: TranscriptRecorder | None = None,
     ) -> None:
         self._ai_player_ids = list(ai_player_ids)
 
@@ -50,8 +45,9 @@ class AICoordinator:
         wolf_ids = [p.player_id for p in state.players_by_role(RoleName.WEREWOLF)]
         madman = state.players_by_role(RoleName.MADMAN)
         wolf_deception = assign_wolf_deception(wolf_ids, seed=seed)
-        _madman_strategy_name, madman_fake_role = assign_madman_strategy(seed=seed)
+        madman_strategy_name, madman_fake_role = assign_madman_strategy(seed=seed)
         fake_claim_guard = FakeClaimGuard(wolf_team_ids=set(wolf_ids))
+        self._wolf_deception = wolf_deception
 
         self._day_summaries = DaySummaryManager()
         self._context = ContextBuilder(
@@ -65,6 +61,66 @@ class AICoordinator:
         self._agents: dict[str, AIPlayerAgent] = {
             pid: AIPlayerAgent(provider, self._personalities[pid]) for pid in self._ai_player_ids
         }
+
+        self._recorder = recorder
+        if recorder is not None:
+            recorder.set_roster(
+                names={pid: p.name for pid, p in state.players.items()},
+                roles={pid: p.role.value for pid, p in state.players.items()},
+                teams={pid: p.team.value for pid, p in state.players.items()},
+                personalities={pid: p.name for pid, p in self._personalities.items()},
+                deception={
+                    "wolf_pattern": wolf_deception.pattern_name,
+                    "wolf_pattern_label": wolf_deception.pattern_label,
+                    "fake_role_by_player": {
+                        pid: role.value for pid, role in wolf_deception.fake_role_by_player.items()
+                    },
+                    "lurking_player_ids": list(wolf_deception.lurking_player_ids),
+                    "madman_strategy": madman_strategy_name if madman else None,
+                },
+                seed=seed,
+                provider=type(provider).__name__,
+            )
+
+    def _deception_role(self, player_id: str) -> str | None:
+        if player_id in self._wolf_deception.fake_role_by_player:
+            return f"fake_{self._wolf_deception.fake_role_by_player[player_id].value}"
+        if player_id in self._wolf_deception.lurking_player_ids:
+            return "lurker"
+        return None
+
+    def _record(
+        self,
+        state: GameState,
+        player_id: str,
+        kind: str,
+        *,
+        text: str = "",
+        target: str | None = None,
+        reasoning_memo: object = None,
+        used_fallback: bool = False,
+    ) -> None:
+        if self._recorder is None:
+            return
+        player = state.players[player_id]
+        memo = reasoning_memo.model_dump() if reasoning_memo is not None else None  # type: ignore[attr-defined]
+        self._recorder.record(
+            Utterance(
+                day=state.day,
+                phase=state.phase.value,
+                kind=kind,
+                player_id=player_id,
+                player_name=player.name,
+                role=player.role.value,
+                team=player.team.value,
+                personality=self._personalities[player_id].name,
+                deception_role=self._deception_role(player_id),
+                text=text,
+                target=target,
+                reasoning_memo=memo,
+                used_fallback=used_fallback,
+            )
+        )
 
     def _find_ai_with_role(self, state: GameState, role: RoleName) -> str | None:
         for pid in self._ai_player_ids:
@@ -87,24 +143,40 @@ class AICoordinator:
                     return
                 system, messages = self._context.build_discussion_context(state, pid)
                 output = await self._agents[pid].generate_discussion(system, messages)
+                self._record(
+                    state,
+                    pid,
+                    "discussion",
+                    text=output.public_message,
+                    reasoning_memo=output.reasoning_memo,
+                    used_fallback=self._is_fallback(pid, output.public_message),
+                )
                 try:
                     controller.chat(pid, output.public_message, "public")
                 except Exception:
                     continue
                 self._maybe_register_co(controller, pid, output.public_message)
 
+    def _is_fallback(self, player_id: str, text: str) -> bool:
+        """The agent substitutes a personality-specific canned line when the
+        model fails entirely. Those lines are distinctive enough that an
+        exact match is a reliable signal, and it keeps the agent's return
+        types unchanged."""
+        return text.strip() == self._personalities[player_id].get_fallback_message()
+
     def _maybe_register_co(self, controller: object, player_id: str, message: str) -> None:
         state = controller.state  # type: ignore[attr-defined]
         already = any(c.player_id == player_id for c in state.co_declarations)
         if already:
             return
-        for role, pattern in _CO_PATTERNS.items():
-            if pattern.search(message):
-                try:
-                    controller.co(player_id, role.value)  # type: ignore[attr-defined]
-                except Exception:
-                    pass
-                return
+        other_names = [p.name for pid, p in state.players.items() if pid != player_id]
+        role = detect_claimed_role(message, other_names)
+        if role is None:
+            return
+        try:
+            controller.co(player_id, role.value)  # type: ignore[attr-defined]
+        except Exception:
+            pass
 
     # -- voting (loops across runoff rounds) --
 
@@ -135,6 +207,7 @@ class AICoordinator:
             return
         system, messages = self._context.build_vote_context(state, player_id, candidates)
         output = await self._agents[player_id].generate_vote(system, messages, candidates)
+        self._record(state, player_id, "vote", text=output.reason, target=output.vote_target)
         try:
             controller.vote(player_id, output.vote_target)  # type: ignore[attr-defined]
         except Exception:
@@ -147,6 +220,7 @@ class AICoordinator:
         narrator_id = alive_ai[0]
         system, messages = self._context.build_summary_context(state, narrator_id)
         output = await self._agents[narrator_id].generate_summary(system, messages)
+        self._record(state, narrator_id, "summary", text=output.summary)
         self._day_summaries.set_summary(state.day, output.summary)
         self._day_summaries.compress_if_needed()
 
@@ -202,6 +276,7 @@ class AICoordinator:
             state, seer_id, "divine", candidates
         )
         output = await self._agents[seer_id].generate_night_action(system, messages, candidates)
+        self._record(state, seer_id, "night_action", text=output.reason, target=output.target)
         try:
             controller.submit_night_action(seer_id, "divine", output.target)  # type: ignore[attr-defined]
         except Exception:
@@ -215,6 +290,7 @@ class AICoordinator:
             state, hunter_id, "guard", candidates
         )
         output = await self._agents[hunter_id].generate_night_action(system, messages, candidates)
+        self._record(state, hunter_id, "night_action", text=output.reason, target=output.target)
         try:
             controller.submit_night_action(hunter_id, "guard", output.target)  # type: ignore[attr-defined]
         except Exception:
@@ -230,6 +306,7 @@ class AICoordinator:
             state, alpha_id, "attack", candidates
         )
         output = await self._agents[alpha_id].generate_night_action(system, messages, candidates)
+        self._record(state, alpha_id, "night_action", text=output.reason, target=output.target)
         try:
             controller.submit_night_action(alpha_id, "attack", output.target)  # type: ignore[attr-defined]
         except Exception:
@@ -244,6 +321,13 @@ class AICoordinator:
         for pid in wolf_ids:
             system, messages = self._context.build_wolf_chat_context(state, pid)
             output = await self._agents[pid].generate_wolf_chat(system, messages)
+            self._record(
+                state,
+                pid,
+                "wolf_chat",
+                text=output.message,
+                used_fallback=self._is_fallback(pid, output.message),
+            )
             try:
                 controller.chat(pid, output.message, "wolf")  # type: ignore[attr-defined]
             except Exception:
@@ -258,6 +342,13 @@ class AICoordinator:
         for pid in mason_ids:
             system, messages = self._context.build_freemason_chat_context(state, pid)
             output = await self._agents[pid].generate_wolf_chat(system, messages)
+            self._record(
+                state,
+                pid,
+                "freemason_chat",
+                text=output.message,
+                used_fallback=self._is_fallback(pid, output.message),
+            )
             try:
                 controller.chat(pid, output.message, "freemason")  # type: ignore[attr-defined]
             except Exception:
