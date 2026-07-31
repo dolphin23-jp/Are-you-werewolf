@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     werewolf_log_level: str = "INFO"
     werewolf_session_store: str = "memory"
     werewolf_rng_seed: int | None = None
+    werewolf_access_password: str = ""
 
     werewolf_llm_provider: str = "mock"
 
