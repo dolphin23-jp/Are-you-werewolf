@@ -67,9 +67,7 @@ AI_NAMES = [
 
 
 def _make_specs() -> list[PlayerSpec]:
-    return [
-        PlayerSpec(player_id=f"p{i}", name=AI_NAMES[i], is_human=False) for i in range(17)
-    ]
+    return [PlayerSpec(player_id=f"p{i}", name=AI_NAMES[i], is_human=False) for i in range(17)]
 
 
 async def play_one_game(seed: int, settings: Settings, metrics: MetricsCollector) -> GameTranscript:

@@ -3,7 +3,7 @@ import { createGame, startGame } from "../../api/client";
 import { useGameStore } from "../../state/gameStore";
 
 export function WelcomeScreen() {
-  const [name, setName] = useState("あなた");
+  const [name, setName] = useState("ゲスト");
   const [loading, setLoading] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
   const setSession = useGameStore((s) => s.setSession);
@@ -13,7 +13,7 @@ export function WelcomeScreen() {
     setLoading(true);
     setLocalError(null);
     try {
-      const created = await createGame(name.trim() || "あなた");
+      const created = await createGame(name.trim() || "ゲスト");
       await startGame(created.session_id);
       setSession(created.session_id, created.human_player_id, created.player_names);
       await refreshView();
