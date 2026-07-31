@@ -1,10 +1,13 @@
 """OpenAI-compatible client for gpt-5.6-luna.
 
-NOTE: the real gpt-5.6-luna endpoint's exact request/response shape and
-structured-output conformance are unconfirmed at the time this was written
-(placeholder base URL/model name in `.env.example`, pending real details
-from the provider). This client is written defensively:
+"OpenAI-compatible" is a weaker promise than it sounds: the first real
+call to gpt-5.6-luna was rejected outright for sending `max_tokens`
+(it requires `max_completion_tokens`). So this client negotiates rather
+than assumes -- see `app/ai/dialect.py` -- and is defensive throughout:
 
+  - Optional request parameters are learned from the endpoint's own
+    rejections on the first call and reused thereafter, so neither the
+    operator nor this file has to hardcode a model generation's quirks.
   - Uses `openai.AsyncOpenAI` exclusively (never the sync client), so a
     real API call can never block the event loop -- this was a real bug in
     the prior Claude-based implementation.
@@ -37,6 +40,7 @@ from typing import Any
 from openai import AsyncOpenAI
 from pydantic import ValidationError
 
+from app.ai.dialect import EndpointDialect
 from app.ai.metrics import CallRecord, MetricsCollector, ParsePath
 from app.ai.provider.base import Message, SchemaT
 
@@ -69,6 +73,13 @@ class LunaOpenAIProvider:
         self._max_retries = max_retries
         self._semaphore = asyncio.Semaphore(max_concurrency)
         self._metrics = metrics
+        # Learned from the endpoint's own rejections on the first call, then
+        # reused for the rest of the process.
+        self._dialect = EndpointDialect()
+
+    @property
+    def dialect(self) -> EndpointDialect:
+        return self._dialect
 
     async def generate_structured(
         self,
@@ -152,6 +163,30 @@ class LunaOpenAIProvider:
             )
         )
 
+    async def _create(
+        self,
+        openai_messages: list[dict[str, str]],
+        response_format: dict[str, Any],
+        max_tokens: int,
+        temperature: float,
+    ) -> Any:
+        """One chat completion, retried once per rejected optional
+        parameter -- see app/ai/dialect.py. Bounded: `adapt` only reports
+        True when it actually changed something, so a genuinely bad request
+        surfaces instead of looping."""
+        while True:
+            kwargs: dict[str, Any] = {
+                "model": self._model,
+                "messages": openai_messages,
+                "response_format": response_format,
+            }
+            self._dialect.apply(kwargs, max_tokens=max_tokens, temperature=temperature)
+            try:
+                return await self._client.chat.completions.create(**kwargs)
+            except Exception as exc:
+                if not self._dialect.adapt(exc):
+                    raise
+
     async def _try_strict_schema(
         self,
         openai_messages: list[dict[str, str]],
@@ -159,21 +194,16 @@ class LunaOpenAIProvider:
         max_tokens: int,
         temperature: float,
     ) -> _Attempt:
+        response_format = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": response_schema.__name__,
+                "schema": response_schema.model_json_schema(),
+                "strict": True,
+            },
+        }
         try:
-            response = await self._client.chat.completions.create(
-                model=self._model,
-                messages=openai_messages,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                response_format={
-                    "type": "json_schema",
-                    "json_schema": {
-                        "name": response_schema.__name__,
-                        "schema": response_schema.model_json_schema(),
-                        "strict": True,
-                    },
-                },
-            )  # type: ignore[call-overload]
+            response = await self._create(openai_messages, response_format, max_tokens, temperature)
         except Exception as exc:
             return _Attempt(error=_describe(exc))
 
@@ -196,13 +226,9 @@ class LunaOpenAIProvider:
         temperature: float,
     ) -> _Attempt:
         try:
-            response = await self._client.chat.completions.create(
-                model=self._model,
-                messages=openai_messages,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                response_format={"type": "json_object"},
-            )  # type: ignore[call-overload]
+            response = await self._create(
+                openai_messages, {"type": "json_object"}, max_tokens, temperature
+            )
         except Exception as exc:
             return _Attempt(error=_describe(exc))
 
