@@ -59,6 +59,7 @@ jobs:
           python scripts/evaluate.py \
             --games "${{ inputs.games }}" \
             --seed "${{ inputs.seed }}" \
+            --provider luna \
             ${{ inputs.judge && '--judge' || '' }} \
             --price-in "${{ inputs.price_in }}" \
             --price-out "${{ inputs.price_out }}" \
