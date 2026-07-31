@@ -29,6 +29,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from app.ai.dialect import EndpointDialect  # noqa: E402
 from app.ai.schemas import VoteOutput  # noqa: E402
 from app.config import Settings  # noqa: E402
 
@@ -50,21 +51,31 @@ def _mask(value: str) -> str:
     return f"{value[:4]}...{value[-2:]} (長さ{len(value)})"
 
 
-async def _one_call(client: Any, model: str, response_format: dict[str, Any] | None) -> dict:
-    kwargs: dict[str, Any] = {
-        "model": model,
-        "messages": [{"role": "user", "content": PROMPT}],
-        "max_tokens": 200,
-        "temperature": 0.0,
-    }
-    if response_format is not None:
-        kwargs["response_format"] = response_format
-
+async def _one_call(
+    client: Any,
+    model: str,
+    response_format: dict[str, Any] | None,
+    dialect: EndpointDialect,
+) -> dict:
+    """Same parameter negotiation the real provider uses, so what this
+    reports is what the game will actually send."""
     started = perf_counter()
-    try:
-        response = await client.chat.completions.create(**kwargs)
-    except Exception as exc:
-        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+    while True:
+        kwargs: dict[str, Any] = {
+            "model": model,
+            "messages": [{"role": "user", "content": PROMPT}],
+        }
+        dialect.apply(kwargs, max_tokens=200, temperature=0.0)
+        if response_format is not None:
+            kwargs["response_format"] = response_format
+        try:
+            response = await client.chat.completions.create(**kwargs)
+            break
+        except Exception as exc:
+            if dialect.adapt(exc):
+                print(f"{INFO}このエンドポイント向けに調整: {dialect.describe()}")
+                continue
+            return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
     elapsed = perf_counter() - started
 
     content = response.choices[0].message.content if response.choices else None
@@ -127,8 +138,10 @@ async def main() -> int:
         timeout=settings.luna_timeout_seconds,
     )
 
+    dialect = EndpointDialect()
+
     print("\n=== 2. 疎通と認証 ===")
-    plain = await _one_call(client, model, None)
+    plain = await _one_call(client, model, None, dialect)
     if not plain["ok"]:
         print(f"{NG}接続に失敗しました: {plain['error']}")
         print("\n確認してください:")
@@ -137,6 +150,7 @@ async def main() -> int:
         print("  - モデル名は正しいですか")
         return 1
     print(f"{OK}応答あり ({plain['latency']:.2f} 秒)")
+    print(f"{INFO}送信パラメータ: {dialect.describe()}")
     print(f"{INFO}生の応答: {str(plain['content'])[:160]}")
 
     if plain["prompt_tokens"] is not None:
@@ -159,6 +173,7 @@ async def main() -> int:
                 "strict": True,
             },
         },
+        dialect,
     )
     strict_ok = strict["ok"] and _validates(strict.get("content"))
     if strict_ok:
@@ -168,7 +183,7 @@ async def main() -> int:
     else:
         print(f"{NG}strict JSON-schema 非対応: {strict['error'][:160]}")
 
-    loose = await _one_call(client, model, {"type": "json_object"})
+    loose = await _one_call(client, model, {"type": "json_object"}, dialect)
     loose_ok = loose["ok"] and _validates(loose.get("content"))
     if loose_ok:
         print(f"{OK}json_object モードに対応 ({loose['latency']:.2f} 秒)")
