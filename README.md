@@ -84,8 +84,6 @@ cd ../backend && uvicorn app.main:app --reload
 git status --porcelain backend/.env
 ```
 
-   キーが未設定のまま `luna` を選ぶと、誤って課金APIを叩く前に起動時エラーで止まります。
-
 ### なぜ公開リポジトリでも安全か
 
 - キーはリポジトリのファイルに一切書きません。GitHub の Secrets 画面(または
@@ -136,6 +134,18 @@ cd frontend && pnpm test
 ```bash
 cd backend && python scripts/dry_run.py --seed 1 --provider mock
 ```
+
+## AIの品質評価
+
+日本語の自然さ・人格の維持・役職整合性・矛盾・人狼の連携・JSON成功率・応答時間・
+実コストを測る評価ハーネスがあります。
+
+```bash
+cd backend
+python scripts/evaluate.py --games 1 --provider luna --judge
+```
+
+詳細は `docs/evaluation.md` を参照してください。
 
 ## 設計ドキュメント
 

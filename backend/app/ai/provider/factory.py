@@ -5,6 +5,7 @@ rather than silently degrading to mock."""
 
 from __future__ import annotations
 
+from app.ai.metrics import MetricsCollector
 from app.ai.provider.base import LLMProvider
 from app.ai.provider.mock import MockProvider
 from app.config import Settings
@@ -14,11 +15,16 @@ class LLMProviderConfigError(RuntimeError):
     pass
 
 
-def build_llm_provider(settings: Settings, *, seed: int | None = None) -> LLMProvider:
+def build_llm_provider(
+    settings: Settings,
+    *,
+    seed: int | None = None,
+    metrics: MetricsCollector | None = None,
+) -> LLMProvider:
     provider = settings.werewolf_llm_provider.lower()
 
     if provider == "mock":
-        return MockProvider(seed=seed)
+        return MockProvider(seed=seed, metrics=metrics)
 
     if provider == "luna":
         if not settings.luna_api_key:
@@ -36,6 +42,7 @@ def build_llm_provider(settings: Settings, *, seed: int | None = None) -> LLMPro
             max_concurrency=settings.luna_max_concurrency,
             timeout_seconds=settings.luna_timeout_seconds,
             max_retries=settings.luna_max_retries,
+            metrics=metrics,
         )
 
     raise LLMProviderConfigError(

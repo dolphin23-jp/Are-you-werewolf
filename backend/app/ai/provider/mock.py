@@ -4,9 +4,12 @@ run with zero network calls and zero API cost."""
 
 from __future__ import annotations
 
+import asyncio
 import random
 import re
+from time import perf_counter
 
+from app.ai.metrics import CallRecord, MetricsCollector, ParsePath
 from app.ai.provider.base import Message, SchemaT
 from app.ai.schemas import (
     DiscussionOutput,
@@ -44,8 +47,17 @@ class MockProvider:
     exactly as a real model would be expected to only ever name a listed
     candidate."""
 
-    def __init__(self, seed: int | None = None) -> None:
+    def __init__(
+        self,
+        seed: int | None = None,
+        metrics: MetricsCollector | None = None,
+        latency_seconds: float = 0.0,
+    ) -> None:
         self._rng = random.Random(seed)
+        self._metrics = metrics
+        # Lets the evaluation harness rehearse concurrency behaviour without
+        # a network; 0 keeps the test suite instant.
+        self._latency_seconds = latency_seconds
 
     async def generate_structured(
         self,
@@ -56,6 +68,10 @@ class MockProvider:
         max_tokens: int = 800,
         temperature: float = 0.9,
     ) -> SchemaT | None:
+        started = perf_counter()
+        if self._latency_seconds:
+            await asyncio.sleep(self._latency_seconds)
+
         text = system + "\n" + "\n".join(m.content for m in messages)
         candidates = sorted(set(_PLAYER_ID_RE.findall(text)))
         pick = self._rng.choice(candidates) if candidates else "p0"
@@ -75,5 +91,20 @@ class MockProvider:
         elif response_schema is SummaryOutput:
             result = SummaryOutput(summary="モックの要約です。")
         else:
-            return None
+            result = None
+
+        if self._metrics is not None:
+            self._metrics.record(
+                CallRecord(
+                    schema=response_schema.__name__,
+                    path=ParsePath.STRICT_SCHEMA if result is not None else ParsePath.FAILED,
+                    latency_seconds=perf_counter() - started,
+                    attempt=0,
+                    # No real endpoint, so no usage to report -- leaving this
+                    # None keeps the summary honest about spend being unknown
+                    # rather than reporting a fake zero.
+                    prompt_tokens=None,
+                    completion_tokens=None,
+                )
+            )
         return result  # type: ignore[return-value]
