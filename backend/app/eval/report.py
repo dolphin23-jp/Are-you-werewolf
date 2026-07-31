@@ -253,7 +253,10 @@ def render_transcript(transcript: GameTranscript) -> str:
     names = transcript.names
     for death in transcript.final_state.get("death_records", []):
         pid = death["player_id"]
-        lines.append(f"- {death['day']}日目: {names.get(pid, pid)}({pid})が{death['cause']}で死亡")
+        lines.append(
+            f"- {death['day']}日目: {names.get(pid, pid)}({pid})が"
+            f"{death['cause']}で死亡"
+        )
     guards = {
         (record["day"], record["target_id"])
         for record in transcript.final_state.get("guard_records", [])

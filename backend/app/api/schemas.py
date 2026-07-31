@@ -6,10 +6,7 @@ from pydantic import BaseModel, Field
 
 
 class CreateGameRequest(BaseModel):
-    # Not "あなた": that string is broadcast verbatim into every OTHER
-    # player's prompt (chat log, roster labels), where it reads as the
-    # second-person pronoun rather than a name.
-    human_name: str = Field(default="ゲスト", max_length=32)
+    human_name: str = Field(default="あなた", max_length=32)
     seed: int | None = None
 
 

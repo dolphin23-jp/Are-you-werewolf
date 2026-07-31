@@ -56,7 +56,9 @@ class AICoordinator:
         fake_claim_guard = FakeClaimGuard(wolf_team_ids=set(wolf_ids))
         self._wolf_deception = wolf_deception
         self._madman_fake_role_by_player = {
-            player.player_id: madman_fake_role for player in madman if madman_fake_role is not None
+            player.player_id: madman_fake_role
+            for player in madman
+            if madman_fake_role is not None
         }
 
         self._day_summaries = DaySummaryManager()
@@ -233,7 +235,9 @@ class AICoordinator:
                 speech_counts[pid] += 1
                 total += 1
                 for question in output.directed_questions:
-                    self._queue_reply(state, question.target_id, speech_counts, reply_queue, queued)
+                    self._queue_reply(
+                        state, question.target_id, speech_counts, reply_queue, queued
+                    )
                 if output.needs_another_statement:
                     self._queue_reply(state, pid, speech_counts, reply_queue, queued)
 
@@ -476,7 +480,8 @@ class AICoordinator:
         candidates = [
             pid
             for pid in state.alive_ids()
-            if state.players[pid].role != RoleName.WEREWOLF and pid not in self._observer_player_ids
+            if state.players[pid].role != RoleName.WEREWOLF
+            and pid not in self._observer_player_ids
         ]
         if not candidates:
             return
