@@ -15,6 +15,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 
+from app.ai.co_detection import detect_claimed_role
 from app.ai.coordinator import AICoordinator
 from app.ai.provider.factory import LLMProviderConfigError, build_llm_provider
 from app.api import orchestrator
@@ -168,6 +169,12 @@ async def chat(
     author = _resolve_player_id(session, player_id)
     _run(session.controller.chat, author, req.content, req.channel)
     if req.channel == "public":
+        state = session.controller.state
+        if not any(claim.player_id == author for claim in state.co_declarations):
+            other_names = [player.name for pid, player in state.players.items() if pid != author]
+            claimed_role = detect_claimed_role(req.content, other_names)
+            if claimed_role is not None:
+                _run(session.controller.co, author, claimed_role.value)
         await orchestrator.after_human_chat(session)
     return OkResponse()
 

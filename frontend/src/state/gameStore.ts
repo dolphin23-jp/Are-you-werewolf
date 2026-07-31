@@ -15,6 +15,7 @@ interface GameStoreState {
   connected: boolean;
   error: string | null;
   busy: boolean;
+  selectedSpeakerId: string | null;
 
   setScreen: (screen: Screen) => void;
   setSession: (
@@ -25,6 +26,7 @@ interface GameStoreState {
   setConnected: (connected: boolean) => void;
   setError: (error: string | null) => void;
   setBusy: (busy: boolean) => void;
+  setSelectedSpeakerId: (playerId: string | null) => void;
   toggleDebug: () => void;
   refreshView: () => Promise<void>;
   refreshDebug: () => Promise<void>;
@@ -42,6 +44,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
   connected: false,
   error: null,
   busy: false,
+  selectedSpeakerId: null,
 
   setScreen: (screen) => set({ screen }),
   setSession: (sessionId, humanId, playerNames) =>
@@ -49,6 +52,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
   setConnected: (connected) => set({ connected }),
   setError: (error) => set({ error }),
   setBusy: (busy) => set({ busy }),
+  setSelectedSpeakerId: (selectedSpeakerId) => set({ selectedSpeakerId }),
   toggleDebug: () => set((s) => ({ debugMode: !s.debugMode })),
 
   refreshView: async () => {
@@ -84,5 +88,6 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
       connected: false,
       error: null,
       busy: false,
+      selectedSpeakerId: null,
     }),
 }));

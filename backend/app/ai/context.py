@@ -300,7 +300,10 @@ class ContextBuilder:
                 self._layer_d_summaries(),
                 self._layer_previous_memo(player_id),
                 self._layer_e_current_log(state, ChatChannel.PUBLIC),
-                f"【議論段階】{stage}。新情報、反論、視点比較を優先し、単なる同意を避けてください。",
+                f"【議論段階】{stage}。状況の復唱や単なる同意だけで発言を終えないでください。"
+                "未検討の論点を一つ提示する、具体的な相手へ根拠を問う、直前の意見へ反論する、"
+                "または発言から処刑候補を絞る、のいずれかを必ず行ってください。"
+                "consensus_summary段階では新説を広げず、対立点と処刑候補を根拠付きでまとめてください。",
                 DISCUSSION_OUTPUT_INSTRUCTION,
             ],
         )
