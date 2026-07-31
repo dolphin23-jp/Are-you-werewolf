@@ -11,10 +11,29 @@ conditionally by role/situation.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 from app.engine.roles import RoleName
 from app.engine.state import GameState
+
+
+def player_label(state: GameState, player_id: str) -> str:
+    """Renders a player as `名前(pN)`.
+
+    The prompt talks about players by name everywhere (chat log, wolf allies,
+    freemason partner) but every machine-readable answer is a player_id. With
+    no roster tying the two together the model was being asked to vote for
+    "p7" having only ever heard of "アカリ" -- a wolf could not even reliably
+    avoid voting for its own partner. Carrying both forms everywhere removes
+    the guesswork without giving up the unambiguous id in the output.
+    """
+    player = state.players.get(player_id)
+    return f"{player.name}({player_id})" if player is not None else player_id
+
+
+def player_labels(state: GameState, player_ids: Iterable[str]) -> str:
+    return "、".join(player_label(state, pid) for pid in player_ids) or "なし"
 
 
 @dataclass
@@ -37,7 +56,10 @@ class StrategyAnalyzer:
         named_ids = {r.target_id for r in state.divine_records} | {
             r.target_id for r in state.medium_records
         }
-        gray_ids = sorted(alive_ids - claimed_ids - named_ids)
+        # Seating order, not sorted(): lexicographic ids read as
+        # "p0、p1、p10、p11、…、p2" once rendered into the prompt.
+        excluded = claimed_ids | named_ids
+        gray_ids = [p.player_id for p in alive if p.player_id not in excluded]
 
         # From a village-side vantage point the true wolf count is hidden;
         # use the fixed initial wolf count as the working upper bound.
@@ -83,14 +105,14 @@ ROLE_LABELS: dict[RoleName, str] = {
 }
 
 
-def render_board_analysis(analysis: BoardAnalysis) -> str:
-    gray = "、".join(analysis.gray_player_ids) if analysis.gray_player_ids else "なし"
+def render_board_analysis(analysis: BoardAnalysis, state: GameState) -> str:
     return (
         "【盤面分析】\n"
         f"- 生存者数: {analysis.alive_count}人\n"
+        f"- 生存者一覧: {player_labels(state, state.alive_ids())}\n"
         f"- 推定残り縄数(村が許容できる誤処刑の目安): {analysis.rope_count}\n"
         f"- CO構成: {analysis.co_composition}\n"
-        f"- グレー(無CO・未言及)のプレイヤー: {gray}"
+        f"- グレー(無CO・未言及)のプレイヤー: {player_labels(state, analysis.gray_player_ids)}"
     )
 
 

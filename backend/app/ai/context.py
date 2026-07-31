@@ -22,6 +22,8 @@ from app.ai.strategy import (
     SEER_NIGHT_GUIDE,
     WOLF_ATTACK_GUIDE,
     StrategyAnalyzer,
+    player_label,
+    player_labels,
     render_board_analysis,
 )
 from app.engine.roles import ROLE_DEFINITIONS, RoleName
@@ -116,7 +118,7 @@ class ContextBuilder:
 
         if player.role == RoleName.WEREWOLF:
             allies = [
-                state.players[pid].name
+                player_label(state, pid)
                 for pid in (p.player_id for p in state.players_by_role(RoleName.WEREWOLF))
                 if pid != player_id
             ]
@@ -137,7 +139,7 @@ class ContextBuilder:
 
         if player.role == RoleName.FREEMASON:
             partners = [
-                state.players[pid].name
+                player_label(state, pid)
                 for pid in (p.player_id for p in state.players_by_role(RoleName.FREEMASON))
                 if pid != player_id
             ]
@@ -149,7 +151,7 @@ class ContextBuilder:
 
     def _layer_c_state(self, state: GameState, player_id: str, extra_guides: list[str]) -> str:
         analysis = self._analyzer.analyze(state)
-        parts = [render_board_analysis(analysis)]
+        parts = [render_board_analysis(analysis, state)]
         parts.extend(extra_guides)
         return "\n\n".join(parts)
 
@@ -193,14 +195,22 @@ class ContextBuilder:
     def build_vote_context(
         self, state: GameState, player_id: str, candidate_ids: list[str]
     ) -> tuple[str, list[Message]]:
-        candidates = "、".join(candidate_ids)
+        candidates = player_labels(state, candidate_ids)
+        # Without saying why the field shrank, a runoff looks to the model like
+        # an arbitrarily truncated ballot.
+        header = (
+            f"【決選投票({state.vote_round}回目)】前回の投票が同数だったため、"
+            "候補は同数だったプレイヤーに限られます。次の中から選んでください: "
+            if state.runoff_candidates
+            else "【投票候補】"
+        )
         return self._assemble(
             [self._layer_a_system(state, player_id), self._layer_b_role(state, player_id)],
             [
                 self._layer_c_state(state, player_id, []),
                 self._layer_d_summaries(),
                 self._layer_e_current_log(state, ChatChannel.PUBLIC),
-                f"【投票候補】{candidates}",
+                f"{header}{candidates}",
                 VOTE_OUTPUT_INSTRUCTION,
             ],
         )
@@ -209,7 +219,7 @@ class ContextBuilder:
         self, state: GameState, player_id: str, action_type: str, candidate_ids: list[str]
     ) -> tuple[str, list[Message]]:
         guides = self._role_specific_guides(state, player_id)
-        candidates = "、".join(candidate_ids)
+        candidates = player_labels(state, candidate_ids)
         extra = ""
         if action_type == "attack":
             wolf_log = self._layer_e_current_log(state, ChatChannel.WOLF)
