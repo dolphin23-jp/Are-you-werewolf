@@ -10,6 +10,7 @@ from typing import Any
 
 from app.api.ws_hub import SessionWSHub
 from app.engine.game import GameController
+from app.eval.transcript import TranscriptRecorder
 
 
 @dataclass
@@ -20,6 +21,7 @@ class GameSession:
     ai_player_ids: list[str]
     ws_hub: SessionWSHub
     coordinator: Any | None = None
+    transcript_recorder: TranscriptRecorder | None = None
     created_at: float = field(default_factory=time.time)
     last_active_at: float = field(default_factory=time.time)
     # Serializes discussion rounds so rapid-fire human chat messages queue
