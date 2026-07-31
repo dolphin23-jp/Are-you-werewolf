@@ -50,3 +50,46 @@ jobs:
         run: pnpm exec vitest run
       - name: Build
         run: pnpm run build
+
+  # Exercises the exact path a Codespace takes: build the UI, then serve
+  # API + UI + WebSocket from one port via .devcontainer/start.sh.
+  single-port-serve:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "pnpm"
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Check devcontainer scripts parse
+        run: bash -n .devcontainer/setup.sh && bash -n .devcontainer/start.sh
+      - name: Install backend
+        run: pip install -e "./backend[dev]"
+      - name: Install and build frontend
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile && pnpm build
+      - name: Serve on a single port and smoke test it
+        run: |
+          bash .devcontainer/start.sh &
+          for _ in $(seq 1 30); do
+            curl -sf http://localhost:8000/api/health >/dev/null && break
+            sleep 1
+          done
+
+          echo "--- /api/health ---"
+          curl -sf http://localhost:8000/api/health | tee /tmp/health.json
+          grep -q '"frontend_bundled":true' /tmp/health.json
+
+          echo "--- / must serve the SPA shell ---"
+          curl -sf http://localhost:8000/ | grep -q '<div id="root"></div>'
+
+          echo "--- unknown /api path must 404, not return HTML ---"
+          code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8000/api/nope)
+          test "$code" = "404"

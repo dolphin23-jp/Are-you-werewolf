@@ -1,4 +1,8 @@
-.PHONY: backend-dev frontend-dev backend-test frontend-test test lint
+.PHONY: serve backend-dev frontend-dev backend-test frontend-test test lint dry-run
+
+# Build the UI and serve everything (API + UI + WebSocket) on one port.
+serve:
+	bash .devcontainer/start.sh
 
 backend-dev:
 	cd backend && . .venv/bin/activate && uvicorn app.main:app --reload
