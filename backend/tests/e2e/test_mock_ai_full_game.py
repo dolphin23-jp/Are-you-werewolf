@@ -83,8 +83,10 @@ async def _play(seed: int):
         elif phase in (Phase.VOTING, Phase.RUNOFF):
             human = state.players[HUMAN_ID]
             if human.alive:
-                candidates = [pid for pid in state.alive_ids() if pid != HUMAN_ID]
-                controller.vote(HUMAN_ID, rng.choice(candidates))
+                # votable_ids: a runoff only accepts the tied players.
+                candidates = state.votable_ids(HUMAN_ID)
+                if candidates:
+                    controller.vote(HUMAN_ID, rng.choice(candidates))
             await coordinator.generate_all_votes(session)
         elif phase == Phase.VOTE_RESULT:
             controller.start_night()

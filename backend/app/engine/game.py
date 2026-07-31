@@ -141,6 +141,7 @@ class GameController:
 
     def end_discussion(self) -> None:
         self.state.vote_round = 1
+        self.state.runoff_candidates = []
         self._transition(PhaseEvent.END_DISCUSSION)
 
     def resolve_votes(self) -> None:
@@ -224,7 +225,15 @@ class GameController:
     def vote(self, voter_id: str, target_id: str) -> None:
         if self.state.phase not in (Phase.VOTING, Phase.RUNOFF):
             raise GameError(f"cannot vote during phase {self.state.phase}")
-        self._vote_manager.record_vote(self.state, voter_id, target_id)
+        try:
+            self._vote_manager.record_vote(self.state, voter_id, target_id)
+        except GameError:
+            raise
+        except ValueError as exc:
+            # The vote manager lives below GameError in the import graph, so it
+            # signals illegal votes with plain ValueError. Translate here so the
+            # API answers 400 instead of leaking a 500.
+            raise GameError(str(exc)) from exc
 
     def submit_night_action(
         self, player_id: str, action_type: NightActionType, target_id: str

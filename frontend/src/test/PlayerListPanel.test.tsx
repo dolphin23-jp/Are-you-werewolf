@@ -10,6 +10,7 @@ function makeView(overrides: Partial<GameView> = {}): GameView {
     phase: "discussion",
     day: 1,
     vote_round: 1,
+    runoff_candidates: [],
     your_player_id: "p0",
     your_role: "villager",
     allies: [],

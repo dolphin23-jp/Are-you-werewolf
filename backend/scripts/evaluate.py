@@ -131,7 +131,9 @@ async def play_one_game(seed: int, settings: Settings, metrics: MetricsCollector
             controller.end_discussion()
         elif phase in (Phase.VOTING, Phase.RUNOFF):
             if controller.state.players[HUMAN_ID].alive:
-                candidates = [pid for pid in controller.state.alive_ids() if pid != HUMAN_ID]
+                # votable_ids, not alive_ids: a runoff only accepts the tied
+                # players as targets.
+                candidates = controller.state.votable_ids(HUMAN_ID)
                 if candidates:
                     controller.vote(HUMAN_ID, rng.choice(candidates))
             await coordinator.generate_all_votes(session)

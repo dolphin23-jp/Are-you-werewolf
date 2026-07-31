@@ -71,6 +71,9 @@ export interface GameView {
   phase: Phase;
   day: number;
   vote_round: number;
+  /** In a runoff, the only players who may be voted for. Empty in an
+   * ordinary round, meaning anyone alive is eligible. */
+  runoff_candidates: string[];
   your_player_id: string;
   your_role: RoleName | null;
   allies: string[];
@@ -100,6 +103,7 @@ export interface DebugView {
   phase: Phase;
   day: number;
   vote_round: number;
+  runoff_candidates: string[];
   players: DebugPlayer[];
   chat_log: ChatMessage[];
   divine_records: DivineResult[];

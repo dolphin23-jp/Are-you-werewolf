@@ -59,7 +59,9 @@ def _drive_human_vote(controller: GameController, rng: random.Random) -> None:
     human = state.players[HUMAN_ID]
     if not human.alive:
         return
-    candidates = [pid for pid in state.alive_ids() if pid != HUMAN_ID]
+    # votable_ids, not alive_ids: in a runoff only the tied players are legal
+    # targets, and the engine now rejects anyone else.
+    candidates = state.votable_ids(HUMAN_ID)
     if candidates:
         controller.vote(HUMAN_ID, rng.choice(candidates))
 

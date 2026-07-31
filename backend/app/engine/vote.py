@@ -30,6 +30,10 @@ class VoteManager:
             raise ValueError(f"target {target_id} is not alive")
         if voter_id == target_id:
             raise ValueError("cannot vote for self")
+        if state.runoff_candidates and target_id not in state.runoff_candidates:
+            raise ValueError(
+                f"runoff is limited to {state.runoff_candidates}; {target_id} is not a candidate"
+            )
         state.pending_votes[voter_id] = target_id
 
     def all_votes_in(self, state: GameState) -> bool:
@@ -61,10 +65,15 @@ class VoteManager:
             state.death_records.append(
                 DeathRecord(player_id=executed_id, cause=DeathCause.EXECUTED, day=state.day)
             )
+            state.runoff_candidates = []
             return VoteTallyResult(executed_player_id=executed_id)
 
         if state.vote_round >= self.max_vote_rounds:
+            state.runoff_candidates = []
             return VoteTallyResult(is_draw=True)
 
+        # Narrow the next round to the tied players. Skipping this is what
+        # made runoffs re-open the whole field and stall into a false draw.
+        state.runoff_candidates = sorted(top)
         state.vote_round += 1
         return VoteTallyResult(tied_player_ids=top)
