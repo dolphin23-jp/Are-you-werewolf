@@ -1,5 +1,7 @@
 import { ROLE_LABELS } from "../../api/types";
+import { downloadTranscript } from "../../api/client";
 import { useGameStore } from "../../state/gameStore";
+import { useState } from "react";
 
 const WINNER_LABELS: Record<string, string> = {
   village: "村人陣営の勝利",
@@ -14,6 +16,9 @@ export function GameOverScreen() {
   const toggleDebug = useGameStore((s) => s.toggleDebug);
   const refreshDebug = useGameStore((s) => s.refreshDebug);
   const reset = useGameStore((s) => s.reset);
+  const sessionId = useGameStore((s) => s.sessionId);
+  const setError = useGameStore((s) => s.setError);
+  const [downloading, setDownloading] = useState(false);
 
   if (!view) return null;
 
@@ -24,6 +29,18 @@ export function GameOverScreen() {
   const handleShowRoles = () => {
     toggleDebug();
     void refreshDebug();
+  };
+
+  const handleDownloadTranscript = async () => {
+    if (!sessionId) return;
+    setDownloading(true);
+    try {
+      await downloadTranscript(sessionId);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "解析用ログの取得に失敗しました");
+    } finally {
+      setDownloading(false);
+    }
   };
 
   return (
@@ -45,6 +62,10 @@ export function GameOverScreen() {
           ))}
         </ul>
       )}
+
+      <button className="btn" disabled={downloading} onClick={() => void handleDownloadTranscript()}>
+        {downloading ? "ログを準備中..." : "解析用ログをダウンロード"}
+      </button>
 
       <button className="btn btn--primary" onClick={reset}>
         もう一度遊ぶ

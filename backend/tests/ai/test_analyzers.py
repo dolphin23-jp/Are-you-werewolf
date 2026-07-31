@@ -168,7 +168,9 @@ def test_medium_result_about_dead_player_is_not_flagged():
 
 
 def test_remote_black_word_does_not_turn_teammate_reference_into_accusation():
-    t = _transcript(utterances=[_say("p2", "ユイ吊りは妥当。ただアカリの自己黒判定は破綻です。")])
+    t = _transcript(
+        utterances=[_say("p2", "ユイ吊りは妥当。ただアカリの自己黒判定は破綻です。")]
+    )
     assert analyze(t).count("wolf_named_teammate_with_wolf_word") == 0
 
 
@@ -196,12 +198,16 @@ def test_true_seer_claiming_opposite_result_is_flagged():
             _say(
                 "p1",
                 "ユイを占った結果、白でした。",
-                public_results=[{"result_type": "seer", "target_id": "p3", "is_werewolf": False}],
+                public_results=[
+                    {"result_type": "seer", "target_id": "p3", "is_werewolf": False}
+                ],
             )
         ],
         final_state={
             "death_records": [],
-            "divine_records": [{"seer_id": "p1", "target_id": "p3", "day": 0, "is_werewolf": True}],
+            "divine_records": [
+                {"seer_id": "p1", "target_id": "p3", "day": 0, "is_werewolf": True}
+            ],
             "medium_records": [],
         },
     )
@@ -214,12 +220,16 @@ def test_true_seer_claiming_matching_result_is_not_flagged():
             _say(
                 "p1",
                 "ユイを占った結果、人狼でした。",
-                public_results=[{"result_type": "seer", "target_id": "p3", "is_werewolf": True}],
+                public_results=[
+                    {"result_type": "seer", "target_id": "p3", "is_werewolf": True}
+                ],
             )
         ],
         final_state={
             "death_records": [],
-            "divine_records": [{"seer_id": "p1", "target_id": "p3", "day": 0, "is_werewolf": True}],
+            "divine_records": [
+                {"seer_id": "p1", "target_id": "p3", "day": 0, "is_werewolf": True}
+            ],
             "medium_records": [],
         },
     )

@@ -29,6 +29,14 @@ def test_luna_provider_builds_when_key_present():
     assert isinstance(provider, LunaOpenAIProvider)
 
 
+@pytest.mark.parametrize("configured", [" luna ", '"luna"', "LUNA", "gpt-5.6-luna"])
+def test_luna_provider_normalizes_common_codespaces_secret_values(configured: str):
+    settings = Settings(werewolf_llm_provider=configured, luna_api_key="sk-test")
+    provider = build_llm_provider(settings)
+    assert settings.werewolf_llm_provider == "luna"
+    assert isinstance(provider, LunaOpenAIProvider)
+
+
 def test_unknown_provider_raises():
     settings = Settings(werewolf_llm_provider="bogus")
     with pytest.raises(LLMProviderConfigError):

@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse
 
 from app.api.routes_game import router as game_router
 from app.api.routes_ws import router as ws_router
+from app.auth import PersonalAccessMiddleware
 from app.config import get_settings
 
 # backend/app/main.py -> backend/app -> backend -> <repo root>
@@ -18,6 +19,11 @@ FRONTEND_DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
 def create_app() -> FastAPI:
     settings = get_settings()
     app = FastAPI(title="Are you werewolf API", version="0.1.0")
+    if settings.werewolf_access_password:
+        app.add_middleware(
+            PersonalAccessMiddleware,
+            password=settings.werewolf_access_password,
+        )
 
     # Only needed when the frontend is served from a different origin than
     # this API. In the default single-service setup it is inert, because

@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     werewolf_log_level: str = "INFO"
     werewolf_session_store: str = "memory"
     werewolf_rng_seed: int | None = None
+    werewolf_access_password: str = ""
 
     werewolf_llm_provider: str = "mock"
 
@@ -28,6 +29,19 @@ class Settings(BaseSettings):
     luna_max_concurrency: int = 6
     luna_timeout_seconds: float = 30.0
     luna_max_retries: int = 2
+
+    @field_validator("werewolf_llm_provider", mode="before")
+    @classmethod
+    def _normalize_llm_provider(cls, value: object) -> object:
+        """Tolerate the common Codespaces-secret forms without hiding bad providers."""
+        if not isinstance(value, str):
+            return value
+        normalized = value.strip().strip('"\'').lower()
+        # The model name is frequently entered in the provider field. There is
+        # currently only one real provider, so this unambiguous alias is safe.
+        if normalized == "gpt-5.6-luna":
+            return "luna"
+        return normalized
 
     @field_validator("werewolf_rng_seed", mode="before")
     @classmethod

@@ -28,7 +28,12 @@ on:
 jobs:
   evaluate:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # A real 17-player game makes roughly 250 model calls. PR #7 deliberately
+    # deepened the discussion flow, so a single game can legitimately take
+    # longer than one hour even though the endpoint is healthy. Keep a finite
+    # ceiling to prevent runaway spend, but do not cancel a normal evaluation
+    # immediately before it can write report.md.
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
 

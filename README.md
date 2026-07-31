@@ -61,6 +61,9 @@ APIキーを設定しなくても、**モックAI相手にそのまま遊べま�
    | `LUNA_API_KEY` | 発行された実際のキー |
    | `LUNA_BASE_URL` | gpt-5.6-luna のOpenAI互換エンドポイントURL |
 
+   `WEREWOLF_LLM_PROVIDER` はモデル名ではなくプロバイダ種別です。値には
+   `gpt-5.6-luna` や `WEREWOLF_LLM_PROVIDER=luna` ではなく、`luna` だけを入力します。
+
 3. **Codespace を再起動**(または作り直す)と反映されます
 4. 反映確認は `/api/health` を開き、`"llm_provider": "luna"` になっていればOK
 
@@ -112,6 +115,32 @@ API・画面・WebSocket がすべて同一オリジンなので:
 フロントエンドを開発サーバーで動かす場合(`pnpm dev`)も、Vite が `/api` と
 `/ws` をバックエンドへプロキシするので、コード側は常に同一オリジン前提の
 1経路だけで済みます。
+
+## 常設デプロイ(Docker)
+
+Codespaceを毎回起動せず、スマートフォンなどから同じURLで遊ぶ場合は、付属の
+`Dockerfile`をWebサービス型のホスティングへデプロイします。サービスには最低限、
+次のSecretを設定してください。
+
+```text
+WEREWOLF_LLM_PROVIDER=luna
+LUNA_API_KEY=<実際のキー>
+LUNA_BASE_URL=<OpenAI互換エンドポイントURL>
+LUNA_MODEL=gpt-5.6-luna
+WEREWOLF_ACCESS_PASSWORD=<長いランダムなパスワード>
+```
+
+公開URLを第三者に使われるとAPI費用が発生するため、`WEREWOLF_ACCESS_PASSWORD`は
+必ず設定してください。ブラウザの認証画面ではユーザー名`werewolf`と、設定した
+パスワードを入力します。`/api/health`だけはホスティングの死活監視用に認証不要です。
+
+```bash
+docker build -t are-you-werewolf .
+docker run --rm -p 8000:8000 --env-file backend/.env are-you-werewolf
+```
+
+現在のゲームセッションはメモリ保存なので、サービスは1インスタンスで運用し、
+プレイ中に再起動・スケールダウンしない設定にしてください。
 
 ```bash
 # 画面のホットリロードが欲しいときだけ、2つ起動する

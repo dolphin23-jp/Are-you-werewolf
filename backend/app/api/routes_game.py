@@ -30,6 +30,8 @@ from app.api.schemas import (
 from app.api.ws_hub import SessionWSHub
 from app.config import get_settings
 from app.engine.game import GameController, GameError, PlayerSpec
+from app.engine.phases import Phase
+from app.eval.transcript import TranscriptRecorder
 from app.sessions.models import GameSession
 from app.sessions.store import get_session_store
 
@@ -101,8 +103,9 @@ def create_game(req: CreateGameRequest) -> CreateGameResponse:
 
     try:
         provider = build_llm_provider(settings, seed=seed)
+        transcript_recorder = TranscriptRecorder()
         coordinator: AICoordinator | None = AICoordinator(
-            controller.state, ai_ids, provider, seed=seed
+            controller.state, ai_ids, provider, seed=seed, recorder=transcript_recorder
         )
     except LLMProviderConfigError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -114,6 +117,7 @@ def create_game(req: CreateGameRequest) -> CreateGameResponse:
         ai_player_ids=ai_ids,
         ws_hub=ws_hub,
         coordinator=coordinator,
+        transcript_recorder=transcript_recorder,
     )
     get_session_store().create(session)
     return CreateGameResponse(
@@ -121,6 +125,18 @@ def create_game(req: CreateGameRequest) -> CreateGameResponse:
         human_player_id=human_id,
         player_names={s.player_id: s.name for s in specs},
     )
+
+
+@router.get("/{session_id}/transcript")
+def get_transcript(session_id: str) -> dict[str, Any]:
+    """Return the complete analysis log, but only after secrets can no longer affect play."""
+    session = _get_session(session_id)
+    if session.controller.state.phase != Phase.GAME_OVER:
+        raise HTTPException(status_code=409, detail="解析用ログはゲーム終了後に取得できます")
+    if session.transcript_recorder is None:
+        raise HTTPException(status_code=404, detail="このゲームには解析用ログがありません")
+    transcript = session.transcript_recorder.finalize(session.controller.get_debug_view())
+    return transcript.to_dict()
 
 
 @router.post("/{session_id}/start", response_model=OkResponse)
