@@ -61,6 +61,9 @@ APIキーを設定しなくても、**モックAI相手にそのまま遊べま�
    | `LUNA_API_KEY` | 発行された実際のキー |
    | `LUNA_BASE_URL` | gpt-5.6-luna のOpenAI互換エンドポイントURL |
 
+   `WEREWOLF_LLM_PROVIDER` はモデル名ではなくプロバイダ種別です。値には
+   `gpt-5.6-luna` や `WEREWOLF_LLM_PROVIDER=luna` ではなく、`luna` だけを入力します。
+
 3. **Codespace を再起動**(または作り直す)と反映されます
 4. 反映確認は `/api/health` を開き、`"llm_provider": "luna"` になっていればOK
 

@@ -50,6 +50,17 @@ export function getDebugView(sessionId: string): Promise<DebugView> {
   return request(`/api/games/${sessionId}/debug`);
 }
 
+export async function downloadTranscript(sessionId: string): Promise<void> {
+  const transcript = await request<unknown>(`/api/games/${sessionId}/transcript`);
+  const blob = new Blob([JSON.stringify(transcript, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `werewolf-transcript-${sessionId}.json`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 export function sendChat(
   sessionId: string,
   content: string,
