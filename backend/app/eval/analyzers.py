@@ -19,24 +19,18 @@ from typing import Any
 from app.ai.co_detection import detect_claimed_role
 from app.eval.transcript import GameTranscript, Utterance
 
-# A divination/medium *result* claim, e.g. 「p3を占った結果、人狼でした」.
-# Deliberately narrower than a bare CO: claiming to be a seer is ordinary
-# bluffing, but reporting a concrete result is a much stronger assertion.
-_RESULT_CLAIM_RE = re.compile(
-    r"(占った結果|占い結果|霊媒結果|霊視結果|白でした|黒でした|人狼でした"
-    r"|人狼ではありません|人狼ではなかった|白確定|黒確定)"
-)
-
 
 def _claimed_role(utterance: Utterance, t: GameTranscript) -> str | None:
     """Same detector the engine uses to register a CO, so the evaluation
     can never disagree with what the game actually recorded."""
+    if utterance.public_claim_role:
+        return utterance.public_claim_role
     others = [name for pid, name in t.names.items() if pid != utterance.player_id]
     role = detect_claimed_role(utterance.text, others)
     return role.value if role is not None else None
 
 
-_ACCUSE_AS_WOLF_RE = re.compile(r"(人狼|黒|狼)")
+_P0_IDENTITY_RE = re.compile(r"(?:私|俺|僕|自分)が(?:本物の)?p0(?:本人)?|p0本人")
 
 # Rough "is this actually Japanese" signal: share of CJK/kana characters.
 _JA_CHAR_RE = re.compile(r"[぀-ヿ一-鿿]")
@@ -73,6 +67,8 @@ def analyze(transcript: GameTranscript) -> AnalysisResult:
     _check_role_consistency(transcript, result)
     _check_contradictions(transcript, result)
     _check_wolf_deception(transcript, result)
+    _check_identity_confusion(transcript, result)
+    _check_true_role_result_accuracy(transcript, result)
     _collect_format_stats(transcript, result)
     return result
 
@@ -87,9 +83,11 @@ def _check_role_consistency(t: GameTranscript, result: AnalysisResult) -> None:
         # Reporting a divination/medium *result* is only legitimate for the
         # real seer/medium, or for a wolf/madman deliberately assigned to
         # fake that role. Anyone else doing it is out of character.
-        if _RESULT_CLAIM_RE.search(u.text):
+        if u.public_results:
             assigned_fake = fake_roles.get(u.player_id)
-            legitimate = u.role in ("seer", "medium") or assigned_fake in ("seer", "medium")
+            claimed_result_roles = {item.get("result_type") for item in u.public_results}
+            legitimate_roles = {u.role, assigned_fake}
+            legitimate = claimed_result_roles <= legitimate_roles
             if not legitimate:
                 result.add(
                     Finding(
@@ -150,26 +148,27 @@ def _check_contradictions(t: GameTranscript, result: AnalysisResult) -> None:
             )
         claimed_roles.setdefault(u.player_id, (claimed_role, u.day))
 
-    # Death day per player, so we can spot someone being discussed as an
-    # active participant after they are gone.
+    # Only structured current targets count. Historical prose about a dead
+    # player's execution, vote or medium result is legitimate analysis.
     died_on: dict[str, int] = {
         d["player_id"]: d["day"] for d in t.final_state.get("death_records", [])
     }
-    id_by_name = {name: pid for pid, name in t.names.items()}
-
     for u in t.by_kind("discussion"):
-        for name, pid in id_by_name.items():
-            if pid == u.player_id or name not in u.text:
-                continue
+        memo = u.reasoning_memo or {}
+        current_targets = set(u.directed_question_targets)
+        execution_target = memo.get("execution_target")
+        if isinstance(execution_target, str):
+            current_targets.add(execution_target)
+        for pid in current_targets:
             death_day = died_on.get(pid)
             if death_day is not None and u.day > death_day:
                 result.add(
                     Finding(
-                        check="references_dead_player",
-                        severity="low",
+                        check="treats_dead_player_as_active",
+                        severity="medium",
                         player_id=u.player_id,
                         day=u.day,
-                        detail=f"{name} は{death_day}日目に死亡済みだが言及している",
+                        detail=f"{t.names.get(pid, pid)} は死亡済みだが現在の対象にしている",
                         text=u.text,
                     )
                 )
@@ -207,15 +206,20 @@ def _check_wolf_deception(t: GameTranscript, result: AnalysisResult) -> None:
     lurkers = set(t.deception.get("lurking_player_ids", []))
     name_by_id = t.names
 
-    # Publicly calling out a teammate as a wolf is the single worst
-    # coordination failure -- FakeClaimGuard only constrains structured fake
-    # results, never free-form chat, so this is genuinely unguarded.
+    # Prefer the structured suspect memo. Text fallback requires the teammate
+    # and an accusation to occur in the same short sentence; a remote word
+    # such as another player's "black result" must not trigger this check.
     for u in t.by_kind("discussion"):
         if u.player_id not in wolf_ids:
             continue
         for teammate in wolf_ids - {u.player_id}:
             teammate_name = name_by_id.get(teammate, teammate)
-            if teammate_name and teammate_name in u.text and _ACCUSE_AS_WOLF_RE.search(u.text):
+            explicit_text = any(
+                teammate_name in sentence
+                and re.search(r"(人狼だ|狼だ|黒だ|黒い|狼で見る|人狼で見る)", sentence)
+                for sentence in re.split(r"[。！？!?\n]", u.text)
+            )
+            if explicit_text:
                 result.add(
                     Finding(
                         check="wolf_named_teammate_with_wolf_word",
@@ -228,12 +232,27 @@ def _check_wolf_deception(t: GameTranscript, result: AnalysisResult) -> None:
                 )
                 break
 
+        memo_suspects = set((u.reasoning_memo or {}).get("suspects", []))
+        teammate_suspects = memo_suspects & (wolf_ids - {u.player_id})
+        if teammate_suspects:
+            teammate = sorted(teammate_suspects)[0]
+            result.add(
+                Finding(
+                    check="wolf_memo_suspects_teammate",
+                    severity="low",
+                    player_id=u.player_id,
+                    day=u.day,
+                    detail=f"非公開メモのsuspectsに仲間 {name_by_id.get(teammate, teammate)}",
+                    text=f"reasoning_memo.suspects={sorted(memo_suspects)}",
+                )
+            )
+
     for u in t.by_kind("vote"):
         if u.player_id in wolf_ids and u.target in wolf_ids:
             result.add(
                 Finding(
                     check="wolf_voted_teammate",
-                    severity="medium",
+                    severity="low",
                     player_id=u.player_id,
                     day=u.day,
                     detail=f"仲間の人狼 {name_by_id.get(u.target or '', u.target)} に投票した",
@@ -283,6 +302,80 @@ def _check_wolf_deception(t: GameTranscript, result: AnalysisResult) -> None:
 
     result.stats["wolf_plan_execution"] = plan
     result.stats["wolf_pattern"] = t.deception.get("wolf_pattern_label")
+
+
+def _check_identity_confusion(t: GameTranscript, result: AnalysisResult) -> None:
+    for u in t.by_kind("discussion"):
+        memo = u.reasoning_memo or {}
+        structured_targets = set(memo.get("suspects", [])) | set(u.directed_question_targets)
+        if memo.get("execution_target"):
+            structured_targets.add(memo["execution_target"])
+        structured_targets.update(item.get("target_id") for item in u.public_results)
+        if u.player_id in structured_targets:
+            result.add(
+                Finding(
+                    check="self_treated_as_other_player",
+                    severity="high",
+                    player_id=u.player_id,
+                    day=u.day,
+                    detail="構造化された疑い先・行動対象に自分自身を指定している",
+                    text=u.text,
+                )
+            )
+
+        if u.player_id != "p0" and _P0_IDENTITY_RE.search(u.text):
+            result.add(
+                Finding(
+                    check="claimed_p0_identity",
+                    severity="high",
+                    player_id=u.player_id,
+                    day=u.day,
+                    detail="p0ではないプレイヤーが自分をp0本人だと主張している",
+                    text=u.text,
+                )
+            )
+
+
+def _check_true_role_result_accuracy(t: GameTranscript, result: AnalysisResult) -> None:
+    records_by_owner: dict[str, dict[str, tuple[int, bool]]] = {}
+    for record in t.final_state.get("divine_records", []):
+        records_by_owner.setdefault(record["seer_id"], {})[record["target_id"]] = (
+            record["day"],
+            record["is_werewolf"],
+        )
+    for record in t.final_state.get("medium_records", []):
+        records_by_owner.setdefault(record["medium_id"], {})[record["target_id"]] = (
+            record["day"],
+            record["is_werewolf"],
+        )
+
+    for u in t.by_kind("discussion"):
+        if u.role not in ("seer", "medium"):
+            continue
+        known = records_by_owner.get(u.player_id, {})
+        for claim in u.public_results:
+            target_id = claim.get("target_id")
+            if not isinstance(target_id, str):
+                continue
+            actual = known.get(target_id)
+            if actual is None:
+                continue
+            record_day, actual_is_wolf = actual
+            if record_day > u.day or claim.get("is_werewolf") == actual_is_wolf:
+                continue
+            result.add(
+                Finding(
+                    check="true_role_result_conflict",
+                    severity="high",
+                    player_id=u.player_id,
+                    day=u.day,
+                    detail=(
+                        f"実際の結果は {target_id}="
+                        f"{'人狼' if actual_is_wolf else '人狼ではない'} だが逆の色を主張"
+                    ),
+                    text=u.text,
+                )
+            )
 
 
 # -- 形式・言語の客観指標 --------------------------------------------------

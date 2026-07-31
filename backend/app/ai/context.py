@@ -12,13 +12,19 @@ keeps total summary size bounded instead of ever-growing transcript replay.
 
 from __future__ import annotations
 
+import json
+from typing import Any
+
 from app.ai.deception import FakeClaimGuard, WolfDeceptionAssignment
 from app.ai.personalities import Personality
 from app.ai.provider.base import Message
 from app.ai.strategy import (
+    FOX_GUIDE,
     FREEMASON_CHAT_GUIDE,
     HUNTER_NIGHT_GUIDE,
+    LEADER_GUIDE,
     MEDIUM_ROLA_KNOWLEDGE,
+    PERSPECTIVE_GUIDE,
     SEER_NIGHT_GUIDE,
     WOLF_ATTACK_GUIDE,
     StrategyAnalyzer,
@@ -33,8 +39,26 @@ DISCUSSION_OUTPUT_INSTRUCTION = """以下のJSON形式で回答してくださ�
 {"public_message": "あなたの発言(200文字以内、人格に合った口調)", \
 "reasoning_memo": {"trusted_seer": "信頼する占い師のplayer_idまたはnull", \
 "suspects": ["怪しいと思うplayer_idの配列"], "trusted": ["信頼するplayer_idの配列"], \
-"execution_target": "処刑したい相手のplayer_idまたはnull", "overall_thought": "現在の考えの要約"}, \
-"contains_co_claim": true または false}"""
+"execution_target": "処刑したい相手のplayer_idまたはnull", "overall_thought": "現在の考えの要約", \
+"role_hypotheses": ["各CO者を真と仮定した内訳・矛盾の短い比較"], \
+"fox_candidates": ["妖狐候補のplayer_id"], \
+"private_team_thought": "非公開。人狼・狂人は本当の陣営と目的を隠さず書く"}, \
+"contains_co_claim": true または false, \
+"public_claim_role": "今回公開COする役職(seer/medium/hunter/freemason)またはnull", \
+"public_results": [{"result_type": "seerまたはmedium", "target_id": "pN", \
+"is_werewolf": trueまたはfalse}], \
+"directed_questions": [{"target_id": "質問相手pN", "question": "質問"}], \
+"ready_to_vote": trueまたはfalse, "needs_another_statement": trueまたはfalse}
+主要候補が反論し、各視点と未解決質問を検討し終えた場合だけready_to_vote=true。
+まだ反論・再評価が必要ならfalseとし、自分も追加発言が必要ならneeds_another_statement=true。"""
+
+MORNING_INTENT_OUTPUT_INSTRUCTION = """公開発言前の非公開判断です。JSONで回答してください:
+{"timing": "immediate|after_results|normal|hold", \
+"intent": "publish_result|claim|lead|question|normal", \
+"public_claim_role": "seer|medium|hunter|freemasonまたはnull", \
+"priority_reason": "簡潔な内部理由"}
+新しい占い・霊媒結果を持つCO済み役職はimmediate。朝一COを決めた役職・騙りもimmediate。
+占霊結果を見てから出たい共有などはafter_results。意図的潜伏はholdを選んでください。"""
 
 VOTE_OUTPUT_INSTRUCTION = """以下のJSON形式で回答してください:
 {"vote_target": "投票する相手のplayer_id", "reason": "簡潔な理由"}"""
@@ -84,6 +108,7 @@ class ContextBuilder:
         wolf_deception: WolfDeceptionAssignment,
         madman_fake_role: RoleName | None,
         fake_claim_guard: FakeClaimGuard,
+        observer_player_ids: set[str] | None = None,
     ) -> None:
         self._personalities = personalities
         self._day_summaries = day_summaries
@@ -91,6 +116,17 @@ class ContextBuilder:
         self._wolf_deception = wolf_deception
         self._madman_fake_role = madman_fake_role
         self._fake_claim_guard = fake_claim_guard
+        self._observer_player_ids = observer_player_ids or set()
+        self._reasoning_memos: dict[str, dict[str, Any]] = {}
+
+    def set_reasoning_memo(self, player_id: str, memo: dict[str, Any]) -> None:
+        self._reasoning_memos[player_id] = memo
+
+    def _layer_previous_memo(self, player_id: str) -> str:
+        memo = self._reasoning_memos.get(player_id)
+        if memo is None:
+            return "【前回の非公開思考メモ】(まだありません)"
+        return "【前回の非公開思考メモ】\n" + json.dumps(memo, ensure_ascii=False)
 
     # -- layer [A] --
 
@@ -99,12 +135,20 @@ class ContextBuilder:
         personality = self._personalities[player_id]
         return (
             f"あなたは人狼ゲームに参加しているプレイヤー「{player.name}」です。\n"
+            f"あなた自身のplayer_idは {player_id} です。"
+            f"「{player.name}({player_id})」はあなた自身であり、別人ではありません。\n"
             "17人参加のオンラインチャット型人狼ゲームです。\n"
             f"{personality.to_prompt_section()}\n"
             "【重要な制約】\n"
             "- 「AIとして」「言語モデルとして」「プロンプト」等のメタ発言は絶対に禁止です\n"
             "- 発言は200文字以内を目安にしてください\n"
-            "- 他のプレイヤーの発言内容に具体的に言及してください"
+            "- 他のプレイヤーの発言内容に具体的に言及してください\n"
+            "- 自分自身を疑い先・処刑先・能力対象として扱ってはいけません\n"
+            "- 名指しの質問には1回だけ追加返信の機会があります。返信前の相手を"
+            "『答えられない』と評価せず、同じ要求を繰り返さないでください\n"
+            "- CO待ちだけで発言を消費せず、各CO者を真と仮定した内訳、矛盾、"
+            "処刑希望、妖狐候補のいずれかを具体化してください\n"
+            "- reasoning_memoは非公開です。人狼・狂人は本当の役職と陣営目的を隠さず考えてください"
         )
 
     # -- layer [B] --
@@ -118,9 +162,9 @@ class ContextBuilder:
 
         if player.role == RoleName.WEREWOLF:
             allies = [
-                player_label(state, pid)
-                for pid in (p.player_id for p in state.players_by_role(RoleName.WEREWOLF))
-                if pid != player_id
+                self._status_label(state, ally.player_id)
+                for ally in state.players_by_role(RoleName.WEREWOLF)
+                if ally.player_id != player_id
             ]
             lines.append(f"仲間の人狼: {'、'.join(allies) if allies else 'なし'}")
             lines.append(f"あなたたちの欺瞞方針: {self._wolf_deception.pattern_label}")
@@ -139,19 +183,74 @@ class ContextBuilder:
 
         if player.role == RoleName.FREEMASON:
             partners = [
-                player_label(state, pid)
-                for pid in (p.player_id for p in state.players_by_role(RoleName.FREEMASON))
-                if pid != player_id
+                self._status_label(state, partner.player_id)
+                for partner in state.players_by_role(RoleName.FREEMASON)
+                if partner.player_id != player_id
             ]
             lines.append(f"共有者の相方: {'、'.join(partners) if partners else 'なし'}")
 
+        divine_results = [r for r in state.divine_records if r.seer_id == player_id]
+        if divine_results:
+            rendered = [
+                f"{r.day}日目 {player_label(state, r.target_id)}="
+                f"{'人狼' if r.is_werewolf else '人狼ではない'}"
+                for r in divine_results
+            ]
+            lines.append("【あなただけが知る占い結果】" + "、".join(rendered))
+
+        medium_results = [r for r in state.medium_records if r.medium_id == player_id]
+        if medium_results:
+            rendered = [
+                f"{r.day}日目 {player_label(state, r.target_id)}="
+                f"{'人狼' if r.is_werewolf else '人狼ではない'}"
+                for r in medium_results
+            ]
+            lines.append("【あなただけが知る霊媒結果】" + "、".join(rendered))
+            black_count = sum(1 for result in medium_results if result.is_werewolf)
+            if black_count >= 2:
+                lines.append(
+                    "【霊媒の仕事終了】人狼判定を2回出したため、ゲームが続く限り今後の"
+                    "処刑結果は白です。自分の価値は結果ではなく確定白・進行役である点です。"
+                )
+
         return "\n".join(lines)
+
+    @staticmethod
+    def _status_label(state: GameState, player_id: str) -> str:
+        player = state.players[player_id]
+        status = "生存" if player.alive else f"{player.death_day}日目死亡済み"
+        return f"{player_label(state, player_id)}[{status}]"
 
     # -- layer [C] --
 
     def _layer_c_state(self, state: GameState, player_id: str, extra_guides: list[str]) -> str:
         analysis = self._analyzer.analyze(state)
         parts = [render_board_analysis(analysis, state)]
+        seer_claimants = [
+            declaration.player_id
+            for declaration in state.co_declarations
+            if declaration.claimed_role == RoleName.SEER
+            and state.players[declaration.player_id].alive
+        ]
+        if len(seer_claimants) >= 2:
+            parts.append(
+                "【占い視点比較課題】占いCO: "
+                + player_labels(state, seer_claimants)
+                + "。各人を真と仮定したとき、他の対抗が狼・狂人・狐のどれなら自然か、"
+                "結果の矛盾、次に検証すべき処刑・占いを比較してください。"
+            )
+        observers = [
+            player_label(state, pid)
+            for pid in sorted(self._observer_player_ids)
+            if pid in state.players
+        ]
+        if observers:
+            parts.append(
+                "【非参戦席】"
+                + "、".join(observers)
+                + "は評価用の無言席で、発言・投票をしません。"
+                "沈黙や未回答を疑い理由にせず、返答も求めないでください。"
+            )
         parts.extend(extra_guides)
         return "\n\n".join(parts)
 
@@ -166,8 +265,20 @@ class ContextBuilder:
         todays = [m for m in state.chat_log if m.channel == channel and m.day == state.day]
         if not todays:
             return "【当日のログ】(まだ発言はありません)"
-        lines = [f"{state.players[m.author_id].name}: {m.content}" for m in todays]
+        lines = [
+            f"{player_label(state, m.author_id)}: {m.content}"
+            for m in todays
+        ]
         return "【当日のログ】\n" + "\n".join(lines)
+
+    def _layer_private_history(self, state: GameState, channel: ChatChannel) -> str:
+        messages = [m for m in state.chat_log if m.channel == channel]
+        if not messages:
+            return "【過去を含む内輪ログ】(まだ発言はありません)"
+        lines = [
+            f"{m.day}日目 {player_label(state, m.author_id)}: {m.content}" for m in messages[-30:]
+        ]
+        return "【過去を含む内輪ログ】\n" + "\n".join(lines)
 
     def _assemble(
         self, system_layers: list[str], user_layers: list[str]
@@ -179,7 +290,7 @@ class ContextBuilder:
     # -- public, phase-specific builders --
 
     def build_discussion_context(
-        self, state: GameState, player_id: str
+        self, state: GameState, player_id: str, stage: str = "initial"
     ) -> tuple[str, list[Message]]:
         guides = self._role_specific_guides(state, player_id)
         return self._assemble(
@@ -187,8 +298,23 @@ class ContextBuilder:
             [
                 self._layer_c_state(state, player_id, guides),
                 self._layer_d_summaries(),
+                self._layer_previous_memo(player_id),
                 self._layer_e_current_log(state, ChatChannel.PUBLIC),
+                f"【議論段階】{stage}。新情報、反論、視点比較を優先し、単なる同意を避けてください。",
                 DISCUSSION_OUTPUT_INSTRUCTION,
+            ],
+        )
+
+    def build_morning_intent_context(
+        self, state: GameState, player_id: str
+    ) -> tuple[str, list[Message]]:
+        return self._assemble(
+            [self._layer_a_system(state, player_id), self._layer_b_role(state, player_id)],
+            [
+                self._layer_c_state(state, player_id, self._role_specific_guides(state, player_id)),
+                self._layer_d_summaries(),
+                self._layer_previous_memo(player_id),
+                MORNING_INTENT_OUTPUT_INSTRUCTION,
             ],
         )
 
@@ -209,6 +335,7 @@ class ContextBuilder:
             [
                 self._layer_c_state(state, player_id, []),
                 self._layer_d_summaries(),
+                self._layer_previous_memo(player_id),
                 self._layer_e_current_log(state, ChatChannel.PUBLIC),
                 f"{header}{candidates}",
                 VOTE_OUTPUT_INSTRUCTION,
@@ -222,13 +349,14 @@ class ContextBuilder:
         candidates = player_labels(state, candidate_ids)
         extra = ""
         if action_type == "attack":
-            wolf_log = self._layer_e_current_log(state, ChatChannel.WOLF)
+            wolf_log = self._layer_private_history(state, ChatChannel.WOLF)
             extra = f"\n\n{wolf_log}"
         return self._assemble(
             [self._layer_a_system(state, player_id), self._layer_b_role(state, player_id)],
             [
                 self._layer_c_state(state, player_id, guides),
                 self._layer_d_summaries(),
+                self._layer_previous_memo(player_id),
                 f"【夜行動: {action_type}】候補: {candidates}{extra}",
                 NIGHT_ACTION_OUTPUT_INSTRUCTION,
             ],
@@ -241,7 +369,8 @@ class ContextBuilder:
             [self._layer_a_system(state, player_id), self._layer_b_role(state, player_id)],
             [
                 self._layer_c_state(state, player_id, [WOLF_ATTACK_GUIDE]),
-                self._layer_e_current_log(state, ChatChannel.WOLF),
+                self._layer_previous_memo(player_id),
+                self._layer_private_history(state, ChatChannel.WOLF),
                 "【指示】内輪チャットで襲撃先や騙り戦略、潜伏戦略を100文字以内で相談してください。",
                 WOLF_CHAT_OUTPUT_INSTRUCTION,
             ],
@@ -254,7 +383,8 @@ class ContextBuilder:
             [self._layer_a_system(state, player_id), self._layer_b_role(state, player_id)],
             [
                 self._layer_c_state(state, player_id, [FREEMASON_CHAT_GUIDE]),
-                self._layer_e_current_log(state, ChatChannel.FREEMASON),
+                self._layer_previous_memo(player_id),
+                self._layer_private_history(state, ChatChannel.FREEMASON),
                 "【指示】共有者チャットで方針を100文字以内で相談してください。",
                 WOLF_CHAT_OUTPUT_INSTRUCTION,
             ],
@@ -273,12 +403,17 @@ class ContextBuilder:
     def _role_specific_guides(self, state: GameState, player_id: str) -> list[str]:
         player = state.players[player_id]
         guides: list[str] = []
+        guides.append(PERSPECTIVE_GUIDE)
+        if state.day >= 2:
+            guides.append(FOX_GUIDE)
         if player.role == RoleName.SEER:
             guides.append(SEER_NIGHT_GUIDE)
         if player.role == RoleName.HUNTER:
             guides.append(HUNTER_NIGHT_GUIDE)
         if player.role == RoleName.WEREWOLF:
             guides.append(WOLF_ATTACK_GUIDE)
+        if player.role in (RoleName.MEDIUM, RoleName.FREEMASON):
+            guides.append(LEADER_GUIDE)
         medium_co_count = sum(1 for c in state.co_declarations if c.claimed_role == RoleName.MEDIUM)
         if medium_co_count >= 2:
             guides.append(MEDIUM_ROLA_KNOWLEDGE)

@@ -13,6 +13,7 @@ from app.ai.metrics import CallRecord, MetricsCollector, ParsePath
 from app.ai.provider.base import Message, SchemaT
 from app.ai.schemas import (
     DiscussionOutput,
+    MorningIntentOutput,
     NightActionOutput,
     ReasoningMemo,
     SummaryOutput,
@@ -78,10 +79,25 @@ class MockProvider:
 
         result: object
         if response_schema is DiscussionOutput:
+            line = self._rng.choice(_MOCK_DISCUSSION_LINES)
+            claim_role = None
+            if line.startswith("占い師CO"):
+                claim_role = "seer"
+            elif line.startswith("霊媒師"):
+                claim_role = "medium"
+            elif line.startswith("狩人CO"):
+                claim_role = "hunter"
+            elif line.startswith("共有者"):
+                claim_role = "freemason"
             result = DiscussionOutput(
-                public_message=self._rng.choice(_MOCK_DISCUSSION_LINES),
+                public_message=line,
                 reasoning_memo=ReasoningMemo(overall_thought="モックの思考メモです。"),
+                public_claim_role=claim_role,
+                contains_co_claim=claim_role is not None,
+                ready_to_vote=True,
             )
+        elif response_schema is MorningIntentOutput:
+            result = MorningIntentOutput()
         elif response_schema is VoteOutput:
             result = VoteOutput(vote_target=pick, reason="モックの投票理由です。")
         elif response_schema is NightActionOutput:

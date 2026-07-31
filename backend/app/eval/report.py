@@ -19,14 +19,18 @@ _CHECK_LABELS = {
     "result_claim_without_role": "役職に無い占い/霊媒結果の主張",
     "co_role_mismatch": "役職と異なるCO",
     "co_role_changed": "CO役職の変更(明確な矛盾)",
-    "references_dead_player": "死亡済みプレイヤーへの言及",
+    "treats_dead_player_as_active": "死亡済みプレイヤーを現在の行動対象として扱う",
     "vote_contradicts_stated_intent": "思考メモと投票先の不一致",
-    "wolf_named_teammate_with_wolf_word": "人狼が仲間を疑う発言",
-    "wolf_voted_teammate": "人狼が仲間に投票",
+    "wolf_named_teammate_with_wolf_word": "人狼が仲間を明示的に狼視",
+    "wolf_memo_suspects_teammate": "人狼の非公開メモで仲間を疑い先に指定",
+    "wolf_voted_teammate": "人狼の仲間投票(戦略観測)",
     "assigned_faker_never_claimed": "騙り担当がCOしなかった",
     "lurker_broke_cover": "潜伏担当がCOした",
     "meta_phrase_leaked": "メタ発言の漏れ",
     "low_japanese_ratio": "日本語比率が低い発言",
+    "self_treated_as_other_player": "自分自身を他プレイヤーとして扱う",
+    "claimed_p0_identity": "p0ではないプレイヤーがp0本人を主張",
+    "true_role_result_conflict": "真役職が実際と逆の判定結果を主張",
 }
 
 
@@ -244,6 +248,27 @@ def render_transcript(transcript: GameTranscript) -> str:
             lines.append(f"- `[{u.kind}]` {speaker}: {u.text}")
         elif u.kind == "summary":
             lines.append(f"- _要約_: {u.text}")
+
+    lines.append("\n## システム記録\n")
+    names = transcript.names
+    for death in transcript.final_state.get("death_records", []):
+        pid = death["player_id"]
+        lines.append(
+            f"- {death['day']}日目: {names.get(pid, pid)}({pid})が"
+            f"{death['cause']}で死亡"
+        )
+    guards = {
+        (record["day"], record["target_id"])
+        for record in transcript.final_state.get("guard_records", [])
+    }
+    for attack in transcript.final_state.get("attack_records", []):
+        target = attack["target_id"]
+        guarded = (attack["day"], target) in guards
+        outcome = "護衛され失敗" if guarded else ("成功" if attack["succeeded"] else "失敗")
+        lines.append(
+            f"- {attack['day']}日目夜: {names.get(attack['wolf_id'], attack['wolf_id'])}が"
+            f"{names.get(target, target)}({target})を襲撃 → {outcome}"
+        )
 
     winner = transcript.final_state.get("winner")
     reason = transcript.final_state.get("victory_reason", "")
