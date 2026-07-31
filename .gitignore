@@ -14,6 +14,7 @@ node_modules/
 dist/
 frontend/.env
 frontend/.env.local
+*.tsbuildinfo
 
 # --- Editors / OS ---
 .vscode/
