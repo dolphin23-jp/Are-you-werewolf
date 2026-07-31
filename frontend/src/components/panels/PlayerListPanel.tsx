@@ -3,6 +3,8 @@ import { useGameStore } from "../../state/gameStore";
 
 export function PlayerListPanel() {
   const view = useGameStore((s) => s.view);
+  const selectedSpeakerId = useGameStore((s) => s.selectedSpeakerId);
+  const setSelectedSpeakerId = useGameStore((s) => s.setSelectedSpeakerId);
   if (!view) return null;
 
   const aliveCount = view.players.filter((p) => p.alive).length;
@@ -14,7 +16,15 @@ export function PlayerListPanel() {
         {view.players.map((p) => (
           <li key={p.player_id} className={p.alive ? "" : "player-list__item--dead"}>
             <PlayerAvatar name={p.name} alive={p.alive} isYou={p.player_id === view.your_player_id} />
-            <span>{p.name}</span>
+            <button
+              type="button"
+              className={`player-name player-name--${view.co_declarations.find((c) => c.player_id === p.player_id)?.claimed_role ?? "gray"}${selectedSpeakerId === p.player_id ? " player-name--selected" : ""}`}
+              onClick={() => setSelectedSpeakerId(selectedSpeakerId === p.player_id ? null : p.player_id)}
+              aria-pressed={selectedSpeakerId === p.player_id}
+              title="この人の発言だけを表示"
+            >
+              {p.name}
+            </button>
             {!p.alive && <span className="tag">{deathLabel(p.death_cause)}</span>}
           </li>
         ))}

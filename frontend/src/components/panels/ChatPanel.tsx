@@ -9,8 +9,11 @@ export function ChatPanel() {
   const playerNames = useGameStore((s) => s.playerNames);
   const refreshView = useGameStore((s) => s.refreshView);
   const setError = useGameStore((s) => s.setError);
+  const selectedSpeakerId = useGameStore((s) => s.selectedSpeakerId);
+  const setSelectedSpeakerId = useGameStore((s) => s.setSelectedSpeakerId);
 
   const [tab, setTab] = useState<ChatChannel>("public");
+  const [selectedDay, setSelectedDay] = useState<number | "all">("all");
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
 
@@ -24,8 +27,19 @@ export function ChatPanel() {
     isAlive && (tab === "wolf" ? canUseWolfChat : tab === "freemason" ? canUseFreemasonChat : false);
   const canSend = tab === "public" ? canSendPublic : canSendPrivate;
 
-  const messages =
+  const channelMessages =
     tab === "public" ? view.public_chat : view.private_chat.filter((m) => m.channel === tab);
+  const availableDays = Array.from(
+    new Set([...channelMessages.map((message) => message.day), ...view.vote_history.map((vote) => vote.day)]),
+  ).sort((a, b) => a - b);
+  const messages = channelMessages.filter(
+    (message) =>
+      (selectedDay === "all" || message.day === selectedDay) &&
+      (tab !== "public" || selectedSpeakerId === null || message.author_id === selectedSpeakerId),
+  );
+  const visibleVotes = view.vote_history.filter(
+    (vote) => selectedDay === "all" || vote.day === selectedDay,
+  );
 
   const handleSend = async () => {
     const content = draft.trim();
@@ -66,6 +80,21 @@ export function ChatPanel() {
         )}
       </div>
 
+      <div className="chat-panel__days" aria-label="日付別ログ">
+        <button className={selectedDay === "all" ? "tab tab--active" : "tab"} onClick={() => setSelectedDay("all")}>全日程</button>
+        {availableDays.map((day) => (
+          <button key={day} className={selectedDay === day ? "tab tab--active" : "tab"} onClick={() => setSelectedDay(day)}>
+            {day}日目
+          </button>
+        ))}
+      </div>
+
+      {tab === "public" && selectedSpeakerId && (
+        <button className="speaker-filter" onClick={() => setSelectedSpeakerId(null)}>
+          {playerNames[selectedSpeakerId] ?? selectedSpeakerId}の発言のみ ×
+        </button>
+      )}
+
       <div className="chat-panel__log">
         {messages.length === 0 && <p className="chat-panel__empty">まだ発言はありません</p>}
         {messages.map((m, i) => (
@@ -75,9 +104,21 @@ export function ChatPanel() {
               m.author_id === view.your_player_id ? "chat-message chat-message--you" : "chat-message"
             }
           >
-            <strong>{playerNames[m.author_id] ?? m.author_id}</strong>: {m.content}
+            <button className="chat-message__author" onClick={() => setSelectedSpeakerId(m.author_id)}>
+              {playerNames[m.author_id] ?? m.author_id}
+            </button>: {m.content}
           </div>
         ))}
+        {tab === "public" && visibleVotes.length > 0 && (
+          <section className="vote-history">
+            <h4>投票記録</h4>
+            {visibleVotes.map((vote, index) => (
+              <p key={`${vote.day}-${vote.round}-${vote.voter_id}-${index}`}>
+                {vote.day}日目 R{vote.round}: {playerNames[vote.voter_id] ?? vote.voter_id} → {playerNames[vote.target_id] ?? vote.target_id}
+              </p>
+            ))}
+          </section>
+        )}
       </div>
 
       <div className="chat-panel__input">

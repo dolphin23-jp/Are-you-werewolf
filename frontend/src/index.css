@@ -199,6 +199,23 @@ button {
   gap: 0.5rem;
 }
 
+.player-name, .chat-message__author {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.player-name--seer { color: #72c7ff; }
+.player-name--medium { color: #bf8cff; }
+.player-name--hunter { color: #79d99d; }
+.player-name--freemason { color: #ffd166; }
+.player-name--villager { color: #eaeaf2; }
+.player-name--selected { text-decoration: underline; text-underline-offset: 3px; }
+
 .player-list__item--dead {
   opacity: 0.5;
   text-decoration: line-through;
@@ -238,9 +255,25 @@ button {
   min-height: 320px;
 }
 
-.chat-panel__tabs {
+.chat-panel__tabs, .chat-panel__days {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.4rem;
+}
+
+.chat-panel__days {
+  padding-top: 0.1rem;
+  border-top: 1px solid var(--border);
+}
+
+.speaker-filter {
+  align-self: flex-start;
+  padding: 0.25rem 0.6rem;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--accent-hover);
+  cursor: pointer;
 }
 
 .tab {
@@ -283,6 +316,20 @@ button {
 
 .chat-message--you strong {
   color: var(--accent-hover);
+}
+
+.chat-message__author { color: var(--text); }
+
+.vote-history {
+  margin-top: 0.7rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--border);
+}
+
+.vote-history h4, .vote-history p {
+  margin: 0 0 0.25rem;
+  font-size: 0.82rem;
+  color: var(--text-dim);
 }
 
 .chat-panel__input {
@@ -334,6 +381,13 @@ button {
 .co-panel__empty {
   color: var(--text-dim);
   font-size: 0.9rem;
+}
+
+.co-panel__hint {
+  margin: 0 0 0.7rem;
+  color: var(--text-dim);
+  font-size: 0.78rem;
+  line-height: 1.4;
 }
 
 .debug-panel__header {

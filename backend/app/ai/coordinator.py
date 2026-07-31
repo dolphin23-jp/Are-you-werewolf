@@ -247,6 +247,17 @@ class AICoordinator:
                     if not reply_queue:
                         break
 
+            # Finish with a concrete synthesis when the queue still has room. A living
+            # shared-role player is a natural facilitator; otherwise use the player who
+            # most recently signalled readiness rather than introducing a random voice.
+            if state.phase == Phase.DISCUSSION and total < max_total:
+                leader = self._find_ai_with_role(state, RoleName.FREEMASON)
+                if leader not in alive:
+                    leader = next(
+                        (pid for pid, item in reversed(outputs) if item.ready_to_vote), order[0]
+                    )
+                await self._speak(controller, state, leader, "consensus_summary")
+
     async def _run_human_followup(
         self, controller: object, state: GameState, alive: list[str]
     ) -> None:
