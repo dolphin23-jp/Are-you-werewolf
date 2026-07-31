@@ -1,0 +1,103 @@
+name: AI評価
+
+# Manual only. This spends real API credit, so it must never fire on push.
+on:
+  workflow_dispatch:
+    inputs:
+      games:
+        description: "対戦数(1戦あたり約280回のAPI呼び出し)"
+        required: true
+        default: "1"
+      seed:
+        description: "シード(同じ値なら配役・人格が再現され、変更前後を比較できます)"
+        required: true
+        default: "1"
+      judge:
+        description: "日本語・人格をLLMで採点する(追加費用)"
+        type: boolean
+        default: false
+      price_in:
+        description: "入力100万トークンあたりの単価(0なら金額換算しない)"
+        required: false
+        default: "0"
+      price_out:
+        description: "出力100万トークンあたりの単価"
+        required: false
+        default: "0"
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 依存関係のインストール
+        run: pip install -e "./backend[dev]"
+
+      - name: 接続確認(1回の呼び出し)
+        working-directory: backend
+        env:
+          WEREWOLF_LLM_PROVIDER: luna
+          LUNA_API_KEY: ${{ secrets.LUNA_API_KEY }}
+          LUNA_BASE_URL: ${{ secrets.LUNA_BASE_URL }}
+          LUNA_MODEL: ${{ vars.LUNA_MODEL || 'gpt-5.6-luna' }}
+        run: python scripts/check_llm.py
+
+      - name: 評価の実行
+        working-directory: backend
+        env:
+          WEREWOLF_LLM_PROVIDER: luna
+          LUNA_API_KEY: ${{ secrets.LUNA_API_KEY }}
+          LUNA_BASE_URL: ${{ secrets.LUNA_BASE_URL }}
+          LUNA_MODEL: ${{ vars.LUNA_MODEL || 'gpt-5.6-luna' }}
+        run: |
+          python scripts/evaluate.py \
+            --games "${{ inputs.games }}" \
+            --seed "${{ inputs.seed }}" \
+            ${{ inputs.judge && '--judge' || '' }} \
+            --price-in "${{ inputs.price_in }}" \
+            --price-out "${{ inputs.price_out }}" \
+            --out eval-out
+
+      # Renders the report directly on the run page, so it is readable on a
+      # phone without downloading the artifact.
+      - name: レポートを画面に表示
+        if: always()
+        working-directory: backend
+        run: |
+          if [ -f eval-out/report.md ]; then
+            cat eval-out/report.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "レポートが生成されませんでした。上のログを確認してください。" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: 対戦記録も表示(先頭のみ)
+        if: always()
+        working-directory: backend
+        run: |
+          transcript=$(ls eval-out/transcript-seed*.md 2>/dev/null | head -1)
+          if [ -n "$transcript" ]; then
+            {
+              echo ""
+              echo "<details><summary>対戦記録(クリックで展開)</summary>"
+              echo ""
+              # Keep well under the 1MB step-summary limit; the full log is
+              # in the downloadable artifact.
+              head -c 400000 "$transcript"
+              echo ""
+              echo "</details>"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: 全出力をダウンロード可能にする
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-out
+          path: backend/eval-out/
+          retention-days: 14

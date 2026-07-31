@@ -2,6 +2,35 @@
 
 `backend/scripts/evaluate.py` がN戦を実行し、レポートと対戦記録を出力します。
 
+## スマホだけで実行する(GitHub Actions・ターミナル不要)
+
+端末にもCodespacesにも入らず、ブラウザのボタンだけで評価を回せます。
+
+### 初回のみ: シークレットの登録
+
+GitHubのリポジトリページ → **Settings → Secrets and variables → Actions** で登録します。
+
+| 種別 | 名前 | 値 |
+|---|---|---|
+| Secret | `LUNA_API_KEY` | 発行された実際のキー |
+| Secret | `LUNA_BASE_URL` | gpt-5.6-luna のエンドポイントURL |
+| Variable | `LUNA_MODEL` | `gpt-5.6-luna`(既定値なので省略可) |
+
+> Codespaces secrets とは別枠です。Codespacesに登録済みでも、Actions用に改めて
+> 登録が必要です。
+
+### 実行
+
+1. リポジトリの **Actions** タブ → 左の **AI評価** を選ぶ
+2. **Run workflow** をタップし、対戦数・シードなどを入力して実行
+3. 数分後、実行ページに**レポートがそのまま表示されます**(ダウンロード不要)
+4. 全出力は Artifacts の `eval-out` からダウンロードできます
+
+対戦記録も折りたたみで同じページに出るので、発言の日本語や人格の維持を
+スマホの画面で直接確認できます。
+
+課金が発生するため、pushでは起動せず**手動実行のみ**にしてあります。
+
 ## まず接続確認(1回の呼び出しだけ)
 
 いきなり評価を回すと1戦で数百回の呼び出しが発生します。その前に、キー・URL・

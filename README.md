@@ -140,8 +140,15 @@ cd backend && python scripts/dry_run.py --seed 1 --provider mock
 日本語の自然さ・人格の維持・役職整合性・矛盾・人狼の連携・JSON成功率・応答時間・
 実コストを測る評価ハーネスがあります。
 
+**スマホだけで実行できます**: リポジトリの **Actions** タブ →
+**AI評価** → **Run workflow** をタップすると評価が走り、レポートが実行ページに
+そのまま表示されます(ターミナル不要)。
+
+ターミナルから実行する場合:
+
 ```bash
 cd backend
+python scripts/check_llm.py                              # まず接続確認(1回だけ)
 python scripts/evaluate.py --games 1 --provider luna --judge
 ```
 
