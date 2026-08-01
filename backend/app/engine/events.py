@@ -16,6 +16,7 @@ class GameEventType(StrEnum):
     MEDIUM_RESULT = "medium_result"
     VOTE_RESULT = "vote_result"
     CO_DECLARED = "co_declared"
+    TYPING_CHANGED = "typing_changed"
     VICTORY = "victory"
 
 

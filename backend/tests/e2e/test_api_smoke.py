@@ -95,6 +95,28 @@ def test_public_chat_role_claim_is_added_to_public_information():
     ]
 
 
+def test_public_view_conceals_night_death_cause():
+    resp = client.post("/api/games", json={"human_name": "Viewer", "seed": 16})
+    session_id = resp.json()["session_id"]
+    session = get_session_store().get(session_id)
+    assert session is not None
+    from app.engine.state import DeathCause
+
+    player = session.controller.state.players["p1"]
+    player.alive = False
+    player.death_cause = DeathCause.CURSED
+    player.death_day = 1
+
+    public = client.get(f"/api/games/{session_id}/view").json()
+    debug = client.get(f"/api/games/{session_id}/debug").json()
+    assert next(item for item in public["players"] if item["player_id"] == "p1")[
+        "death_cause"
+    ] == "night_death"
+    assert next(item for item in debug["players"] if item["player_id"] == "p1")[
+        "death_cause"
+    ] == "cursed"
+
+
 def test_analysis_transcript_is_available_only_after_game_over():
     resp = client.post("/api/games", json={"human_name": "Analyst", "seed": 9})
     session_id = resp.json()["session_id"]

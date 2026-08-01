@@ -49,6 +49,7 @@ export function NightActionPanel() {
     actionType === "attack"
       ? new Set([view.your_player_id, ...view.allies])
       : new Set([view.your_player_id]);
+  if (actionType === "divine" && view.first_victim_id) excludeIds.add(view.first_victim_id);
   const candidates = view.players.filter((p) => p.alive && !excludeIds.has(p.player_id));
 
   const handleSubmit = async () => {

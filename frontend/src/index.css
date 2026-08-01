@@ -214,6 +214,7 @@ button {
 .player-name--hunter { color: #79d99d; }
 .player-name--freemason { color: #ffd166; }
 .player-name--villager { color: #eaeaf2; }
+.player-name--white { color: #f7f7ff; text-shadow: 0 0 6px #8fd3ff66; }
 .player-name--selected { text-decoration: underline; text-underline-offset: 3px; }
 
 .player-list__item--dead {
@@ -330,6 +331,17 @@ button {
   margin: 0 0 0.25rem;
   font-size: 0.82rem;
   color: var(--text-dim);
+}
+
+.vote-history__round { margin-top: 0.65rem; }
+.vote-history__round strong { font-size: 0.86rem; }
+.system-message {
+  margin: 0.25rem 0;
+  padding: 0.45rem 0.6rem;
+  border-left: 3px solid var(--accent);
+  background: #171723;
+  color: var(--text-dim);
+  font-size: 0.85rem;
 }
 
 .chat-panel__input {

@@ -22,6 +22,7 @@ from app.engine.roles import RoleName
         ("霊媒CO。昨日の処刑結果を伝えます。", RoleName.MEDIUM),
         ("狩人COします。護衛は任せてください。", RoleName.HUNTER),
         ("共有者です。COします。", RoleName.FREEMASON),
+        ("共有CO、相方はリクです。", RoleName.FREEMASON),
         ("占い師でした。昨夜の結果を話します。", RoleName.SEER),
     ],
 )

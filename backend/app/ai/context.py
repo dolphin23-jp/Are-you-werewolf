@@ -226,6 +226,34 @@ class ContextBuilder:
     def _layer_c_state(self, state: GameState, player_id: str, extra_guides: list[str]) -> str:
         analysis = self._analyzer.analyze(state)
         parts = [render_board_analysis(analysis, state)]
+        # Night N deaths are announced after start_discussion increments the
+        # public day to N+1; executions remain attached to their discussion day.
+        todays_deaths = [
+            death
+            for death in state.death_records
+            if death.day == state.day - 1 and death.cause.value in ("attacked", "cursed")
+        ]
+        if todays_deaths:
+            night_names = [
+                player_label(state, death.player_id)
+                for death in todays_deaths
+                if death.cause.value in ("attacked", "cursed")
+            ]
+            if night_names:
+                parts.append(
+                    "【今朝の公開死体（最優先で考察）】"
+                    + "、".join(night_names)
+                    + "。公開情報では死因の区別はつきません。"
+                    "死体数と公開占い結果を照合してください。"
+                )
+        if state.public_result_claims:
+            result_lines = [
+                f"{claim.day}日目 {player_label(state, claim.claimant_id)}の"
+                f"{'占い' if claim.result_type == 'seer' else '霊媒'}主張: "
+                f"{player_label(state, claim.target_id)}={'黒' if claim.is_werewolf else '白'}"
+                for claim in state.public_result_claims
+            ]
+            parts.append("【公開された判定主張】" + " / ".join(result_lines))
         seer_claimants = [
             declaration.player_id
             for declaration in state.co_declarations
@@ -303,6 +331,9 @@ class ContextBuilder:
                 f"【議論段階】{stage}。状況の復唱や単なる同意だけで発言を終えないでください。"
                 "未検討の論点を一つ提示する、具体的な相手へ根拠を問う、直前の意見へ反論する、"
                 "または発言から処刑候補を絞る、のいずれかを必ず行ってください。"
+                "直近の複数人がすでに述べた結論・質問を言い換えて繰り返してはいけません。"
+                "同じ処刑候補を支持する場合も、未提示の投票履歴・死体・能力結果・発言差を"
+                "一つ追加してください。名指しされた本人は質問への直接回答を最初に述べてください。"
                 "consensus_summary段階では新説を広げず、対立点と処刑候補を根拠付きでまとめてください。",
                 DISCUSSION_OUTPUT_INSTRUCTION,
             ],

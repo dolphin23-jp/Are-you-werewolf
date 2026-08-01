@@ -81,7 +81,11 @@ def _submit_night_actions(controller, rng: random.Random) -> None:
         (p for p in controller.state.players.values() if p.role == RoleName.SEER and p.alive), None
     )
     if seer is not None:
-        candidates = [pid for pid in alive_ids if pid != seer.player_id]
+        candidates = [
+            pid
+            for pid in alive_ids
+            if pid != seer.player_id and pid != controller.state.first_victim_id
+        ]
         controller.submit_night_action(seer.player_id, "divine", rng.choice(candidates))
 
     if controller.state.day == 0:

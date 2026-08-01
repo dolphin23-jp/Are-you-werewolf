@@ -71,4 +71,19 @@ describe("VotePanel", () => {
     render(<VotePanel />);
     expect(optionNames()).toEqual(["Jiro"]);
   });
+
+  it("uses the server's current-round vote state instead of prior-day history", () => {
+    useGameStore.setState({
+      view: makeView({
+        day: 2,
+        vote_round: 1,
+        has_voted_current_round: false,
+        vote_history: [{ voter_id: "p0", target_id: "p1", day: 1, round: 1 }],
+      }),
+      sessionId: "s1",
+    });
+    render(<VotePanel />);
+    expect(screen.getByRole("combobox")).toBeEnabled();
+    expect(screen.queryByText(/他のプレイヤーの投票を待っています/)).not.toBeInTheDocument();
+  });
 });

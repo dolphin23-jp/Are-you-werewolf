@@ -29,7 +29,7 @@ _ROLE_WORDS: dict[RoleName, str] = {
     RoleName.SEER: "(?:占い師|占い)",
     RoleName.MEDIUM: "(?:霊媒師|霊媒)",
     RoleName.HUNTER: "狩人",
-    RoleName.FREEMASON: "共有者",
+    RoleName.FREEMASON: "(?:共有者|共有)",
 }
 
 # Markers that only make sense when applied to oneself, anchored directly
