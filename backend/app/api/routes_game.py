@@ -15,6 +15,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 
+from app.ai.co_detection import detect_claimed_role
 from app.ai.coordinator import AICoordinator
 from app.ai.provider.factory import LLMProviderConfigError, build_llm_provider
 from app.api import orchestrator
@@ -168,7 +169,35 @@ async def chat(
     author = _resolve_player_id(session, player_id)
     _run(session.controller.chat, author, req.content, req.channel)
     if req.channel == "public":
+        state = session.controller.state
+        if not any(claim.player_id == author for claim in state.co_declarations):
+            other_names = [player.name for pid, player in state.players.items() if pid != author]
+            claimed_role = detect_claimed_role(req.content, other_names)
+            if claimed_role is not None:
+                _run(session.controller.co, author, claimed_role.value)
+        result_type = (
+            "seer" if "占い結果" in req.content else "medium" if "霊媒結果" in req.content else None
+        )
+        if result_type is not None:
+            for target_id, target in state.players.items():
+                if target_id == author or target.name not in req.content:
+                    continue
+                black = any(word in req.content for word in ("黒", "人狼でした", "は人狼"))
+                white = any(
+                    word in req.content for word in ("白", "人狼ではありません", "人狼ではない")
+                )
+                if black or white:
+                    _run(
+                        session.controller.public_result,
+                        author,
+                        result_type,
+                        target_id,
+                        black and not white,
+                    )
+                    break
         await orchestrator.after_human_chat(session)
+    else:
+        await orchestrator.after_human_private_chat(session, req.channel)
     return OkResponse()
 
 

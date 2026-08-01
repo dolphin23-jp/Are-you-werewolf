@@ -17,6 +17,12 @@ class DeathCause(StrEnum):
     FIRST_VICTIM = "first_victim"
 
 
+class PublicDeathCause(StrEnum):
+    EXECUTED = "executed"
+    NIGHT = "night_death"
+    FIRST_VICTIM = "first_victim"
+
+
 class ChatChannel(StrEnum):
     PUBLIC = "public"
     WOLF = "wolf"
@@ -100,6 +106,15 @@ class CoDeclaration:
 
 
 @dataclass
+class PublicResultClaim:
+    claimant_id: str
+    result_type: str
+    target_id: str
+    is_werewolf: bool
+    day: int
+
+
+@dataclass
 class GameState:
     session_id: str
     players: dict[str, PlayerState]
@@ -114,6 +129,9 @@ class GameState:
     vote_records: list[VoteRecord] = field(default_factory=list)
     death_records: list[DeathRecord] = field(default_factory=list)
     co_declarations: list[CoDeclaration] = field(default_factory=list)
+    public_result_claims: list[PublicResultClaim] = field(default_factory=list)
+    first_victim_id: str | None = None
+    typing_channels: dict[str, str] = field(default_factory=dict)
     winner: Team | None = None
     victory_reason: str = ""
     is_draw: bool = False
@@ -155,7 +173,7 @@ class GameState:
                 "player_id": p.player_id,
                 "name": p.name,
                 "alive": p.alive,
-                "death_cause": p.death_cause,
+                "death_cause": _public_death_cause(p.death_cause),
                 "death_day": p.death_day,
             }
             for p in self.players.values()
@@ -205,9 +223,28 @@ class GameState:
                 {"player_id": c.player_id, "claimed_role": c.claimed_role, "day": c.day}
                 for c in self.co_declarations
             ],
+            "public_result_claims": [
+                {
+                    "claimant_id": claim.claimant_id,
+                    "result_type": claim.result_type,
+                    "target_id": claim.target_id,
+                    "is_werewolf": claim.is_werewolf,
+                    "day": claim.day,
+                }
+                for claim in self.public_result_claims
+            ],
             "vote_history": [
                 {"voter_id": v.voter_id, "target_id": v.target_id, "day": v.day, "round": v.round}
                 for v in self.vote_records
+            ],
+            "first_victim_id": self.first_victim_id,
+            "has_voted_current_round": viewer_id in self.pending_votes,
+            "typing_player_ids": [
+                player_id
+                for player_id, channel in self.typing_channels.items()
+                if channel == "public"
+                or (channel == "wolf" and viewer and viewer.role == RoleName.WEREWOLF)
+                or (channel == "freemason" and viewer and viewer.role == RoleName.FREEMASON)
             ],
             "winner": self.winner,
             "victory_reason": self.victory_reason,
@@ -271,6 +308,16 @@ class GameState:
 
 def _chat_dict(m: ChatMessage) -> dict[str, Any]:
     return {"author_id": m.author_id, "content": m.content, "channel": m.channel, "day": m.day}
+
+
+def _public_death_cause(cause: DeathCause | None) -> PublicDeathCause | None:
+    if cause is None:
+        return None
+    if cause == DeathCause.EXECUTED:
+        return PublicDeathCause.EXECUTED
+    if cause == DeathCause.FIRST_VICTIM:
+        return PublicDeathCause.FIRST_VICTIM
+    return PublicDeathCause.NIGHT
 
 
 def _divine_dict(r: DivineRecord) -> dict[str, Any]:

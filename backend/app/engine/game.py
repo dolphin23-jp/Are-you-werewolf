@@ -12,7 +12,14 @@ from app.engine.events import EventBus, GameEvent, GameEventType
 from app.engine.night_resolver import NightResolver
 from app.engine.phases import Phase, PhaseEvent, next_phase
 from app.engine.roles import ROLE_DEFINITIONS, AlphaWolfTracker, RoleAssigner, RoleName
-from app.engine.state import ChatChannel, ChatMessage, CoDeclaration, GameState, PlayerState
+from app.engine.state import (
+    ChatChannel,
+    ChatMessage,
+    CoDeclaration,
+    GameState,
+    PlayerState,
+    PublicResultClaim,
+)
 from app.engine.victory import VictoryChecker
 from app.engine.vote import VoteManager
 
@@ -90,7 +97,6 @@ class GameController:
         self._victory_checker = VictoryChecker()
         self.events = EventBus()
 
-        self._first_victim_id: str | None = None
 
     # -- read-only views --
 
@@ -117,16 +123,16 @@ class GameController:
         active_assignment = {
             pid: player.role for pid, player in self.state.players.items() if player.alive
         }
-        self._first_victim_id = self._assigner.pick_first_victim(active_assignment)
+        self.state.first_victim_id = self._assigner.pick_first_victim(active_assignment)
 
     def resolve_night(self) -> None:
         if self.state.phase != Phase.NIGHT:
             raise GameError(f"cannot resolve night during phase {self.state.phase}")
 
         if self.state.day == 0:
-            if self._first_victim_id is None:
+            if self.state.first_victim_id is None:
                 raise GameError("first victim not selected; call start_game() first")
-            result = self._night_resolver.resolve_day_zero(self.state, self._first_victim_id)
+            result = self._night_resolver.resolve_day_zero(self.state, self.state.first_victim_id)
         else:
             result = self._night_resolver.resolve_night(self.state)
 
@@ -163,7 +169,6 @@ class GameController:
                 )
             )
 
-        self._first_victim_id = None
         if not self._check_victory():
             self._transition(PhaseEvent.RESOLVE_NIGHT)
 
@@ -281,6 +286,8 @@ class GameController:
         if action_type == "divine":
             if player.role != RoleName.SEER:
                 raise GameError("only the seer may divine")
+            if target_id == self.state.first_victim_id:
+                raise GameError("the first victim cannot be divined")
             self.state.pending_divine = (player_id, target_id)
         elif action_type == "guard":
             if player.role != RoleName.HUNTER:
@@ -307,6 +314,42 @@ class GameController:
         )
         self.events.publish(
             GameEvent(GameEventType.CO_DECLARED, {"player_id": player_id, "claimed_role": role})
+        )
+
+    def public_result(
+        self, claimant_id: str, result_type: str, target_id: str, is_werewolf: bool
+    ) -> None:
+        self._require_alive(claimant_id)
+        if target_id not in self.state.players or result_type not in ("seer", "medium"):
+            raise GameError("invalid public result claim")
+        duplicate = any(
+            claim.claimant_id == claimant_id
+            and claim.result_type == result_type
+            and claim.target_id == target_id
+            and claim.day == self.state.day
+            for claim in self.state.public_result_claims
+        )
+        if not duplicate:
+            self.state.public_result_claims.append(
+                PublicResultClaim(
+                    claimant_id=claimant_id,
+                    result_type=result_type,
+                    target_id=target_id,
+                    is_werewolf=is_werewolf,
+                    day=self.state.day,
+                )
+            )
+
+    def set_typing(self, player_id: str, typing: bool, channel: str = "public") -> None:
+        if typing:
+            self.state.typing_channels[player_id] = channel
+        else:
+            self.state.typing_channels.pop(player_id, None)
+        self.events.publish(
+            GameEvent(
+                GameEventType.TYPING_CHANGED,
+                {"player_id": player_id, "typing": typing, "channel": channel},
+            )
         )
 
     # -- internals --

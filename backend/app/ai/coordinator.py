@@ -247,6 +247,26 @@ class AICoordinator:
                     if not reply_queue:
                         break
 
+            # Finish with a concrete synthesis when the queue still has room. A living
+            # shared-role player is a natural facilitator; otherwise use the player who
+            # most recently signalled readiness rather than introducing a random voice.
+            if state.phase == Phase.DISCUSSION and total < max_total:
+                leader = next(
+                    (
+                        claim.player_id
+                        for claim in state.co_declarations
+                        if claim.claimed_role == RoleName.FREEMASON
+                        and claim.player_id in alive
+                        and claim.player_id in self._agents
+                    ),
+                    None,
+                )
+                if leader is None:
+                    leader = next(
+                        (pid for pid, item in reversed(outputs) if item.ready_to_vote), order[0]
+                    )
+                await self._speak(controller, state, leader, "consensus_summary")
+
     async def _run_human_followup(
         self, controller: object, state: GameState, alive: list[str]
     ) -> None:
@@ -279,7 +299,11 @@ class AICoordinator:
         if state.phase != Phase.DISCUSSION:
             return None
         system, messages = self._context.build_discussion_context(state, player_id, stage)
-        output = await self._agents[player_id].generate_discussion(system, messages)
+        controller.set_typing(player_id, True)  # type: ignore[attr-defined]
+        try:
+            output = await self._agents[player_id].generate_discussion(system, messages)
+        finally:
+            controller.set_typing(player_id, False)  # type: ignore[attr-defined]
         self._context.set_reasoning_memo(player_id, output.reasoning_memo.model_dump())
         self._record(
             state,
@@ -298,6 +322,21 @@ class AICoordinator:
         except Exception:
             return None
         self._register_public_claim(controller, player_id, output)
+        for result in output.public_results:
+            if result.target_id not in state.players:
+                continue
+            target_name = state.players[result.target_id].name
+            if (
+                target_name not in output.public_message
+                and result.target_id not in output.public_message
+            ):
+                continue
+            try:
+                controller.public_result(  # type: ignore[attr-defined]
+                    player_id, result.result_type, result.target_id, result.is_werewolf
+                )
+            except Exception:
+                pass
         return output
 
     @staticmethod
@@ -447,7 +486,11 @@ class AICoordinator:
             pass
 
     async def _cast_divine(self, controller: object, state: GameState, seer_id: str) -> None:
-        candidates = [pid for pid in state.alive_ids() if pid != seer_id]
+        candidates = [
+            pid
+            for pid in state.alive_ids()
+            if pid != seer_id and pid != state.first_victim_id
+        ]
         candidates = [pid for pid in candidates if pid not in self._observer_player_ids]
         if not candidates:
             return
@@ -534,5 +577,32 @@ class AICoordinator:
             )
             try:
                 controller.chat(pid, output.message, "freemason")  # type: ignore[attr-defined]
+            except Exception:
+                pass
+
+    async def respond_to_private_chat(self, session: object, channel: str) -> None:
+        """Let living AI teammates answer a human private message immediately."""
+        controller = session.controller  # type: ignore[attr-defined]
+        state = controller.state
+        role = RoleName.FREEMASON if channel == "freemason" else RoleName.WEREWOLF
+        responders = [
+            pid
+            for pid in self._ai_player_ids
+            if state.players[pid].alive and state.players[pid].role == role
+        ]
+        for pid in responders:
+            builder = (
+                self._context.build_freemason_chat_context
+                if channel == "freemason"
+                else self._context.build_wolf_chat_context
+            )
+            system, messages = builder(state, pid)
+            controller.set_typing(pid, True, channel)
+            try:
+                output = await self._agents[pid].generate_wolf_chat(system, messages)
+            finally:
+                controller.set_typing(pid, False, channel)
+            try:
+                controller.chat(pid, output.message, channel)
             except Exception:
                 pass

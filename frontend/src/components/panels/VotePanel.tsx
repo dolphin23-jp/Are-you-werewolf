@@ -9,13 +9,14 @@ export function VotePanel() {
   const setError = useGameStore((s) => s.setError);
   const [target, setTarget] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [votedRound, setVotedRound] = useState<number | null>(null);
+  const [votedTurn, setVotedTurn] = useState<string | null>(null);
+  const turnKey = view ? `${view.day}:${view.vote_round}` : null;
 
   useEffect(() => {
-    if (view && votedRound !== null && view.vote_round !== votedRound) {
-      setVotedRound(null);
+    if (turnKey !== null && votedTurn !== null && turnKey !== votedTurn) {
+      setVotedTurn(null);
     }
-  }, [view, votedRound]);
+  }, [turnKey, votedTurn]);
 
   if (!view || !sessionId || (view.phase !== "voting" && view.phase !== "runoff")) return null;
 
@@ -28,7 +29,7 @@ export function VotePanel() {
     );
   }
 
-  if (votedRound === view.vote_round) {
+  if (view.has_voted_current_round || votedTurn === turnKey) {
     return (
       <div className="panel vote-panel">
         <p>投票しました。他のプレイヤーの投票を待っています...</p>
@@ -51,7 +52,7 @@ export function VotePanel() {
     setSubmitting(true);
     try {
       await castVote(sessionId, target);
-      setVotedRound(view.vote_round);
+      setVotedTurn(turnKey);
       setTarget("");
       await refreshView();
     } catch (e) {

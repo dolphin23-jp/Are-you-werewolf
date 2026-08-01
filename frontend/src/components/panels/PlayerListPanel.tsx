@@ -3,9 +3,18 @@ import { useGameStore } from "../../state/gameStore";
 
 export function PlayerListPanel() {
   const view = useGameStore((s) => s.view);
+  const selectedSpeakerId = useGameStore((s) => s.selectedSpeakerId);
+  const setSelectedSpeakerId = useGameStore((s) => s.setSelectedSpeakerId);
   if (!view) return null;
 
   const aliveCount = view.players.filter((p) => p.alive).length;
+  const colorClass = (playerId: string) => {
+    const role = view.co_declarations.find((claim) => claim.player_id === playerId)?.claimed_role;
+    const confirmedWhite = (view.public_result_claims ?? []).some(
+      (claim) => claim.target_id === playerId && !claim.is_werewolf,
+    );
+    return role ?? (confirmedWhite ? "white" : "gray");
+  };
 
   return (
     <div className="panel player-list-panel">
@@ -14,7 +23,15 @@ export function PlayerListPanel() {
         {view.players.map((p) => (
           <li key={p.player_id} className={p.alive ? "" : "player-list__item--dead"}>
             <PlayerAvatar name={p.name} alive={p.alive} isYou={p.player_id === view.your_player_id} />
-            <span>{p.name}</span>
+            <button
+              type="button"
+              className={`player-name player-name--${colorClass(p.player_id)}${selectedSpeakerId === p.player_id ? " player-name--selected" : ""}`}
+              onClick={() => setSelectedSpeakerId(selectedSpeakerId === p.player_id ? null : p.player_id)}
+              aria-pressed={selectedSpeakerId === p.player_id}
+              title="この人の発言だけを表示"
+            >
+              {p.player_id === view.first_victim_id ? `初日犠牲者（${p.name}）` : p.name}
+            </button>
             {!p.alive && <span className="tag">{deathLabel(p.death_cause)}</span>}
           </li>
         ))}
@@ -28,9 +45,9 @@ function deathLabel(cause: string | null): string {
     case "executed":
       return "処刑";
     case "attacked":
-      return "襲撃";
     case "cursed":
-      return "呪殺";
+    case "night_death":
+      return "死亡";
     case "first_victim":
       return "犠牲";
     default:

@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { ChatPanel } from "../components/panels/ChatPanel";
 import { useGameStore } from "../state/gameStore";
@@ -50,5 +50,26 @@ describe("ChatPanel", () => {
     render(<ChatPanel />);
     expect(screen.getByText("人狼チャット")).toBeInTheDocument();
     expect(screen.queryByText("共有者チャット")).not.toBeInTheDocument();
+  });
+
+  it("switches between day logs and filters by speaker", () => {
+    useGameStore.setState({
+      view: makeView({
+        day: 2,
+        public_chat: [
+          { author_id: "p1", content: "初日の意見", channel: "public", day: 1 },
+          { author_id: "p2", content: "二日目の意見", channel: "public", day: 2 },
+        ],
+      }),
+      sessionId: "s1",
+      playerNames: { p1: "Hanako", p2: "Jiro" },
+    });
+    render(<ChatPanel />);
+
+    fireEvent.click(screen.getByRole("button", { name: "1日目" }));
+    expect(screen.getByText(/初日の意見/)).toBeInTheDocument();
+    expect(screen.queryByText(/二日目の意見/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Hanako" }));
+    expect(screen.getByRole("button", { name: "Hanakoの発言のみ ×" })).toBeInTheDocument();
   });
 });

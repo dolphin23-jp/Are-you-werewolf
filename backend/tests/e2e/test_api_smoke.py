@@ -76,6 +76,47 @@ def test_view_is_filtered_but_debug_is_not():
     assert "role" in debug["players"][0]
 
 
+def test_public_chat_role_claim_is_added_to_public_information():
+    resp = client.post("/api/games", json={"human_name": "Claimant", "seed": 15})
+    session_id = resp.json()["session_id"]
+    human_id = resp.json()["human_player_id"]
+    session = get_session_store().get(session_id)
+    assert session is not None
+    session.controller.state.phase = Phase.DISCUSSION
+
+    response = client.post(
+        f"/api/games/{session_id}/chat", json={"content": "私が占い師です。結果を話します"}
+    )
+
+    assert response.status_code == 200
+    view = client.get(f"/api/games/{session_id}/view").json()
+    assert {"player_id": human_id, "claimed_role": "seer", "day": 0} in view[
+        "co_declarations"
+    ]
+
+
+def test_public_view_conceals_night_death_cause():
+    resp = client.post("/api/games", json={"human_name": "Viewer", "seed": 16})
+    session_id = resp.json()["session_id"]
+    session = get_session_store().get(session_id)
+    assert session is not None
+    from app.engine.state import DeathCause
+
+    player = session.controller.state.players["p1"]
+    player.alive = False
+    player.death_cause = DeathCause.CURSED
+    player.death_day = 1
+
+    public = client.get(f"/api/games/{session_id}/view").json()
+    debug = client.get(f"/api/games/{session_id}/debug").json()
+    assert next(item for item in public["players"] if item["player_id"] == "p1")[
+        "death_cause"
+    ] == "night_death"
+    assert next(item for item in debug["players"] if item["player_id"] == "p1")[
+        "death_cause"
+    ] == "cursed"
+
+
 def test_analysis_transcript_is_available_only_after_game_over():
     resp = client.post("/api/games", json={"human_name": "Analyst", "seed": 9})
     session_id = resp.json()["session_id"]

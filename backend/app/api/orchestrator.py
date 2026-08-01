@@ -32,6 +32,11 @@ async def after_human_chat(session: GameSession) -> None:
     asyncio.create_task(session.coordinator.run_discussion_round(session))
 
 
+async def after_human_private_chat(session: GameSession, channel: str) -> None:
+    if session.coordinator is not None:
+        asyncio.create_task(session.coordinator.respond_to_private_chat(session, channel))
+
+
 async def after_human_vote(session: GameSession) -> None:
     if session.coordinator is None:
         return

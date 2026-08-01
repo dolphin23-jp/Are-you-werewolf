@@ -20,7 +20,7 @@ export type RoleName =
 
 export type Team = "village" | "werewolf" | "fox";
 
-export type DeathCause = "executed" | "attacked" | "cursed" | "first_victim";
+export type DeathCause = "executed" | "attacked" | "cursed" | "night_death" | "first_victim";
 
 export type ChatChannel = "public" | "wolf" | "freemason";
 
@@ -59,6 +59,14 @@ export interface CoDeclarationRecord {
   day: number;
 }
 
+export interface PublicResultClaimRecord {
+  claimant_id: string;
+  result_type: "seer" | "medium";
+  target_id: string;
+  is_werewolf: boolean;
+  day: number;
+}
+
 export interface VoteRecordEntry {
   voter_id: string;
   target_id: string;
@@ -83,7 +91,11 @@ export interface GameView {
   your_divine_results: DivineResult[];
   your_medium_results: MediumResult[];
   co_declarations: CoDeclarationRecord[];
+  public_result_claims?: PublicResultClaimRecord[];
   vote_history: VoteRecordEntry[];
+  first_victim_id?: string | null;
+  has_voted_current_round?: boolean;
+  typing_player_ids?: string[];
   winner: Team | null;
   victory_reason: string;
   is_draw: boolean;
