@@ -11,15 +11,14 @@ from __future__ import annotations
 
 from app.engine.phases import Phase
 from app.engine.roles import RoleName
+from app.engine.speech_events import SpeechEventType, result_role
 from app.engine.state import (
     ChatChannel,
     ChatMessage,
-    CoDeclaration,
     DeathCause,
     DeathRecord,
     GameState,
     PlayerState,
-    PublicResultClaim,
     VoteRecord,
 )
 
@@ -66,10 +65,19 @@ def _kill(state: GameState, player_id: str, cause: DeathCause, day: int) -> None
     state.death_records.append(DeathRecord(player_id=player_id, cause=cause, day=day))
 
 
-def declare_co(state: GameState, player_id: str, role: RoleName, day: int = 1) -> None:
-    state.co_declarations.append(
-        CoDeclaration(player_id=player_id, claimed_role=role, day=day)
-    )
+def declare_co(
+    state: GameState,
+    player_id: str,
+    role: RoleName,
+    day: int = 1,
+    source_message_id: str = "",
+) -> None:
+    _on_day(state, day, SpeechEventType.ROLE_CLAIM, player_id, role=role,
+            source_message_id=source_message_id)
+
+
+def retract_co(state: GameState, player_id: str, day: int = 1) -> None:
+    _on_day(state, day, SpeechEventType.ROLE_RETRACTION, player_id)
 
 
 def publish_result(
@@ -79,16 +87,35 @@ def publish_result(
     target_id: str,
     is_werewolf: bool,
     day: int = 1,
+    source_message_id: str = "",
 ) -> None:
-    state.public_result_claims.append(
-        PublicResultClaim(
-            claimant_id=claimant_id,
-            result_type=result_type,
-            target_id=target_id,
-            is_werewolf=is_werewolf,
-            day=day,
-        )
+    _on_day(
+        state,
+        day,
+        SpeechEventType.ABILITY_RESULT,
+        claimant_id,
+        role=result_role(result_type),
+        target_id=target_id,
+        result_is_werewolf=is_werewolf,
+        source_message_id=source_message_id,
     )
+
+
+def _on_day(
+    state: GameState,
+    day: int,
+    event_type: SpeechEventType,
+    actor_id: str,
+    **kwargs: object,
+) -> None:
+    """Speech events are stamped with the state's current day, so a fixture
+    building a past day borrows it briefly rather than forging an event id."""
+    original_day = state.day
+    state.day = day
+    try:
+        state.append_speech_event(actor_id, event_type, **kwargs)  # type: ignore[arg-type]
+    finally:
+        state.day = original_day
 
 
 def cast_vote(

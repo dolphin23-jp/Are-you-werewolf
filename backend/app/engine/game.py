@@ -12,19 +12,32 @@ from app.engine.events import EventBus, GameEvent, GameEventType
 from app.engine.night_resolver import NightResolver
 from app.engine.phases import Phase, PhaseEvent, next_phase
 from app.engine.roles import ROLE_DEFINITIONS, AlphaWolfTracker, RoleAssigner, RoleName
+from app.engine.speech_events import (
+    MEDIUM_RESULT,
+    RESULT_EVENT_TYPES,
+    RESULT_TYPES,
+    SEER_RESULT,
+    SpeechEvent,
+    SpeechEventType,
+    active_result,
+    current_role_claim,
+    result_role,
+)
 from app.engine.state import (
     ChatChannel,
     ChatMessage,
-    CoDeclaration,
-    FreemasonPartnerClaim,
     GameState,
     PlayerState,
-    PublicResultClaim,
 )
 from app.engine.victory import VictoryChecker
 from app.engine.vote import VoteManager
 
 NightActionType = Literal["divine", "guard", "attack"]
+
+_RESULT_TYPES: dict[RoleName, str] = {
+    RoleName.SEER: SEER_RESULT,
+    RoleName.MEDIUM: MEDIUM_RESULT,
+}
 
 
 @dataclass(frozen=True)
@@ -353,70 +366,207 @@ class GameController:
         else:
             raise GameError(f"unknown action_type {action_type}")
 
-    def co(self, player_id: str, claimed_role: str) -> None:
-        self._require_alive(player_id)
-        role = RoleName(claimed_role)
-        if role not in ROLE_DEFINITIONS:
-            raise GameError(f"unknown role {claimed_role}")
-        self.state.co_declarations.append(
-            CoDeclaration(player_id=player_id, claimed_role=role, day=self.state.day)
-        )
-        self.events.publish(
-            GameEvent(GameEventType.CO_DECLARED, {"player_id": player_id, "claimed_role": role})
-        )
+    def record_speech_event(
+        self,
+        actor_id: str,
+        event_type: SpeechEventType,
+        *,
+        source_message_id: str = "",
+        target_id: str | None = None,
+        role: RoleName | None = None,
+        result_is_werewolf: bool | None = None,
+        referenced_day: int | None = None,
+        confidence: float = 1.0,
+    ) -> SpeechEvent | None:
+        """The single write path for every public claim.
 
-    def claim_freemason_partner(self, claimant_id: str, partner_id: str) -> None:
-        """Record only the public relationship claim, never the secret role truth."""
-        self._require_alive(claimant_id)
-        if partner_id not in self.state.players or partner_id == claimant_id:
-            raise GameError("invalid freemason partner")
-        reverse = next(
-            (
-                claim
+        `co`, `public_result` and `claim_freemason_partner` are thin wrappers
+        over this, so there is no second place that can record a claim and drift
+        from the log. Returns None when the event adds nothing (a same-day
+        restatement of an identical verdict, a partner claim already made).
+        """
+        self._require_alive(actor_id)
+        if event_type in (SpeechEventType.ROLE_CLAIM, SpeechEventType.ROLE_SWITCH):
+            if role is None or role not in ROLE_DEFINITIONS:
+                raise GameError(f"unknown claimed role {role}")
+        if event_type in RESULT_EVENT_TYPES:
+            if role not in (RoleName.SEER, RoleName.MEDIUM):
+                raise GameError("a published result must name the seer or medium ability")
+            if target_id not in self.state.players:
+                raise GameError("invalid public result claim")
+            if self._is_redundant_result(
+                actor_id, event_type, role, target_id, is_werewolf=result_is_werewolf
+            ):
+                return None
+        if event_type is SpeechEventType.PARTNER_CLAIM:
+            if target_id not in self.state.players or target_id == actor_id:
+                raise GameError("invalid freemason partner")
+            if any(
+                claim.claimant_id == actor_id and claim.partner_id == target_id
                 for claim in self.state.freemason_partner_claims
-                if claim.claimant_id == partner_id and claim.partner_id == claimant_id
-            ),
-            None,
+            ):
+                return None
+
+        role_before = current_role_claim(self.state.speech_events, actor_id)
+        event = self.state.append_speech_event(
+            actor_id,
+            event_type,
+            source_message_id=source_message_id,
+            target_id=target_id,
+            role=role,
+            result_is_werewolf=result_is_werewolf,
+            referenced_day=referenced_day,
+            confidence=confidence,
         )
-        if reverse is not None:
-            reverse.confirmed = True
-            return
-        duplicate = any(
-            claim.claimant_id == claimant_id and claim.partner_id == partner_id
-            for claim in self.state.freemason_partner_claims
-        )
-        if not duplicate:
-            self.state.freemason_partner_claims.append(
-                FreemasonPartnerClaim(
-                    claimant_id=claimant_id,
-                    partner_id=partner_id,
-                    day=self.state.day,
+        role_after = current_role_claim(self.state.speech_events, actor_id)
+        # Only an actual change in the standing claim is news. A reaffirmation
+        # and an unpromoted low-confidence guess both leave the board as it was.
+        if role_after is not None and (role_before is None or role_before.role != role_after.role):
+            self.events.publish(
+                GameEvent(
+                    GameEventType.CO_DECLARED,
+                    {"player_id": actor_id, "claimed_role": role_after.role},
                 )
             )
+        return event
+
+    def _is_redundant_result(
+        self,
+        actor_id: str,
+        event_type: SpeechEventType,
+        role: RoleName,
+        target_id: str,
+        *,
+        is_werewolf: bool | None,
+    ) -> bool:
+        """Saying the same verdict twice in one day is emphasis, not a new
+        version. A correction or a retraction always counts."""
+        if event_type is not SpeechEventType.ABILITY_RESULT:
+            return False
+        existing = active_result(
+            self.state.speech_events, actor_id, _RESULT_TYPES[role], target_id
+        )
+        return (
+            existing is not None
+            and existing.day == self.state.day
+            and existing.is_werewolf == bool(is_werewolf)
+        )
+
+    def co(
+        self,
+        player_id: str,
+        claimed_role: str,
+        source_message_id: str = "",
+        confidence: float = 1.0,
+    ) -> None:
+        try:
+            role = RoleName(claimed_role)
+        except ValueError as exc:
+            raise GameError(f"unknown role {claimed_role}") from exc
+        self.record_speech_event(
+            player_id,
+            SpeechEventType.ROLE_CLAIM,
+            role=role,
+            source_message_id=source_message_id,
+            confidence=confidence,
+        )
+
+    def retract_co(self, player_id: str, source_message_id: str = "") -> None:
+        self.record_speech_event(
+            player_id, SpeechEventType.ROLE_RETRACTION, source_message_id=source_message_id
+        )
+
+    def claim_freemason_partner(
+        self, claimant_id: str, partner_id: str, source_message_id: str = ""
+    ) -> None:
+        """Record only the public relationship claim, never the secret role truth."""
+        self.record_speech_event(
+            claimant_id,
+            SpeechEventType.PARTNER_CLAIM,
+            target_id=partner_id,
+            source_message_id=source_message_id,
+        )
 
     def public_result(
-        self, claimant_id: str, result_type: str, target_id: str, is_werewolf: bool
+        self,
+        claimant_id: str,
+        result_type: str,
+        target_id: str,
+        is_werewolf: bool,
+        source_message_id: str = "",
+        confidence: float = 1.0,
     ) -> None:
-        self._require_alive(claimant_id)
-        if target_id not in self.state.players or result_type not in ("seer", "medium"):
-            raise GameError("invalid public result claim")
-        duplicate = any(
-            claim.claimant_id == claimant_id
-            and claim.result_type == result_type
-            and claim.target_id == target_id
-            and claim.day == self.state.day
-            for claim in self.state.public_result_claims
+        self._record_result_event(
+            claimant_id,
+            SpeechEventType.ABILITY_RESULT,
+            result_type,
+            target_id,
+            is_werewolf=is_werewolf,
+            source_message_id=source_message_id,
+            confidence=confidence,
         )
-        if not duplicate:
-            self.state.public_result_claims.append(
-                PublicResultClaim(
-                    claimant_id=claimant_id,
-                    result_type=result_type,
-                    target_id=target_id,
-                    is_werewolf=is_werewolf,
-                    day=self.state.day,
-                )
-            )
+
+    def correct_public_result(
+        self,
+        claimant_id: str,
+        result_type: str,
+        target_id: str,
+        is_werewolf: bool,
+        source_message_id: str = "",
+        referenced_day: int | None = None,
+    ) -> None:
+        """Publish a verdict that replaces an earlier one. The superseded
+        version stays in the log so "what did they say first" is answerable."""
+        self._record_result_event(
+            claimant_id,
+            SpeechEventType.RESULT_CORRECTION,
+            result_type,
+            target_id,
+            is_werewolf=is_werewolf,
+            source_message_id=source_message_id,
+            referenced_day=referenced_day,
+        )
+
+    def retract_public_result(
+        self,
+        claimant_id: str,
+        result_type: str,
+        target_id: str,
+        source_message_id: str = "",
+    ) -> None:
+        self._record_result_event(
+            claimant_id,
+            SpeechEventType.RESULT_RETRACTION,
+            result_type,
+            target_id,
+            is_werewolf=None,
+            source_message_id=source_message_id,
+        )
+
+    def _record_result_event(
+        self,
+        claimant_id: str,
+        event_type: SpeechEventType,
+        result_type: str,
+        target_id: str,
+        *,
+        is_werewolf: bool | None,
+        source_message_id: str = "",
+        referenced_day: int | None = None,
+        confidence: float = 1.0,
+    ) -> None:
+        if result_type not in RESULT_TYPES:
+            raise GameError("invalid public result claim")
+        self.record_speech_event(
+            claimant_id,
+            event_type,
+            role=result_role(result_type),
+            target_id=target_id,
+            result_is_werewolf=is_werewolf,
+            source_message_id=source_message_id,
+            referenced_day=referenced_day,
+            confidence=confidence,
+        )
 
     def set_typing(self, player_id: str, typing: bool, channel: str = "public") -> None:
         if typing:

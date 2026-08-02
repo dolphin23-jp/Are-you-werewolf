@@ -16,10 +16,10 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 
-from app.ai.co_detection import detect_claimed_role, detect_freemason_partner
 from app.ai.coordinator import AICoordinator
 from app.ai.provider.factory import LLMProviderConfigError, build_llm_provider
-from app.ai.public_speech import detect_public_result
+from app.ai.reasoning import PublicFactLedger
+from app.ai.reasoning.claims import build_claim_drafts, register_claim_drafts
 from app.ai.schemas import DiscussionOutput
 from app.api import orchestrator
 from app.api.schemas import (
@@ -37,7 +37,6 @@ from app.api.ws_hub import SessionWSHub
 from app.config import get_settings
 from app.engine.game import GameController, GameError, PlayerSpec
 from app.engine.phases import Phase
-from app.engine.roles import RoleName
 from app.eval.transcript import TranscriptRecorder
 from app.sessions.models import GameSession
 from app.sessions.store import get_session_store
@@ -228,43 +227,14 @@ async def chat(
                 message_id,
             )
         else:
-            other_names = [player.name for pid, player in state.players.items() if pid != author]
-            claimed_role = detect_claimed_role(req.content, other_names)
-            already_claimed = any(claim.player_id == author for claim in state.co_declarations)
-            if claimed_role is not None and not already_claimed:
-                _run(session.controller.co, author, claimed_role.value)
-            effective_role = claimed_role or next(
-                (
-                    claim.claimed_role
-                    for claim in state.co_declarations
-                    if claim.player_id == author
-                ),
-                None,
+            # Same conversion the coordinator uses, so a human claim becomes the
+            # same kind of event whether or not AI players are in the game.
+            drafts = build_claim_drafts(
+                DiscussionOutput(public_message=req.content),
+                PublicFactLedger(state),
+                speaker_id=author,
             )
-            if effective_role == RoleName.FREEMASON:
-                candidates = {
-                    pid: player.name for pid, player in state.players.items() if pid != author
-                }
-                partner_id = detect_freemason_partner(req.content, candidates)
-                if partner_id is not None:
-                    _run(session.controller.claim_freemason_partner, author, partner_id)
-            candidates = {
-                pid: player.name for pid, player in state.players.items() if pid != author
-            }
-            detected_result = detect_public_result(
-                req.content,
-                effective_role,
-                candidates,
-                role_claimed_in_message=claimed_role in (RoleName.SEER, RoleName.MEDIUM),
-            )
-            if detected_result is not None:
-                _run(
-                    session.controller.public_result,
-                    author,
-                    detected_result.result_type,
-                    detected_result.target_id,
-                    detected_result.is_werewolf,
-                )
+            _run(register_claim_drafts, session.controller, author, drafts, message_id)
         await orchestrator.after_human_chat(session)
     else:
         await orchestrator.after_human_private_chat(session, req.channel)

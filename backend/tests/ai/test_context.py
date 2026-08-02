@@ -16,7 +16,6 @@ from app.ai.strategy import StrategyAnalyzer, render_board_analysis
 from app.engine.phases import Phase
 from app.engine.roles import RoleName
 from app.engine.state import (
-    CoDeclaration,
     DivineRecord,
     MediumRecord,
     PendingQuestion,
@@ -302,9 +301,8 @@ def test_vote_prompt_carries_the_faction_doctrine_the_discussion_gets():
     state = controller.state
     fake_seer = state.players_by_role(RoleName.WEREWOLF)[0].player_id
     builder = _fake_seer_builder(state, fake_seer)
-    state.co_declarations.append(
-        CoDeclaration(player_id=fake_seer, claimed_role=RoleName.SEER, day=1)
-    )
+    state.day = 1
+    controller.co(fake_seer, RoleName.SEER.value)
 
     # A phrase unique to fake-seer-objectives.md; "偽占い" alone also appears in the
     # perspective doctrine that everyone receives.

@@ -23,11 +23,37 @@ from dataclasses import dataclass
 
 from app.engine.phases import Phase
 from app.engine.roles import RoleName
+from app.engine.speech_events import (
+    MEDIUM_RESULT,
+    RESULT_TYPES,
+    SEER_RESULT,
+    ResultVersion,
+    RoleClaimState,
+    SpeechEvent,
+    current_role_claim,
+    events_for_message,
+    result_versions,
+    role_claim_history,
+)
 from app.engine.state import DeathCause, GameState, PublicDeathCause, public_death_cause
 
-SEER_RESULT = "seer"
-MEDIUM_RESULT = "medium"
-RESULT_TYPES = (SEER_RESULT, MEDIUM_RESULT)
+# Re-exported so the reasoning layer has one import site for public-claim
+# vocabulary, whether it comes from the engine's event model or from here.
+__all__ = [
+    "MEDIUM_RESULT",
+    "RESULT_TYPES",
+    "SEER_RESULT",
+    "PublicCoFact",
+    "PublicExecutionFact",
+    "PublicFactLedger",
+    "PublicPlayerFact",
+    "PublicResultFact",
+    "PublicVoteFact",
+    "ResultVersion",
+    "RoleClaimState",
+    "SpeechEvent",
+    "mentions_player",
+]
 
 
 @dataclass(frozen=True)
@@ -218,12 +244,42 @@ class PublicFactLedger:
         )
 
     def claimed_role_of(self, player_id: str) -> RoleName | None:
-        """The player's most recent public role claim, or None if they never COed."""
-        latest: RoleName | None = None
-        for claim in self._state.co_declarations:
-            if claim.player_id == player_id:
-                latest = claim.claimed_role
-        return latest
+        """The claim standing now: None if never made, retracted, or the new role
+        after a slide."""
+        claim = current_role_claim(self._state.speech_events, player_id)
+        return claim.role if claim is not None else None
+
+    def speech_events(self) -> tuple[SpeechEvent, ...]:
+        """The raw public-claim log. Every derived view below comes from it, and
+        every claim in it points back at the message that made it."""
+        return tuple(self._state.speech_events)
+
+    def events_for_message(self, message_id: str) -> tuple[SpeechEvent, ...]:
+        return events_for_message(self._state.speech_events, message_id)
+
+    def role_claim_history(self, player_id: str | None = None) -> tuple[RoleClaimState, ...]:
+        """Claimed, retracted, slid -- in the order it happened. Separate from
+        `co_declarations`, which is only what stands right now."""
+        return role_claim_history(self._state.speech_events, player_id)
+
+    def current_role_claim(self, player_id: str) -> RoleClaimState | None:
+        return current_role_claim(self._state.speech_events, player_id)
+
+    def result_versions(
+        self,
+        *,
+        claimant_id: str | None = None,
+        result_type: str | None = None,
+        target_id: str | None = None,
+    ) -> tuple[ResultVersion, ...]:
+        """Including superseded and retracted ones, so "what did they say before
+        the correction" stays answerable."""
+        return result_versions(
+            self._state.speech_events,
+            claimant_id=claimant_id,
+            result_type=result_type,
+            target_id=target_id,
+        )
 
     def public_results(self) -> tuple[PublicResultFact, ...]:
         return tuple(
@@ -240,10 +296,10 @@ class PublicFactLedger:
     def find_result(
         self, claimant_id: str, result_type: str, target_id: str
     ) -> PublicResultFact | None:
-        """The earliest published verdict for this exact claim.
+        """The verdict standing right now for this exact claim.
 
-        Earliest, not latest: once a result is on the table, a later restatement
-        that disagrees with it is the corruption, not the correction.
+        A restatement that disagrees with it is corruption; changing it requires
+        an explicit correction, which supersedes rather than overwrites.
         """
         for result in self.public_results():
             if (

@@ -42,6 +42,7 @@ def test_named_freemason_partner_is_prompted_and_confirmation_closes_line():
 
     relation = controller.state.freemason_partner_claims[0]
     assert (relation.claimant_id, relation.partner_id, relation.confirmed) == ("p1", "p2", False)
+    assert relation.source_message_id == "m1"
     assert controller.state.pending_questions["p2"][0].source_message_id == "m1"
 
     coordinator.register_public_claim(
@@ -53,7 +54,9 @@ def test_named_freemason_partner_is_prompted_and_confirmation_closes_line():
         "m2",
     )
 
-    assert relation.confirmed is True
+    # The view is derived from the event log, so re-read it rather than holding
+    # a record that used to be mutated in place.
+    assert controller.state.freemason_partner_claims[0].confirmed is True
 
 
 def test_named_ai_partner_speaks_before_remaining_initial_order():

@@ -77,6 +77,9 @@ export interface CoDeclarationRecord {
   player_id: string;
   claimed_role: RoleName;
   day: number;
+  /** The chat message this claim was made in. Present since the backend
+   * started deriving claims from structured speech events. */
+  source_message_id?: string;
 }
 
 export interface PublicResultClaimRecord {
@@ -85,6 +88,38 @@ export interface PublicResultClaimRecord {
   target_id: string;
   is_werewolf: boolean;
   day: number;
+  source_message_id?: string;
+}
+
+export type SpeechEventType =
+  | "role_claim"
+  | "role_retraction"
+  | "role_switch"
+  | "ability_result"
+  | "result_retraction"
+  | "result_correction"
+  | "partner_claim"
+  | "fact_correction"
+  | "accusation"
+  | "defense"
+  | "vote_intention"
+  | "question"
+  | "agreement"
+  | "disagreement";
+
+/** Append-only record of every public claim. `co_declarations` and
+ * `public_result_claims` are views derived from this. */
+export interface SpeechEventRecord {
+  event_id: string;
+  source_message_id: string;
+  actor_id: string;
+  event_type: SpeechEventType;
+  day: number;
+  target_id: string | null;
+  role: RoleName | null;
+  result_is_werewolf: boolean | null;
+  referenced_day: number | null;
+  confidence: number;
 }
 
 export interface VoteRecordEntry {
@@ -119,6 +154,7 @@ export interface GameView {
   co_declarations: CoDeclarationRecord[];
   freemason_partner_claims: FreemasonPartnerClaim[];
   public_result_claims?: PublicResultClaimRecord[];
+  speech_events?: SpeechEventRecord[];
   vote_history: VoteRecordEntry[];
   first_victim_id?: string | null;
   has_voted_current_round?: boolean;
@@ -157,6 +193,7 @@ export interface DebugView {
   vote_records: VoteRecordEntry[];
   death_records: { player_id: string; cause: DeathCause; day: number }[];
   co_declarations: CoDeclarationRecord[];
+  speech_events?: SpeechEventRecord[];
   winner: Team | null;
   victory_reason: string;
   is_draw: boolean;
