@@ -127,9 +127,17 @@ class AIPlayerAgent:
 
     @staticmethod
     def _truncate_at_sentence(text: str, max_len: int) -> str:
-        truncated = text[:max_len]
-        for boundary in _SENTENCE_BOUNDARIES:
-            idx = truncated.rfind(boundary)
-            if idx != -1:
-                return truncated[: idx + 1]
-        return truncated
+        return truncate_at_sentence(text, max_len)
+
+
+def truncate_at_sentence(text: str, max_len: int) -> str:
+    """Cut to `max_len` at the last sentence boundary, so a shortened line reads
+    as a finished sentence instead of stopping mid-word."""
+    if len(text) <= max_len:
+        return text
+    truncated = text[:max_len]
+    for boundary in _SENTENCE_BOUNDARIES:
+        idx = truncated.rfind(boundary)
+        if idx != -1:
+            return truncated[: idx + 1]
+    return truncated

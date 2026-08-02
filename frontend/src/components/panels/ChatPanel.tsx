@@ -23,7 +23,7 @@ export function ChatPanel() {
   const [waitRemaining, setWaitRemaining] = useState(0);
   const chatLogRef = useRef<HTMLDivElement>(null);
   const previousMessageCount = useRef(0);
-  const autoPassStarted = useRef(false);
+  const autoPassedToken = useRef<string | null>(null);
 
   useEffect(() => {
     const log = chatLogRef.current;
@@ -42,7 +42,6 @@ export function ChatPanel() {
 
   useEffect(() => {
     setWaitRemaining(view?.speech_wait_remaining_seconds ?? 0);
-    autoPassStarted.current = false;
     if (!view?.awaiting_your_speech) return;
     const timer = window.setInterval(
       () => setWaitRemaining((remaining) => Math.max(0, remaining - 1)),
@@ -51,15 +50,20 @@ export function ChatPanel() {
     return () => window.clearInterval(timer);
   }, [view?.awaiting_your_speech, view?.speech_wait_remaining_seconds]);
 
+  // Auto-pass at most once per wait. Keying off the server's token rather than a
+  // boolean matters because the 2.5s poll re-runs this effect: a wait that stays at
+  // zero would otherwise fire a pass request on every single poll.
+  const waitToken = view?.speech_wait_token ?? null;
   useEffect(() => {
-    if (!view?.awaiting_your_speech || waitRemaining > 0 || autoPassStarted.current || !sessionId) {
-      return;
-    }
-    autoPassStarted.current = true;
-    void passDiscussionTurn(sessionId).then(refreshView).catch((error: unknown) => {
-      setError(error instanceof Error ? error.message : "パスに失敗しました");
-    });
-  }, [refreshView, sessionId, setError, view?.awaiting_your_speech, waitRemaining]);
+    if (!view?.awaiting_your_speech || waitRemaining > 0 || !sessionId) return;
+    if (waitToken === null || autoPassedToken.current === waitToken) return;
+    autoPassedToken.current = waitToken;
+    void passDiscussionTurn(sessionId)
+      .then(refreshView)
+      .catch((error: unknown) => {
+        setError(error instanceof Error ? error.message : "パスに失敗しました");
+      });
+  }, [refreshView, sessionId, setError, view?.awaiting_your_speech, waitRemaining, waitToken]);
 
   if (!view || !sessionId) return null;
 
@@ -283,7 +287,6 @@ export function ChatPanel() {
             ))}
           </section>
         )}
-        <div ref={logEndRef} />
       </div>
 
       {newMessageCount > 0 && (

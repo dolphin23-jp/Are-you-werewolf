@@ -167,23 +167,26 @@ def get_view(session_id: str, player_id: str | None = Query(default=None)) -> di
     view = session.controller.get_player_view(viewer)
     round_state = session.discussion_round
     settings = get_settings()
-    view["awaiting_your_speech"] = bool(
+    awaiting = bool(
         round_state and round_state.awaiting_human and viewer == session.human_id
     )
+    view["awaiting_your_speech"] = awaiting
     view["discussion_progress"] = {
         "spoken": len(round_state.outputs) if round_state else 0,
         "total": round_state.max_total if round_state else 0,
     }
-    elapsed = (
-        time.time() - round_state.awaiting_since
-        if round_state and round_state.awaiting_human and round_state.awaiting_since
-        else 0.0
-    )
-    view["speech_wait_remaining_seconds"] = (
-        max(0, int(settings.werewolf_discussion_wait_seconds - elapsed + 0.999))
-        if round_state and round_state.awaiting_human
-        else 0
-    )
+    # The countdown and its identifier only mean anything to the seat being waited
+    # on, so they follow `awaiting_your_speech` rather than the raw round state.
+    view["speech_wait_remaining_seconds"] = 0
+    # Identifies one specific wait. The client auto-passes at most once per token,
+    # so a wait that lingers at zero cannot turn into a stream of pass requests.
+    view["speech_wait_token"] = None
+    if awaiting and round_state is not None and round_state.awaiting_since is not None:
+        elapsed = time.time() - round_state.awaiting_since
+        view["speech_wait_remaining_seconds"] = max(
+            0, int(settings.werewolf_discussion_wait_seconds - elapsed + 0.999)
+        )
+        view["speech_wait_token"] = f"{round_state.day}:{round_state.awaiting_since}"
     return view
 
 

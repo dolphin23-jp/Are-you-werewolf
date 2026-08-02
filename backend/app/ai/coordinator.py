@@ -24,7 +24,7 @@ from app.ai.co_detection import detect_claimed_role
 from app.ai.context import ContextBuilder, DaySummaryManager
 from app.ai.deception import FakeClaimGuard, assign_madman_strategy, assign_wolf_deception
 from app.ai.personalities import assign_personalities, discussion_length_range
-from app.ai.player_agent import AIPlayerAgent
+from app.ai.player_agent import AIPlayerAgent, truncate_at_sentence
 from app.ai.provider.base import LLMProvider
 from app.ai.schemas import DiscussionOutput, MorningIntentOutput
 from app.engine.phases import Phase
@@ -32,6 +32,21 @@ from app.engine.roles import RoleName
 from app.engine.state import GameState, PendingQuestion
 from app.eval.transcript import TranscriptRecorder, Utterance
 from app.sessions.models import DiscussionRoundState
+
+# How many times the round may re-queue pressured execution candidates that have
+# not rebutted yet. Bounded so the speaker selection always terminates.
+_MAX_MAJOR_TARGET_SWEEPS = 2
+
+# Consecutive speakers that may yield no output before the segment gives up.
+_MAX_CONSECUTIVE_SPEECH_FAILURES = 3
+
+# Cap for a message that only agrees with an existing point, matching the
+# "60文字以内の短い同意" instruction in DISCUSSION_OUTPUT_INSTRUCTION.
+_REACTION_MAX_CHARS = 60
+
+# Private-channel messages are capped at 100 chars by `generate_wolf_chat`; the
+# evaluation harness needs the same number to flag overruns.
+_PRIVATE_CHAT_MAX_CHARS = 100
 
 
 class AICoordinator:
@@ -220,14 +235,25 @@ class AICoordinator:
                     return
 
             spoken = 0
+            # A speaker that never produces output must not be retried forever:
+            # `_speak` returns None both when the phase left DISCUSSION mid-segment
+            # (without awaiting, so a retry loop would never yield to the event
+            # loop) and when generation fails outright.
+            consecutive_failures = 0
             while spoken < self._segment_size and not round_state.complete:
+                if state.phase != Phase.DISCUSSION:
+                    return
                 pid, stage = self._next_discussion_speaker(state, round_state)
                 if pid is None:
                     round_state.complete = True
                     break
                 output = await self._speak(controller, state, pid, stage)
                 if output is None:
+                    consecutive_failures += 1
+                    if consecutive_failures >= _MAX_CONSECUTIVE_SPEECH_FAILURES:
+                        break
                     continue
+                consecutive_failures = 0
                 round_state.outputs.append((pid, output))
                 round_state.speech_counts[pid] = round_state.speech_counts.get(pid, 0) + 1
                 spoken += 1
@@ -301,25 +327,43 @@ class AICoordinator:
             for target in round_state.major_targets:
                 if round_state.speech_counts.get(target, 0) < 2:
                     self._round_queue_reply(state, round_state, target)
-        while round_state.reply_queue and len(round_state.outputs) < round_state.max_total:
-            pid = round_state.reply_queue.pop(0)
-            round_state.queued.discard(pid)
-            limit = max(1, round(2.5 * self._personalities[pid].talkativeness))
-            if pid in round_state.major_targets:
-                limit = max(limit, 4)
-            if state.players[pid].alive and round_state.speech_counts.get(pid, 0) < limit:
-                if (
-                    pid in round_state.major_targets
-                    and round_state.speech_counts.get(pid, 0) < 2
-                ):
-                    return pid, "rebuttal_or_reassessment"
-                return pid, "reaction" if self._rng.random() < 0.35 else "rebuttal_or_reassessment"
-        for target in round_state.major_targets:
-            if (
-                round_state.speech_counts.get(target, 0) < 2
-                and len(round_state.outputs) < round_state.max_total
-            ):
-                return target, "rebuttal_or_reassessment"
+        # Every branch below must change round state before returning. A branch that
+        # returns the same speaker without advancing anything spins forever when
+        # `_speak` yields nothing -- and the phase-changed path of `_speak` returns
+        # without awaiting, so such a spin would never release the event loop.
+        while True:
+            while round_state.reply_queue and len(round_state.outputs) < round_state.max_total:
+                pid = round_state.reply_queue.pop(0)
+                round_state.queued.discard(pid)
+                limit = max(1, round(2.5 * self._personalities[pid].talkativeness))
+                if pid in round_state.major_targets:
+                    limit = max(limit, 4)
+                if state.players[pid].alive and round_state.speech_counts.get(pid, 0) < limit:
+                    if (
+                        pid in round_state.major_targets
+                        and round_state.speech_counts.get(pid, 0) < 2
+                    ):
+                        return pid, "rebuttal_or_reassessment"
+                    return (
+                        pid,
+                        "reaction" if self._rng.random() < 0.35 else "rebuttal_or_reassessment",
+                    )
+            # The queue is empty, but the most-pressured execution candidates still
+            # owe the table a rebuttal. Re-queue them rather than returning them
+            # directly, so the pop above stays the single source of progress.
+            if round_state.major_target_sweeps >= _MAX_MAJOR_TARGET_SWEEPS:
+                break
+            owed = [
+                target
+                for target in round_state.major_targets
+                if state.players[target].alive
+                and round_state.speech_counts.get(target, 0) < 2
+            ]
+            if not owed or len(round_state.outputs) >= round_state.max_total:
+                break
+            round_state.major_target_sweeps += 1
+            for target in owed:
+                self._round_queue_reply(state, round_state, target)
         if not round_state.summary_done and len(round_state.outputs) < round_state.max_total:
             leader = next(
                 (
@@ -406,7 +450,11 @@ class AICoordinator:
         if output is None:
             return None
         if output.agrees_with and not output.key_point.strip():
-            output.public_message = output.public_message[:60]
+            # Agreement with no new argument is a reaction, not an analysis. Cut at a
+            # sentence boundary so the shortened line still reads as finished Japanese.
+            output.public_message = truncate_at_sentence(
+                output.public_message, _REACTION_MAX_CHARS
+            )
         self._context.set_reasoning_memo(player_id, output.reasoning_memo.model_dump())
         self._record(
             state,
@@ -667,6 +715,7 @@ class AICoordinator:
                 "wolf_chat",
                 text=output.message,
                 used_fallback=self._is_fallback(pid, output.message),
+                effective_length_limit=_PRIVATE_CHAT_MAX_CHARS,
             )
             try:
                 controller.chat(pid, output.message, "wolf")  # type: ignore[attr-defined]
@@ -688,6 +737,7 @@ class AICoordinator:
                 "freemason_chat",
                 text=output.message,
                 used_fallback=self._is_fallback(pid, output.message),
+                effective_length_limit=_PRIVATE_CHAT_MAX_CHARS,
             )
             try:
                 controller.chat(pid, output.message, "freemason")  # type: ignore[attr-defined]
