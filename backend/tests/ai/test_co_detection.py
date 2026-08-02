@@ -66,3 +66,8 @@ def test_third_person_report_is_not_a_self_claim():
 def test_claim_in_a_later_sentence_is_still_found():
     text = "みなさんこんにちは。よろしくお願いします。占い師COします。"
     assert detect_claimed_role(text) is RoleName.SEER
+
+
+def test_shared_partner_confirmation_is_a_self_claim_despite_leading_name():
+    text = "ユイ(p3)の共有者CO、相方は私ツムギ(p11)で間違いありません。"
+    assert detect_claimed_role(text, ["ユイ", "ツムギ"]) is RoleName.FREEMASON

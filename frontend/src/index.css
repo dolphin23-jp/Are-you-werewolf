@@ -330,6 +330,16 @@ button {
 .chat-message__author-column { text-align: right; }
 .chat-message__content { min-width: 0; }
 .chat-message__body { white-space: pre-wrap; }
+.chat-message__reference {
+  display: inline;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
 
 .chat-message__quote {
   display: flex;

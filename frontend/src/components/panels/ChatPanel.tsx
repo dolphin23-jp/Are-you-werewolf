@@ -4,6 +4,20 @@ import type { ChatChannel, ChatMessage } from "../../api/types";
 import { useGameStore } from "../../state/gameStore";
 import { TypingIndicator } from "../common/TypingIndicator";
 
+const MESSAGE_REFERENCE_RE = /(【m\d+(?:への回答)?】|\[m\d+\]|m\d+)/g;
+
+function MessageBody({ content, onReference }: { content: string; onReference: (id: string) => void }) {
+  return content.split(MESSAGE_REFERENCE_RE).map((part, index) => {
+    const id = part.match(/m\d+/)?.[0];
+    if (!id) return <Fragment key={index}>{part}</Fragment>;
+    return (
+      <button key={index} type="button" className="chat-message__reference" onClick={() => onReference(id)}>
+        {part}
+      </button>
+    );
+  });
+}
+
 export function ChatPanel() {
   const view = useGameStore((s) => s.view);
   const sessionId = useGameStore((s) => s.sessionId);
@@ -228,7 +242,9 @@ export function ChatPanel() {
           const source = m.reply_to
             ? channelMessages.find((candidate) => candidate.message_id === m.reply_to)
             : undefined;
-          const grouped = index > 0 && messages[index - 1].author_id === m.author_id;
+          // A quote visually starts a new conversational unit. Keeping the author on
+          // that line prevents a consecutive post from looking like somebody else's.
+          const grouped = index > 0 && messages[index - 1].author_id === m.author_id && !m.reply_to;
           const showDay = selectedDay === "all" && (index === 0 || messages[index - 1].day !== m.day);
           return (
             <Fragment key={m.message_id}>
@@ -263,7 +279,9 @@ export function ChatPanel() {
                       <span>{m.quote || source?.content.slice(0, 160) || "元発言を表示"}</span>
                     </button>
                   )}
-                  <span className="chat-message__body">{m.content}</span>
+                  <span className="chat-message__body">
+                    <MessageBody content={m.content} onReference={jumpToMessage} />
+                  </span>
                   <button
                     className="chat-message__reply-button"
                     type="button"

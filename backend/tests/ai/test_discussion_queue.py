@@ -8,8 +8,24 @@ from app.ai.player_agent import DEFAULT_MAX_RETRIES
 from app.ai.provider.base import Message, SchemaT
 from app.ai.schemas import DirectedQuestion, DiscussionOutput, MorningIntentOutput
 from app.engine.phases import Phase
+from app.engine.roles import RoleName
 from app.sessions.models import DiscussionRoundState
 from tests.conftest import make_controller
+
+
+def test_public_claim_registration_falls_back_to_spoken_message():
+    controller = make_controller(seed=4)
+    coordinator = AICoordinator(controller.state, ["p1"], MorningPriorityProvider(), seed=1)
+    output = DiscussionOutput(
+        public_message="霊媒師CO。現時点で処刑結果はありません。",
+        public_claim_role=None,
+        contains_co_claim=False,
+    )
+
+    coordinator._register_public_claim(controller, "p1", output)
+
+    claims = [(claim.player_id, claim.claimed_role) for claim in controller.state.co_declarations]
+    assert claims == [("p1", RoleName.MEDIUM)]
 
 
 class ReplyLoopProvider:
