@@ -16,9 +16,11 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 
-from app.ai.co_detection import detect_claimed_role
+from app.ai.co_detection import detect_claimed_role, detect_freemason_partner
 from app.ai.coordinator import AICoordinator
 from app.ai.provider.factory import LLMProviderConfigError, build_llm_provider
+from app.ai.public_speech import detect_public_result
+from app.ai.schemas import DiscussionOutput
 from app.api import orchestrator
 from app.api.schemas import (
     ChatRequest,
@@ -26,6 +28,7 @@ from app.api.schemas import (
     CoRequest,
     CreateGameRequest,
     CreateGameResponse,
+    DiscussionControlRequest,
     NightActionRequest,
     OkResponse,
     VoteRequest,
@@ -34,6 +37,7 @@ from app.api.ws_hub import SessionWSHub
 from app.config import get_settings
 from app.engine.game import GameController, GameError, PlayerSpec
 from app.engine.phases import Phase
+from app.engine.roles import RoleName
 from app.eval.transcript import TranscriptRecorder
 from app.sessions.models import GameSession
 from app.sessions.store import get_session_store
@@ -171,6 +175,9 @@ def get_view(session_id: str, player_id: str | None = Query(default=None)) -> di
         round_state and round_state.awaiting_human and viewer == session.human_id
     )
     view["awaiting_your_speech"] = awaiting
+    view["discussion_paused"] = bool(
+        session.discussion_paused or session.discussion_pause_requested
+    )
     view["discussion_progress"] = {
         "spoken": len(round_state.outputs) if round_state else 0,
         "total": round_state.max_total if round_state else 0,
@@ -203,35 +210,61 @@ async def chat(
     session = _get_session(session_id)
     author = _resolve_player_id(session, player_id)
     message_id = _run(
-        session.controller.chat, author, req.content, req.channel, req.reply_to, req.quote
+        session.controller.chat,
+        author,
+        req.content,
+        req.channel,
+        req.reply_to,
+        req.quote,
+        req.references,
     )
     if req.channel == "public":
         state = session.controller.state
-        if not any(claim.player_id == author for claim in state.co_declarations):
+        if session.coordinator is not None:
+            session.coordinator.register_public_claim(
+                session.controller,
+                author,
+                DiscussionOutput(public_message=req.content),
+                message_id,
+            )
+        else:
             other_names = [player.name for pid, player in state.players.items() if pid != author]
             claimed_role = detect_claimed_role(req.content, other_names)
-            if claimed_role is not None:
+            already_claimed = any(claim.player_id == author for claim in state.co_declarations)
+            if claimed_role is not None and not already_claimed:
                 _run(session.controller.co, author, claimed_role.value)
-        result_type = (
-            "seer" if "占い結果" in req.content else "medium" if "霊媒結果" in req.content else None
-        )
-        if result_type is not None:
-            for target_id, target in state.players.items():
-                if target_id == author or target.name not in req.content:
-                    continue
-                black = any(word in req.content for word in ("黒", "人狼でした", "は人狼"))
-                white = any(
-                    word in req.content for word in ("白", "人狼ではありません", "人狼ではない")
+            effective_role = claimed_role or next(
+                (
+                    claim.claimed_role
+                    for claim in state.co_declarations
+                    if claim.player_id == author
+                ),
+                None,
+            )
+            if effective_role == RoleName.FREEMASON:
+                candidates = {
+                    pid: player.name for pid, player in state.players.items() if pid != author
+                }
+                partner_id = detect_freemason_partner(req.content, candidates)
+                if partner_id is not None:
+                    _run(session.controller.claim_freemason_partner, author, partner_id)
+            candidates = {
+                pid: player.name for pid, player in state.players.items() if pid != author
+            }
+            detected_result = detect_public_result(
+                req.content,
+                effective_role,
+                candidates,
+                role_claimed_in_message=claimed_role in (RoleName.SEER, RoleName.MEDIUM),
+            )
+            if detected_result is not None:
+                _run(
+                    session.controller.public_result,
+                    author,
+                    detected_result.result_type,
+                    detected_result.target_id,
+                    detected_result.is_werewolf,
                 )
-                if black or white:
-                    _run(
-                        session.controller.public_result,
-                        author,
-                        result_type,
-                        target_id,
-                        black and not white,
-                    )
-                    break
         await orchestrator.after_human_chat(session)
     else:
         await orchestrator.after_human_private_chat(session, req.channel)
@@ -311,6 +344,27 @@ async def start_discussion(session_id: str) -> OkResponse:
 @router.post("/{session_id}/pass-turn", response_model=OkResponse)
 async def pass_turn(session_id: str) -> OkResponse:
     session = _get_session(session_id)
+    if session.coordinator is not None:
+        session.coordinator.resume_after_human(session)
+        await session.coordinator.advance_discussion(session)
+    return OkResponse()
+
+
+@router.post("/{session_id}/discussion-control", response_model=OkResponse)
+async def discussion_control(session_id: str, req: DiscussionControlRequest) -> OkResponse:
+    session = _get_session(session_id)
+    if req.action == "pause":
+        session.discussion_pause_requested = True
+        task = session.discussion_advance_task
+        if task is None or task.done():
+            session.discussion_pause_requested = False
+            session.discussion_paused = True
+        return OkResponse()
+    if req.action not in ("resume", "step"):
+        raise HTTPException(status_code=400, detail="unknown discussion control action")
+    session.discussion_pause_requested = False
+    session.discussion_paused = False
+    session.discussion_step_budget = 1 if req.action == "step" else None
     if session.coordinator is not None:
         session.coordinator.resume_after_human(session)
         await session.coordinator.advance_discussion(session)
