@@ -342,6 +342,16 @@ class ContextBuilder:
         self, state: GameState, player_id: str, stage: str = "initial"
     ) -> tuple[str, list[Message]]:
         guides = self._role_specific_guides(state, player_id)
+        personality = self._personalities[player_id]
+        target_chars = {"terse": "30〜100", "normal": "80〜240", "wordy": "180〜400"}.get(
+            personality.verbosity, "80〜240"
+        )
+        stage_instruction = (
+            "reaction段階では、新論点を無理に作らず、短い同意・驚き・反論・回答だけでも構いません。"
+            if stage == "reaction"
+            else "未検討の論点を一つ提示する、具体的な相手へ根拠を問う、直前の意見へ反論する、"
+            "または発言から処刑候補を絞る、のいずれかを行ってください。"
+        )
         return self._assemble(
             [self._layer_a_system(state, player_id), self._layer_b_role(state, player_id)],
             [
@@ -350,9 +360,9 @@ class ContextBuilder:
                 self._layer_d_summaries(),
                 self._layer_previous_memo(player_id),
                 self._layer_e_current_log(state, ChatChannel.PUBLIC),
-                f"【議論段階】{stage}。状況の復唱や単なる同意だけで発言を終えないでください。"
-                "未検討の論点を一つ提示する、具体的な相手へ根拠を問う、直前の意見へ反論する、"
-                "または発言から処刑候補を絞る、のいずれかを必ず行ってください。"
+                f"【議論段階】{stage}。発言長の目安は{target_chars}字です。"
+                + stage_instruction
+                +
                 "直近の複数人がすでに述べた結論・質問を言い換えて繰り返してはいけません。"
                 "同じ処刑候補を支持する場合も、未提示の投票履歴・死体・能力結果・発言差を"
                 "一つ追加してください。名指しされた本人は質問への直接回答を最初に述べてください。"

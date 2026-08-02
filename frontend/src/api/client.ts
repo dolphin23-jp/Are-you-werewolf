@@ -107,6 +107,10 @@ export function endDiscussion(sessionId: string): Promise<void> {
   return request(`/api/games/${sessionId}/end-discussion`, { method: "POST" });
 }
 
+export function passDiscussionTurn(sessionId: string): Promise<void> {
+  return request(`/api/games/${sessionId}/pass-turn`, { method: "POST" });
+}
+
 export function startNight(sessionId: string): Promise<void> {
   return request(`/api/games/${sessionId}/start-night`, { method: "POST" });
 }

@@ -107,7 +107,17 @@ def create_game(req: CreateGameRequest) -> CreateGameResponse:
         provider = build_llm_provider(settings, seed=seed)
         transcript_recorder = TranscriptRecorder()
         coordinator: AICoordinator | None = AICoordinator(
-            controller.state, ai_ids, provider, seed=seed, recorder=transcript_recorder
+            controller.state,
+            ai_ids,
+            provider,
+            seed=seed,
+            recorder=transcript_recorder,
+            discussion_segment_size=settings.werewolf_discussion_segment_size,
+            pacing_scale=(
+                0.0
+                if settings.werewolf_llm_provider == "mock"
+                else settings.werewolf_ai_pacing_scale
+            ),
         )
     except LLMProviderConfigError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -153,7 +163,16 @@ async def start_game(session_id: str) -> OkResponse:
 def get_view(session_id: str, player_id: str | None = Query(default=None)) -> dict[str, Any]:
     session = _get_session(session_id)
     viewer = _resolve_player_id(session, player_id)
-    return session.controller.get_player_view(viewer)
+    view = session.controller.get_player_view(viewer)
+    round_state = session.discussion_round
+    view["awaiting_your_speech"] = bool(
+        round_state and round_state.awaiting_human and viewer == session.human_id
+    )
+    view["discussion_progress"] = {
+        "spoken": len(round_state.outputs) if round_state else 0,
+        "total": round_state.max_total if round_state else 0,
+    }
+    return view
 
 
 @router.get("/{session_id}/debug")
@@ -270,4 +289,14 @@ async def resolve_votes(session_id: str) -> OkResponse:
 async def start_discussion(session_id: str) -> OkResponse:
     session = _get_session(session_id)
     _run(session.controller.start_discussion)
+    await orchestrator.after_discussion_phase_entered(session)
+    return OkResponse()
+
+
+@router.post("/{session_id}/pass-turn", response_model=OkResponse)
+async def pass_turn(session_id: str) -> OkResponse:
+    session = _get_session(session_id)
+    if session.coordinator is not None:
+        session.coordinator.resume_after_human(session)
+        await session.coordinator.advance_discussion(session)
     return OkResponse()

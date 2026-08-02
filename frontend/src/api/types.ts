@@ -100,6 +100,8 @@ export interface GameView {
   public_chat: ChatMessage[];
   private_chat: ChatMessage[];
   pending_questions?: PendingQuestion[];
+  awaiting_your_speech?: boolean;
+  discussion_progress?: { spoken: number; total: number };
   your_divine_results: DivineResult[];
   your_medium_results: MediumResult[];
   co_declarations: CoDeclarationRecord[];
