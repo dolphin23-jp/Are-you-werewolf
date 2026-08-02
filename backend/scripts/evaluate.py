@@ -121,7 +121,7 @@ async def main() -> int:
     # WEREWOLF_LLM_PROVIDER from the environment, so a CLI *default* would
     # silently beat an env var the operator deliberately set. Settings
     # supplies the real default (mock) when this is omitted.
-    parser.add_argument("--provider", choices=["mock", "luna"], default=None)
+    parser.add_argument("--provider", choices=["mock", "scenario", "luna"], default=None)
     parser.add_argument("--seed", type=int, default=1, help="最初のゲームのシード")
     parser.add_argument("--out", type=Path, default=Path("eval-out"))
     parser.add_argument("--judge", action="store_true", help="日本語/人格をLLMで採点する(追加費用)")
