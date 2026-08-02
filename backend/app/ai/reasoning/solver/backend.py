@@ -63,7 +63,19 @@ class Unsatisfiable:
     reason: str
 
 
-Constraint = RoleIs | RoleIsNot | RoleIsOneOf | RoleCountIs | Unsatisfiable
+@dataclass(frozen=True)
+class AnyOf:
+    """At least one of these holds.
+
+    Needed the moment night events enter: two corpses in one morning means one
+    of the two was cursed, without saying which. Forcing that into a per-player
+    constraint would either overclaim or lose the deduction entirely.
+    """
+
+    options: tuple[Constraint, ...]
+
+
+Constraint = RoleIs | RoleIsNot | RoleIsOneOf | RoleCountIs | Unsatisfiable | AnyOf
 
 
 @dataclass(frozen=True)
@@ -146,6 +158,8 @@ def render_constraint(constraint: Constraint) -> str:
             return f"#{role.value}={count}"
         case Unsatisfiable(reason=reason):
             return f"false({reason})"
+        case AnyOf(options=options):
+            return f"any({'|'.join(sorted(render_constraint(item) for item in options))})"
     raise TypeError(f"unrenderable constraint {constraint!r}")
 
 

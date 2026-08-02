@@ -20,6 +20,7 @@ from collections.abc import Sequence
 import z3
 
 from app.ai.reasoning.solver.backend import (
+    AnyOf,
     Constraint,
     ContradictionResult,
     Hypothesis,
@@ -246,6 +247,8 @@ class Z3ConstraintBackend:
                 return z3.Or(*[self._var(pid) == _ROLE_INDEX[role] for role in roles])
             case Unsatisfiable():
                 return z3.BoolVal(False)
+            case AnyOf(options=options):
+                return z3.Or(*[self._encode(option) for option in options])
             case RoleCountIs(role=role, count=count):
                 index = _ROLE_INDEX[role]
                 return (

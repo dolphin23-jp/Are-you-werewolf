@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
+from app.ai.reasoning.evidence import SoftEvidence
 from app.ai.reasoning.observations import ObservationSet
 from app.ai.reasoning.perspectives import Perspective
 from app.ai.reasoning.solver.builder import ConstraintBuilder
@@ -24,6 +25,12 @@ class RuleModule(Protocol):
         perspective: Perspective,
         observations: ObservationSet,
     ) -> None: ...
+
+    def extract_soft_evidence(
+        self,
+        perspective: Perspective,
+        observations: ObservationSet,
+    ) -> list[SoftEvidence]: ...
 
     def explain(self, constraint_id: str) -> str: ...
 
@@ -45,6 +52,15 @@ class BaseRuleModule:
     ) -> None:
         self._explanations[constraint_id] = explanation
         builder.for_module(self.module_id).add(constraint_id, constraint, explanation)  # type: ignore[arg-type]
+
+    def extract_soft_evidence(
+        self,
+        perspective: Perspective,
+        observations: ObservationSet,
+    ) -> list[SoftEvidence]:
+        """No likelihoods yet. A module says what the rules permit; guessing how
+        likely a night action was belongs with the belief engine, not here."""
+        return []
 
     def explain(self, constraint_id: str) -> str:
         return self._explanations.get(constraint_id, "")
