@@ -118,6 +118,30 @@ def test_view_reports_human_speech_deadline_countdown():
     assert 34 <= view["speech_wait_remaining_seconds"] <= 35
 
 
+def test_discussion_can_be_paused_without_an_active_generation_task():
+    response = client.post("/api/games", json={"human_name": "Reader", "seed": 18})
+    session_id = response.json()["session_id"]
+
+    response = client.post(
+        f"/api/games/{session_id}/discussion-control", json={"action": "pause"}
+    )
+
+    assert response.status_code == 200
+    view = client.get(f"/api/games/{session_id}/view").json()
+    assert view["discussion_paused"] is True
+
+
+def test_discussion_control_rejects_unknown_actions():
+    response = client.post("/api/games", json={"human_name": "Reader", "seed": 19})
+    session_id = response.json()["session_id"]
+
+    response = client.post(
+        f"/api/games/{session_id}/discussion-control", json={"action": "rewind"}
+    )
+
+    assert response.status_code == 400
+
+
 def test_public_chat_role_claim_is_added_to_public_information():
     resp = client.post("/api/games", json={"human_name": "Claimant", "seed": 15})
     session_id = resp.json()["session_id"]

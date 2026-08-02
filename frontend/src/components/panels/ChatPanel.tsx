@@ -1,8 +1,22 @@
 import { Fragment, useEffect, useRef, useState } from "react";
-import { passDiscussionTurn, sendChat } from "../../api/client";
+import { controlDiscussion, passDiscussionTurn, sendChat } from "../../api/client";
 import type { ChatChannel, ChatMessage } from "../../api/types";
 import { useGameStore } from "../../state/gameStore";
 import { TypingIndicator } from "../common/TypingIndicator";
+
+const MESSAGE_REFERENCE_RE = /(【m\d+(?:への回答)?】|\[m\d+\]|m\d+)/g;
+
+function MessageBody({ content, onReference }: { content: string; onReference: (id: string) => void }) {
+  return content.split(MESSAGE_REFERENCE_RE).map((part, index) => {
+    const id = part.match(/m\d+/)?.[0];
+    if (!id) return <Fragment key={index}>{part}</Fragment>;
+    return (
+      <button key={index} type="button" className="chat-message__reference" onClick={() => onReference(id)}>
+        {part}
+      </button>
+    );
+  });
+}
 
 export function ChatPanel() {
   const view = useGameStore((s) => s.view);
@@ -18,7 +32,8 @@ export function ChatPanel() {
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [passing, setPassing] = useState(false);
-  const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
+  const [controlling, setControlling] = useState(false);
+  const [replyingTo, setReplyingTo] = useState<ChatMessage[]>([]);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
   const [newMessageCount, setNewMessageCount] = useState(0);
   const [waitRemaining, setWaitRemaining] = useState(0);
@@ -56,7 +71,7 @@ export function ChatPanel() {
   // zero would otherwise fire a pass request on every single poll.
   const waitToken = view?.speech_wait_token ?? null;
   useEffect(() => {
-    if (!view?.awaiting_your_speech || waitRemaining > 0 || !sessionId) return;
+    if (!view?.awaiting_your_speech || view.discussion_paused || waitRemaining > 0 || !sessionId) return;
     if (waitToken === null || autoPassedToken.current === waitToken) return;
     autoPassedToken.current = waitToken;
     void passDiscussionTurn(sessionId)
@@ -64,7 +79,7 @@ export function ChatPanel() {
       .catch((error: unknown) => {
         setError(error instanceof Error ? error.message : "パスに失敗しました");
       });
-  }, [refreshView, sessionId, setError, view?.awaiting_your_speech, waitRemaining, waitToken]);
+  }, [refreshView, sessionId, setError, view?.awaiting_your_speech, view?.discussion_paused, waitRemaining, waitToken]);
 
   if (!view || !sessionId) return null;
 
@@ -79,7 +94,11 @@ export function ChatPanel() {
   const channelMessages =
     tab === "public" ? view.public_chat : view.private_chat.filter((m) => m.channel === tab);
   const availableDays = Array.from(
-    new Set([...channelMessages.map((message) => message.day), ...view.vote_history.map((vote) => vote.day)]),
+    new Set([
+      ...channelMessages.map((message) => message.day),
+      ...view.vote_history.map((vote) => vote.day),
+      ...(tab === "public" && view.day > 0 ? [view.day] : []),
+    ]),
   ).sort((a, b) => a - b);
   const messages = channelMessages.filter(
     (message) =>
@@ -121,11 +140,12 @@ export function ChatPanel() {
         sessionId,
         content,
         tab,
-        replyingTo?.message_id,
-        replyingTo?.content.slice(0, 160),
+        replyingTo[0]?.message_id,
+        replyingTo[0]?.content.slice(0, 160),
+        replyingTo.slice(1).map((message) => message.message_id),
       );
       setDraft("");
-      setReplyingTo(null);
+      setReplyingTo([]);
       await refreshView();
     } catch (e) {
       setError(e instanceof Error ? e.message : "発言に失敗しました");
@@ -142,8 +162,16 @@ export function ChatPanel() {
   };
 
   const selectReply = (message: ChatMessage) => {
-    setReplyingTo(message);
+    setReplyingTo([message]);
     jumpToMessage(message.message_id);
+  };
+
+  const toggleQuestionReply = (message: ChatMessage) => {
+    setReplyingTo((current) =>
+      current.some((item) => item.message_id === message.message_id)
+        ? current.filter((item) => item.message_id !== message.message_id)
+        : [...current, message],
+    );
   };
 
   // Passing has its own in-flight flag: sharing `sending` made a pass disable the
@@ -158,6 +186,19 @@ export function ChatPanel() {
       setError(error instanceof Error ? error.message : "パスに失敗しました");
     } finally {
       setPassing(false);
+    }
+  };
+
+  const handleDiscussionControl = async (action: "pause" | "resume" | "step") => {
+    if (controlling) return;
+    setControlling(true);
+    try {
+      await controlDiscussion(sessionId, action);
+      await refreshView();
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "AI議論の操作に失敗しました");
+    } finally {
+      setControlling(false);
     }
   };
 
@@ -218,6 +259,11 @@ export function ChatPanel() {
             {view.players.filter((player) => publicDeathDay(player) === selectedDay && player.death_cause === "night_death").length > 0 && (
               <p className="system-message">{view.players.filter((player) => publicDeathDay(player) === selectedDay && player.death_cause === "night_death").map((player) => player.name).join("、")}が死体となって発見されました</p>
             )}
+            {selectedDay > 1 && selectedDay <= view.day && view.players.every(
+              (player) => publicDeathDay(player) !== selectedDay || player.death_cause !== "night_death",
+            ) && (
+              <p className="system-message">昨夜は誰も死体となって発見されませんでした</p>
+            )}
             {view.players.filter((player) => player.death_day === selectedDay && player.death_cause === "executed").map((player) => (
               <p className="system-message" key={`executed-${player.player_id}`}>投票の結果、{player.name}が処刑されました</p>
             ))}
@@ -228,7 +274,9 @@ export function ChatPanel() {
           const source = m.reply_to
             ? channelMessages.find((candidate) => candidate.message_id === m.reply_to)
             : undefined;
-          const grouped = index > 0 && messages[index - 1].author_id === m.author_id;
+          // A quote visually starts a new conversational unit. Keeping the author on
+          // that line prevents a consecutive post from looking like somebody else's.
+          const grouped = index > 0 && messages[index - 1].author_id === m.author_id && !m.reply_to;
           const showDay = selectedDay === "all" && (index === 0 || messages[index - 1].day !== m.day);
           return (
             <Fragment key={m.message_id}>
@@ -263,7 +311,19 @@ export function ChatPanel() {
                       <span>{m.quote || source?.content.slice(0, 160) || "元発言を表示"}</span>
                     </button>
                   )}
-                  <span className="chat-message__body">{m.content}</span>
+                  {(m.references ?? []).length > 0 && (
+                    <div className="chat-message__references">
+                      同時返信:
+                      {(m.references ?? []).map((messageId) => (
+                        <button key={messageId} type="button" onClick={() => jumpToMessage(messageId)}>
+                          [{messageId}]
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <span className="chat-message__body">
+                    <MessageBody content={m.content} onReference={jumpToMessage} />
+                  </span>
                   <button
                     className="chat-message__reply-button"
                     type="button"
@@ -307,6 +367,25 @@ export function ChatPanel() {
       )}
 
       <div className="chat-panel__input">
+        {view.phase === "discussion" && isAlive && (
+          <div className="discussion-controls">
+            {view.discussion_paused ? (
+              <>
+                <strong>AI議論は一時停止中です</strong>
+                <button className="btn" type="button" disabled={controlling} onClick={() => void handleDiscussionControl("step")}>
+                  次の1発言
+                </button>
+                <button className="btn" type="button" disabled={controlling} onClick={() => void handleDiscussionControl("resume")}>
+                  自動進行を再開
+                </button>
+              </>
+            ) : (
+              <button className="btn" type="button" disabled={controlling} onClick={() => void handleDiscussionControl("pause")}>
+                AI議論を一時停止
+              </button>
+            )}
+          </div>
+        )}
         {/* Shown to living players too: while a round is segmented and paced, the
             log can sit still for a while, and "how far along is this day" is the
             question that answers. It was previously visible only after you died. */}
@@ -315,7 +394,7 @@ export function ChatPanel() {
             AI議論進行: {view.discussion_progress.spoken}/{view.discussion_progress.total}
           </small>
         )}
-        {view.awaiting_your_speech && (
+        {view.awaiting_your_speech && !view.discussion_paused && (
           <div className="speech-waiting">
             <strong>あなたの発言を待っています（残り {waitRemaining} 秒）</strong>
             <button className="btn" type="button" disabled={passing} onClick={() => void handlePass()}>
@@ -334,8 +413,16 @@ export function ChatPanel() {
                 <button
                   key={question.source_message_id}
                   type="button"
-                  onClick={() => source && selectReply(source)}
+                  onClick={() => source && toggleQuestionReply(source)}
+                  aria-pressed={Boolean(source && replyingTo.some((item) => item.message_id === source.message_id))}
                 >
+                  <input
+                    type="checkbox"
+                    readOnly
+                    checked={Boolean(source && replyingTo.some((item) => item.message_id === source.message_id))}
+                    onClick={(event) => event.stopPropagation()}
+                    onChange={() => source && toggleQuestionReply(source)}
+                  />
                   [{question.source_message_id}] {playerNames[question.asker] ?? question.asker}: 「{question.question}」
                 </button>
               );
@@ -346,10 +433,10 @@ export function ChatPanel() {
           <TypingIndicator label={`${(view.typing_player_ids ?? []).map((id) => playerNames[id] ?? id).join("、")}が書き込み中…`} />
         )}
         <div className="chat-composer">
-        {replyingTo && (
+        {replyingTo.length > 0 && (
           <div className="reply-preview">
-            <span>返信先 [{replyingTo.message_id}] {playerNames[replyingTo.author_id] ?? replyingTo.author_id}: {replyingTo.content}</span>
-            <button type="button" onClick={() => setReplyingTo(null)} aria-label="返信をキャンセル">×</button>
+            <span>返信先 {replyingTo.map((message) => `[${message.message_id}] ${playerNames[message.author_id] ?? message.author_id}`).join("、")}</span>
+            <button type="button" onClick={() => setReplyingTo([])} aria-label="返信をキャンセル">×</button>
           </div>
         )}
         <div className="chat-composer__row"><textarea

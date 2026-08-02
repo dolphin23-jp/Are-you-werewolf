@@ -49,7 +49,8 @@ DISCUSSION_OUTPUT_INSTRUCTION = """以下のJSON形式で回答してくださ�
 "key_point": "今回新たに出す論点を1行で。新規論点がなければ空文字", \
 "agrees_with": ["同意する既出発言ID(mN)"], \
 "directed_questions": [{"target_id": "質問相手pN", "question": "質問", \
-"source_message_id": "質問のきっかけになった発言IDまたはnull"}], \
+"source_message_id": "質問のきっかけになった発言IDまたはnull", \
+"topic": "execution_candidate|fox_candidate|claim_reason|timeline|other"}], \
 "ready_to_vote": trueまたはfalse, "needs_another_statement": trueまたはfalse}
 主要候補が反論し、各視点と未解決質問を検討し終えた場合だけready_to_vote=true。
 新規論点がなくagrees_withだけの場合はreactionとして60文字以内の短い同意にする。
@@ -167,8 +168,9 @@ class ContextBuilder:
             "- 自分自身を疑い先・処刑先・能力対象として扱ってはいけません\n"
             "- 名指しの質問には1回だけ追加返信の機会があります。返信前の相手を"
             "『答えられない』と評価せず、同じ要求を繰り返さないでください\n"
-            "- CO待ちだけで発言を消費せず、各CO者を真と仮定した内訳、矛盾、"
-            "処刑希望、妖狐候補のいずれかを具体化してください\n"
+            "- CO待ちだけで発言を消費せず、処刑希望・妖狐候補・新しく判明した矛盾の"
+            "いずれかを具体化してください。既出のCO内訳や両視点で同じ成立条件は再掲せず、"
+            "必要ならagrees_withで参照して新しい含意だけを述べてください\n"
             "- reasoning_memoは非公開です。人狼・狂人は本当の役職と陣営目的を隠さず考えてください"
         )
 
@@ -336,8 +338,9 @@ class ContextBuilder:
     @staticmethod
     def _format_chat_line(state: GameState, message: ChatMessage) -> str:
         reply = f" →{message.reply_to}" if message.reply_to else ""
+        references = f" refs={','.join(message.references)}" if message.references else ""
         return (
-            f"[{message.message_id}{reply}] "
+            f"[{message.message_id}{reply}{references}] "
             f"{player_label(state, message.author_id)}: {message.content}"
         )
 

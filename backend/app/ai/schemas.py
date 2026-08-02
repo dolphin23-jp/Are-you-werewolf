@@ -17,6 +17,7 @@ class DirectedQuestion(BaseModel):
     target_id: str
     question: str = ""
     source_message_id: str | None = None
+    topic: str = ""
 
 
 class ReasoningMemo(BaseModel):

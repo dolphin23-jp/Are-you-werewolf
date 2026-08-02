@@ -26,6 +26,7 @@ from app.api.schemas import (
     CoRequest,
     CreateGameRequest,
     CreateGameResponse,
+    DiscussionControlRequest,
     NightActionRequest,
     OkResponse,
     VoteRequest,
@@ -171,6 +172,9 @@ def get_view(session_id: str, player_id: str | None = Query(default=None)) -> di
         round_state and round_state.awaiting_human and viewer == session.human_id
     )
     view["awaiting_your_speech"] = awaiting
+    view["discussion_paused"] = bool(
+        session.discussion_paused or session.discussion_pause_requested
+    )
     view["discussion_progress"] = {
         "spoken": len(round_state.outputs) if round_state else 0,
         "total": round_state.max_total if round_state else 0,
@@ -203,7 +207,13 @@ async def chat(
     session = _get_session(session_id)
     author = _resolve_player_id(session, player_id)
     message_id = _run(
-        session.controller.chat, author, req.content, req.channel, req.reply_to, req.quote
+        session.controller.chat,
+        author,
+        req.content,
+        req.channel,
+        req.reply_to,
+        req.quote,
+        req.references,
     )
     if req.channel == "public":
         state = session.controller.state
@@ -311,6 +321,27 @@ async def start_discussion(session_id: str) -> OkResponse:
 @router.post("/{session_id}/pass-turn", response_model=OkResponse)
 async def pass_turn(session_id: str) -> OkResponse:
     session = _get_session(session_id)
+    if session.coordinator is not None:
+        session.coordinator.resume_after_human(session)
+        await session.coordinator.advance_discussion(session)
+    return OkResponse()
+
+
+@router.post("/{session_id}/discussion-control", response_model=OkResponse)
+async def discussion_control(session_id: str, req: DiscussionControlRequest) -> OkResponse:
+    session = _get_session(session_id)
+    if req.action == "pause":
+        session.discussion_pause_requested = True
+        task = session.discussion_advance_task
+        if task is None or task.done():
+            session.discussion_pause_requested = False
+            session.discussion_paused = True
+        return OkResponse()
+    if req.action not in ("resume", "step"):
+        raise HTTPException(status_code=400, detail="unknown discussion control action")
+    session.discussion_pause_requested = False
+    session.discussion_paused = False
+    session.discussion_step_budget = 1 if req.action == "step" else None
     if session.coordinator is not None:
         session.coordinator.resume_after_human(session)
         await session.coordinator.advance_discussion(session)

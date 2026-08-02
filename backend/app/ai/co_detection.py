@@ -50,6 +50,10 @@ CO_PATTERNS: dict[RoleName, re.Pattern[str]] = {
 }
 
 _SENTENCE_SPLIT_RE = re.compile(r"[。！？!?\n]")
+_PARTNER_CONFIRMATION_RE = re.compile(
+    r"相方(?:は|が)[、，,\s]*私(?:[^。！？!?\n]{0,30})"
+    r"(?:です|だ|で間違い(?:ありません|ない)|で合っています|で合って(?:い)?ます)"
+)
 
 
 def detect_claimed_role(text: str, other_player_names: list[str] | None = None) -> RoleName | None:
@@ -61,6 +65,13 @@ def detect_claimed_role(text: str, other_player_names: list[str] | None = None) 
     """
     names = [n for n in (other_player_names or []) if n]
 
+    # A shared partner confirmation necessarily mentions the first claimant before
+    # describing oneself (「ユイの共有CO、相方は私…」).  It is nevertheless an
+    # explicit self-claim, so handle this established form before the generic
+    # third-person-report guard below.
+    if _PARTNER_CONFIRMATION_RE.search(text):
+        return RoleName.FREEMASON
+
     for sentence in _SENTENCE_SPLIT_RE.split(text):
         if not sentence.strip():
             continue
@@ -71,6 +82,32 @@ def detect_claimed_role(text: str, other_player_names: list[str] | None = None) 
             if _mentions_other_before(sentence, names, match.start()):
                 continue
             return role
+    return None
+
+
+def detect_freemason_partner(
+    text: str, candidates: dict[str, str]
+) -> str | None:
+    """Return the player id publicly named as the speaker's shared partner.
+
+    Handles both an initial reveal (「相方はツムギ(p11)」) and the standard
+    confirmation form (「ユイの共有CO、相方は私」).  A bare role discussion
+    without the word 相方 is deliberately ignored.
+    """
+    if "相方" not in text:
+        return None
+    confirmation = _PARTNER_CONFIRMATION_RE.search(text)
+    for player_id, name in candidates.items():
+        labels = (name, player_id, f"({player_id})")
+        if confirmation is not None:
+            prefix = text[: confirmation.start()]
+            if any(label in prefix for label in labels):
+                return player_id
+            continue
+        partner_index = text.find("相方")
+        suffix = text[partner_index : partner_index + 50]
+        if any(label in suffix for label in labels):
+            return player_id
     return None
 
 
