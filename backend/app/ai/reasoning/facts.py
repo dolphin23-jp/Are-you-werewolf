@@ -84,6 +84,7 @@ class PublicResultFact:
     target_id: str
     is_werewolf: bool
     day: int
+    source_message_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -293,6 +294,7 @@ class PublicFactLedger:
                 target_id=claim.target_id,
                 is_werewolf=claim.is_werewolf,
                 day=claim.day,
+                source_message_id=claim.source_message_id,
             )
             for claim in self._state.public_result_claims
         )
