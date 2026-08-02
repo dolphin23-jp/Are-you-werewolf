@@ -79,8 +79,10 @@ ROLE_DEFINITIONS: dict[RoleName, RoleDefinition] = {
 TOTAL_PLAYERS = sum(d.count for d in ROLE_DEFINITIONS.values())
 assert TOTAL_PLAYERS == 17
 
-# Roles that must never be the scripted Day-0 first victim.
-_FIRST_VICTIM_EXCLUDED = {RoleName.WEREWOLF, RoleName.FOX}
+# Roles that must never be the scripted Day-0 first victim. Public because it is
+# a rule the table can reason from, not just an implementation detail of the
+# assigner: everyone knows the first victim was neither wolf nor fox.
+FIRST_VICTIM_EXCLUDED_ROLES = frozenset({RoleName.WEREWOLF, RoleName.FOX})
 
 
 class RoleAssigner:
@@ -102,7 +104,9 @@ class RoleAssigner:
 
     def pick_first_victim(self, assignment: dict[str, RoleName]) -> str:
         """Pick the Day-0 scripted victim, guaranteed not to be Wolf/Fox."""
-        eligible = [pid for pid, role in assignment.items() if role not in _FIRST_VICTIM_EXCLUDED]
+        eligible = [
+            pid for pid, role in assignment.items() if role not in FIRST_VICTIM_EXCLUDED_ROLES
+        ]
         return self._rng.choice(eligible)
 
 
