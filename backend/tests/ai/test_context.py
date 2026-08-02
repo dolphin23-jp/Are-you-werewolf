@@ -55,6 +55,20 @@ def test_vote_candidates_carry_both_name_and_id():
     assert "Player3(p3)" in body
 
 
+def test_vote_prompt_requires_independent_evidence_and_countercase():
+    controller = make_controller(seed=4)
+    state = controller.state
+    builder = _builder(state)
+
+    _, messages = builder.build_vote_context(state, "p1", ["p2", "p3"])
+    body = messages[0].content
+
+    assert "decisive_evidence" in body
+    assert "countercase" in body
+    assert "多数派、共有指定、他者への同意だけを投票理由" in body
+    assert "自吊り拒否、COの短さ、初日占い理由の薄さ" in body
+
+
 def test_wolf_allies_carry_ids_so_a_wolf_can_avoid_voting_for_a_partner():
     controller = make_controller(seed=4)
     state = controller.state
@@ -119,6 +133,18 @@ def test_discussion_prompt_localizes_stage_and_includes_vote_history():
     assert "【議論段階】初回意見" in body
     assert "initial_view" not in body
     assert "200文字" not in (_system + body)
+
+
+def test_discussion_prompt_uses_role_neutral_evidence_standards():
+    controller = make_controller(seed=4)
+    builder = _builder(controller.state)
+
+    system, _messages = builder.build_discussion_context(controller.state, "p3")
+
+    assert "初日・0日目の占い先は発言情報がないランダム選択でも自然" in system
+    assert "CO文が短いこと、丁寧さや強い口調そのものを偽要素" in system
+    assert "自吊りを拒むこと自体を黒要素にせず" in system
+    assert "黒一致だけで占い師の真は確定しません" in system
 
 
 def test_vote_history_is_limited_to_the_most_recent_two_days():
@@ -317,3 +343,17 @@ def test_reaction_stage_still_asks_for_an_anchored_target():
     _, messages = builder.build_discussion_context(state, "p2", "reaction")
     prompt = "\n".join(m.content for m in messages)
     assert "reply_to" in prompt and "quote" in prompt
+
+
+def test_minority_review_requires_countercase_and_alternative():
+    controller = make_controller(seed=4)
+    builder = _builder(controller.state)
+
+    _, messages = builder.build_discussion_context(
+        controller.state, "p2", "minority_review:p0"
+    )
+    prompt = "\n".join(message.content for message in messages)
+
+    assert "Player0(p0)へ集中" in prompt
+    assert "反対仮説" in prompt
+    assert "別の処刑候補" in prompt

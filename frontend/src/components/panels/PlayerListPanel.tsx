@@ -33,6 +33,14 @@ export function PlayerListPanel() {
               {p.player_id === view.first_victim_id ? `初日犠牲者（${p.name}）` : p.name}
             </button>
             {!p.alive && <span className="tag">{deathLabel(p.death_cause)}</span>}
+            {view.freemason_partner_claims.some(
+              (claim) =>
+                (claim.claimant_id === p.player_id || claim.partner_id === p.player_id) &&
+                claim.confirmed,
+            ) && <span className="tag">共有相方確認済み</span>}
+            {view.freemason_partner_claims.some(
+              (claim) => claim.partner_id === p.player_id && !claim.confirmed,
+            ) && <span className="tag">相方確認待ち</span>}
           </li>
         ))}
       </ul>
