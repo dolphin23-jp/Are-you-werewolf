@@ -75,6 +75,66 @@ def test_named_ai_partner_speaks_before_remaining_initial_order():
     assert round_state.order == ["p3"]
 
 
+def test_ai_freemasons_can_use_a_hidden_partner_opening_and_reveal_after_death():
+    controller = make_controller(seed=4)
+    controller.state.players["p1"].role = RoleName.FREEMASON
+    controller.state.players["p2"].role = RoleName.FREEMASON
+    coordinator = AICoordinator(
+        controller.state, ["p1", "p2"], MorningPriorityProvider(), seed=1
+    )
+    coordinator._freemason_public_plan = ("p1", "p2", False)
+
+    assert coordinator._freemason_opening(controller.state, "p1") == (
+        "共有者CO。相方は生存しています。"
+    )
+    assert coordinator._freemason_must_hide(controller.state, "p2") is True
+
+    controller.co("p1", RoleName.FREEMASON.value)
+    controller.state.players["p1"].alive = False
+    assert coordinator._freemason_opening(controller.state, "p2") == (
+        "共有者CO。相方は死亡したPlayer1(p1)です。"
+    )
+
+
+def test_full_reveal_names_partner_then_allows_confirmation():
+    controller = make_controller(seed=4)
+    controller.state.players["p1"].role = RoleName.FREEMASON
+    controller.state.players["p2"].role = RoleName.FREEMASON
+    coordinator = AICoordinator(
+        controller.state, ["p1", "p2"], MorningPriorityProvider(), seed=1
+    )
+    coordinator._freemason_public_plan = ("p1", "p2", True)
+
+    assert coordinator._freemason_opening(controller.state, "p1") == (
+        "共有者CO。相方はPlayer2(p2)です。"
+    )
+    assert coordinator._freemason_must_hide(controller.state, "p2") is True
+
+    coordinator.register_public_claim(
+        controller,
+        "p1",
+        DiscussionOutput(public_message="共有者CO。相方はPlayer2(p2)です。"),
+        "m1",
+    )
+    assert coordinator._freemason_must_hide(controller.state, "p2") is False
+
+
+def test_hidden_partner_reveals_immediately_when_given_a_public_black_result():
+    controller = make_controller(seed=4)
+    controller.state.players["p1"].role = RoleName.FREEMASON
+    controller.state.players["p2"].role = RoleName.FREEMASON
+    coordinator = AICoordinator(
+        controller.state, ["p1", "p2"], MorningPriorityProvider(), seed=1
+    )
+    coordinator._freemason_public_plan = ("p1", "p2", False)
+    controller.public_result("p3", "seer", "p2", True)
+
+    assert coordinator._freemason_must_hide(controller.state, "p2") is False
+    assert coordinator._freemason_opening(controller.state, "p2") == (
+        "共有者CO。相方はPlayer1(p1)です。"
+    )
+
+
 def test_question_topic_groups_equivalent_execution_questions():
     assert AICoordinator._question_topic("今日の処刑候補は誰ですか") == "execution_candidate"
     assert AICoordinator._question_topic("一番怪しい灰は誰ですか") == "execution_candidate"

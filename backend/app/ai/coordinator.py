@@ -79,6 +79,17 @@ class AICoordinator:
             if question.topic
         }
         self._forced_partner_confirmations: set[str] = set()
+        self._freemason_public_plan: tuple[str, str, bool] | None = None
+        self._freemason_death_announced: set[str] = set()
+        freemasons = [
+            player.player_id
+            for player in state.players_by_role(RoleName.FREEMASON)
+            if player.player_id in self._ai_player_ids
+        ]
+        if len(freemasons) == 2:
+            plan_rng = random.Random(f"{seed}:freemason-public-plan")
+            leader, partner = plan_rng.sample(freemasons, 2)
+            self._freemason_public_plan = (leader, partner, plan_rng.random() < 0.5)
         self._metrics = getattr(provider, "_metrics", None)
 
         self._personalities = assign_personalities(self._ai_player_ids, seed=seed)
@@ -529,6 +540,33 @@ class AICoordinator:
         system, messages = self._context.build_morning_intent_context(state, player_id)
         output = await self._agents[player_id].generate_morning_intent(system, messages)
         player = state.players[player_id]
+        if self._freemason_public_plan is not None and player.role == RoleName.FREEMASON:
+            leader, partner, full_reveal = self._freemason_public_plan
+            leader_alive = state.players[leader].alive
+            partner_alive = state.players[partner].alive
+            already_claimed = any(
+                claim.player_id == player_id for claim in state.co_declarations
+            )
+            if player_id == leader and not already_claimed:
+                output.timing = "after_results"
+                output.intent = "claim"
+                output.public_claim_role = RoleName.FREEMASON.value
+            elif player_id == partner and not already_claimed:
+                under_black = any(
+                    claim.target_id == player_id and claim.is_werewolf
+                    for claim in state.public_result_claims
+                )
+                if leader_alive and not under_black:
+                    output.timing = "hold"
+                    output.intent = "normal"
+                    output.public_claim_role = None
+                else:
+                    output.timing = "immediate"
+                    output.intent = "claim"
+                    output.public_claim_role = RoleName.FREEMASON.value
+            elif player_id == leader and already_claimed and not partner_alive and not full_reveal:
+                output.timing = "immediate"
+                output.intent = "lead"
         has_divine = any(r.seer_id == player_id for r in state.divine_records)
         has_medium = any(r.medium_id == player_id for r in state.medium_records)
         if (player.role == RoleName.SEER and has_divine) or (
@@ -545,6 +583,18 @@ class AICoordinator:
         if state.phase != Phase.DISCUSSION:
             return None
         system, messages = self._context.build_discussion_context(state, player_id, stage)
+        freemason_opening = self._freemason_opening(state, player_id)
+        freemason_must_hide = self._freemason_must_hide(state, player_id)
+        if freemason_opening is not None:
+            system += (
+                "\n\n【共有公開計画】この発言では指定された共有CO文を最初に"
+                "そのまま述べてください。"
+            )
+        elif freemason_must_hide:
+            system += (
+                "\n\n【共有公開計画】あなたは潜伏側です。共有CO、相方の名前、共有者だと"
+                "推測できる表現を公開発言に絶対に含めないでください。"
+            )
         controller.set_typing(player_id, True)  # type: ignore[attr-defined]
         try:
             output = await self._agents[player_id].generate_discussion(system, messages)
@@ -554,6 +604,16 @@ class AICoordinator:
             self._metrics.record_discussion_result(skipped=output is None)
         if output is None:
             return None
+        if freemason_opening is not None:
+            output.public_message = freemason_opening
+            output.public_claim_role = RoleName.FREEMASON.value
+            output.contains_co_claim = True
+            if "死亡" in freemason_opening:
+                self._freemason_death_announced.add(player_id)
+        elif freemason_must_hide and detect_claimed_role(output.public_message) is not None:
+            output.public_message = "現時点ではCOしません。既出の判定と灰の発言を比較します。"
+            output.public_claim_role = None
+            output.contains_co_claim = False
         valid_reassessments = [
             item
             for item in output.reassessments
@@ -688,6 +748,56 @@ class AICoordinator:
             except Exception:
                 pass
         return output
+
+    def _freemason_must_hide(self, state: GameState, player_id: str) -> bool:
+        if self._freemason_public_plan is None:
+            return False
+        leader, partner, full_reveal = self._freemason_public_plan
+        named_for_confirmation = any(
+            claim.partner_id == player_id for claim in state.freemason_partner_claims
+        )
+        partner_under_black = any(
+            claim.target_id == player_id and claim.is_werewolf
+            for claim in state.public_result_claims
+        )
+        return (
+            player_id == partner
+            and state.players[leader].alive
+            and not partner_under_black
+            and (not full_reveal or not named_for_confirmation)
+            and not any(claim.player_id == player_id for claim in state.co_declarations)
+        )
+
+    def _freemason_opening(self, state: GameState, player_id: str) -> str | None:
+        """Return the public line required by the AI-only shared-role plan."""
+        if self._freemason_public_plan is None:
+            return None
+        leader, partner, full_reveal = self._freemason_public_plan
+        if any(claim.player_id == player_id for claim in state.co_declarations):
+            if (
+                player_id == leader
+                and not state.players[partner].alive
+                and not full_reveal
+                and player_id not in self._freemason_death_announced
+            ):
+                return "共有者として報告します。相方は死亡しました。"
+            return None
+        if player_id == leader:
+            if full_reveal:
+                partner_player = state.players[partner]
+                return f"共有者CO。相方は{partner_player.name}({partner})です。"
+            return "共有者CO。相方は生存しています。"
+        partner_under_black = any(
+            claim.target_id == player_id and claim.is_werewolf
+            for claim in state.public_result_claims
+        )
+        if player_id == partner and (
+            not state.players[leader].alive or partner_under_black
+        ):
+            leader_player = state.players[leader]
+            status = "死亡した" if not state.players[leader].alive else ""
+            return f"共有者CO。相方は{status}{leader_player.name}({leader})です。"
+        return None
 
     def _is_fallback(self, player_id: str, text: str) -> bool:
         """The agent substitutes a personality-specific canned line when the
