@@ -9,6 +9,7 @@ from app.ai.provider.base import Message, SchemaT
 from app.ai.schemas import DirectedQuestion, DiscussionOutput, MorningIntentOutput
 from app.engine.phases import Phase
 from app.engine.roles import RoleName
+from app.engine.state import PendingQuestion
 from app.sessions.models import DiscussionRoundState
 from tests.conftest import make_controller
 
@@ -78,6 +79,19 @@ def test_question_topic_groups_equivalent_execution_questions():
     assert AICoordinator._question_topic("今日の処刑候補は誰ですか") == "execution_candidate"
     assert AICoordinator._question_topic("一番怪しい灰は誰ですか") == "execution_candidate"
     assert AICoordinator._question_topic("狐候補を挙げてください") == "fox_candidate"
+
+
+def test_question_topic_ledger_is_seeded_from_existing_pending_questions():
+    controller = make_controller(seed=4)
+    controller.state.pending_questions["p2"] = [
+        PendingQuestion("p1", "p2", "初日占い理由は?", "m1", 1, "claim_reason")
+    ]
+
+    coordinator = AICoordinator(
+        controller.state, ["p1", "p2"], MorningPriorityProvider(), seed=1
+    )
+
+    assert (1, "p2", "claim_reason") in coordinator._asked_question_topics
 
 
 def test_concentrated_pressure_schedules_a_minority_review_before_summary():

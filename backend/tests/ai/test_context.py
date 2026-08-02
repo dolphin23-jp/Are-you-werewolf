@@ -55,6 +55,20 @@ def test_vote_candidates_carry_both_name_and_id():
     assert "Player3(p3)" in body
 
 
+def test_vote_prompt_requires_independent_evidence_and_countercase():
+    controller = make_controller(seed=4)
+    state = controller.state
+    builder = _builder(state)
+
+    _, messages = builder.build_vote_context(state, "p1", ["p2", "p3"])
+    body = messages[0].content
+
+    assert "decisive_evidence" in body
+    assert "countercase" in body
+    assert "多数派、共有指定、他者への同意だけを投票理由" in body
+    assert "自吊り拒否、COの短さ、初日占い理由の薄さ" in body
+
+
 def test_wolf_allies_carry_ids_so_a_wolf_can_avoid_voting_for_a_partner():
     controller = make_controller(seed=4)
     state = controller.state

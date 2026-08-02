@@ -72,7 +72,12 @@ class AICoordinator:
         self._pending_questions = state.pending_questions
         # Pending questions disappear when answered, but their topic must remain in
         # the day's ledger or another AI immediately asks the same thing again.
-        self._asked_question_topics: set[tuple[int, str, str]] = set()
+        self._asked_question_topics: set[tuple[int, str, str]] = {
+            (question.day, target_id, question.topic)
+            for target_id, questions in state.pending_questions.items()
+            for question in questions
+            if question.topic
+        }
         self._forced_partner_confirmations: set[str] = set()
         self._metrics = getattr(provider, "_metrics", None)
 

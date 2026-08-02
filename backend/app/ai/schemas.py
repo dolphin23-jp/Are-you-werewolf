@@ -79,6 +79,9 @@ class MorningIntentOutput(BaseModel):
 class VoteOutput(BaseModel):
     vote_target: str
     reason: str = ""
+    decisive_evidence: str = ""
+    countercase: str = ""
+    alternative_target: str | None = None
 
 
 class NightActionOutput(BaseModel):

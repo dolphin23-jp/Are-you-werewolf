@@ -75,7 +75,14 @@ MORNING_INTENT_OUTPUT_INSTRUCTION = """公開発言前の非公開判断です�
 占霊結果を見てから出たい共有などはafter_results。意図的潜伏はholdを選んでください。"""
 
 VOTE_OUTPUT_INSTRUCTION = """以下のJSON形式で回答してください:
-{"vote_target": "投票する相手のplayer_id", "reason": "簡潔な理由"}"""
+{"vote_target": "投票する相手のplayer_id", "reason": "簡潔な理由", \
+"decisive_evidence": "人数や口調ではない、投票を決めた最も強い独立根拠", \
+"countercase": "その相手が村側・真役職でも説明できる最も強い反対仮説", \
+"alternative_target": "次点候補のplayer_idまたはnull"}
+多数派、共有指定、他者への同意だけを投票理由にしてはいけません。現在の最多候補を
+投票する場合も、自分で確認した独立根拠と反対仮説を比較してください。黒を受けた
+占いCO者の生存欲、自吊り拒否、COの短さ、初日占い理由の薄さはdecisive_evidenceに
+できません。処刑で得る霊結果だけでなく、真役職だった場合に失う結果も比較します。"""
 
 NIGHT_ACTION_OUTPUT_INSTRUCTION = """以下のJSON形式で回答してください:
 {"target": "対象プレイヤーのplayer_id", "reason": "簡潔な理由"}"""
