@@ -13,6 +13,7 @@ formatting a sum as a percentage would only invent that authority.
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field, replace
 
 from app.ai.reasoning.solver.backend import Certainty
@@ -29,6 +30,20 @@ CONFIDENCE_SPREAD = 2.0
 
 def is_hard(score: float) -> bool:
     return abs(score) >= HARD_CONFIRMED_SCORE
+
+
+def tiebreak(salt: str, player_id: str) -> float:
+    """A stable per-seat ordering for candidates the evidence cannot separate.
+
+    Early on, most greys carry identical (zero) evidence. Breaking those ties by
+    seat number makes every AI name the same person, which looks like consensus
+    and is actually an artefact of sorting. Which grey you happen to distrust
+    with no evidence is genuinely arbitrary, so it varies per seat -- seeded, so
+    a game still replays exactly. Strictly a secondary key: it can never move a
+    candidate the evidence has separated.
+    """
+    digest = hashlib.sha256(f"{salt}|{player_id}".encode()).digest()
+    return int.from_bytes(digest[:4], "big") / 0xFFFFFFFF
 
 
 @dataclass(frozen=True)
@@ -90,7 +105,12 @@ class PlayerBeliefState:
         return tuple(self.evidence_links.get(subject_id, ()))
 
     def ranked_suspects(self) -> tuple[tuple[str, float], ...]:
-        """Most suspicious first; ties broken by seat order so it is stable."""
+        """Most suspicious first. Ties break per-seat rather than by seat number
+        -- see `tiebreak` for why that matters."""
+        salt = f"{self.player_id}:{self.perspective_id}"
         return tuple(
-            sorted(self.wolf_scores.items(), key=lambda item: (-item[1], item[0]))
+            sorted(
+                self.wolf_scores.items(),
+                key=lambda item: (-item[1], tiebreak(salt, item[0]), item[0]),
+            )
         )

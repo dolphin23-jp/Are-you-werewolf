@@ -20,6 +20,7 @@ from app.ai.coordinator import AICoordinator
 from app.ai.provider.factory import LLMProviderConfigError, build_llm_provider
 from app.ai.reasoning import PublicFactLedger
 from app.ai.reasoning.claims import build_claim_drafts, register_claim_drafts
+from app.ai.reasoning.runtime import ReasoningRuntime
 from app.ai.schemas import DiscussionOutput
 from app.api import orchestrator
 from app.api.schemas import (
@@ -110,12 +111,18 @@ def create_game(req: CreateGameRequest) -> CreateGameResponse:
     try:
         provider = build_llm_provider(settings, seed=seed)
         transcript_recorder = TranscriptRecorder()
+        reasoning = (
+            ReasoningRuntime(controller.state, ai_ids, seed=seed)
+            if settings.werewolf_reasoning_engine == "v2"
+            else None
+        )
         coordinator: AICoordinator | None = AICoordinator(
             controller.state,
             ai_ids,
             provider,
             seed=seed,
             recorder=transcript_recorder,
+            reasoning=reasoning,
             discussion_segment_size=settings.werewolf_discussion_segment_size,
             pacing_scale=(
                 0.0
@@ -226,6 +233,8 @@ async def chat(
                 DiscussionOutput(public_message=req.content),
                 message_id,
             )
+            # Corrections are checked once, in code, for the whole table.
+            session.coordinator.note_human_message(state, author, req.content)
         else:
             # Same conversion the coordinator uses, so a human claim becomes the
             # same kind of event whether or not AI players are in the game.

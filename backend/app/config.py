@@ -25,6 +25,11 @@ class Settings(BaseSettings):
     werewolf_discussion_wait_seconds: float = 45.0
 
     werewolf_llm_provider: str = "mock"
+    # legacy: every decision goes through the model, as before.
+    # v2: the reasoning layer decides votes, night actions and the speaking
+    # order in code, and the model is left with wording. Defaults to legacy so
+    # the switch is a deliberate act, not a side effect of upgrading.
+    werewolf_reasoning_engine: str = "legacy"
 
     luna_api_key: str = ""
     luna_base_url: str = "https://api.example.com/v1"
@@ -45,6 +50,14 @@ class Settings(BaseSettings):
         if normalized == "gpt-5.6-luna":
             return "luna"
         return normalized
+
+    @field_validator("werewolf_reasoning_engine", mode="before")
+    @classmethod
+    def _normalize_reasoning_engine(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        normalized = value.strip().strip('"\'').lower()
+        return normalized or "legacy"
 
     @field_validator("werewolf_rng_seed", mode="before")
     @classmethod

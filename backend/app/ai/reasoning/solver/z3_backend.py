@@ -251,9 +251,12 @@ class Z3ConstraintBackend:
                 return z3.Or(*[self._encode(option) for option in options])
             case RoleCountIs(role=role, count=count):
                 index = _ROLE_INDEX[role]
-                return (
-                    z3.Sum([z3.If(self._var(pid) == index, 1, 0) for pid in self._player_ids])
-                    == count
+                # Pseudo-boolean rather than Sum(If(...)): the composition is a
+                # cardinality constraint, and z3 has a dedicated solver for those.
+                # The arithmetic form measured ~40x slower on this board, which
+                # is the difference between a usable turn and a visible pause.
+                return z3.PbEq(
+                    [(self._var(pid) == index, 1) for pid in self._player_ids], count
                 )
         raise TypeError(f"unencodable constraint {constraint!r}")
 
