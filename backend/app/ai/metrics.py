@@ -35,6 +35,10 @@ class CallRecord:
     path: ParsePath
     latency_seconds: float
     attempt: int
+    # Logical generations and HTTP requests are deliberately separate: a
+    # strict-schema failure may require a second response-mode request, and
+    # either request may be retried at the transport/API boundary.
+    http_requests: int = 0
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
     error: str | None = None
@@ -111,9 +115,15 @@ class MetricsCollector:
 
         summary: dict[str, Any] = {
             "total_calls": total,
+            "http_requests": sum(r.http_requests for r in records),
             "success_rate": sum(1 for r in records if r.succeeded) / total,
             "parse_path_counts": by_path,
             "strict_schema_rate": by_path[ParsePath.STRICT_SCHEMA.value] / total,
+            "strict_schema_failures": total - by_path[ParsePath.STRICT_SCHEMA.value],
+            "json_object_successes": (
+                by_path[ParsePath.JSON_OBJECT.value] + by_path[ParsePath.PERMISSIVE.value]
+            ),
+            "complete_failures": by_path[ParsePath.FAILED.value],
             "retry_calls": sum(1 for r in records if r.attempt > 0),
             "latency_seconds": {
                 "mean": round(statistics.fmean(latencies), 3),
