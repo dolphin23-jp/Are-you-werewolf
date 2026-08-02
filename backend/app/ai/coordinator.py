@@ -162,6 +162,9 @@ class AICoordinator:
         effective_length_limit: int | None = None,
         key_point: str = "",
         agrees_with: list[str] | None = None,
+        decision_evidence: str = "",
+        countercase: str = "",
+        alternative_target: str | None = None,
     ) -> None:
         if self._recorder is None:
             return
@@ -189,6 +192,9 @@ class AICoordinator:
                 effective_length_limit=effective_length_limit,
                 key_point=key_point,
                 agrees_with=agrees_with or [],
+                decision_evidence=decision_evidence,
+                countercase=countercase,
+                alternative_target=alternative_target,
             )
         )
 
@@ -811,7 +817,16 @@ class AICoordinator:
             return
         system, messages = self._context.build_vote_context(state, player_id, candidates)
         output = await self._agents[player_id].generate_vote(system, messages, candidates)
-        self._record(state, player_id, "vote", text=output.reason, target=output.vote_target)
+        self._record(
+            state,
+            player_id,
+            "vote",
+            text=output.reason,
+            target=output.vote_target,
+            decision_evidence=output.decisive_evidence,
+            countercase=output.countercase,
+            alternative_target=output.alternative_target,
+        )
         try:
             controller.vote(player_id, output.vote_target)  # type: ignore[attr-defined]
         except Exception:

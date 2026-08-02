@@ -111,9 +111,16 @@ class AIPlayerAgent:
         self, system: str, messages: list[Message], valid_targets: list[str]
     ) -> VoteOutput:
         result = await self._generate_with_retry(system, messages, VoteOutput)
-        if result is None or result.vote_target not in valid_targets:
-            reason = result.reason if result else ""
-            return VoteOutput(vote_target=random.choice(valid_targets), reason=reason)
+        if result is None:
+            return VoteOutput(vote_target=random.choice(valid_targets))
+        if result.alternative_target not in valid_targets or (
+            result.alternative_target == result.vote_target
+        ):
+            result.alternative_target = None
+        if result.vote_target not in valid_targets:
+            fallback_target = result.alternative_target or random.choice(valid_targets)
+            result.vote_target = fallback_target
+            result.alternative_target = None
         return result
 
     async def generate_night_action(

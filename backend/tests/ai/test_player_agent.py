@@ -25,6 +25,19 @@ class _HallucinatingVoteProvider:
         raise AssertionError("unexpected schema")
 
 
+class _AlternativeVoteProvider:
+    async def generate_structured(self, *, response_schema, **kwargs):
+        if response_schema is VoteOutput:
+            return VoteOutput(
+                vote_target="not-a-real-player",
+                reason="第一候補が無効なら次点",
+                decisive_evidence="投票履歴",
+                countercase="村でも起こりうる",
+                alternative_target="p2",
+            )
+        raise AssertionError("unexpected schema")
+
+
 @pytest.mark.asyncio
 async def test_discussion_returns_none_on_total_failure():
     personality = PERSONALITIES[0]
@@ -48,6 +61,20 @@ async def test_invalid_vote_target_falls_back_to_random_valid_choice():
     valid = ["p1", "p2", "p3"]
     result = await agent.generate_vote("system", [Message(role="user", content="hi")], valid)
     assert result.vote_target in valid
+
+
+@pytest.mark.asyncio
+async def test_invalid_vote_target_prefers_the_models_valid_alternative():
+    agent = AIPlayerAgent(_AlternativeVoteProvider(), PERSONALITIES[0])
+
+    result = await agent.generate_vote(
+        "system", [Message(role="user", content="hi")], ["p1", "p2"]
+    )
+
+    assert result.vote_target == "p2"
+    assert result.decisive_evidence == "投票履歴"
+    assert result.countercase == "村でも起こりうる"
+    assert result.alternative_target is None
 
 
 class _TruncatingProvider:
