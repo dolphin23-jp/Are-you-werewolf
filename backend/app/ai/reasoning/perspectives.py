@@ -76,6 +76,33 @@ class PlayerPrivatePerspective(Perspective):
 
 
 @dataclass(frozen=True)
+class ClaimedStoryPerspective(Perspective):
+    """The world as a bluffer is publicly telling it.
+
+    A wolf's fake seer story has to hold together on its own terms: the only
+    thing it may take for granted is the role being claimed. Their real card and
+    their team are deliberately absent -- a story that quietly leans on knowing
+    where the wolves are is not a story the table could ever accept, and would
+    also let the bluffer "prove" things they have no public reason to believe.
+
+    Always a separate instance from the same player's `PlayerPrivatePerspective`,
+    with a distinct id, so the two can never share a cached deduction.
+    """
+
+    claimed_role: RoleName = RoleName.VILLAGER
+
+    def __init__(self, actor_id: str, claimed_role: RoleName) -> None:
+        object.__setattr__(self, "perspective_id", f"story:{actor_id}:{claimed_role.value}")
+        object.__setattr__(self, "viewer_id", actor_id)
+        object.__setattr__(self, "debug_only", False)
+        object.__setattr__(self, "claimed_role", claimed_role)
+
+    def known_roles(self, observations: ObservationSet) -> dict[str, RoleName]:
+        assert self.viewer_id is not None
+        return {self.viewer_id: self.claimed_role}
+
+
+@dataclass(frozen=True)
 class TrueWorldPerspective(Perspective):
     """Omniscient. Tests, evaluation and debugging only -- see module docstring."""
 

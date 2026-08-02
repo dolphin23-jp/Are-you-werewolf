@@ -29,7 +29,9 @@ from app.ai.reasoning.solver.backend import (
     RoleIsNot,
     RoleIsOneOf,
     SolverStats,
+    Unsatisfiable,
     WorldModel,
+    render_constraint,
 )
 from app.engine.roles import RoleName
 
@@ -61,8 +63,18 @@ class Z3ConstraintBackend:
         self._solver.set("random_seed", 0)
         for var in self._vars.values():
             self._solver.add(var >= 0, var < len(ROLE_ORDER))
+        # Each constraint hides behind its own literal, and every check asserts
+        # all of them. It costs nothing on a problem this size and it is what
+        # makes `unsat_core` able to name the handful of rules in conflict --
+        # otherwise an impossible story can only be reported as "impossible".
+        self._literals: dict[str, z3.BoolRef] = {}
         for labelled in self._constraints:
-            self._solver.add(self._encode(labelled.constraint))
+            literal = self._literal(labelled.constraint_id)
+            self._solver.add(z3.Implies(literal, self._encode(labelled.constraint)))
+        self._base_literals = tuple(self._literals.values())
+        self._by_literal = {
+            str(self._literal(item.constraint_id)): item for item in self._constraints
+        }
         # "Does this board admit any world at all" is asked by every `is_forced`
         # call and can never change: the constraint set is fixed at construction.
         self._base_satisfiable: bool | None = None
@@ -97,16 +109,43 @@ class Z3ConstraintBackend:
         return not self._check(assertions)
 
     def contradiction(self, *hypotheses: Hypothesis) -> ContradictionResult:
-        """Whether the assumptions can hold at all, and which rules constrain them."""
-        assertions: list[z3.BoolRef] = []
-        for hypothesis in hypotheses:
-            assertions.extend(self._encode_hypothesis(hypothesis))
-        if self._check(assertions):
-            return ContradictionResult(is_contradictory=False)
+        """Whether the assumptions can hold, and if not, which rules collide.
+
+        Extra hypotheses get their own tracking literals too, so a core can
+        point at "this claim is genuine" rather than only at the fixed rules.
+        """
+        extra: list[tuple[z3.BoolRef, LabelledConstraint]] = []
+        self._solver.push()
+        try:
+            for index, hypothesis in enumerate(hypotheses):
+                for claim_index, claim in enumerate(hypothesis.claims):
+                    labelled = LabelledConstraint(
+                        constraint_id=f"hypothesis:{index}:{claim_index}",
+                        constraint=claim,
+                        explanation=hypothesis.label or render_constraint(claim),
+                        module_id="hypothesis",
+                    )
+                    literal = z3.Bool(f"h!{index}!{claim_index}")
+                    self._solver.add(z3.Implies(literal, self._encode(claim)))
+                    extra.append((literal, labelled))
+                for claim in hypothesis.excluded:
+                    self._solver.add(z3.Not(self._encode(claim)))
+            literals = [literal for literal, _ in extra]
+            self._stats.checks += 1
+            outcome = self._solver.check(*self._base_literals, *literals)
+            if outcome == z3.sat:
+                return ContradictionResult(is_contradictory=False)
+            lookup = dict(self._by_literal)
+            lookup.update({str(literal): labelled for literal, labelled in extra})
+            core = [lookup[str(item)] for item in self._solver.unsat_core() if str(item) in lookup]
+        finally:
+            self._solver.pop()
+        if not core:
+            core = list(self._constraints)
         return ContradictionResult(
             is_contradictory=True,
-            constraint_ids=tuple(item.constraint_id for item in self._constraints),
-            explanations=tuple(item.explanation for item in self._constraints),
+            constraint_ids=tuple(item.constraint_id for item in core),
+            explanations=tuple(item.explanation for item in core),
         )
 
     def representative_models(
@@ -152,11 +191,16 @@ class Z3ConstraintBackend:
 
     # -- internals --
 
+    def _literal(self, constraint_id: str) -> z3.BoolRef:
+        if constraint_id not in self._literals:
+            self._literals[constraint_id] = z3.Bool(f"c!{constraint_id}")
+        return self._literals[constraint_id]
+
     def _check(self, assertions: Sequence[z3.BoolRef]) -> bool:
         self._stats.checks += 1
         # z3 is untyped, so the boundary between it and the rest of the codebase
         # is converted explicitly here rather than leaking Any upward.
-        return bool(self._solver.check(*assertions) == z3.sat)
+        return bool(self._solver.check(*self._base_literals, *assertions) == z3.sat)
 
     def _satisfiable(self) -> bool:
         if self._base_satisfiable is None:
@@ -200,6 +244,8 @@ class Z3ConstraintBackend:
                 return self._var(pid) != _ROLE_INDEX[role]
             case RoleIsOneOf(player_id=pid, roles=roles):
                 return z3.Or(*[self._var(pid) == _ROLE_INDEX[role] for role in roles])
+            case Unsatisfiable():
+                return z3.BoolVal(False)
             case RoleCountIs(role=role, count=count):
                 index = _ROLE_INDEX[role]
                 return (

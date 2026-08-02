@@ -12,7 +12,10 @@ from typing import TypeVar, cast
 
 from app.ai.reasoning.observations import ObservationSet
 from app.ai.reasoning.perspectives import Perspective
+from app.ai.reasoning.solver import assumptions as assumption_rules
+from app.ai.reasoning.solver.assumptions import Assumption
 from app.ai.reasoning.solver.backend import (
+    Certainty,
     ContradictionResult,
     Hypothesis,
     SolverStats,
@@ -41,13 +44,19 @@ class RoleSolver:
         *,
         rules: Sequence[RuleModule] | None = None,
         cache: SolverCache | None = None,
+        assumptions: Sequence[Assumption] = (),
     ) -> None:
         self.observations = observations
         self.perspective = perspective
+        self.assumptions = tuple(assumptions)
         self._modules = tuple(rules if rules is not None else default_rule_modules())
         builder = ConstraintBuilder()
         for module in self._modules:
             module.add_hard_constraints(builder, perspective, observations)
+        # Behavioural suppositions ride on top of the hard rules and are never
+        # folded into them: the same board with different assumptions is a
+        # different solver, and the assumption signature says which.
+        builder.constraints.extend(assumption_rules.expand(self.assumptions, observations))
         self._signature = builder.signature()
         self._stats = SolverStats(constraint_ids=list(builder.constraint_ids()))
         self._backend = Z3ConstraintBackend(
@@ -59,6 +68,21 @@ class RoleSolver:
     @property
     def stats(self) -> SolverStats:
         return self._stats
+
+    def assuming(self, *assumptions: Assumption) -> RoleSolver:
+        """A solver for the same board under additional suppositions.
+
+        A new instance rather than mutable state: "what follows if this claim is
+        real" must not leak back into the unconditional view, and the two need
+        separate cache identities.
+        """
+        return RoleSolver(
+            self.observations,
+            self.perspective,
+            rules=self._modules,
+            cache=self._cache,
+            assumptions=self.assumptions + assumptions,
+        )
 
     @property
     def cache(self) -> SolverCache:
@@ -93,6 +117,66 @@ class RoleSolver:
             "contradiction", hypotheses, lambda: self._backend.contradiction(*hypotheses)
         )
 
+    # -- certainty --
+
+    def assess(self, query: Hypothesis, given: Hypothesis | None = None) -> Certainty:
+        """Distinguish impossible / possible / certain / certain-only-if.
+
+        The fourth is the one play actually turns on: "X is a wolf if this seer
+        is real" is not knowledge, but it is not idle speculation either.
+        """
+        if given is None or given.is_empty:
+            if not self.is_possible(query):
+                return Certainty.IMPOSSIBLE
+            return Certainty.CERTAIN if self.is_forced(query) else Certainty.POSSIBLE
+        if not self.is_possible(given):
+            return Certainty.IMPOSSIBLE
+        if self.is_forced(query):
+            return Certainty.CERTAIN
+        if not self.implies(given, query):
+            return (
+                Certainty.POSSIBLE
+                if self.is_possible(query & given)
+                else Certainty.IMPOSSIBLE
+            )
+        return Certainty.CONDITIONAL
+
+    def required_latent_roles(self) -> tuple[RoleName, ...]:
+        """Roles that must be held by someone who never claimed them.
+
+        A bluffer's story can be internally consistent and still demand that,
+        say, the real seer is sitting quiet -- which is exactly the cost of the
+        story, and worth being able to state.
+        """
+        required = []
+        for role in ROLE_ORDER:
+            constraints = assumption_rules.no_latent_constraints(role, self.observations)
+            if not constraints:
+                continue
+            hypothesis = Hypothesis(
+                claims=tuple(item.constraint for item in constraints),
+                label=f"no latent {role.value}",
+            )
+            if not self.is_possible(hypothesis):
+                required.append(role)
+        return tuple(required)
+
+    def explain_contradiction(self, *hypotheses: Hypothesis) -> ContradictionResult:
+        """`contradiction`, but always answering in this board's own wording."""
+        result = self.contradiction(*hypotheses)
+        if not result.is_contradictory:
+            return result
+        return ContradictionResult(
+            is_contradictory=True,
+            constraint_ids=result.constraint_ids,
+            explanations=tuple(
+                self.explanations.explain(cid) or explanation
+                for cid, explanation in zip(
+                    result.constraint_ids, result.explanations, strict=True
+                )
+            ),
+        )
+
     # -- convenience --
 
     def possible_roles(self, player_id: str) -> tuple[RoleName, ...]:
@@ -120,7 +204,10 @@ class RoleSolver:
     ) -> _T:
         key = QueryKey(
             board_version=self.observations.board_version,
-            perspective_id=self.perspective.perspective_id,
+            perspective_id=(
+                f"{self.perspective.perspective_id}"
+                f"|{assumption_rules.signature(self.assumptions)}"
+            ),
             constraint_signature=self._signature,
             query_kind=kind,
             assumptions=tuple(hypothesis.cache_key() for hypothesis in hypotheses),
@@ -140,5 +227,8 @@ def build_solver(
     *,
     rules: Sequence[RuleModule] | None = None,
     cache: SolverCache | None = None,
+    assumptions: Sequence[Assumption] = (),
 ) -> RoleSolver:
-    return RoleSolver(observations, perspective, rules=rules, cache=cache)
+    return RoleSolver(
+        observations, perspective, rules=rules, cache=cache, assumptions=assumptions
+    )

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import Protocol
 
 from app.engine.roles import RoleName
@@ -48,7 +49,21 @@ class RoleCountIs:
     count: int
 
 
-Constraint = RoleIs | RoleIsNot | RoleIsOneOf | RoleCountIs
+@dataclass(frozen=True)
+class Unsatisfiable:
+    """An assumption the observations already contradict.
+
+    Some suppositions are not about who holds what -- "this claimant disclosed
+    everything" is refuted by counting their published results, not by a role
+    assignment. Expressing that as a constraint keeps the refusal inside the
+    solver, so it shows up in the unsat core with its own explanation instead of
+    being a special case the caller has to remember to check.
+    """
+
+    reason: str
+
+
+Constraint = RoleIs | RoleIsNot | RoleIsOneOf | RoleCountIs | Unsatisfiable
 
 
 @dataclass(frozen=True)
@@ -88,8 +103,8 @@ class Hypothesis:
         return not self.claims and not self.excluded
 
     def cache_key(self) -> str:
-        parts = [_render(claim) for claim in self.claims]
-        parts += [f"!{_render(claim)}" for claim in self.excluded]
+        parts = [render_constraint(claim) for claim in self.claims]
+        parts += [f"!{render_constraint(claim)}" for claim in self.excluded]
         return ";".join(sorted(parts))
 
 
@@ -118,7 +133,8 @@ def all_of(*hypotheses: Hypothesis) -> Hypothesis:
     return combined
 
 
-def _render(constraint: Constraint) -> str:
+def render_constraint(constraint: Constraint) -> str:
+    """Short, stable text for a constraint. Doubles as its cache-key fragment."""
     match constraint:
         case RoleIs(player_id=pid, role=role):
             return f"{pid}={role.value}"
@@ -128,6 +144,8 @@ def _render(constraint: Constraint) -> str:
             return f"{pid}in{{{','.join(sorted(r.value for r in roles))}}}"
         case RoleCountIs(role=role, count=count):
             return f"#{role.value}={count}"
+        case Unsatisfiable(reason=reason):
+            return f"false({reason})"
     raise TypeError(f"unrenderable constraint {constraint!r}")
 
 
@@ -151,14 +169,31 @@ class WorldModel:
 class ContradictionResult:
     """Why a set of assumptions cannot hold.
 
-    `constraint_ids` names the rules involved, so the explanation is derived
-    from code rather than invented by a model. PR5 fills the unsat core in;
-    here it carries the assumptions themselves.
+    `constraint_ids` is an unsat core: the subset of constraints that are
+    actually in conflict, not every constraint in play. That is what makes the
+    answer usable -- "占い師はちょうど1人 / p3のCOを真と仮定 / p7のCOを真と仮定"
+    names the contradiction, while a dump of thirty constraints does not. The
+    wording comes from the modules that declared them, so no model is inventing
+    the reason.
     """
 
     is_contradictory: bool
     constraint_ids: tuple[str, ...] = ()
     explanations: tuple[str, ...] = ()
+
+
+class Certainty(StrEnum):
+    """How settled a question is -- four states, routinely collapsed into two.
+
+    `CONDITIONAL` is the one that matters in play: "X is a wolf if this seer is
+    real" is neither knowledge nor speculation, and a village that cannot say
+    which of the two it has cannot decide what to do about it.
+    """
+
+    IMPOSSIBLE = "impossible"
+    POSSIBLE = "possible"
+    CERTAIN = "certain"
+    CONDITIONAL = "conditional"
 
 
 @dataclass
