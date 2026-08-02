@@ -28,6 +28,33 @@ def test_public_claim_registration_falls_back_to_spoken_message():
     assert claims == [("p1", RoleName.MEDIUM)]
 
 
+def test_named_freemason_partner_is_prompted_and_confirmation_closes_line():
+    controller = make_controller(seed=4)
+    coordinator = AICoordinator(controller.state, ["p1", "p2"], MorningPriorityProvider(), seed=1)
+
+    coordinator._register_public_claim(
+        controller,
+        "p1",
+        DiscussionOutput(public_message="共有者CO、相方はPlayer2(p2)です。"),
+        "m1",
+    )
+
+    relation = controller.state.freemason_partner_claims[0]
+    assert (relation.claimant_id, relation.partner_id, relation.confirmed) == ("p1", "p2", False)
+    assert controller.state.pending_questions["p2"][0].source_message_id == "m1"
+
+    coordinator._register_public_claim(
+        controller,
+        "p2",
+        DiscussionOutput(
+            public_message="Player1(p1)の共有者CO、相方は私Player2で間違いありません。"
+        ),
+        "m2",
+    )
+
+    assert relation.confirmed is True
+
+
 class ReplyLoopProvider:
     def __init__(self) -> None:
         self.calls = 0

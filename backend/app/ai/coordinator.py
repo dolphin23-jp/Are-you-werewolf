@@ -20,7 +20,7 @@ import random
 import time
 from collections import Counter
 
-from app.ai.co_detection import detect_claimed_role
+from app.ai.co_detection import detect_claimed_role, detect_freemason_partner
 from app.ai.context import ContextBuilder, DaySummaryManager
 from app.ai.deception import FakeClaimGuard, assign_madman_strategy, assign_wolf_deception
 from app.ai.personalities import assign_personalities, discussion_length_range
@@ -69,6 +69,7 @@ class AICoordinator:
         self._pacing_scale = max(0.0, pacing_scale)
         self._rng = random.Random(seed)
         self._pending_questions = state.pending_questions
+        self._forced_partner_confirmations: set[str] = set()
         self._metrics = getattr(provider, "_metrics", None)
 
         self._personalities = assign_personalities(self._ai_player_ids, seed=seed)
@@ -262,6 +263,9 @@ class AICoordinator:
                     continue
                 consecutive_failures = 0
                 round_state.outputs.append((pid, output))
+                for target_id in tuple(self._forced_partner_confirmations):
+                    self._round_queue_reply(state, round_state, target_id)
+                    self._forced_partner_confirmations.discard(target_id)
                 round_state.speech_counts[pid] = round_state.speech_counts.get(pid, 0) + 1
                 spoken += 1
                 step_budget = getattr(session, "discussion_step_budget", None)
@@ -476,6 +480,34 @@ class AICoordinator:
             self._metrics.record_discussion_result(skipped=output is None)
         if output is None:
             return None
+        pending_relation = next(
+            (
+                claim
+                for claim in state.freemason_partner_claims
+                if claim.partner_id == player_id
+                and not claim.confirmed
+                and state.players[claim.claimant_id].role == RoleName.FREEMASON
+                and state.players[player_id].role == RoleName.FREEMASON
+            ),
+            None,
+        )
+        if pending_relation is not None:
+            claimant = state.players[pending_relation.claimant_id]
+            output.public_message = (
+                f"共有者CO。{claimant.name}({pending_relation.claimant_id})の相方は"
+                f"私{state.players[player_id].name}({player_id})で間違いありません。"
+            )
+            output.public_claim_role = RoleName.FREEMASON.value
+            source_question = next(
+                (
+                    question
+                    for question in self._pending_questions.get(player_id, [])
+                    if question.asker == pending_relation.claimant_id
+                ),
+                None,
+            )
+            if source_question is not None:
+                output.reply_to = source_question.source_message_id
         if output.agrees_with and not output.key_point.strip():
             # Agreement with no new argument is a reaction, not an analysis. Cut at a
             # sentence boundary so the shortened line still reads as finished Japanese.
@@ -527,7 +559,7 @@ class AICoordinator:
                 )
             )
         self._context.record_key_point(state.day, message_id, player_id, output.key_point)
-        self._register_public_claim(controller, player_id, output)
+        self._register_public_claim(controller, player_id, output, message_id)
         for result in output.public_results:
             if result.target_id not in state.players:
                 continue
@@ -553,24 +585,61 @@ class AICoordinator:
         return text.strip() == self._personalities[player_id].get_fallback_message()
 
     def _register_public_claim(
-        self, controller: object, player_id: str, output: DiscussionOutput
+        self,
+        controller: object,
+        player_id: str,
+        output: DiscussionOutput,
+        message_id: str = "",
     ) -> None:
         state = controller.state  # type: ignore[attr-defined]
         already = any(c.player_id == player_id for c in state.co_declarations)
-        if already:
-            return
         other_names = [p.name for pid, p in state.players.items() if pid != player_id]
         # What was actually said is authoritative.  Structured metadata is a useful
         # hint, but models occasionally omit it even after writing an unambiguous CO.
         # Requiring both representations used to leave those public claims out of the
         # board analysis for the rest of the day.
         role = detect_claimed_role(output.public_message, other_names)
-        if role is None:
+        if role is not None and not already:
+            try:
+                controller.co(player_id, role.value)  # type: ignore[attr-defined]
+            except Exception:
+                pass
+        if role != RoleName.FREEMASON:
+            return
+        candidates = {
+            pid: player.name for pid, player in state.players.items() if pid != player_id
+        }
+        partner_id = detect_freemason_partner(output.public_message, candidates)
+        if partner_id is None:
             return
         try:
-            controller.co(player_id, role.value)  # type: ignore[attr-defined]
+            controller.claim_freemason_partner(player_id, partner_id)  # type: ignore[attr-defined]
         except Exception:
-            pass
+            return
+        relation = next(
+            (
+                claim
+                for claim in state.freemason_partner_claims
+                if claim.claimant_id == player_id and claim.partner_id == partner_id
+            ),
+            None,
+        )
+        if relation is None or relation.confirmed:
+            return
+        self._pending_questions.setdefault(partner_id, []).append(
+            PendingQuestion(
+                asker=player_id,
+                target=partner_id,
+                question=(
+                    "共有相方として指名されました。本人ならこの発言で確認共有COし、"
+                    "相方でなければ明確に否定してください。"
+                ),
+                source_message_id=message_id,
+                day=state.day,
+            )
+        )
+        if partner_id in self._agents:
+            self._forced_partner_confirmations.add(partner_id)
 
     # -- voting (loops across runoff rounds) --
 

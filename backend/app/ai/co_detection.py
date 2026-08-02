@@ -85,6 +85,32 @@ def detect_claimed_role(text: str, other_player_names: list[str] | None = None) 
     return None
 
 
+def detect_freemason_partner(
+    text: str, candidates: dict[str, str]
+) -> str | None:
+    """Return the player id publicly named as the speaker's shared partner.
+
+    Handles both an initial reveal (「相方はツムギ(p11)」) and the standard
+    confirmation form (「ユイの共有CO、相方は私」).  A bare role discussion
+    without the word 相方 is deliberately ignored.
+    """
+    if "相方" not in text:
+        return None
+    confirmation = _PARTNER_CONFIRMATION_RE.search(text)
+    for player_id, name in candidates.items():
+        labels = (name, player_id, f"({player_id})")
+        if confirmation is not None:
+            prefix = text[: confirmation.start()]
+            if any(label in prefix for label in labels):
+                return player_id
+            continue
+        partner_index = text.find("相方")
+        suffix = text[partner_index : partner_index + 50]
+        if any(label in suffix for label in labels):
+            return player_id
+    return None
+
+
 def _mentions_other_before(sentence: str, names: list[str], role_index: int) -> bool:
     for name in names:
         index = sentence.find(name)

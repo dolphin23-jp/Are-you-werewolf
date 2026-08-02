@@ -37,6 +37,7 @@ export function makeView(overrides: Partial<GameView> = {}): GameView {
     your_divine_results: [],
     your_medium_results: [],
     co_declarations: [],
+    freemason_partner_claims: [],
     vote_history: [],
     winner: null,
     victory_reason: "",

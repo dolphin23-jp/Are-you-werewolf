@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.ai.co_detection import detect_claimed_role
+from app.ai.co_detection import detect_claimed_role, detect_freemason_partner
 from app.engine.roles import RoleName
 
 
@@ -71,3 +71,16 @@ def test_claim_in_a_later_sentence_is_still_found():
 def test_shared_partner_confirmation_is_a_self_claim_despite_leading_name():
     text = "ユイ(p3)の共有者CO、相方は私ツムギ(p11)で間違いありません。"
     assert detect_claimed_role(text, ["ユイ", "ツムギ"]) is RoleName.FREEMASON
+
+
+def test_extracts_partner_from_reveal_and_confirmation_forms():
+    candidates = {"p3": "ユイ", "p11": "ツムギ"}
+    assert detect_freemason_partner("共有者CO、相方はツムギ(p11)です。", candidates) == "p11"
+    assert (
+        detect_freemason_partner(
+            "ユイ(p3)の共有者CO、相方は私ツムギ(p11)で間違いありません。",
+            candidates,
+        )
+        == "p3"
+    )
+    assert detect_freemason_partner("共有は相方生存のようですね。", candidates) is None

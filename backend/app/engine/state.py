@@ -118,6 +118,14 @@ class CoDeclaration:
 
 
 @dataclass
+class FreemasonPartnerClaim:
+    claimant_id: str
+    partner_id: str
+    day: int
+    confirmed: bool = False
+
+
+@dataclass
 class PublicResultClaim:
     claimant_id: str
     result_type: str
@@ -143,6 +151,7 @@ class GameState:
     vote_records: list[VoteRecord] = field(default_factory=list)
     death_records: list[DeathRecord] = field(default_factory=list)
     co_declarations: list[CoDeclaration] = field(default_factory=list)
+    freemason_partner_claims: list[FreemasonPartnerClaim] = field(default_factory=list)
     public_result_claims: list[PublicResultClaim] = field(default_factory=list)
     first_victim_id: str | None = None
     typing_channels: dict[str, str] = field(default_factory=dict)
@@ -241,6 +250,15 @@ class GameState:
                 {"player_id": c.player_id, "claimed_role": c.claimed_role, "day": c.day}
                 for c in self.co_declarations
             ],
+            "freemason_partner_claims": [
+                {
+                    "claimant_id": claim.claimant_id,
+                    "partner_id": claim.partner_id,
+                    "day": claim.day,
+                    "confirmed": claim.confirmed,
+                }
+                for claim in self.freemason_partner_claims
+            ],
             "public_result_claims": [
                 {
                     "claimant_id": claim.claimant_id,
@@ -322,6 +340,15 @@ class GameState:
             "co_declarations": [
                 {"player_id": c.player_id, "claimed_role": c.claimed_role, "day": c.day}
                 for c in self.co_declarations
+            ],
+            "freemason_partner_claims": [
+                {
+                    "claimant_id": claim.claimant_id,
+                    "partner_id": claim.partner_id,
+                    "day": claim.day,
+                    "confirmed": claim.confirmed,
+                }
+                for claim in self.freemason_partner_claims
             ],
             "winner": self.winner,
             "victory_reason": self.victory_reason,

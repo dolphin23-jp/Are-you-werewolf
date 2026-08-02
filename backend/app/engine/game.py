@@ -16,6 +16,7 @@ from app.engine.state import (
     ChatChannel,
     ChatMessage,
     CoDeclaration,
+    FreemasonPartnerClaim,
     GameState,
     PlayerState,
     PublicResultClaim,
@@ -350,6 +351,35 @@ class GameController:
         self.events.publish(
             GameEvent(GameEventType.CO_DECLARED, {"player_id": player_id, "claimed_role": role})
         )
+
+    def claim_freemason_partner(self, claimant_id: str, partner_id: str) -> None:
+        """Record only the public relationship claim, never the secret role truth."""
+        self._require_alive(claimant_id)
+        if partner_id not in self.state.players or partner_id == claimant_id:
+            raise GameError("invalid freemason partner")
+        reverse = next(
+            (
+                claim
+                for claim in self.state.freemason_partner_claims
+                if claim.claimant_id == partner_id and claim.partner_id == claimant_id
+            ),
+            None,
+        )
+        if reverse is not None:
+            reverse.confirmed = True
+            return
+        duplicate = any(
+            claim.claimant_id == claimant_id and claim.partner_id == partner_id
+            for claim in self.state.freemason_partner_claims
+        )
+        if not duplicate:
+            self.state.freemason_partner_claims.append(
+                FreemasonPartnerClaim(
+                    claimant_id=claimant_id,
+                    partner_id=partner_id,
+                    day=self.state.day,
+                )
+            )
 
     def public_result(
         self, claimant_id: str, result_type: str, target_id: str, is_werewolf: bool
