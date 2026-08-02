@@ -433,7 +433,11 @@ class ContextBuilder:
         return self._assemble(
             [self._layer_a_system(state, player_id), self._layer_b_role(state, player_id)],
             [
-                self._layer_c_state(state, player_id, []),
+                # The vote is where a faction's objective actually costs it something,
+                # so it needs the same doctrine the discussion and night phases get.
+                # Without it a fake seer argues its bluff all day and then votes like
+                # a plain villager.
+                self._layer_c_state(state, player_id, self._role_specific_guides(state, player_id)),
                 self._layer_d_summaries(),
                 self._layer_previous_memo(player_id),
                 self._layer_e_current_log(state, ChatChannel.PUBLIC),

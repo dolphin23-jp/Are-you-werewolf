@@ -15,7 +15,13 @@ from app.ai.personalities import assign_personalities
 from app.ai.strategy import StrategyAnalyzer, render_board_analysis
 from app.engine.phases import Phase
 from app.engine.roles import RoleName
-from app.engine.state import DivineRecord, MediumRecord, PendingQuestion, VoteRecord
+from app.engine.state import (
+    CoDeclaration,
+    DivineRecord,
+    MediumRecord,
+    PendingQuestion,
+    VoteRecord,
+)
 from app.engine.vote import VoteManager
 from tests.conftest import make_controller
 
@@ -245,3 +251,41 @@ def test_previous_private_reasoning_memo_is_reused():
 
     assert "前回の非公開思考メモ" in messages[0].content
     assert "継続思考" in messages[0].content
+
+
+def _fake_seer_builder(state, fake_seer_id: str) -> ContextBuilder:
+    wolf_ids = [p.player_id for p in state.players_by_role(RoleName.WEREWOLF)]
+    return ContextBuilder(
+        personalities=assign_personalities(list(state.players), seed=1),
+        day_summaries=DaySummaryManager(),
+        wolf_deception=WolfDeceptionAssignment(
+            pattern_name="fake_seer",
+            pattern_label="偽占い",
+            fake_role_by_player={fake_seer_id: RoleName.SEER},
+            lurking_player_ids=[w for w in wolf_ids if w != fake_seer_id],
+        ),
+        madman_fake_role=None,
+        fake_claim_guard=FakeClaimGuard(wolf_team_ids=set(wolf_ids)),
+    )
+
+
+def test_vote_prompt_carries_the_faction_doctrine_the_discussion_gets():
+    # The vote is where a bluff costs something. Without doctrine here a fake seer
+    # argues its claim all day and then votes like a plain villager.
+    controller = make_controller(seed=4)
+    state = controller.state
+    fake_seer = state.players_by_role(RoleName.WEREWOLF)[0].player_id
+    builder = _fake_seer_builder(state, fake_seer)
+    state.co_declarations.append(
+        CoDeclaration(player_id=fake_seer, claimed_role=RoleName.SEER, day=1)
+    )
+
+    # A phrase unique to fake-seer-objectives.md; "偽占い" alone also appears in the
+    # perspective doctrine that everyone receives.
+    doctrine = "【偽占いとしての目的】"
+    _, messages = builder.build_vote_context(state, fake_seer, ["p2", "p3"])
+    assert doctrine in "\n".join(m.content for m in messages)
+
+    villager = state.players_by_role(RoleName.VILLAGER)[0].player_id
+    _, plain = builder.build_vote_context(state, villager, ["p2", "p3"])
+    assert doctrine not in "\n".join(m.content for m in plain)

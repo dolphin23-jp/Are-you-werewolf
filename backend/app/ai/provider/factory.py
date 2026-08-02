@@ -8,6 +8,7 @@ from __future__ import annotations
 from app.ai.metrics import MetricsCollector
 from app.ai.provider.base import LLMProvider
 from app.ai.provider.mock import MockProvider
+from app.ai.provider.scenario import ScenarioProvider
 from app.config import Settings
 
 
@@ -25,6 +26,11 @@ def build_llm_provider(
 
     if provider == "mock":
         return MockProvider(seed=seed, metrics=metrics)
+
+    if provider == "scenario":
+        # Also offline and free -- a richer double than `mock`, used to drive the
+        # reply/quote, pending-question and pressured-candidate paths end to end.
+        return ScenarioProvider(seed=seed, metrics=metrics)
 
     if provider == "luna":
         if not settings.luna_api_key:

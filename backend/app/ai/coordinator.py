@@ -315,11 +315,14 @@ class AICoordinator:
             round_state.cursor += 1
             return pid, "immediate" if round_state.stage == "immediate" else "initial_view"
         if not round_state.major_targets_ready:
+            # Restricted to seats this coordinator speaks for: the pressure list
+            # drives speaking limits and the rebuttal sweep, neither of which can
+            # apply to the human.
             pressure: Counter[str] = Counter(
                 target
                 for _speaker, output in round_state.outputs
                 if isinstance((target := output.reasoning_memo.execution_target), str)
-                and target in state.players
+                and target in self._agents
                 and state.players[target].alive
             )
             round_state.major_targets = [target for target, _count in pressure.most_common(2)]
@@ -389,12 +392,15 @@ class AICoordinator:
                 return leader, "consensus_summary"
         return None, "consensus_summary"
 
-    @staticmethod
     def _round_queue_reply(
-        state: GameState, round_state: DiscussionRoundState, target_id: str
+        self, state: GameState, round_state: DiscussionRoundState, target_id: str
     ) -> None:
+        # Only seats this coordinator can speak for. AIs routinely question the
+        # human or name them as an execution target, and scheduling that seat used
+        # to reach `self._personalities[human_id]` and raise KeyError -- which,
+        # inside the fire-and-forget discussion task, silently killed the round.
         if (
-            target_id in state.players
+            target_id in self._agents
             and state.players[target_id].alive
             and target_id not in round_state.queued
         ):

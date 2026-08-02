@@ -233,3 +233,33 @@ def test_segment_stops_when_the_phase_leaves_discussion_mid_round():
 
     assert controller.state.phase == Phase.VOTING
     assert provider.discussion_calls <= 4
+
+
+def test_the_human_seat_is_never_scheduled_as_a_speaker():
+    # AIs routinely question the human or name them as an execution target.
+    # Scheduling that seat reached `self._personalities[human_id]` and raised
+    # KeyError inside the fire-and-forget discussion task, which killed the round
+    # with no error surfacing anywhere.
+    controller = make_controller(seed=4)
+    coordinator = AICoordinator(controller.state, ["p1", "p2"], MorningPriorityProvider(), seed=1)
+    accusing_human = DiscussionOutput(public_message="p0が怪しい")
+    accusing_human.reasoning_memo.execution_target = "p0"
+    round_state = DiscussionRoundState(
+        day=1,
+        order=["p1", "p2"],
+        cursor=2,
+        outputs=[("p1", accusing_human), ("p2", accusing_human)],
+        speech_counts={"p1": 1, "p2": 1},
+        max_total=8,
+    )
+
+    coordinator._round_queue_reply(controller.state, round_state, "p0")
+    assert "p0" not in round_state.reply_queue
+
+    for _ in range(20):
+        speaker, _stage = coordinator._next_discussion_speaker(controller.state, round_state)
+        if speaker is None:
+            break
+        assert speaker != "p0"
+        round_state.speech_counts[speaker] = round_state.speech_counts.get(speaker, 0) + 1
+    assert "p0" not in round_state.major_targets
