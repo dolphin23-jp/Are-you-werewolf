@@ -16,6 +16,7 @@ from app.engine.state import (
     ChatChannel,
     ChatMessage,
     CoDeclaration,
+    DeathCause,
     FreemasonPartnerClaim,
     GameState,
     PlayerState,
@@ -400,6 +401,20 @@ class GameController:
         self._require_alive(claimant_id)
         if target_id not in self.state.players or result_type not in ("seer", "medium"):
             raise GameError("invalid public result claim")
+        if result_type == "medium" and not any(
+            death.player_id == target_id and death.cause == DeathCause.EXECUTED
+            for death in self.state.death_records
+        ):
+            raise GameError("medium result target was not executed")
+        contradictory = any(
+            claim.claimant_id == claimant_id
+            and claim.result_type == result_type
+            and claim.target_id == target_id
+            and claim.is_werewolf != is_werewolf
+            for claim in self.state.public_result_claims
+        )
+        if contradictory:
+            raise GameError("public result contradicts an existing claim")
         duplicate = any(
             claim.claimant_id == claimant_id
             and claim.result_type == result_type

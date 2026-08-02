@@ -5,7 +5,7 @@ can never crash or stall on bad LLM output:
   - meta-phrase filter (strips "as an AI"/model-name/"prompt" even though
     structured output already constrains the shape)
   - truncation at a sentence boundary
-  - retry loop; for discussion, a failed full contract falls back to a
+  - for discussion, a failed full contract falls back once to a
     minimal "just the sentence" request rather than a canned line, so a turn
     still produces something the player actually said
   - any hallucinated/invalid target name falls back to a random valid
@@ -14,7 +14,6 @@ can never crash or stall on bad LLM output:
 
 from __future__ import annotations
 
-import random
 import re
 
 from app.ai.context import BRIEF_DISCUSSION_OUTPUT_INSTRUCTION
@@ -52,9 +51,10 @@ _SENTENCE_BOUNDARIES = "。！？"
 # budget is fine for them.
 _DEFAULT_MAX_TOKENS = 800
 
-# Attempts per contract are `DEFAULT_MAX_RETRIES + 1`. Exported so tests can derive
-# the bounded worst case instead of hardcoding a number that silently goes stale.
-DEFAULT_MAX_RETRIES = 2
+# Compatibility export for callers that calculate the discussion failure
+# ceiling. Agents no longer retry a contract; discussion alone may make one
+# additional request using the brief schema.
+DEFAULT_MAX_RETRIES = 0
 
 
 def _discussion_token_budget(max_message_chars: int) -> int:
@@ -75,6 +75,8 @@ class AIPlayerAgent:
     ) -> None:
         self._provider = provider
         self._personality = personality
+        # Kept as a source-compatible argument for existing integrations. HTTP
+        # retries belong to the provider; an agent submits each contract once.
         self._max_retries = max_retries
 
     async def generate_discussion(
@@ -112,13 +114,13 @@ class AIPlayerAgent:
     ) -> VoteOutput:
         result = await self._generate_with_retry(system, messages, VoteOutput)
         if result is None:
-            return VoteOutput(vote_target=random.choice(valid_targets))
+            return VoteOutput(vote_target=sorted(valid_targets)[0])
         if result.alternative_target not in valid_targets or (
             result.alternative_target == result.vote_target
         ):
             result.alternative_target = None
         if result.vote_target not in valid_targets:
-            fallback_target = result.alternative_target or random.choice(valid_targets)
+            fallback_target = result.alternative_target or sorted(valid_targets)[0]
             result.vote_target = fallback_target
             result.alternative_target = None
         return result
@@ -129,7 +131,7 @@ class AIPlayerAgent:
         result = await self._generate_with_retry(system, messages, NightActionOutput)
         if result is None or result.target not in valid_targets:
             reason = result.reason if result else ""
-            return NightActionOutput(target=random.choice(valid_targets), reason=reason)
+            return NightActionOutput(target=sorted(valid_targets)[0], reason=reason)
         return result
 
     async def generate_wolf_chat(self, system: str, messages: list[Message]) -> WolfChatOutput:
@@ -152,19 +154,15 @@ class AIPlayerAgent:
         schema: type[SchemaT],
         max_tokens: int = _DEFAULT_MAX_TOKENS,
     ) -> SchemaT | None:
-        for _attempt in range(self._max_retries + 1):
-            try:
-                result = await self._provider.generate_structured(
-                    system=system,
-                    messages=messages,
-                    response_schema=schema,
-                    max_tokens=max_tokens,
-                )
-            except Exception:
-                result = None
-            if result is not None:
-                return result
-        return None
+        try:
+            return await self._provider.generate_structured(
+                system=system,
+                messages=messages,
+                response_schema=schema,
+                max_tokens=max_tokens,
+            )
+        except Exception:
+            return None
 
     def _sanitize(self, text: str, max_len: int) -> str:
         for pattern in _META_PATTERNS:

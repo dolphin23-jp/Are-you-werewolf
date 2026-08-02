@@ -27,6 +27,14 @@ from app.ai.personalities import assign_personalities, discussion_length_range
 from app.ai.player_agent import AIPlayerAgent, truncate_at_sentence
 from app.ai.provider.base import LLMProvider
 from app.ai.public_speech import detect_public_result
+from app.ai.reasoning.facts import PublicFactLedger
+from app.ai.reasoning.summaries import render_public_fact_summary
+from app.ai.reasoning.validation import (
+    VoteIntentMismatch,
+    detect_vote_intent_mismatch,
+    sanitize_discussion_output,
+    validate_public_result,
+)
 from app.ai.schemas import DiscussionOutput, MorningIntentOutput
 from app.engine.phases import Phase
 from app.engine.roles import RoleName
@@ -81,6 +89,8 @@ class AICoordinator:
         self._forced_partner_confirmations: set[str] = set()
         self._freemason_public_plan: tuple[str, str, bool] | None = None
         self._freemason_death_announced: set[str] = set()
+        self.vote_intent_mismatches: list[VoteIntentMismatch] = []
+        self._latest_execution_intents: dict[str, str] = {}
         freemasons = [
             player.player_id
             for player in state.players_by_role(RoleName.FREEMASON)
@@ -101,9 +111,7 @@ class AICoordinator:
         fake_claim_guard = FakeClaimGuard(wolf_team_ids=set(wolf_ids))
         self._wolf_deception = wolf_deception
         self._madman_fake_role_by_player = {
-            player.player_id: madman_fake_role
-            for player in madman
-            if madman_fake_role is not None
+            player.player_id: madman_fake_role for player in madman if madman_fake_role is not None
         }
 
         self._day_summaries = DaySummaryManager()
@@ -230,9 +238,7 @@ class AICoordinator:
             if round_state is None or round_state.complete:
                 return
 
-    async def advance_discussion(
-        self, session: object, *, allow_human_pause: bool = True
-    ) -> None:
+    async def advance_discussion(self, session: object, *, allow_human_pause: bool = True) -> None:
         """Run at most one discussion segment while holding the session lock."""
         async with session.discussion_lock:  # type: ignore[attr-defined]
             controller = session.controller  # type: ignore[attr-defined]
@@ -419,8 +425,7 @@ class AICoordinator:
             owed = [
                 target
                 for target in round_state.major_targets
-                if state.players[target].alive
-                and round_state.speech_counts.get(target, 0) < 2
+                if state.players[target].alive and round_state.speech_counts.get(target, 0) < 2
             ]
             if not owed or len(round_state.outputs) >= round_state.max_total:
                 break
@@ -544,9 +549,7 @@ class AICoordinator:
             leader, partner, full_reveal = self._freemason_public_plan
             leader_alive = state.players[leader].alive
             partner_alive = state.players[partner].alive
-            already_claimed = any(
-                claim.player_id == player_id for claim in state.co_declarations
-            )
+            already_claimed = any(claim.player_id == player_id for claim in state.co_declarations)
             if player_id == leader and not already_claimed:
                 output.timing = "after_results"
                 output.intent = "claim"
@@ -587,8 +590,7 @@ class AICoordinator:
         freemason_must_hide = self._freemason_must_hide(state, player_id)
         if freemason_opening is not None:
             system += (
-                "\n\n【共有公開計画】この発言では指定された共有CO文を最初に"
-                "そのまま述べてください。"
+                "\n\n【共有公開計画】この発言では指定された共有CO文を最初にそのまま述べてください。"
             )
         elif freemason_must_hide:
             system += (
@@ -604,6 +606,7 @@ class AICoordinator:
             self._metrics.record_discussion_result(skipped=output is None)
         if output is None:
             return None
+        output = sanitize_discussion_output(state, player_id, output)
         if freemason_opening is not None:
             output.public_message = freemason_opening
             output.public_claim_role = RoleName.FREEMASON.value
@@ -667,10 +670,10 @@ class AICoordinator:
         if output.agrees_with and not output.key_point.strip():
             # Agreement with no new argument is a reaction, not an analysis. Cut at a
             # sentence boundary so the shortened line still reads as finished Japanese.
-            output.public_message = truncate_at_sentence(
-                output.public_message, _REACTION_MAX_CHARS
-            )
+            output.public_message = truncate_at_sentence(output.public_message, _REACTION_MAX_CHARS)
         self._context.set_reasoning_memo(player_id, output.reasoning_memo.model_dump())
+        if output.reasoning_memo.execution_target is not None:
+            self._latest_execution_intents[player_id] = output.reasoning_memo.execution_target
         self._record(
             state,
             player_id,
@@ -732,6 +735,11 @@ class AICoordinator:
             )
         self._context.record_key_point(state.day, message_id, player_id, output.key_point)
         self.register_public_claim(controller, player_id, output, message_id)
+        output.public_results = [
+            result
+            for result in output.public_results
+            if validate_public_result(state, player_id, result)
+        ]
         for result in output.public_results:
             if result.target_id not in state.players:
                 continue
@@ -791,9 +799,7 @@ class AICoordinator:
             claim.target_id == player_id and claim.is_werewolf
             for claim in state.public_result_claims
         )
-        if player_id == partner and (
-            not state.players[leader].alive or partner_under_black
-        ):
+        if player_id == partner and (not state.players[leader].alive or partner_under_black):
             leader_player = state.players[leader]
             status = "死亡した" if not state.players[leader].alive else ""
             return f"共有者CO。相方は{status}{leader_player.name}({leader})です。"
@@ -827,16 +833,10 @@ class AICoordinator:
             except Exception:
                 pass
         effective_role = role or next(
-            (
-                claim.claimed_role
-                for claim in state.co_declarations
-                if claim.player_id == player_id
-            ),
+            (claim.claimed_role for claim in state.co_declarations if claim.player_id == player_id),
             None,
         )
-        candidates = {
-            pid: player.name for pid, player in state.players.items() if pid != player_id
-        }
+        candidates = {pid: player.name for pid, player in state.players.items() if pid != player_id}
         detected_result = detect_public_result(
             output.public_message,
             effective_role,
@@ -927,6 +927,14 @@ class AICoordinator:
             return
         system, messages = self._context.build_vote_context(state, player_id, candidates)
         output = await self._agents[player_id].generate_vote(system, messages, candidates)
+        mismatch = detect_vote_intent_mismatch(
+            player_id,
+            state.day,
+            self._latest_execution_intents.get(player_id),
+            output.vote_target,
+        )
+        if mismatch is not None:
+            self.vote_intent_mismatches.append(mismatch)
         self._record(
             state,
             player_id,
@@ -949,8 +957,11 @@ class AICoordinator:
         narrator_id = alive_ai[0]
         system, messages = self._context.build_summary_context(state, narrator_id)
         output = await self._agents[narrator_id].generate_summary(system, messages)
-        self._record(state, narrator_id, "summary", text=output.summary)
-        self._day_summaries.set_summary(state.day, output.summary)
+        summary = render_public_fact_summary(PublicFactLedger.from_state(state))
+        if output.summary.strip():
+            summary += "\n【推測・意見】\n" + output.summary.strip()
+        self._record(state, narrator_id, "summary", text=summary)
+        self._day_summaries.set_summary(state.day, summary)
         self._day_summaries.compress_if_needed()
 
     # -- night --
@@ -999,9 +1010,7 @@ class AICoordinator:
 
     async def _cast_divine(self, controller: object, state: GameState, seer_id: str) -> None:
         candidates = [
-            pid
-            for pid in state.alive_ids()
-            if pid != seer_id and pid != state.first_victim_id
+            pid for pid in state.alive_ids() if pid != seer_id and pid != state.first_victim_id
         ]
         candidates = [pid for pid in candidates if pid not in self._observer_player_ids]
         if not candidates:
@@ -1035,8 +1044,7 @@ class AICoordinator:
         candidates = [
             pid
             for pid in state.alive_ids()
-            if state.players[pid].role != RoleName.WEREWOLF
-            and pid not in self._observer_player_ids
+            if state.players[pid].role != RoleName.WEREWOLF and pid not in self._observer_player_ids
         ]
         if not candidates:
             return

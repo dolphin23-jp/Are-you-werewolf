@@ -7,7 +7,11 @@ from app.ai.schemas import BriefDiscussionOutput, DiscussionOutput, VoteOutput
 
 
 class _AlwaysNoneProvider:
+    def __init__(self):
+        self.calls = 0
+
     async def generate_structured(self, **kwargs):
+        self.calls += 1
         return None
 
 
@@ -41,9 +45,12 @@ class _AlternativeVoteProvider:
 @pytest.mark.asyncio
 async def test_discussion_returns_none_on_total_failure():
     personality = PERSONALITIES[0]
-    agent = AIPlayerAgent(_AlwaysNoneProvider(), personality, max_retries=1)
+    provider = _AlwaysNoneProvider()
+    agent = AIPlayerAgent(provider, personality, max_retries=99)
     result = await agent.generate_discussion("system", [Message(role="user", content="hi")])
     assert result is None
+    # Exactly one full-contract request and one brief-contract fallback.
+    assert provider.calls == 2
 
 
 @pytest.mark.asyncio
@@ -67,9 +74,7 @@ async def test_invalid_vote_target_falls_back_to_random_valid_choice():
 async def test_invalid_vote_target_prefers_the_models_valid_alternative():
     agent = AIPlayerAgent(_AlternativeVoteProvider(), PERSONALITIES[0])
 
-    result = await agent.generate_vote(
-        "system", [Message(role="user", content="hi")], ["p1", "p2"]
-    )
+    result = await agent.generate_vote("system", [Message(role="user", content="hi")], ["p1", "p2"])
 
     assert result.vote_target == "p2"
     assert result.decisive_evidence == "投票履歴"
@@ -100,6 +105,7 @@ async def test_a_truncated_full_contract_still_produces_a_real_turn():
     result = await agent.generate_discussion("system", [Message(role="user", content="hi")])
     assert result is not None
     assert result.public_message == "占い理由を説明します。"
+    assert len(agent._provider.schemas) == 2
 
 
 @pytest.mark.asyncio
