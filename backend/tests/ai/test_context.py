@@ -121,6 +121,18 @@ def test_discussion_prompt_localizes_stage_and_includes_vote_history():
     assert "200文字" not in (_system + body)
 
 
+def test_discussion_prompt_uses_role_neutral_evidence_standards():
+    controller = make_controller(seed=4)
+    builder = _builder(controller.state)
+
+    system, _messages = builder.build_discussion_context(controller.state, "p3")
+
+    assert "初日・0日目の占い先は発言情報がないランダム選択でも自然" in system
+    assert "CO文が短いこと、丁寧さや強い口調そのものを偽要素" in system
+    assert "自吊りを拒むこと自体を黒要素にせず" in system
+    assert "黒一致だけで占い師の真は確定しません" in system
+
+
 def test_vote_history_is_limited_to_the_most_recent_two_days():
     controller = make_controller(seed=4)
     state = controller.state
@@ -317,3 +329,17 @@ def test_reaction_stage_still_asks_for_an_anchored_target():
     _, messages = builder.build_discussion_context(state, "p2", "reaction")
     prompt = "\n".join(m.content for m in messages)
     assert "reply_to" in prompt and "quote" in prompt
+
+
+def test_minority_review_requires_countercase_and_alternative():
+    controller = make_controller(seed=4)
+    builder = _builder(controller.state)
+
+    _, messages = builder.build_discussion_context(
+        controller.state, "p2", "minority_review:p0"
+    )
+    prompt = "\n".join(message.content for message in messages)
+
+    assert "Player0(p0)へ集中" in prompt
+    assert "反対仮説" in prompt
+    assert "別の処刑候補" in prompt

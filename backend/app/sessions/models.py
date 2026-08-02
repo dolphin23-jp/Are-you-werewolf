@@ -32,6 +32,7 @@ class DiscussionRoundState:
     summary_done: bool = False
     major_targets_ready: bool = False
     major_target_sweeps: int = 0
+    minority_review_done: bool = False
 
 
 @dataclass
@@ -50,6 +51,11 @@ class GameSession:
     discussion_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     discussion_round: DiscussionRoundState | None = None
     discussion_advance_task: asyncio.Task[Any] | None = None
+    # User-controlled pacing. A pause request is observed between generated
+    # messages, so an in-flight provider request can finish without being cancelled.
+    discussion_paused: bool = False
+    discussion_pause_requested: bool = False
+    discussion_step_budget: int | None = None
 
     def touch(self) -> None:
         self.last_active_at = time.time()
