@@ -315,11 +315,23 @@ button {
   line-height: 1.4;
 }
 
-.chat-message--you strong {
+.chat-message--you .chat-message__author {
   color: var(--accent-hover);
+  font-weight: 700;
 }
 
-.chat-message__author { color: var(--text); }
+.chat-message__reply,
+.chat-message__reply-button {
+  margin-left: 0.35rem;
+  color: var(--text-dim);
+  font-size: 0.75rem;
+}
+
+.chat-message__reply-button {
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
 
 .vote-history {
   margin-top: 0.7rem;
@@ -349,13 +361,28 @@ button {
   gap: 0.5rem;
 }
 
-.chat-panel__input input {
+.chat-panel__input textarea {
   flex: 1;
+  min-height: 3.2rem;
+  resize: vertical;
   padding: 0.5rem 0.7rem;
   border-radius: 8px;
   border: 1px solid var(--border);
   background: var(--panel-alt);
   color: var(--text);
+}
+
+.reply-preview {
+  display: flex;
+  max-width: 45%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+  padding: 0.4rem 0.55rem;
+  border-left: 3px solid var(--accent);
+  background: var(--panel-alt);
+  color: var(--text-dim);
+  font-size: 0.75rem;
 }
 
 .night-action-panel, .vote-panel {

@@ -90,6 +90,9 @@ def _render_metrics(summary: dict[str, Any]) -> str:
         f"| **JSON成功率** | {summary['success_rate']:.1%} |",
         f"| うち strict schema で成功 | {summary['strict_schema_rate']:.1%} |",
         f"| リトライが発生した呼び出し | {summary['retry_calls']} |",
+        f"| 議論生成スキップ | {summary.get('discussion_skips', 0)} / "
+        f"{summary.get('discussion_generation_attempts', 0)} "
+        f"({summary.get('discussion_skip_rate', 0.0):.1%}) |",
         f"| 応答時間 平均 | {summary['latency_seconds']['mean']:.3f} 秒 |",
         f"| 応答時間 p50 / p95 | "
         f"{summary['latency_seconds']['p50']:.3f} / {summary['latency_seconds']['p95']:.3f} 秒 |",
@@ -178,6 +181,8 @@ def _render_speech_stats(games: list[tuple[GameTranscript, AnalysisResult]]) -> 
     over = sum(s["over_200_chars"] for s in collected)
     fallbacks = sum(s["fallback_lines"] for s in collected)
     repeats = sum(s["verbatim_repeat_players"] for s in collected)
+    def weighted(key: str) -> float:
+        return float(sum(s[key] * s["utterances"] for s in collected) / max(total, 1))
 
     return "\n".join(
         [
@@ -188,6 +193,12 @@ def _render_speech_stats(games: list[tuple[GameTranscript, AnalysisResult]]) -> 
             f"| 200文字超過(指示違反) | {over} ({over / max(total, 1):.1%}) |",
             f"| フォールバック定型文 | {fallbacks} ({fallbacks / max(total, 1):.1%}) |",
             f"| 同一発言の繰り返し | {repeats} |",
+            f"| クロスプレイヤー論点重複率 | {weighted('cross_player_topic_overlap_rate'):.1%} |",
+            f"| クロスプレイヤー平均Jaccard | {weighted('cross_player_mean_jaccard'):.3f} |",
+            f"| 発言回数ジニ係数 | {weighted('speech_count_gini'):.3f} |",
+            f"| 返信率 | {weighted('reply_rate'):.1%} |",
+            f"| 未回答質問残存率 | {weighted('unanswered_question_rate'):.1%} |",
+            f"| 発言長の分散 | {weighted('length_variance'):.1f} |",
         ]
     )
 

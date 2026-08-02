@@ -28,6 +28,17 @@ def test_success_rate_separates_strict_schema_from_fallbacks():
     assert summary["errors"] == [{"error": "boom", "count": 1}]
 
 
+def test_discussion_skip_rate_is_reported():
+    collector = MetricsCollector()
+    collector.record(_record(ParsePath.FAILED))
+    collector.record_discussion_result(skipped=True)
+    collector.record_discussion_result(skipped=False)
+
+    summary = collector.summary()
+    assert summary["discussion_skips"] == 1
+    assert summary["discussion_skip_rate"] == 0.5
+
+
 def test_tokens_and_cost_are_none_when_the_endpoint_reports_no_usage():
     collector = MetricsCollector()
     collector.record(_record(ParsePath.STRICT_SCHEMA))

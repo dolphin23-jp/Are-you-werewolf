@@ -46,9 +46,21 @@ class PlayerState:
 
 @dataclass
 class ChatMessage:
+    message_id: str
     author_id: str
     content: str
     channel: ChatChannel
+    day: int
+    reply_to: str | None = None
+    quote: str | None = None
+
+
+@dataclass
+class PendingQuestion:
+    asker: str
+    target: str
+    question: str
+    source_message_id: str
     day: int
 
 
@@ -122,6 +134,8 @@ class GameState:
     day: int = 0
     vote_round: int = 1
     chat_log: list[ChatMessage] = field(default_factory=list)
+    next_message_number: int = 1
+    pending_questions: dict[str, list[PendingQuestion]] = field(default_factory=dict)
     divine_records: list[DivineRecord] = field(default_factory=list)
     medium_records: list[MediumRecord] = field(default_factory=list)
     guard_records: list[GuardRecord] = field(default_factory=list)
@@ -217,6 +231,10 @@ class GameState:
             "players": public_players,
             "public_chat": [_chat_dict(m) for m in public_chat],
             "private_chat": [_chat_dict(m) for m in private_chat],
+            "pending_questions": [
+                _pending_question_dict(question)
+                for question in self.pending_questions.get(viewer_id, [])
+            ],
             "your_divine_results": [_divine_dict(r) for r in my_divine],
             "your_medium_results": [_medium_dict(r) for r in my_medium],
             "co_declarations": [
@@ -273,6 +291,11 @@ class GameState:
                 for p in self.players.values()
             ],
             "chat_log": [_chat_dict(m) for m in self.chat_log],
+            "pending_questions": {
+                target: [_pending_question_dict(question) for question in questions]
+                for target, questions in self.pending_questions.items()
+                if questions
+            },
             "divine_records": [_divine_dict(r) for r in self.divine_records],
             "medium_records": [_medium_dict(r) for r in self.medium_records],
             "guard_records": [
@@ -307,7 +330,25 @@ class GameState:
 
 
 def _chat_dict(m: ChatMessage) -> dict[str, Any]:
-    return {"author_id": m.author_id, "content": m.content, "channel": m.channel, "day": m.day}
+    return {
+        "message_id": m.message_id,
+        "author_id": m.author_id,
+        "content": m.content,
+        "channel": m.channel,
+        "day": m.day,
+        "reply_to": m.reply_to,
+        "quote": m.quote,
+    }
+
+
+def _pending_question_dict(question: PendingQuestion) -> dict[str, Any]:
+    return {
+        "asker": question.asker,
+        "target": question.target,
+        "question": question.question,
+        "source_message_id": question.source_message_id,
+        "day": question.day,
+    }
 
 
 def _public_death_cause(cause: DeathCause | None) -> PublicDeathCause | None:

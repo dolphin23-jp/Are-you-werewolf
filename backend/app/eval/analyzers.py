@@ -13,6 +13,7 @@ problem or a false positive of the pattern.
 from __future__ import annotations
 
 import re
+import statistics
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -431,6 +432,27 @@ def _collect_format_stats(t: GameTranscript, result: AnalysisResult) -> None:
             repeats += 1
 
     over_limit = [u for u in speech if len(u.text) > 200]
+    discussions = [u for u in speech if u.kind == "discussion"]
+    counts = [
+        sum(utterance.player_id == player_id for utterance in discussions)
+        for player_id in t.names
+        if player_id in {utterance.player_id for utterance in discussions}
+    ]
+    cross_pairs = [
+        _jaccard(_bigrams(left.text), _bigrams(right.text))
+        for index, left in enumerate(discussions)
+        for right in discussions[index + 1 :]
+        if left.player_id != right.player_id and _bigrams(left.text) and _bigrams(right.text)
+    ]
+    public_chat = [
+        message
+        for message in t.final_state.get("chat_log", [])
+        if message.get("channel") == "public"
+    ]
+    question_count = sum(len(u.directed_question_targets) for u in discussions)
+    pending_count = sum(
+        len(questions) for questions in t.final_state.get("pending_questions", {}).values()
+    )
 
     result.stats["speech"] = {
         "utterances": len(speech),
@@ -441,4 +463,36 @@ def _collect_format_stats(t: GameTranscript, result: AnalysisResult) -> None:
         "fallback_lines": len(fallbacks),
         "fallback_rate": round(len(fallbacks) / len(speech), 4),
         "verbatim_repeat_players": repeats,
+        "length_variance": round(statistics.pvariance(lengths), 1),
+        "speech_count_gini": round(_gini(counts), 4),
+        "reply_rate": round(
+            sum(bool(message.get("reply_to")) for message in public_chat)
+            / max(len(public_chat), 1),
+            4,
+        ),
+        "unanswered_question_rate": round(pending_count / max(question_count, 1), 4),
+        "cross_player_topic_overlap_rate": round(
+            sum(similarity >= 0.35 for similarity in cross_pairs) / max(len(cross_pairs), 1), 4
+        ),
+        "cross_player_mean_jaccard": round(
+            sum(cross_pairs) / max(len(cross_pairs), 1), 4
+        ),
     }
+
+
+def _bigrams(text: str) -> set[str]:
+    normalized = re.sub(r"[\s、。！？,.・「」『』（）()]+", "", text.lower())
+    return {normalized[index : index + 2] for index in range(max(len(normalized) - 1, 0))}
+
+
+def _jaccard(left: set[str], right: set[str]) -> float:
+    return len(left & right) / max(len(left | right), 1)
+
+
+def _gini(values: list[int]) -> float:
+    if not values or sum(values) == 0:
+        return 0.0
+    ordered = sorted(values)
+    count = len(ordered)
+    weighted = sum((index + 1) * value for index, value in enumerate(ordered))
+    return (2 * weighted) / (count * sum(ordered)) - (count + 1) / count
