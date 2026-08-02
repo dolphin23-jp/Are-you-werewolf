@@ -49,8 +49,16 @@ DISCUSSION_OUTPUT_INSTRUCTION = """以下のJSON形式で回答してくださ�
 "key_point": "今回新たに出す論点を1行で。新規論点がなければ空文字", \
 "agrees_with": ["同意する既出発言ID(mN)"], \
 "directed_questions": [{"target_id": "質問相手pN", "question": "質問", \
-"source_message_id": "質問のきっかけになった発言IDまたはnull"}], \
-"ready_to_vote": trueまたはfalse, "needs_another_statement": trueまたはfalse}
+"source_message_id": "質問のきっかけになった発言IDまたはnull", \
+"topic": "execution_candidate|fox_candidate|claim_reason|timeline|other"}], \
+"ready_to_vote": trueまたはfalse, "needs_another_statement": trueまたはfalse, \
+"reassessments": [{"player_id": "pN", "accepted_point": \
+"反論で妥当だった点", "remaining_reason": "それでも残る独立した疑い。なければ空", \
+"changed_mind": trueまたはfalse}], \
+"alternative_execution_target": "第二候補のpNまたはnull", \
+"strongest_case_against_execution": "第一候補を処刑しない最も強い理由"}
+反論を読んだ場合はreassessmentsを入れ、主要処刑候補がいる場合は第二候補と、
+第一候補を処刑しない最も強い理由を必ず入れる。
 主要候補が反論し、各視点と未解決質問を検討し終えた場合だけready_to_vote=true。
 新規論点がなくagrees_withだけの場合はreactionとして60文字以内の短い同意にする。
 まだ反論・再評価が必要ならfalseとし、自分も追加発言が必要ならneeds_another_statement=true。"""
@@ -167,8 +175,9 @@ class ContextBuilder:
             "- 自分自身を疑い先・処刑先・能力対象として扱ってはいけません\n"
             "- 名指しの質問には1回だけ追加返信の機会があります。返信前の相手を"
             "『答えられない』と評価せず、同じ要求を繰り返さないでください\n"
-            "- CO待ちだけで発言を消費せず、各CO者を真と仮定した内訳、矛盾、"
-            "処刑希望、妖狐候補のいずれかを具体化してください\n"
+            "- CO待ちだけで発言を消費せず、処刑希望・妖狐候補・新しく判明した矛盾の"
+            "いずれかを具体化してください。既出のCO内訳や両視点で同じ成立条件は再掲せず、"
+            "必要ならagrees_withで参照して新しい含意だけを述べてください\n"
             "- reasoning_memoは非公開です。人狼・狂人は本当の役職と陣営目的を隠さず考えてください"
         )
 
@@ -336,8 +345,9 @@ class ContextBuilder:
     @staticmethod
     def _format_chat_line(state: GameState, message: ChatMessage) -> str:
         reply = f" →{message.reply_to}" if message.reply_to else ""
+        references = f" refs={','.join(message.references)}" if message.references else ""
         return (
-            f"[{message.message_id}{reply}] "
+            f"[{message.message_id}{reply}{references}] "
             f"{player_label(state, message.author_id)}: {message.content}"
         )
 
@@ -396,6 +406,29 @@ class ContextBuilder:
             else "未検討の論点を一つ提示する、具体的な相手へ根拠を問う、直前の意見へ反論する、"
             "または発言から処刑候補を絞る、のいずれかを行ってください。"
         )
+        if stage == "rebuttal_or_reassessment":
+            stage_instruction = (
+                "対象の反論を最も強い形で捉え、妥当な点を一つ認めてください。"
+                "疑いを維持するなら反論後にも残る独立根拠を示し、それがなければ候補順位を下げます。"
+            )
+        elif stage == "freemason_confirmation":
+            stage_instruction = (
+                "共有相方として名指しされています。真の相方なら確認共有COを最初に述べ、"
+                "相方でなければ明確に否定してください。他の論点を先に話してはいけません。"
+            )
+        elif stage.startswith("minority_review:"):
+            target_id = stage.split(":", 1)[1]
+            target = player_label(state, target_id) if target_id in state.players else target_id
+            stage_instruction = (
+                f"票・疑いが{target}へ集中しています。多数派の理由を再掲せず、"
+                "この人物が村側である反対仮説、本人の反論で妥当な点、別の処刑候補を"
+                "必ず比較してください。疑いを維持する場合も独立根拠だけを述べます。"
+            )
+        elif stage == "consensus_summary":
+            stage_instruction = (
+                "第一候補だけでなく第二候補、第一候補を処刑しない最強の理由、"
+                "本人の反論後にも残った独立根拠、少数意見を整理してください。"
+            )
         return self._assemble(
             [self._layer_a_system(state, player_id), self._layer_b_role(state, player_id)],
             [
@@ -547,11 +580,14 @@ class ContextBuilder:
 
     @staticmethod
     def _stage_label(stage: str) -> str:
+        if stage.startswith("minority_review:"):
+            return "多数派への反証・代替候補の比較"
         return {
             "immediate": "朝一CO・結果発表",
             "initial_view": "初回意見",
             "reaction": "短い反応",
             "rebuttal_or_reassessment": "反論・再評価",
+            "freemason_confirmation": "共有相方の確認",
             "consensus_summary": "議論の整理",
             "human_followup": "人間発言への応答",
         }.get(stage, "議論")

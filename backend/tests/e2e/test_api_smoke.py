@@ -118,6 +118,30 @@ def test_view_reports_human_speech_deadline_countdown():
     assert 34 <= view["speech_wait_remaining_seconds"] <= 35
 
 
+def test_discussion_can_be_paused_without_an_active_generation_task():
+    response = client.post("/api/games", json={"human_name": "Reader", "seed": 18})
+    session_id = response.json()["session_id"]
+
+    response = client.post(
+        f"/api/games/{session_id}/discussion-control", json={"action": "pause"}
+    )
+
+    assert response.status_code == 200
+    view = client.get(f"/api/games/{session_id}/view").json()
+    assert view["discussion_paused"] is True
+
+
+def test_discussion_control_rejects_unknown_actions():
+    response = client.post("/api/games", json={"human_name": "Reader", "seed": 19})
+    session_id = response.json()["session_id"]
+
+    response = client.post(
+        f"/api/games/{session_id}/discussion-control", json={"action": "rewind"}
+    )
+
+    assert response.status_code == 400
+
+
 def test_public_chat_role_claim_is_added_to_public_information():
     resp = client.post("/api/games", json={"human_name": "Claimant", "seed": 15})
     session_id = resp.json()["session_id"]
@@ -134,6 +158,46 @@ def test_public_chat_role_claim_is_added_to_public_information():
     view = client.get(f"/api/games/{session_id}/view").json()
     assert {"player_id": human_id, "claimed_role": "seer", "day": 0} in view[
         "co_declarations"
+    ]
+
+
+def test_human_shared_reveal_and_partner_confirmation_are_tracked():
+    response = client.post("/api/games", json={"human_name": "共有本人", "seed": 26})
+    session_id = response.json()["session_id"]
+    human_id = response.json()["human_player_id"]
+    session = get_session_store().get(session_id)
+    assert session is not None
+    session.coordinator = None
+    session.controller.state.phase = Phase.DISCUSSION
+    partner_id = "p11"
+    partner_name = session.controller.state.players[partner_id].name
+    human_name = session.controller.state.players[human_id].name
+
+    client.post(f"/api/games/{session_id}/chat", json={"content": "共有者CO、相方生存"})
+    reveal = client.post(
+        f"/api/games/{session_id}/chat",
+        json={"content": f"相方は{partner_name}({partner_id})です"},
+    )
+    confirmation = client.post(
+        f"/api/games/{session_id}/chat",
+        params={"player_id": partner_id},
+        json={
+            "content": (
+                f"{human_name}({human_id})の共有者CO、相方は私{partner_name}で間違いありません"
+            )
+        },
+    )
+
+    assert reveal.status_code == 200
+    assert confirmation.status_code == 200
+    view = client.get(f"/api/games/{session_id}/view").json()
+    assert view["freemason_partner_claims"] == [
+        {
+            "claimant_id": human_id,
+            "partner_id": partner_id,
+            "day": 0,
+            "confirmed": True,
+        }
     ]
 
 

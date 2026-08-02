@@ -40,6 +40,7 @@ export interface ChatMessage {
   day: number;
   reply_to: string | null;
   quote: string | null;
+  references?: string[];
 }
 
 export interface PendingQuestion {
@@ -48,6 +49,14 @@ export interface PendingQuestion {
   question: string;
   source_message_id: string;
   day: number;
+  topic?: string;
+}
+
+export interface FreemasonPartnerClaim {
+  claimant_id: string;
+  partner_id: string;
+  day: number;
+  confirmed: boolean;
 }
 
 export interface DivineResult {
@@ -104,9 +113,11 @@ export interface GameView {
   speech_wait_remaining_seconds: number;
   speech_wait_token: string | null;
   discussion_progress: { spoken: number; total: number };
+  discussion_paused: boolean;
   your_divine_results: DivineResult[];
   your_medium_results: MediumResult[];
   co_declarations: CoDeclarationRecord[];
+  freemason_partner_claims: FreemasonPartnerClaim[];
   public_result_claims?: PublicResultClaimRecord[];
   vote_history: VoteRecordEntry[];
   first_victim_id?: string | null;

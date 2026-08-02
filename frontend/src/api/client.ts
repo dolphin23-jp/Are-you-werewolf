@@ -67,10 +67,11 @@ export function sendChat(
   channel: "public" | "wolf" | "freemason" = "public",
   replyTo?: string,
   quote?: string,
+  references: string[] = [],
 ): Promise<{ ok: boolean; message_id: string }> {
   return request(`/api/games/${sessionId}/chat`, {
     method: "POST",
-    body: JSON.stringify({ content, channel, reply_to: replyTo, quote }),
+    body: JSON.stringify({ content, channel, reply_to: replyTo, quote, references }),
   });
 }
 
@@ -109,6 +110,16 @@ export function endDiscussion(sessionId: string): Promise<void> {
 
 export function passDiscussionTurn(sessionId: string): Promise<void> {
   return request(`/api/games/${sessionId}/pass-turn`, { method: "POST" });
+}
+
+export function controlDiscussion(
+  sessionId: string,
+  action: "pause" | "resume" | "step",
+): Promise<void> {
+  return request(`/api/games/${sessionId}/discussion-control`, {
+    method: "POST",
+    body: JSON.stringify({ action }),
+  });
 }
 
 export function startNight(sessionId: string): Promise<void> {

@@ -50,6 +50,10 @@ CO_PATTERNS: dict[RoleName, re.Pattern[str]] = {
 }
 
 _SENTENCE_SPLIT_RE = re.compile(r"[。！？!?\n]")
+_PARTNER_CONFIRMATION_RE = re.compile(
+    r"相方(?:は|が)[、，,\s]*私(?:[^。！？!?\n]{0,30})"
+    r"(?:です|だ|で間違い(?:ありません|ない)|で合っています|で合って(?:い)?ます)"
+)
 
 
 def detect_claimed_role(text: str, other_player_names: list[str] | None = None) -> RoleName | None:
@@ -60,6 +64,13 @@ def detect_claimed_role(text: str, other_player_names: list[str] | None = None) 
     same sentence means the speaker is talking about someone else.
     """
     names = [n for n in (other_player_names or []) if n]
+
+    # A shared partner confirmation necessarily mentions the first claimant before
+    # describing oneself (「ユイの共有CO、相方は私…」).  It is nevertheless an
+    # explicit self-claim, so handle this established form before the generic
+    # third-person-report guard below.
+    if _PARTNER_CONFIRMATION_RE.search(text):
+        return RoleName.FREEMASON
 
     for sentence in _SENTENCE_SPLIT_RE.split(text):
         if not sentence.strip():
@@ -72,6 +83,40 @@ def detect_claimed_role(text: str, other_player_names: list[str] | None = None) 
                 continue
             return role
     return None
+
+
+def detect_freemason_partner(
+    text: str, candidates: dict[str, str]
+) -> str | None:
+    """Return the player id publicly named as the speaker's shared partner.
+
+    Handles both an initial reveal (「相方はツムギ(p11)」) and the standard
+    confirmation form (「ユイの共有CO、相方は私」).  A bare role discussion
+    without the word 相方 is deliberately ignored.
+    """
+    if "相方" not in text:
+        return None
+    confirmation = _PARTNER_CONFIRMATION_RE.search(text)
+    for player_id, name in candidates.items():
+        if confirmation is not None:
+            prefix = text[: confirmation.start()]
+            if _mentions_player(prefix, player_id, name):
+                return player_id
+            continue
+        partner_index = text.find("相方")
+        suffix = text[partner_index : partner_index + 50]
+        if _mentions_player(suffix, player_id, name):
+            return player_id
+    return None
+
+
+def _mentions_player(text: str, player_id: str, name: str) -> bool:
+    """Match p1 without accidentally treating the p1 prefix in p11 as a hit."""
+    return bool(
+        name in text
+        or f"({player_id})" in text
+        or re.search(rf"(?<![A-Za-z0-9]){re.escape(player_id)}(?!\d)", text)
+    )
 
 
 def _mentions_other_before(sentence: str, names: list[str], role_index: int) -> bool:
