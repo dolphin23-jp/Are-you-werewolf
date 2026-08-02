@@ -15,7 +15,7 @@ from app.ai.personalities import assign_personalities
 from app.ai.strategy import StrategyAnalyzer, render_board_analysis
 from app.engine.phases import Phase
 from app.engine.roles import RoleName
-from app.engine.state import DivineRecord, MediumRecord
+from app.engine.state import DivineRecord, MediumRecord, PendingQuestion, VoteRecord
 from app.engine.vote import VoteManager
 from tests.conftest import make_controller
 
@@ -97,6 +97,84 @@ def test_ordinary_round_does_not_mention_a_runoff():
     _, messages = builder.build_vote_context(state, "p1", ["p2", "p3"])
 
     assert "決選投票" not in messages[0].content
+
+
+def test_discussion_prompt_localizes_stage_and_includes_vote_history():
+    controller = make_controller(seed=4)
+    state = controller.state
+    state.vote_records.append(VoteRecord(voter_id="p1", target_id="p2", day=1, round=1))
+    builder = _builder(state)
+
+    _system, messages = builder.build_discussion_context(state, "p3", "initial_view")
+    body = messages[0].content
+
+    assert "【投票履歴】" in body
+    assert "Player1(p1) → Player2(p2)" in body
+    assert "【議論段階】初回意見" in body
+    assert "initial_view" not in body
+    assert "200文字" not in (_system + body)
+
+
+def test_vote_history_is_limited_to_the_most_recent_two_days():
+    controller = make_controller(seed=4)
+    state = controller.state
+    state.vote_records.extend(
+        VoteRecord(voter_id="p1", target_id="p2", day=day, round=1)
+        for day in (1, 2, 3)
+    )
+    builder = _builder(state)
+
+    _system, messages = builder.build_discussion_context(state, "p3")
+    body = messages[0].content
+
+    assert "1日目R1" not in body
+    assert "2日目R1" in body
+    assert "3日目R1" in body
+
+
+def test_reply_quote_round_trip_is_rendered_in_ai_log():
+    controller = make_controller(seed=4)
+    state = controller.state
+    state.day = 1
+    first = controller.chat("p1", "元の発言", "public")
+    controller.chat("p2", "回答です", "public", reply_to=first, quote="元の発言")
+    builder = _builder(state)
+
+    _system, messages = builder.build_discussion_context(state, "p3")
+
+    assert "[m1] Player1(p1): 元の発言" in messages[0].content
+    assert "[m2 →m1] Player2(p2): 回答です" in messages[0].content
+
+
+def test_pending_question_enters_target_prompt_and_reply_resolves_it():
+    controller = make_controller(seed=4)
+    state = controller.state
+    state.day = 1
+    source = controller.chat("p1", "理由を教えてください", "public")
+    state.pending_questions["p2"] = [
+        PendingQuestion("p1", "p2", "理由は何ですか?", source, state.day)
+    ]
+    builder = _builder(state)
+
+    _system, messages = builder.build_discussion_context(state, "p2")
+    assert "理由は何ですか?" in messages[0].content
+
+    controller.chat("p2", "この理由です", "public", reply_to=source)
+    assert state.pending_questions["p2"] == []
+
+
+def test_existing_key_points_are_rendered_with_message_ids():
+    controller = make_controller(seed=4)
+    state = controller.state
+    state.day = 1
+    builder = _builder(state)
+    builder.record_key_point(1, "m7", "p1", "初日の投票先を比較する")
+
+    _system, messages = builder.build_discussion_context(state, "p2")
+
+    assert "【すでに卓に出ている論点】" in messages[0].content
+    assert "[m7] Player1(p1): 初日の投票先を比較する" in messages[0].content
+    assert "agrees_with" in messages[0].content
 
 
 def test_role_owner_receives_private_results_but_other_player_does_not():

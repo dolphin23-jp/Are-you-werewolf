@@ -84,6 +84,7 @@ async def play_one_game(seed: int, settings: Settings, metrics: MetricsCollector
         provider,
         seed=seed,
         recorder=recorder,
+        pacing_scale=0.0,
     )
     session = SimpleNamespace(
         controller=controller,

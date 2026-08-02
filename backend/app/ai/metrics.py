@@ -50,11 +50,18 @@ class MetricsCollector:
     and the provider may be shared across concurrent games."""
 
     records: list[CallRecord] = field(default_factory=list)
+    discussion_attempts: int = 0
+    discussion_skips: int = 0
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def record(self, record: CallRecord) -> None:
         with self._lock:
             self.records.append(record)
+
+    def record_discussion_result(self, *, skipped: bool) -> None:
+        with self._lock:
+            self.discussion_attempts += 1
+            self.discussion_skips += int(skipped)
 
     @contextmanager
     def time_call(self) -> Iterator[list[float]]:
@@ -75,6 +82,8 @@ class MetricsCollector:
     ) -> dict[str, Any]:
         with self._lock:
             records = list(self.records)
+            discussion_attempts = self.discussion_attempts
+            discussion_skips = self.discussion_skips
 
         total = len(records)
         if total == 0:
@@ -114,6 +123,9 @@ class MetricsCollector:
             },
             "by_schema": by_schema,
             "errors": _top_errors(records),
+            "discussion_generation_attempts": discussion_attempts,
+            "discussion_skips": discussion_skips,
+            "discussion_skip_rate": discussion_skips / max(discussion_attempts, 1),
         }
 
         if tokens_reported:

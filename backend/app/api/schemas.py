@@ -17,8 +17,10 @@ class CreateGameResponse(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    content: str = Field(min_length=1, max_length=500)
+    content: str = Field(min_length=1, max_length=1500)
     channel: str = "public"
+    reply_to: str | None = None
+    quote: str | None = None
 
 
 class VoteRequest(BaseModel):
@@ -36,3 +38,7 @@ class CoRequest(BaseModel):
 
 class OkResponse(BaseModel):
     ok: bool = True
+
+
+class ChatResponse(OkResponse):
+    message_id: str

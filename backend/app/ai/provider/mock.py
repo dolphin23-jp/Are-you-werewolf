@@ -91,6 +91,7 @@ class MockProvider:
                 claim_role = "freemason"
             result = DiscussionOutput(
                 public_message=line,
+                key_point=line,
                 reasoning_memo=ReasoningMemo(overall_thought="モックの思考メモです。"),
                 public_claim_role=claim_role,
                 contains_co_claim=claim_role is not None,

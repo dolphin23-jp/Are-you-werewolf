@@ -214,6 +214,10 @@ button {
 .player-name--hunter { color: #79d99d; }
 .player-name--freemason { color: #ffd166; }
 .player-name--villager { color: #eaeaf2; }
+.player-name--gray { color: var(--text-dim); }
+.player-name--werewolf { color: #ff6b6b; }
+.player-name--madman { color: #ff9f43; }
+.player-name--fox { color: #d98cff; }
 .player-name--white { color: #f7f7ff; text-shadow: 0 0 6px #8fd3ff66; }
 .player-name--selected { text-decoration: underline; text-underline-offset: 3px; }
 
@@ -295,8 +299,8 @@ button {
 
 .chat-panel__log {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
-  max-height: 360px;
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
@@ -311,15 +315,69 @@ button {
 }
 
 .chat-message {
+  display: grid;
+  grid-template-columns: minmax(5.5rem, 8rem) minmax(0, 1fr);
+  column-gap: 0.55rem;
   font-size: 0.92rem;
   line-height: 1.4;
+  overflow-wrap: anywhere;
+  scroll-margin-block: 4rem;
+  transition: background-color 0.25s ease;
 }
 
-.chat-message--you strong {
+.chat-message--grouped { margin-top: -0.2rem; }
+.chat-message--highlighted { background: #ffd16626; }
+.chat-message__author-column { text-align: right; }
+.chat-message__content { min-width: 0; }
+.chat-message__body { white-space: pre-wrap; }
+
+.chat-message__quote {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  margin-bottom: 0.25rem;
+  padding: 0.3rem 0.45rem;
+  border: 0;
+  border-left: 3px solid var(--accent);
+  background: #ffffff08;
+  color: var(--text-dim);
+  text-align: left;
+  cursor: pointer;
+}
+
+.chat-day-separator {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--text-dim);
+  font-size: 0.75rem;
+}
+
+.chat-day-separator::before,
+.chat-day-separator::after {
+  height: 1px;
+  flex: 1;
+  background: var(--border);
+  content: "";
+}
+
+.chat-message--you .chat-message__author {
   color: var(--accent-hover);
+  font-weight: 700;
 }
 
-.chat-message__author { color: var(--text); }
+.chat-message__reply,
+.chat-message__reply-button {
+  margin-left: 0.35rem;
+  color: var(--text-dim);
+  font-size: 0.75rem;
+}
+
+.chat-message__reply-button {
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
 
 .vote-history {
   margin-top: 0.7rem;
@@ -346,16 +404,62 @@ button {
 
 .chat-panel__input {
   display: flex;
+  flex-direction: column;
   gap: 0.5rem;
 }
 
-.chat-panel__input input {
+.chat-composer { display: flex; flex-direction: column; gap: 0.4rem; }
+.chat-composer__row { display: flex; gap: 0.5rem; }
+
+.chat-composer textarea {
   flex: 1;
+  min-height: 3.2rem;
+  resize: vertical;
   padding: 0.5rem 0.7rem;
   border-radius: 8px;
   border: 1px solid var(--border);
   background: var(--panel-alt);
   color: var(--text);
+}
+
+.reply-preview {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+  padding: 0.4rem 0.55rem;
+  border-left: 3px solid var(--accent);
+  background: var(--panel-alt);
+  color: var(--text-dim);
+  font-size: 0.75rem;
+}
+
+.speech-waiting,
+.pending-questions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: 8px;
+  background: var(--panel-alt);
+  font-size: 0.82rem;
+}
+
+.pending-questions { flex-direction: column; align-items: stretch; }
+.pending-questions button { text-align: left; }
+
+.new-message-badge {
+  align-self: center;
+  margin-top: -2.2rem;
+  z-index: 2;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--accent-hover);
+  padding: 0.3rem 0.7rem;
+  cursor: pointer;
 }
 
 .night-action-panel, .vote-panel {

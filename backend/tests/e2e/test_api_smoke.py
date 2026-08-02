@@ -5,10 +5,13 @@ handles the other 16 seats automatically via the orchestrator hooks)."""
 
 from __future__ import annotations
 
+import time
+
 from fastapi.testclient import TestClient
 
 from app.engine.phases import Phase
 from app.main import app
+from app.sessions.models import DiscussionRoundState
 from app.sessions.store import get_session_store
 
 client = TestClient(app)
@@ -63,6 +66,27 @@ def test_health_endpoint():
     assert resp.json()["status"] == "ok"
 
 
+def test_discussion_runs_without_waiting_when_human_is_dead():
+    response = client.post("/api/games", json={"human_name": "Spectator", "seed": 44})
+    session_id = response.json()["session_id"]
+    session = get_session_store().get(session_id)
+    assert session is not None
+    session.controller.state.phase = Phase.DAWN
+    session.controller.state.day = 1
+    session.controller.state.players[session.human_id].alive = False
+
+    response = client.post(f"/api/games/{session_id}/start-discussion")
+
+    assert response.status_code == 200
+    assert any(
+        message.author_id != session.human_id
+        for message in session.controller.state.chat_log
+    )
+    view = client.get(f"/api/games/{session_id}/view").json()
+    assert view["awaiting_your_speech"] is False
+    assert view["discussion_progress"]["spoken"] > 0
+
+
 def test_view_is_filtered_but_debug_is_not():
     resp = client.post("/api/games", json={"human_name": "Tester", "seed": 5})
     session_id = resp.json()["session_id"]
@@ -74,6 +98,24 @@ def test_view_is_filtered_but_debug_is_not():
 
     debug = client.get(f"/api/games/{session_id}/debug").json()
     assert "role" in debug["players"][0]
+
+
+def test_view_reports_human_speech_deadline_countdown():
+    response = client.post("/api/games", json={"human_name": "Waiting", "seed": 8})
+    session_id = response.json()["session_id"]
+    session = get_session_store().get(session_id)
+    assert session is not None
+    session.discussion_round = DiscussionRoundState(
+        day=1,
+        order=[],
+        awaiting_human=True,
+        awaiting_since=time.time() - 10,
+    )
+
+    view = client.get(f"/api/games/{session_id}/view").json()
+
+    assert view["awaiting_your_speech"] is True
+    assert 34 <= view["speech_wait_remaining_seconds"] <= 35
 
 
 def test_public_chat_role_claim_is_added_to_public_information():
