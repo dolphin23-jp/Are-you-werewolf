@@ -291,6 +291,11 @@ class GameState:
                 for p in self.players.values()
             ],
             "chat_log": [_chat_dict(m) for m in self.chat_log],
+            "pending_questions": {
+                target: [_pending_question_dict(question) for question in questions]
+                for target, questions in self.pending_questions.items()
+                if questions
+            },
             "divine_records": [_divine_dict(r) for r in self.divine_records],
             "medium_records": [_medium_dict(r) for r in self.medium_records],
             "guard_records": [

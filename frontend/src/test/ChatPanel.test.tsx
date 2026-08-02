@@ -1,46 +1,16 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { sendChat } from "../api/client";
 import { ChatPanel } from "../components/panels/ChatPanel";
 import { useGameStore } from "../state/gameStore";
-import type { GameView } from "../api/types";
+import { makeView } from "./fixtures/gameView";
 
-function makeView(overrides: Partial<GameView> = {}): GameView {
-  return {
-    session_id: "s1",
-    phase: "discussion",
-    day: 1,
-    vote_round: 1,
-    runoff_candidates: [],
-    your_player_id: "p0",
-    your_role: "villager",
-    allies: [],
-    players: [{ player_id: "p0", name: "Taro", alive: true, death_cause: null, death_day: null }],
-    public_chat: [
-      {
-        message_id: "m1",
-        author_id: "p1",
-        content: "こんにちは",
-        channel: "public",
-        day: 1,
-        reply_to: null,
-        quote: null,
-      },
-    ],
-    private_chat: [],
-    your_divine_results: [],
-    your_medium_results: [],
-    co_declarations: [],
-    vote_history: [],
-    winner: null,
-    victory_reason: "",
-    is_draw: false,
-    ...overrides,
-  };
-}
+vi.mock("../api/client", () => ({ sendChat: vi.fn() }));
 
 describe("ChatPanel", () => {
   afterEach(() => {
     useGameStore.getState().reset();
+    vi.clearAllMocks();
   });
 
   it("renders public chat messages", () => {
@@ -97,5 +67,37 @@ describe("ChatPanel", () => {
     expect(screen.queryByText(/二日目の意見/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Hanako" }));
     expect(screen.getByRole("button", { name: "Hanakoの発言のみ ×" })).toBeInTheDocument();
+  });
+
+  it("does not send on IME Enter and keeps Shift+Enter for a newline", () => {
+    useGameStore.setState({ view: makeView(), sessionId: "s1" });
+    render(<ChatPanel />);
+    const textarea = screen.getByPlaceholderText("発言を入力...");
+    fireEvent.change(textarea, { target: { value: "変換中" } });
+
+    fireEvent.keyDown(textarea, { key: "Enter", isComposing: true, keyCode: 229 });
+    fireEvent.keyDown(textarea, { key: "Enter", shiftKey: true });
+
+    expect(sendChat).not.toHaveBeenCalled();
+    expect(textarea).toHaveValue("変換中");
+  });
+
+  it("shows a reply preview and uses message ids as reply targets", async () => {
+    useGameStore.setState({ view: makeView(), sessionId: "s1", playerNames: { p1: "Hanako" } });
+    render(<ChatPanel />);
+
+    fireEvent.click(screen.getByRole("button", { name: "m1に返信" }));
+
+    expect(screen.getByText(/返信先 \[m1\] Hanako/)).toBeInTheDocument();
+  });
+
+  it("scrolls to the newest message", () => {
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+    useGameStore.setState({ view: makeView(), sessionId: "s1" });
+
+    render(<ChatPanel />);
+
+    expect(scrollIntoView).toHaveBeenCalled();
   });
 });
