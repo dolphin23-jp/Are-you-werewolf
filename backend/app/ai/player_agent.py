@@ -5,8 +5,9 @@ can never crash or stall on bad LLM output:
   - meta-phrase filter (strips "as an AI"/model-name/"prompt" even though
     structured output already constrains the shape)
   - truncation at a sentence boundary
-  - retry loop with a personality-flavored canned fallback line on total
-    failure
+  - retry loop; for discussion, a failed full contract falls back to a
+    minimal "just the sentence" request rather than a canned line, so a turn
+    still produces something the player actually said
   - any hallucinated/invalid target name falls back to a random valid
     candidate
 """
@@ -16,9 +17,11 @@ from __future__ import annotations
 import random
 import re
 
+from app.ai.context import BRIEF_DISCUSSION_OUTPUT_INSTRUCTION
 from app.ai.personalities import Personality, discussion_length_range
 from app.ai.provider.base import LLMProvider, Message, SchemaT
 from app.ai.schemas import (
+    BriefDiscussionOutput,
     DiscussionOutput,
     MorningIntentOutput,
     NightActionOutput,
@@ -45,10 +48,30 @@ _META_PATTERNS = [
 
 _SENTENCE_BOUNDARIES = "。！？"
 
+# Everything except the discussion call answers a small schema, so the historical
+# budget is fine for them.
+_DEFAULT_MAX_TOKENS = 800
+
+# Attempts per contract are `DEFAULT_MAX_RETRIES + 1`. Exported so tests can derive
+# the bounded worst case instead of hardcoding a number that silently goes stale.
+DEFAULT_MAX_RETRIES = 2
+
+
+def _discussion_token_budget(max_message_chars: int) -> int:
+    """`DiscussionOutput` carries twelve fields plus an eight-field reasoning memo
+    around the visible sentence, and Japanese costs roughly a token per character.
+    A flat 800 fits a terse speaker and truncates a wordy one mid-JSON, which no
+    parser can recover -- the model appears to type and then say nothing at all.
+    Budget for the sentence, the private memo, and the structural overhead."""
+    return _DEFAULT_MAX_TOKENS + max_message_chars * 4
+
 
 class AIPlayerAgent:
     def __init__(
-        self, provider: LLMProvider, personality: Personality, max_retries: int = 2
+        self,
+        provider: LLMProvider,
+        personality: Personality,
+        max_retries: int = DEFAULT_MAX_RETRIES,
     ) -> None:
         self._provider = provider
         self._personality = personality
@@ -57,13 +80,25 @@ class AIPlayerAgent:
     async def generate_discussion(
         self, system: str, messages: list[Message]
     ) -> DiscussionOutput | None:
-        result = await self._generate_with_retry(system, messages, DiscussionOutput)
-        if result is None:
-            return None
         _minimum, maximum = discussion_length_range(self._personality.verbosity)
-        result.public_message = self._sanitize(
-            result.public_message, max_len=maximum
+        result = await self._generate_with_retry(
+            system, messages, DiscussionOutput, max_tokens=_discussion_token_budget(maximum)
         )
+        if result is None:
+            # The full contract failed every attempt -- overwhelmingly because the
+            # JSON was cut off mid-object. Asking for just the sentence still gives
+            # the player a real turn; going silent here is what leaves a typing
+            # indicator on screen with nothing behind it.
+            brief = await self._generate_with_retry(
+                system + "\n\n" + BRIEF_DISCUSSION_OUTPUT_INSTRUCTION,
+                messages,
+                BriefDiscussionOutput,
+                max_tokens=_discussion_token_budget(maximum),
+            )
+            if brief is None:
+                return None
+            result = DiscussionOutput(public_message=brief.public_message)
+        result.public_message = self._sanitize(result.public_message, max_len=maximum)
         return result
 
     async def generate_morning_intent(
@@ -104,12 +139,19 @@ class AIPlayerAgent:
         return result
 
     async def _generate_with_retry(
-        self, system: str, messages: list[Message], schema: type[SchemaT]
+        self,
+        system: str,
+        messages: list[Message],
+        schema: type[SchemaT],
+        max_tokens: int = _DEFAULT_MAX_TOKENS,
     ) -> SchemaT | None:
         for _attempt in range(self._max_retries + 1):
             try:
                 result = await self._provider.generate_structured(
-                    system=system, messages=messages, response_schema=schema
+                    system=system,
+                    messages=messages,
+                    response_schema=schema,
+                    max_tokens=max_tokens,
                 )
             except Exception:
                 result = None

@@ -289,3 +289,31 @@ def test_vote_prompt_carries_the_faction_doctrine_the_discussion_gets():
     villager = state.players_by_role(RoleName.VILLAGER)[0].player_id
     _, plain = builder.build_vote_context(state, villager, ["p2", "p3"])
     assert doctrine not in "\n".join(m.content for m in plain)
+
+
+def test_discussion_prompt_pushes_replies_and_verbatim_quotes():
+    # Message ids are rendered in the log, but the log alone does not make a model
+    # use them. The instruction has to name the fields and demand a verbatim excerpt.
+    controller = make_controller(seed=4)
+    state = controller.state
+    controller.chat("p1", "おはよう", "public")
+    builder = _builder(state)
+
+    _, messages = builder.build_discussion_context(state, "p2", "initial_view")
+    prompt = "\n".join(m.content for m in messages)
+
+    assert "[m1]" in prompt, "the log must expose ids for reply_to to be usable"
+    assert "reply_to" in prompt
+    assert "quote" in prompt
+    assert "原文" in prompt
+
+
+def test_reaction_stage_still_asks_for_an_anchored_target():
+    controller = make_controller(seed=4)
+    state = controller.state
+    controller.chat("p1", "おはよう", "public")
+    builder = _builder(state)
+
+    _, messages = builder.build_discussion_context(state, "p2", "reaction")
+    prompt = "\n".join(m.content for m in messages)
+    assert "reply_to" in prompt and "quote" in prompt

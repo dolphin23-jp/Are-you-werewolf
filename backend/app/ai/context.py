@@ -44,7 +44,8 @@ DISCUSSION_OUTPUT_INSTRUCTION = """以下のJSON形式で回答してくださ�
 "public_claim_role": "今回公開COする役職(seer/medium/hunter/freemason)またはnull", \
 "public_results": [{"result_type": "seerまたはmedium", "target_id": "pN", \
 "is_werewolf": trueまたはfalse}], \
-"reply_to": "反論・回答対象の発言ID(mN)またはnull", "quote": "必要なら短い引用またはnull", \
+"reply_to": "反応する相手の発言ID(mN)。特定の発言に反応するなら必ず入れる", \
+"quote": "reply_toを入れたときは相手の該当箇所を10〜40字で原文のまま抜粋。それ以外はnull", \
 "key_point": "今回新たに出す論点を1行で。新規論点がなければ空文字", \
 "agrees_with": ["同意する既出発言ID(mN)"], \
 "directed_questions": [{"target_id": "質問相手pN", "question": "質問", \
@@ -53,6 +54,9 @@ DISCUSSION_OUTPUT_INSTRUCTION = """以下のJSON形式で回答してくださ�
 主要候補が反論し、各視点と未解決質問を検討し終えた場合だけready_to_vote=true。
 新規論点がなくagrees_withだけの場合はreactionとして60文字以内の短い同意にする。
 まだ反論・再評価が必要ならfalseとし、自分も追加発言が必要ならneeds_another_statement=true。"""
+
+BRIEF_DISCUSSION_OUTPUT_INSTRUCTION = """【簡易形式】直前の指定は取り消します。分析欄は不要です。
+次のJSONだけを返してください: {"public_message": "あなたの発言(人格に合った口調)"}"""
 
 MORNING_INTENT_OUTPUT_INSTRUCTION = """公開発言前の非公開判断です。JSONで回答してください:
 {"timing": "immediate|after_results|normal|hold", \
@@ -154,7 +158,12 @@ class ContextBuilder:
             "- 「AIとして」「言語モデルとして」「プロンプト」等のメタ発言は絶対に禁止です\n"
             "- 他のプレイヤーの発言内容に具体的に言及してください\n"
             "- 他プレイヤーを示すときは必ず「名前(pN)」の形で書いてください\n"
-            "- 反論や質問への回答では、対象ログの発言IDをreply_toに入れてください\n"
+            "- 特定の誰かの発言に反応するときは必ずreply_toにその発言ID(mN)を入れてください。"
+            "反論・同意・質問への回答・質問のきっかけは、すべてこれに当たります\n"
+            "- reply_toを使うときはquoteに相手の該当箇所を10〜40字でそのまま抜き出してください。"
+            "要約や言い換えではなく原文のまま抜き出します\n"
+            "- 誰に向けた発言か曖昧なまま論評を続けないでください。"
+            "宛先のない一般論より、特定の発言への具体的な反応を優先します\n"
             "- 自分自身を疑い先・処刑先・能力対象として扱ってはいけません\n"
             "- 名指しの質問には1回だけ追加返信の機会があります。返信前の相手を"
             "『答えられない』と評価せず、同じ要求を繰り返さないでください\n"
@@ -382,6 +391,7 @@ class ContextBuilder:
         target_chars = f"{minimum}〜{maximum}"
         stage_instruction = (
             "reaction段階では、新論点を無理に作らず、短い同意・驚き・反論・回答だけでも構いません。"
+            "その場合もreply_toとquoteで対象の発言を必ず指してください。"
             if stage == "reaction"
             else "未検討の論点を一つ提示する、具体的な相手へ根拠を問う、直前の意見へ反論する、"
             "または発言から処刑候補を絞る、のいずれかを行ってください。"
@@ -400,6 +410,8 @@ class ContextBuilder:
                 + "直近の複数人がすでに述べた結論・質問を言い換えて繰り返してはいけません。"
                 "同じ処刑候補を支持する場合も、未提示の投票履歴・死体・能力結果・発言差を"
                 "一つ追加してください。名指しされた本人は質問への直接回答を最初に述べてください。"
+                "当日のログは各行の先頭に[mN]の発言IDが付いています。"
+                "誰かの発言を受けて話すなら、そのIDをreply_toに、該当箇所の原文をquoteに入れてください。"
                 "consensus_summary段階では新説を広げず、対立点と処刑候補を根拠付きでまとめてください。",
                 DISCUSSION_OUTPUT_INSTRUCTION,
             ],
