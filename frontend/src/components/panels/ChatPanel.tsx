@@ -161,6 +161,12 @@ export function ChatPanel() {
       </div>
 
       <div className="chat-panel__input">
+        {!view.players.find((player) => player.player_id === view.your_player_id)?.alive &&
+          view.discussion_progress && (
+            <small className="discussion-progress">
+              AI議論進行: {view.discussion_progress.spoken}/{view.discussion_progress.total}
+            </small>
+          )}
         {(view.typing_player_ids ?? []).length > 0 && (
           <TypingIndicator label={`${(view.typing_player_ids ?? []).map((id) => playerNames[id] ?? id).join("、")}が書き込み中…`} />
         )}

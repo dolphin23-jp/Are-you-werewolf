@@ -15,7 +15,7 @@ from app.ai.personalities import assign_personalities
 from app.ai.strategy import StrategyAnalyzer, render_board_analysis
 from app.engine.phases import Phase
 from app.engine.roles import RoleName
-from app.engine.state import DivineRecord, MediumRecord
+from app.engine.state import DivineRecord, MediumRecord, VoteRecord
 from app.engine.vote import VoteManager
 from tests.conftest import make_controller
 
@@ -97,6 +97,21 @@ def test_ordinary_round_does_not_mention_a_runoff():
     _, messages = builder.build_vote_context(state, "p1", ["p2", "p3"])
 
     assert "決選投票" not in messages[0].content
+
+
+def test_discussion_prompt_localizes_stage_and_includes_vote_history():
+    controller = make_controller(seed=4)
+    state = controller.state
+    state.vote_records.append(VoteRecord(voter_id="p1", target_id="p2", day=1, round=1))
+    builder = _builder(state)
+
+    _system, messages = builder.build_discussion_context(state, "p3", "initial_view")
+    body = messages[0].content
+
+    assert "【投票履歴】" in body
+    assert "Player1(p1) → Player2(p2)" in body
+    assert "【議論段階】初回意見" in body
+    assert "initial_view" not in body
 
 
 def test_role_owner_receives_private_results_but_other_player_does_not():
