@@ -9,6 +9,16 @@ from __future__ import annotations
 import random
 from dataclasses import dataclass, replace
 
+DISCUSSION_LENGTH_RANGES: dict[str, tuple[int, int]] = {
+    "terse": (30, 100),
+    "normal": (80, 240),
+    "wordy": (180, 400),
+}
+
+
+def discussion_length_range(verbosity: str) -> tuple[int, int]:
+    return DISCUSSION_LENGTH_RANGES.get(verbosity, DISCUSSION_LENGTH_RANGES["normal"])
+
 
 @dataclass(frozen=True)
 class Personality:

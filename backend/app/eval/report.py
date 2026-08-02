@@ -178,9 +178,12 @@ def _render_speech_stats(games: list[tuple[GameTranscript, AnalysisResult]]) -> 
 
     total = sum(s["utterances"] for s in collected)
     mean_len = sum(s["mean_length"] * s["utterances"] for s in collected) / max(total, 1)
-    over = sum(s["over_200_chars"] for s in collected)
+    over = sum(s["over_length_limit"] for s in collected)
     fallbacks = sum(s["fallback_lines"] for s in collected)
     repeats = sum(s["verbatim_repeat_players"] for s in collected)
+    def weighted(key: str) -> float:
+        return float(sum(s[key] * s["utterances"] for s in collected) / max(total, 1))
+
     def weighted(key: str) -> float:
         return float(sum(s[key] * s["utterances"] for s in collected) / max(total, 1))
 
@@ -190,7 +193,7 @@ def _render_speech_stats(games: list[tuple[GameTranscript, AnalysisResult]]) -> 
             "|---|---|",
             f"| 発言数 | {total} |",
             f"| 平均文字数 | {mean_len:.1f} |",
-            f"| 200文字超過(指示違反) | {over} ({over / max(total, 1):.1%}) |",
+            f"| 人格別の発言長上限超過 | {over} ({over / max(total, 1):.1%}) |",
             f"| フォールバック定型文 | {fallbacks} ({fallbacks / max(total, 1):.1%}) |",
             f"| 同一発言の繰り返し | {repeats} |",
             f"| クロスプレイヤー論点重複率 | {weighted('cross_player_topic_overlap_rate'):.1%} |",

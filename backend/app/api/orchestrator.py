@@ -25,7 +25,16 @@ async def after_human_chat(session: GameSession) -> None:
         return
     latest = session.controller.state.chat_log[-1]
     session.coordinator.resume_after_human(session, latest.reply_to)
-    asyncio.create_task(session.coordinator.advance_discussion(session))
+    if session.discussion_advance_task is not None and not session.discussion_advance_task.done():
+        return
+    task = asyncio.create_task(session.coordinator.advance_discussion(session))
+    session.discussion_advance_task = task
+
+    def clear_task(completed: asyncio.Task[None]) -> None:
+        if session.discussion_advance_task is completed:
+            session.discussion_advance_task = None
+
+    task.add_done_callback(clear_task)
 
 
 async def after_discussion_phase_entered(session: GameSession) -> None:

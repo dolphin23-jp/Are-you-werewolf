@@ -17,7 +17,7 @@ from typing import Any
 
 from app.ai.deception import FakeClaimGuard, WolfDeceptionAssignment
 from app.ai.knowledge_base import KnowledgeBase, KnowledgeContext
-from app.ai.personalities import Personality
+from app.ai.personalities import Personality, discussion_length_range
 from app.ai.provider.base import Message
 from app.ai.strategy import (
     StrategyAnalyzer,
@@ -29,7 +29,7 @@ from app.engine.roles import ROLE_DEFINITIONS, RoleName
 from app.engine.state import ChatChannel, ChatMessage, GameState
 
 DISCUSSION_OUTPUT_INSTRUCTION = """以下のJSON形式で回答してください:
-{"public_message": "あなたの発言(200文字以内、人格に合った口調)", \
+{"public_message": "あなたの発言(人格に合った口調)", \
 "reasoning_memo": {"trusted_seer": "信頼する占い師のplayer_idまたはnull", \
 "suspects": ["怪しいと思うplayer_idの配列"], "trusted": ["信頼するplayer_idの配列"], \
 "execution_target": "処刑したい相手のplayer_idまたはnull", "overall_thought": "現在の考えの要約", \
@@ -137,7 +137,6 @@ class ContextBuilder:
             f"{personality.to_prompt_section()}\n"
             "【重要な制約】\n"
             "- 「AIとして」「言語モデルとして」「プロンプト」等のメタ発言は絶対に禁止です\n"
-            "- 発言は200文字以内を目安にしてください\n"
             "- 他のプレイヤーの発言内容に具体的に言及してください\n"
             "- 他プレイヤーを示すときは必ず「名前(pN)」の形で書いてください\n"
             "- 反論や質問への回答では、対象ログの発言IDをreply_toに入れてください\n"
@@ -253,10 +252,12 @@ class ContextBuilder:
             ]
             parts.append("【公開された判定主張】" + " / ".join(result_lines))
         if state.vote_records:
+            recent_days = sorted({vote.day for vote in state.vote_records}, reverse=True)[:2]
             vote_lines = [
                 f"{vote.day}日目R{vote.round}: {player_label(state, vote.voter_id)} → "
                 f"{player_label(state, vote.target_id)}"
                 for vote in state.vote_records
+                if vote.day in recent_days
             ]
             parts.append("【投票履歴】\n" + "\n".join(vote_lines))
         seer_claimants = [
@@ -345,9 +346,8 @@ class ContextBuilder:
     ) -> tuple[str, list[Message]]:
         guides = self._role_specific_guides(state, player_id)
         personality = self._personalities[player_id]
-        target_chars = {"terse": "30〜100", "normal": "80〜240", "wordy": "180〜400"}.get(
-            personality.verbosity, "80〜240"
-        )
+        minimum, maximum = discussion_length_range(personality.verbosity)
+        target_chars = f"{minimum}〜{maximum}"
         stage_instruction = (
             "reaction段階では、新論点を無理に作らず、短い同意・驚き・反論・回答だけでも構いません。"
             if stage == "reaction"
@@ -364,8 +364,7 @@ class ContextBuilder:
                 self._layer_e_current_log(state, ChatChannel.PUBLIC),
                 f"【議論段階】{self._stage_label(stage)}。発言長の目安は{target_chars}字です。"
                 + stage_instruction
-                +
-                "直近の複数人がすでに述べた結論・質問を言い換えて繰り返してはいけません。"
+                + "直近の複数人がすでに述べた結論・質問を言い換えて繰り返してはいけません。"
                 "同じ処刑候補を支持する場合も、未提示の投票履歴・死体・能力結果・発言差を"
                 "一つ追加してください。名指しされた本人は質問への直接回答を最初に述べてください。"
                 "consensus_summary段階では新説を広げず、対立点と処刑候補を根拠付きでまとめてください。",
@@ -478,16 +477,16 @@ class ContextBuilder:
             for declaration in state.co_declarations
             if declaration.player_id == player_id
         }
+        perspective_in_public_log = any(
+            message.day == state.day
+            and any(marker in message.content for marker in ("視点", "真と仮定", "内訳"))
+            for message in state.chat_log
+            if message.channel == ChatChannel.PUBLIC
+        )
         perspective_needed = bool(
             own_claims.intersection({RoleName.SEER, RoleName.MEDIUM})
             or player.role in (RoleName.MEDIUM, RoleName.FREEMASON)
-            or not any(
-                message.day == state.day
-                and any(marker in message.content for marker in ("視点", "真と仮定", "内訳"))
-                for message in state.chat_log
-                if message.channel == ChatChannel.PUBLIC
-            )
-            and not any(memo.get("role_hypotheses") for memo in self._reasoning_memos.values())
+            or (not perspective_in_public_log)
         )
         context = KnowledgeContext(
             state=state,

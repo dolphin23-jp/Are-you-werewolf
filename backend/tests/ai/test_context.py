@@ -112,6 +112,24 @@ def test_discussion_prompt_localizes_stage_and_includes_vote_history():
     assert "Player1(p1) → Player2(p2)" in body
     assert "【議論段階】初回意見" in body
     assert "initial_view" not in body
+    assert "200文字" not in (_system + body)
+
+
+def test_vote_history_is_limited_to_the_most_recent_two_days():
+    controller = make_controller(seed=4)
+    state = controller.state
+    state.vote_records.extend(
+        VoteRecord(voter_id="p1", target_id="p2", day=day, round=1)
+        for day in (1, 2, 3)
+    )
+    builder = _builder(state)
+
+    _system, messages = builder.build_discussion_context(state, "p3")
+    body = messages[0].content
+
+    assert "1日目R1" not in body
+    assert "2日目R1" in body
+    assert "3日目R1" in body
 
 
 def test_reply_quote_round_trip_is_rendered_in_ai_log():

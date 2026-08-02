@@ -28,6 +28,8 @@ class DiscussionRoundState:
     immediate_count: int = 0
     max_total: int = 0
     complete: bool = False
+    summary_done: bool = False
+    major_targets_ready: bool = False
 
 
 @dataclass
@@ -45,6 +47,7 @@ class GameSession:
     # sequential AI rounds instead of interleaving overlapping ones.
     discussion_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     discussion_round: DiscussionRoundState | None = None
+    discussion_advance_task: asyncio.Task[Any] | None = None
 
     def touch(self) -> None:
         self.last_active_at = time.time()

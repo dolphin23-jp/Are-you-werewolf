@@ -281,6 +281,17 @@ def test_discussion_quality_metrics_cover_overlap_balance_replies_and_questions(
     assert stats["length_variance"] > 0
 
 
+def test_length_limit_uses_each_recorded_personality_limit():
+    t = _transcript(
+        utterances=[
+            _say("p1", "短" * 101, effective_length_limit=100),
+            _say("p2", "長" * 201, effective_length_limit=400),
+        ]
+    )
+
+    assert analyze(t).stats["speech"]["over_length_limit"] == 1
+
+
 def test_clean_transcript_produces_no_findings():
     t = _transcript(
         utterances=[

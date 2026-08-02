@@ -17,12 +17,12 @@ from __future__ import annotations
 
 import asyncio
 import random
-from collections import Counter, deque
+from collections import Counter
 
 from app.ai.co_detection import detect_claimed_role
 from app.ai.context import ContextBuilder, DaySummaryManager
 from app.ai.deception import FakeClaimGuard, assign_madman_strategy, assign_wolf_deception
-from app.ai.personalities import assign_personalities
+from app.ai.personalities import assign_personalities, discussion_length_range
 from app.ai.player_agent import AIPlayerAgent
 from app.ai.provider.base import LLMProvider
 from app.ai.schemas import DiscussionOutput, MorningIntentOutput
@@ -49,7 +49,6 @@ class AICoordinator:
         self._ai_player_ids = list(ai_player_ids)
         self._observer_player_ids = observer_player_ids or set()
         self._max_discussion_followups = max(0, max_discussion_followups)
-        self._discussion_started_days: set[int] = set()
         self._segment_size = max(1, discussion_segment_size)
         self._pacing_scale = max(0.0, pacing_scale)
         self._rng = random.Random(seed)
@@ -134,6 +133,7 @@ class AICoordinator:
         public_results: list[dict[str, object]] | None = None,
         directed_question_targets: list[str] | None = None,
         ready_to_vote: bool | None = None,
+        effective_length_limit: int | None = None,
     ) -> None:
         if self._recorder is None:
             return
@@ -158,6 +158,7 @@ class AICoordinator:
                 directed_question_targets=directed_question_targets or [],
                 ready_to_vote=ready_to_vote,
                 used_fallback=used_fallback,
+                effective_length_limit=effective_length_limit,
             )
         )
 
@@ -225,6 +226,9 @@ class AICoordinator:
                 round_state.outputs.append((pid, output))
                 round_state.speech_counts[pid] = round_state.speech_counts.get(pid, 0) + 1
                 spoken += 1
+                if stage == "consensus_summary":
+                    round_state.complete = True
+                    break
                 for question in output.directed_questions:
                     self._round_queue_reply(state, round_state, question.target_id)
                 if output.needs_another_statement and self._rng.random() < min(
@@ -279,12 +283,61 @@ class AICoordinator:
             pid = round_state.order[round_state.cursor]
             round_state.cursor += 1
             return pid, "immediate" if round_state.stage == "immediate" else "initial_view"
+        if not round_state.major_targets_ready:
+            pressure: Counter[str] = Counter(
+                target
+                for _speaker, output in round_state.outputs
+                if isinstance((target := output.reasoning_memo.execution_target), str)
+                and target in state.players
+                and state.players[target].alive
+            )
+            round_state.major_targets = [target for target, _count in pressure.most_common(2)]
+            round_state.major_targets_ready = True
+            for target in round_state.major_targets:
+                if round_state.speech_counts.get(target, 0) < 2:
+                    self._round_queue_reply(state, round_state, target)
         while round_state.reply_queue and len(round_state.outputs) < round_state.max_total:
             pid = round_state.reply_queue.pop(0)
             round_state.queued.discard(pid)
             limit = max(1, round(2.5 * self._personalities[pid].talkativeness))
+            if pid in round_state.major_targets:
+                limit = max(limit, 4)
             if state.players[pid].alive and round_state.speech_counts.get(pid, 0) < limit:
+                if (
+                    pid in round_state.major_targets
+                    and round_state.speech_counts.get(pid, 0) < 2
+                ):
+                    return pid, "rebuttal_or_reassessment"
                 return pid, "reaction" if self._rng.random() < 0.35 else "rebuttal_or_reassessment"
+        for target in round_state.major_targets:
+            if (
+                round_state.speech_counts.get(target, 0) < 2
+                and len(round_state.outputs) < round_state.max_total
+            ):
+                return target, "rebuttal_or_reassessment"
+        if not round_state.summary_done and len(round_state.outputs) < round_state.max_total:
+            leader = next(
+                (
+                    claim.player_id
+                    for claim in state.co_declarations
+                    if claim.claimed_role == RoleName.FREEMASON
+                    and claim.player_id in self._agents
+                    and state.players[claim.player_id].alive
+                ),
+                None,
+            )
+            if leader is None:
+                leader = next(
+                    (
+                        pid
+                        for pid, output in reversed(round_state.outputs)
+                        if output.ready_to_vote and state.players[pid].alive
+                    ),
+                    round_state.order[0] if round_state.order else None,
+                )
+            round_state.summary_done = True
+            if leader is not None:
+                return leader, "consensus_summary"
         return None, "consensus_summary"
 
     @staticmethod
@@ -354,6 +407,9 @@ class AICoordinator:
             public_results=[item.model_dump() for item in output.public_results],
             directed_question_targets=[item.target_id for item in output.directed_questions],
             ready_to_vote=output.ready_to_vote,
+            effective_length_limit=discussion_length_range(
+                self._personalities[player_id].verbosity
+            )[1],
         )
         try:
             message_id = controller.chat(  # type: ignore[attr-defined]
@@ -398,22 +454,6 @@ class AICoordinator:
             except Exception:
                 pass
         return output
-
-    @staticmethod
-    def _queue_reply(
-        state: GameState,
-        target_id: str,
-        speech_counts: Counter[str],
-        queue: deque[str],
-        queued: set[str],
-    ) -> None:
-        if (
-            target_id in state.players
-            and state.players[target_id].alive
-            and target_id not in queued
-        ):
-            queue.append(target_id)
-            queued.add(target_id)
 
     def _is_fallback(self, player_id: str, text: str) -> bool:
         """The agent substitutes a personality-specific canned line when the

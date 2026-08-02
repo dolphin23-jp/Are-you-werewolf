@@ -16,7 +16,7 @@ from __future__ import annotations
 import random
 import re
 
-from app.ai.personalities import Personality
+from app.ai.personalities import Personality, discussion_length_range
 from app.ai.provider.base import LLMProvider, Message, SchemaT
 from app.ai.schemas import (
     DiscussionOutput,
@@ -60,9 +60,9 @@ class AIPlayerAgent:
         result = await self._generate_with_retry(system, messages, DiscussionOutput)
         if result is None:
             return None
-        limits = {"terse": 100, "normal": 240, "wordy": 400}
+        _minimum, maximum = discussion_length_range(self._personality.verbosity)
         result.public_message = self._sanitize(
-            result.public_message, max_len=limits.get(self._personality.verbosity, 240)
+            result.public_message, max_len=maximum
         )
         return result
 

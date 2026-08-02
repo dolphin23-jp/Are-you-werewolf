@@ -431,7 +431,11 @@ def _collect_format_stats(t: GameTranscript, result: AnalysisResult) -> None:
         if seen[key] == 2:
             repeats += 1
 
-    over_limit = [u for u in speech if len(u.text) > 200]
+    over_limit = [
+        u
+        for u in speech
+        if u.effective_length_limit is not None and len(u.text) > u.effective_length_limit
+    ]
     discussions = [u for u in speech if u.kind == "discussion"]
     counts = [
         sum(utterance.player_id == player_id for utterance in discussions)
@@ -459,7 +463,7 @@ def _collect_format_stats(t: GameTranscript, result: AnalysisResult) -> None:
         "mean_length": round(sum(lengths) / len(lengths), 1),
         "median_length": lengths[len(lengths) // 2],
         "max_length": lengths[-1],
-        "over_200_chars": len(over_limit),
+        "over_length_limit": len(over_limit),
         "fallback_lines": len(fallbacks),
         "fallback_rate": round(len(fallbacks) / len(speech), 4),
         "verbatim_repeat_players": repeats,
