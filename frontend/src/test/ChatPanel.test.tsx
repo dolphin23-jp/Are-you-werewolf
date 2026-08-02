@@ -262,6 +262,25 @@ describe("ChatPanel", () => {
     expect(grouped?.querySelector(".chat-message__author")).toBeNull();
   });
 
+  it("links inline message ids and keeps the author beside quoted follow-ups", () => {
+    useGameStore.setState({
+      view: makeView({
+        public_chat: [
+          { message_id: "m1", author_id: "p1", content: "最初", channel: "public", day: 1, reply_to: null, quote: null },
+          { message_id: "m2", author_id: "p1", content: "【m1への回答】と[m1]", channel: "public", day: 1, reply_to: "m1", quote: "最初" },
+        ],
+      }),
+      sessionId: "s1",
+      playerNames: { p1: "Hanako" },
+    });
+    const { container } = render(<ChatPanel />);
+
+    const followUp = container.querySelector("#chat-m2");
+    expect(followUp?.className).not.toContain("chat-message--grouped");
+    expect(followUp?.textContent).toContain("Hanako");
+    expect(followUp?.querySelectorAll(".chat-message__reference")).toHaveLength(2);
+  });
+
   it("scrolls to the newest message while already near the bottom", () => {
     const scrollTo = vi.fn();
     Element.prototype.scrollTo = scrollTo;

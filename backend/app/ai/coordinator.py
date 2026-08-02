@@ -538,15 +538,13 @@ class AICoordinator:
         already = any(c.player_id == player_id for c in state.co_declarations)
         if already:
             return
-        if output.public_claim_role is None:
-            return
-        try:
-            role = RoleName(output.public_claim_role)
-        except ValueError:
-            return
         other_names = [p.name for pid, p in state.players.items() if pid != player_id]
-        detected = detect_claimed_role(output.public_message, other_names)
-        if detected != role:
+        # What was actually said is authoritative.  Structured metadata is a useful
+        # hint, but models occasionally omit it even after writing an unambiguous CO.
+        # Requiring both representations used to leave those public claims out of the
+        # board analysis for the rest of the day.
+        role = detect_claimed_role(output.public_message, other_names)
+        if role is None:
             return
         try:
             controller.co(player_id, role.value)  # type: ignore[attr-defined]
