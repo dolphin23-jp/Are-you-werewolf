@@ -28,6 +28,10 @@ from app.ai.strategy import (
 from app.engine.roles import ROLE_DEFINITIONS, RoleName
 from app.engine.state import ChatChannel, ChatMessage, GameState
 
+# Upper bound for the key-point digest layer. The same statements appear in full in
+# the current-day log, so an unbounded digest just doubles the prompt as a day runs on.
+_MAX_KEY_POINTS_SHOWN = 12
+
 DISCUSSION_OUTPUT_INSTRUCTION = """以下のJSON形式で回答してください:
 {"public_message": "あなたの発言(人格に合った口調)", \
 "reasoning_memo": {"trusted_seer": "信頼する占い師のplayer_idまたはnull", \
@@ -347,9 +351,11 @@ class ContextBuilder:
         points = self._key_points.get(state.day, [])
         if not points:
             return "【すでに卓に出ている論点】(まだありません)"
+        # The full text of every one of these is already in the current-day log, so
+        # this layer is a digest, not a second transcript. Keep the most recent ones.
         lines = [
             f"[{message_id}] {player_label(state, player_id)}: {key_point}"
-            for message_id, player_id, key_point in points
+            for message_id, player_id, key_point in points[-_MAX_KEY_POINTS_SHOWN:]
         ]
         return (
             "【すでに卓に出ている論点】\n"

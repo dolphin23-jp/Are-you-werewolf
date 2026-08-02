@@ -31,6 +31,7 @@ class DiscussionRoundState:
     complete: bool = False
     summary_done: bool = False
     major_targets_ready: bool = False
+    major_target_sweeps: int = 0
 
 
 @dataclass

@@ -106,12 +106,60 @@ describe("ChatPanel", () => {
 
   it("automatically passes when the countdown reaches zero", async () => {
     useGameStore.setState({
-      view: makeView({ awaiting_your_speech: true, speech_wait_remaining_seconds: 0 }),
+      view: makeView({
+        awaiting_your_speech: true,
+        speech_wait_remaining_seconds: 0,
+        speech_wait_token: "1:100",
+      }),
       sessionId: "s1",
     });
     render(<ChatPanel />);
 
     await waitFor(() => expect(passDiscussionTurn).toHaveBeenCalledWith("s1"));
+  });
+
+  it("auto-passes only once while the same wait is still pending", async () => {
+    // The 2.5s poll replaces `view` wholesale. Without per-wait deduping, a wait
+    // that lingers at zero would fire a pass request on every refresh.
+    const waiting = {
+      awaiting_your_speech: true,
+      speech_wait_remaining_seconds: 0,
+      speech_wait_token: "1:100",
+    };
+    useGameStore.setState({ view: makeView(waiting), sessionId: "s1" });
+    const { rerender } = render(<ChatPanel />);
+    await waitFor(() => expect(passDiscussionTurn).toHaveBeenCalledTimes(1));
+
+    useGameStore.setState({ view: makeView(waiting) });
+    rerender(<ChatPanel />);
+    useGameStore.setState({ view: makeView(waiting) });
+    rerender(<ChatPanel />);
+
+    expect(passDiscussionTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it("auto-passes again once a new wait begins", async () => {
+    useGameStore.setState({
+      view: makeView({
+        awaiting_your_speech: true,
+        speech_wait_remaining_seconds: 0,
+        speech_wait_token: "1:100",
+      }),
+      sessionId: "s1",
+    });
+    const { rerender } = render(<ChatPanel />);
+    await waitFor(() => expect(passDiscussionTurn).toHaveBeenCalledTimes(1));
+
+    useGameStore.setState({
+      view: makeView({
+        awaiting_your_speech: true,
+        speech_wait_remaining_seconds: 0,
+        speech_wait_token: "1:200",
+      }),
+    });
+    rerender(<ChatPanel />);
+
+    await waitFor(() => expect(passDiscussionTurn).toHaveBeenCalledTimes(2));
   });
 
   it("turns a pending question into a reply selection", () => {

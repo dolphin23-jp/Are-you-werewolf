@@ -102,6 +102,7 @@ export interface GameView {
   pending_questions: PendingQuestion[];
   awaiting_your_speech: boolean;
   speech_wait_remaining_seconds: number;
+  speech_wait_token: string | null;
   discussion_progress: { spoken: number; total: number };
   your_divine_results: DivineResult[];
   your_medium_results: MediumResult[];

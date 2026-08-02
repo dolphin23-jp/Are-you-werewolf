@@ -33,16 +33,20 @@ class Personality:
     sample_lines: tuple[str, ...] = ()
 
     def to_prompt_section(self) -> str:
-        return (
+        section = (
             f"【あなたの人格】\n"
             f"- 口調: {self.tone}\n"
             f"- 思考スタイル: {self.thinking_style}\n"
             f"- 議論スタイル: {self.discussion_style}\n"
             f"- 感情傾向: {self.emotional_tendency}\n"
             f"- 発言頻度: {self.talkativeness:.1f}\n"
-            f"- 発言量: {self.verbosity}\n"
-            "- 口調の例:\n  - " + "\n  - ".join(self.sample_lines)
+            f"- 発言量: {self.verbosity}"
         )
+        # Examples anchor the register far better than the abstract labels do, but a
+        # preset without them must not emit a dangling empty bullet.
+        if self.sample_lines:
+            section += "\n- 口調の例:\n  - " + "\n  - ".join(self.sample_lines)
+        return section
 
     def get_fallback_message(self) -> str:
         return self.fallback_message
@@ -231,7 +235,10 @@ PERSONALITIES = [
         personality,
         talkativeness=_ACTIVITY[index % len(_ACTIVITY)],
         verbosity=_VERBOSITY[index % len(_VERBOSITY)],
-        sample_lines=_SAMPLE_LINES[personality.name],
+        # `.get`, not `[...]`: a preset added or renamed without updating
+        # `_SAMPLE_LINES` would otherwise raise at import time and take the whole
+        # app down rather than just losing its examples.
+        sample_lines=_SAMPLE_LINES.get(personality.name, ()),
     )
     for index, personality in enumerate(PERSONALITIES)
 ]
