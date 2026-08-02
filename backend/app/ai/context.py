@@ -97,28 +97,49 @@ SUMMARY_OUTPUT_INSTRUCTION = """以下のJSON形式で回答してください:
 class DaySummaryManager:
     """Bounded rolling-summary memory: full current-day log stays verbatim,
     older days degrade to compressed summaries instead of ever-growing
-    transcript replay."""
+    transcript replay.
+
+    Facts and commentary are stored apart. The public-fact block is generated
+    deterministically from the ledger and must survive compression intact --
+    truncating it would leave the AI recalling half a vote history. Only the
+    generated commentary, which is opinion, gets shortened."""
 
     def __init__(self) -> None:
         self.summaries: dict[int, str] = {}
+        self.facts: dict[int, str] = {}
 
-    def set_summary(self, day: int, summary: str) -> None:
+    def set_summary(self, day: int, summary: str, facts: str = "") -> None:
         self.summaries[day] = summary
+        if facts:
+            self.facts[day] = facts
 
     def compress_if_needed(self, max_total_chars: int = 3000) -> None:
-        total = sum(len(s) for s in self.summaries.values())
-        while total > max_total_chars and self.summaries:
-            oldest = min(self.summaries.keys())
-            current = self.summaries[oldest]
-            if len(current) <= 200:
-                break
-            self.summaries[oldest] = current[:200] + "…(省略)"
-            total = sum(len(s) for s in self.summaries.values())
+        for day in sorted(self.summaries):
+            if self._total_chars() <= max_total_chars:
+                return
+            current = self.summaries[day]
+            if len(current) > 200:
+                self.summaries[day] = current[:200] + "…(省略)"
 
     def render(self) -> str:
-        if not self.summaries:
+        days = sorted(set(self.facts) | set(self.summaries))
+        if not days:
             return "(まだ過去日の要約はありません)"
-        return "\n".join(f"{day}日目: {summary}" for day, summary in sorted(self.summaries.items()))
+        blocks = []
+        for day in days:
+            facts = self.facts.get(day, "")
+            summary = self.summaries.get(day, "")
+            if facts:
+                body = "\n".join(part for part in (facts, summary) if part)
+                blocks.append(f"{day}日目:\n{body}")
+            else:
+                blocks.append(f"{day}日目: {summary}")
+        return "\n".join(blocks)
+
+    def _total_chars(self) -> int:
+        return sum(len(s) for s in self.summaries.values()) + sum(
+            len(s) for s in self.facts.values()
+        )
 
 
 class ContextBuilder:
@@ -144,6 +165,11 @@ class ContextBuilder:
 
     def set_reasoning_memo(self, player_id: str, memo: dict[str, Any]) -> None:
         self._reasoning_memos[player_id] = memo
+
+    def get_reasoning_memo(self, player_id: str) -> dict[str, Any] | None:
+        """The player's last persisted memo. Free-text fields in it are opinion,
+        not fact -- only the validated id fields may be relied on."""
+        return self._reasoning_memos.get(player_id)
 
     def record_key_point(
         self, day: int, message_id: str, player_id: str, key_point: str
