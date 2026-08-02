@@ -235,7 +235,14 @@ class GameController:
 
     # -- player actions --
 
-    def chat(self, author_id: str, content: str, channel: str = "public") -> None:
+    def chat(
+        self,
+        author_id: str,
+        content: str,
+        channel: str = "public",
+        reply_to: str | None = None,
+        quote: str | None = None,
+    ) -> str:
         player = self._require_alive(author_id)
         chat_channel = ChatChannel(channel)
         if chat_channel == ChatChannel.WOLF and player.role != RoleName.WEREWOLF:
@@ -243,21 +250,49 @@ class GameController:
         if chat_channel == ChatChannel.FREEMASON and player.role != RoleName.FREEMASON:
             raise GameError("only freemasons may use the freemason channel")
 
+        referenced = next(
+            (
+                message
+                for message in self.state.chat_log
+                if message.message_id == reply_to and message.channel == chat_channel
+            ),
+            None,
+        )
+        if referenced is None:
+            reply_to = None
+            quote = None
+        message_id = f"m{self.state.next_message_number}"
+        self.state.next_message_number += 1
         message = ChatMessage(
-            author_id=author_id, content=content, channel=chat_channel, day=self.state.day
+            message_id=message_id,
+            author_id=author_id,
+            content=content,
+            channel=chat_channel,
+            day=self.state.day,
+            reply_to=reply_to,
+            quote=quote,
         )
         self.state.chat_log.append(message)
+        if reply_to is not None:
+            pending = self.state.pending_questions.get(author_id, [])
+            self.state.pending_questions[author_id] = [
+                question for question in pending if question.source_message_id != reply_to
+            ]
         self.events.publish(
             GameEvent(
                 GameEventType.CHAT_MESSAGE,
                 {
+                    "message_id": message_id,
                     "author_id": author_id,
                     "content": content,
                     "channel": chat_channel,
                     "day": self.state.day,
+                    "reply_to": reply_to,
+                    "quote": quote,
                 },
             )
         )
+        return message_id
 
     def vote(self, voter_id: str, target_id: str) -> None:
         if self.state.phase not in (Phase.VOTING, Phase.RUNOFF):

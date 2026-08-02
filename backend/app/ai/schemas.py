@@ -16,6 +16,7 @@ class PublicResultClaim(BaseModel):
 class DirectedQuestion(BaseModel):
     target_id: str
     question: str = ""
+    source_message_id: str | None = None
 
 
 class ReasoningMemo(BaseModel):
@@ -35,6 +36,8 @@ class ReasoningMemo(BaseModel):
 
 class DiscussionOutput(BaseModel):
     public_message: str
+    reply_to: str | None = None
+    quote: str | None = None
     reasoning_memo: ReasoningMemo = Field(default_factory=ReasoningMemo)
     contains_co_claim: bool = False
     public_claim_role: str | None = None

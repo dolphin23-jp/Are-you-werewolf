@@ -16,6 +16,7 @@ stays emergent rather than scripted.
 from __future__ import annotations
 
 import asyncio
+import random
 from collections import Counter, deque
 
 from app.ai.co_detection import detect_claimed_role
@@ -27,8 +28,9 @@ from app.ai.provider.base import LLMProvider
 from app.ai.schemas import DiscussionOutput, MorningIntentOutput
 from app.engine.phases import Phase
 from app.engine.roles import RoleName
-from app.engine.state import GameState
+from app.engine.state import GameState, PendingQuestion
 from app.eval.transcript import TranscriptRecorder, Utterance
+from app.sessions.models import DiscussionRoundState
 
 
 class AICoordinator:
@@ -41,11 +43,17 @@ class AICoordinator:
         recorder: TranscriptRecorder | None = None,
         observer_player_ids: set[str] | None = None,
         max_discussion_followups: int = 4,
+        discussion_segment_size: int = 4,
+        pacing_scale: float = 0.0,
     ) -> None:
         self._ai_player_ids = list(ai_player_ids)
         self._observer_player_ids = observer_player_ids or set()
         self._max_discussion_followups = max(0, max_discussion_followups)
         self._discussion_started_days: set[int] = set()
+        self._segment_size = max(1, discussion_segment_size)
+        self._pacing_scale = max(0.0, pacing_scale)
+        self._rng = random.Random(seed)
+        self._pending_questions = state.pending_questions
 
         self._personalities = assign_personalities(self._ai_player_ids, seed=seed)
 
@@ -162,122 +170,147 @@ class AICoordinator:
     # -- discussion --
 
     async def run_discussion_round(self, session: object) -> None:
-        """Run a finite morning -> initial views -> rebuttal discussion."""
+        """Compatibility wrapper: advance segments until the round completes.
+
+        Offline/evaluation callers use this method and must never pause for a
+        human. Interactive routes call :meth:`advance_discussion` directly.
+        """
+        while session.controller.state.phase == Phase.DISCUSSION:  # type: ignore[attr-defined]
+            await self.advance_discussion(session, allow_human_pause=False)
+            round_state = getattr(session, "discussion_round", None)
+            if round_state is None or round_state.complete:
+                return
+
+    async def advance_discussion(
+        self, session: object, *, allow_human_pause: bool = True
+    ) -> None:
+        """Run at most one discussion segment while holding the session lock."""
         async with session.discussion_lock:  # type: ignore[attr-defined]
             controller = session.controller  # type: ignore[attr-defined]
             state = controller.state
-            alive = [pid for pid in self._ai_player_ids if state.players[pid].alive]
-            if not alive:
+            if state.phase != Phase.DISCUSSION:
                 return
-            if state.day in self._discussion_started_days:
-                await self._run_human_followup(controller, state, alive)
-                return
-            self._discussion_started_days.add(state.day)
+            round_state = getattr(session, "discussion_round", None)
+            if round_state is None or round_state.day != state.day:
+                round_state = await self._start_discussion_round(state)
+                session.discussion_round = round_state  # type: ignore[attr-defined]
 
-            intents = await asyncio.gather(*(self._morning_intent(state, pid) for pid in alive))
-            priority = {"immediate": 0, "after_results": 1, "normal": 2, "hold": 3}
-            intent_by_id = dict(zip(alive, intents, strict=True))
-            order = sorted(
-                alive,
-                key=lambda pid: (
-                    priority.get(intent_by_id[pid].timing, 2),
-                    0 if intent_by_id[pid].intent == "publish_result" else 1,
-                    alive.index(pid),
-                ),
+            human_id = getattr(session, "human_id", "")
+            human = state.players.get(human_id)
+            can_pause = bool(
+                allow_human_pause
+                and human
+                and human.alive
+                and human_id not in self._observer_player_ids
             )
-
-            outputs: list[tuple[str, DiscussionOutput]] = []
-            speech_counts: Counter[str] = Counter()
-            reply_queue: deque[str] = deque()
-            queued: set[str] = set()
-            for pid in order:
-                if state.phase != Phase.DISCUSSION:
+            if round_state.awaiting_human and can_pause:
+                return
+            round_state.awaiting_human = False
+            if round_state.stage == "immediate" and round_state.immediate_count == 0:
+                round_state.stage = "initial_view"
+                if can_pause:
+                    round_state.awaiting_human = True
                     return
-                output = await self._speak(controller, state, pid, "initial_view")
-                if output is not None:
-                    outputs.append((pid, output))
-                    speech_counts[pid] += 1
 
-            order_index = {pid: index for index, pid in enumerate(order)}
-            for speaker, output in outputs:
-                for question in output.directed_questions:
-                    if order_index.get(question.target_id, len(order)) < order_index[speaker]:
-                        self._queue_reply(
-                            state, question.target_id, speech_counts, reply_queue, queued
-                        )
-
-            execution_targets = [
-                target
-                for _pid, output in outputs
-                if isinstance((target := output.reasoning_memo.execution_target), str)
-                and target in state.players
-            ]
-            pressure: Counter[str] = Counter(execution_targets)
-            major_targets = [pid for pid, _count in pressure.most_common(2)]
-            for pid in major_targets:
-                self._queue_reply(state, pid, speech_counts, reply_queue, queued)
-            for pid, output in outputs:
-                if not output.ready_to_vote or output.needs_another_statement:
-                    self._queue_reply(state, pid, speech_counts, reply_queue, queued)
-
-            max_total = max(len(alive) + self._max_discussion_followups, int(len(alive) * 2.5))
-            total = len(outputs)
-            while reply_queue and total < max_total:
-                pid = reply_queue.popleft()
-                queued.discard(pid)
-                per_player_limit = 4 if pid in major_targets else 3
-                if not state.players[pid].alive or speech_counts[pid] >= per_player_limit:
-                    continue
-                output = await self._speak(controller, state, pid, "rebuttal_or_reassessment")
+            spoken = 0
+            while spoken < self._segment_size and not round_state.complete:
+                pid, stage = self._next_discussion_speaker(state, round_state)
+                if pid is None:
+                    round_state.complete = True
+                    break
+                output = await self._speak(controller, state, pid, stage)
                 if output is None:
                     continue
-                outputs.append((pid, output))
-                speech_counts[pid] += 1
-                total += 1
+                round_state.outputs.append((pid, output))
+                round_state.speech_counts[pid] = round_state.speech_counts.get(pid, 0) + 1
+                spoken += 1
                 for question in output.directed_questions:
-                    self._queue_reply(
-                        state, question.target_id, speech_counts, reply_queue, queued
-                    )
-                if output.needs_another_statement:
-                    self._queue_reply(state, pid, speech_counts, reply_queue, queued)
+                    self._round_queue_reply(state, round_state, question.target_id)
+                if output.needs_another_statement and self._rng.random() < min(
+                    0.95, self._personalities[pid].talkativeness / 1.5
+                ):
+                    self._round_queue_reply(state, round_state, pid)
 
-                ready = sum(1 for _p, item in outputs[-len(alive) :] if item.ready_to_vote)
-                major_replied = all(speech_counts[target] >= 2 for target in major_targets)
-                if ready / max(min(len(alive), len(outputs)), 1) >= 0.8 and major_replied:
-                    if not reply_queue:
+                # The first segment contains only morning-immediate speakers.
+                if (
+                    round_state.stage == "immediate"
+                    and round_state.cursor >= round_state.immediate_count
+                ):
+                    round_state.stage = "initial_view"
+                    if can_pause:
+                        round_state.awaiting_human = True
                         break
+            if (
+                can_pause
+                and round_state.stage != "immediate"
+                and not round_state.complete
+                and spoken >= self._segment_size
+            ):
+                round_state.awaiting_human = True
 
-            # Finish with a concrete synthesis when the queue still has room. A living
-            # shared-role player is a natural facilitator; otherwise use the player who
-            # most recently signalled readiness rather than introducing a random voice.
-            if state.phase == Phase.DISCUSSION and total < max_total:
-                leader = next(
-                    (
-                        claim.player_id
-                        for claim in state.co_declarations
-                        if claim.claimed_role == RoleName.FREEMASON
-                        and claim.player_id in alive
-                        and claim.player_id in self._agents
-                    ),
-                    None,
-                )
-                if leader is None:
-                    leader = next(
-                        (pid for pid, item in reversed(outputs) if item.ready_to_vote), order[0]
-                    )
-                await self._speak(controller, state, leader, "consensus_summary")
+    async def _start_discussion_round(self, state: GameState) -> DiscussionRoundState:
+        alive = [pid for pid in self._ai_player_ids if state.players[pid].alive]
+        shuffled = list(alive)
+        self._rng.shuffle(shuffled)
+        intents = await asyncio.gather(*(self._morning_intent(state, pid) for pid in shuffled))
+        priority = {"immediate": 0, "after_results": 1, "normal": 2, "hold": 3}
+        intent_by_id = dict(zip(shuffled, intents, strict=True))
+        order = sorted(
+            shuffled,
+            key=lambda pid: (
+                priority.get(intent_by_id[pid].timing, 2),
+                0 if intent_by_id[pid].intent == "publish_result" else 1,
+            ),
+        )
+        immediate_count = sum(intent_by_id[pid].timing == "immediate" for pid in order)
+        return DiscussionRoundState(
+            day=state.day,
+            order=order,
+            stage="immediate",
+            immediate_count=immediate_count,
+            max_total=max(len(alive) + self._max_discussion_followups, int(len(alive) * 2.5)),
+        )
 
-    async def _run_human_followup(
-        self, controller: object, state: GameState, alive: list[str]
+    def _next_discussion_speaker(
+        self, state: GameState, round_state: DiscussionRoundState
+    ) -> tuple[str | None, str]:
+        if round_state.cursor < len(round_state.order):
+            pid = round_state.order[round_state.cursor]
+            round_state.cursor += 1
+            return pid, "immediate" if round_state.stage == "immediate" else "initial_view"
+        while round_state.reply_queue and len(round_state.outputs) < round_state.max_total:
+            pid = round_state.reply_queue.pop(0)
+            round_state.queued.discard(pid)
+            limit = max(1, round(2.5 * self._personalities[pid].talkativeness))
+            if state.players[pid].alive and round_state.speech_counts.get(pid, 0) < limit:
+                return pid, "reaction" if self._rng.random() < 0.35 else "rebuttal_or_reassessment"
+        return None, "consensus_summary"
+
+    @staticmethod
+    def _round_queue_reply(
+        state: GameState, round_state: DiscussionRoundState, target_id: str
     ) -> None:
-        public = [m for m in state.chat_log if m.channel.value == "public" and m.day == state.day]
-        latest = public[-1].content if public else ""
-        named = [pid for pid in alive if state.players[pid].name in latest]
-        speakers = (named + [pid for pid in alive if pid not in named])[
-            : self._max_discussion_followups
-        ]
-        for pid in speakers:
-            await self._speak(controller, state, pid, "human_followup")
+        if (
+            target_id in state.players
+            and state.players[target_id].alive
+            and target_id not in round_state.queued
+        ):
+            round_state.reply_queue.append(target_id)
+            round_state.queued.add(target_id)
+
+    def resume_after_human(self, session: object, reply_to: str | None = None) -> None:
+        """Release the human pause and prioritize the referenced AI/questioner."""
+        round_state = getattr(session, "discussion_round", None)
+        if round_state is None:
+            return
+        round_state.awaiting_human = False
+        if reply_to:
+            message = next(
+                (m for m in session.controller.state.chat_log if m.message_id == reply_to),  # type: ignore[attr-defined]
+                None,
+            )
+            if message and message.author_id in self._agents:
+                self._round_queue_reply(session.controller.state, round_state, message.author_id)  # type: ignore[attr-defined]
 
     async def _morning_intent(self, state: GameState, player_id: str) -> MorningIntentOutput:
         system, messages = self._context.build_morning_intent_context(state, player_id)
@@ -318,9 +351,31 @@ class AICoordinator:
             ready_to_vote=output.ready_to_vote,
         )
         try:
-            controller.chat(player_id, output.public_message, "public")  # type: ignore[attr-defined]
+            message_id = controller.chat(  # type: ignore[attr-defined]
+                player_id,
+                output.public_message,
+                "public",
+                output.reply_to,
+                output.quote,
+            )
         except Exception:
             return None
+        if self._pacing_scale:
+            base = 0.35 + len(output.public_message) * 0.012
+            delay = min(3.0, base) * self._pacing_scale * self._rng.uniform(0.8, 1.2)
+            await asyncio.sleep(delay)
+        for question in output.directed_questions:
+            if question.target_id not in state.players or not question.question.strip():
+                continue
+            self._pending_questions.setdefault(question.target_id, []).append(
+                PendingQuestion(
+                    asker=player_id,
+                    target=question.target_id,
+                    question=question.question.strip(),
+                    source_message_id=message_id,
+                    day=state.day,
+                )
+            )
         self._register_public_claim(controller, player_id, output)
         for result in output.public_results:
             if result.target_id not in state.players:
@@ -350,7 +405,6 @@ class AICoordinator:
         if (
             target_id in state.players
             and state.players[target_id].alive
-            and speech_counts[target_id] > 0
             and target_id not in queued
         ):
             queue.append(target_id)

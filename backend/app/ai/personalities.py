@@ -7,7 +7,7 @@ line matching its tone for total-LLM-failure cases."""
 from __future__ import annotations
 
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 
 @dataclass(frozen=True)
@@ -18,6 +18,8 @@ class Personality:
     discussion_style: str
     emotional_tendency: str
     fallback_message: str
+    talkativeness: float = 1.0
+    verbosity: str = "normal"
 
     def to_prompt_section(self) -> str:
         return (
@@ -25,7 +27,9 @@ class Personality:
             f"- 口調: {self.tone}\n"
             f"- 思考スタイル: {self.thinking_style}\n"
             f"- 議論スタイル: {self.discussion_style}\n"
-            f"- 感情傾向: {self.emotional_tendency}"
+            f"- 感情傾向: {self.emotional_tendency}\n"
+            f"- 発言頻度: {self.talkativeness:.1f}\n"
+            f"- 発言量: {self.verbosity}"
         )
 
     def get_fallback_message(self) -> str:
@@ -153,6 +157,27 @@ PERSONALITIES: list[Personality] = [
         "感情の起伏が激しい",
         "みんな、ここが勝負所ですよ!",
     ),
+    Personality(
+        "素朴な聞き手", "飾らない素直な口調", "疑問を一つずつ確かめる", "短い相槌と質問が中心",
+        "驚きや納得を率直に示す", "そこをもう少し聞きたいです。",
+    ),
+    Personality(
+        "長考する参謀", "慎重で整然とした敬語", "複数視点を比較してから結論を出す",
+        "要点を整理した長めの分析を出す", "表面上は冷静", "整理してから結論を述べます。",
+    ),
+]
+
+# The cadence axes are part of the presets (rather than assigned per game),
+# so a seeded assignment still returns one of the canonical personalities.
+_VERBOSITY = ("terse", "normal", "wordy")
+_ACTIVITY = (0.65, 0.85, 1.0, 1.2, 1.4)
+PERSONALITIES = [
+    replace(
+        personality,
+        talkativeness=_ACTIVITY[index % len(_ACTIVITY)],
+        verbosity=_VERBOSITY[index % len(_VERBOSITY)],
+    )
+    for index, personality in enumerate(PERSONALITIES)
 ]
 
 
