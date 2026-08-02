@@ -59,6 +59,13 @@ export interface FreemasonPartnerClaim {
   confirmed: boolean;
 }
 
+export interface FreemasonPartnerClaim {
+  claimant_id: string;
+  partner_id: string;
+  day: number;
+  confirmed: boolean;
+}
+
 export interface DivineResult {
   seer_id: string;
   target_id: string;
