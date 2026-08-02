@@ -21,6 +21,7 @@ from app.ai.provider.factory import LLMProviderConfigError, build_llm_provider
 from app.api import orchestrator
 from app.api.schemas import (
     ChatRequest,
+    ChatResponse,
     CoRequest,
     CreateGameRequest,
     CreateGameResponse,
@@ -74,9 +75,9 @@ def _resolve_player_id(session: GameSession, player_id: str | None) -> str:
     return player_id or session.human_id
 
 
-def _run(fn: object, *args: object, **kwargs: object) -> None:
+def _run(fn: object, *args: object, **kwargs: object) -> Any:
     try:
-        fn(*args, **kwargs)  # type: ignore[operator]
+        return fn(*args, **kwargs)  # type: ignore[operator]
     except GameError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -161,13 +162,15 @@ def get_debug(session_id: str) -> dict[str, Any]:
     return session.controller.get_debug_view()
 
 
-@router.post("/{session_id}/chat", response_model=OkResponse)
+@router.post("/{session_id}/chat", response_model=ChatResponse)
 async def chat(
     session_id: str, req: ChatRequest, player_id: str | None = Query(default=None)
-) -> OkResponse:
+) -> ChatResponse:
     session = _get_session(session_id)
     author = _resolve_player_id(session, player_id)
-    _run(session.controller.chat, author, req.content, req.channel)
+    message_id = _run(
+        session.controller.chat, author, req.content, req.channel, req.reply_to, req.quote
+    )
     if req.channel == "public":
         state = session.controller.state
         if not any(claim.player_id == author for claim in state.co_declarations):
@@ -198,7 +201,7 @@ async def chat(
         await orchestrator.after_human_chat(session)
     else:
         await orchestrator.after_human_private_chat(session, req.channel)
-    return OkResponse()
+    return ChatResponse(message_id=message_id)
 
 
 @router.post("/{session_id}/vote", response_model=OkResponse)

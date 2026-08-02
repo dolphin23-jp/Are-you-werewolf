@@ -27,7 +27,7 @@ from app.ai.provider.base import LLMProvider
 from app.ai.schemas import DiscussionOutput, MorningIntentOutput
 from app.engine.phases import Phase
 from app.engine.roles import RoleName
-from app.engine.state import GameState
+from app.engine.state import GameState, PendingQuestion
 from app.eval.transcript import TranscriptRecorder, Utterance
 
 
@@ -46,6 +46,7 @@ class AICoordinator:
         self._observer_player_ids = observer_player_ids or set()
         self._max_discussion_followups = max(0, max_discussion_followups)
         self._discussion_started_days: set[int] = set()
+        self._pending_questions = state.pending_questions
 
         self._personalities = assign_personalities(self._ai_player_ids, seed=seed)
 
@@ -198,13 +199,9 @@ class AICoordinator:
                     outputs.append((pid, output))
                     speech_counts[pid] += 1
 
-            order_index = {pid: index for index, pid in enumerate(order)}
-            for speaker, output in outputs:
+            for _speaker, output in outputs:
                 for question in output.directed_questions:
-                    if order_index.get(question.target_id, len(order)) < order_index[speaker]:
-                        self._queue_reply(
-                            state, question.target_id, speech_counts, reply_queue, queued
-                        )
+                    self._queue_reply(state, question.target_id, speech_counts, reply_queue, queued)
 
             execution_targets = [
                 target
@@ -235,9 +232,7 @@ class AICoordinator:
                 speech_counts[pid] += 1
                 total += 1
                 for question in output.directed_questions:
-                    self._queue_reply(
-                        state, question.target_id, speech_counts, reply_queue, queued
-                    )
+                    self._queue_reply(state, question.target_id, speech_counts, reply_queue, queued)
                 if output.needs_another_statement:
                     self._queue_reply(state, pid, speech_counts, reply_queue, queued)
 
@@ -318,9 +313,27 @@ class AICoordinator:
             ready_to_vote=output.ready_to_vote,
         )
         try:
-            controller.chat(player_id, output.public_message, "public")  # type: ignore[attr-defined]
+            message_id = controller.chat(  # type: ignore[attr-defined]
+                player_id,
+                output.public_message,
+                "public",
+                output.reply_to,
+                output.quote,
+            )
         except Exception:
             return None
+        for question in output.directed_questions:
+            if question.target_id not in state.players or not question.question.strip():
+                continue
+            self._pending_questions.setdefault(question.target_id, []).append(
+                PendingQuestion(
+                    asker=player_id,
+                    target=question.target_id,
+                    question=question.question.strip(),
+                    source_message_id=message_id,
+                    day=state.day,
+                )
+            )
         self._register_public_claim(controller, player_id, output)
         for result in output.public_results:
             if result.target_id not in state.players:
@@ -350,7 +363,6 @@ class AICoordinator:
         if (
             target_id in state.players
             and state.players[target_id].alive
-            and speech_counts[target_id] > 0
             and target_id not in queued
         ):
             queue.append(target_id)
