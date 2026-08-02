@@ -70,6 +70,9 @@ class AICoordinator:
         self._pacing_scale = max(0.0, pacing_scale)
         self._rng = random.Random(seed)
         self._pending_questions = state.pending_questions
+        # Pending questions disappear when answered, but their topic must remain in
+        # the day's ledger or another AI immediately asks the same thing again.
+        self._asked_question_topics: set[tuple[int, str, str]] = set()
         self._forced_partner_confirmations: set[str] = set()
         self._metrics = getattr(provider, "_metrics", None)
 
@@ -639,8 +642,13 @@ class AICoordinator:
                 else self._question_topic(question.question)
             )
             existing = self._pending_questions.setdefault(question.target_id, [])
-            if topic and any(item.day == state.day and item.topic == topic for item in existing):
-                continue
+            if topic:
+                topic_key = (state.day, question.target_id, topic)
+                if topic_key in self._asked_question_topics or any(
+                    item.day == state.day and item.topic == topic for item in existing
+                ):
+                    continue
+                self._asked_question_topics.add(topic_key)
             existing.append(
                 PendingQuestion(
                     asker=player_id,
