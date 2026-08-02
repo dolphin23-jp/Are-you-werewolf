@@ -111,6 +111,16 @@ export function passDiscussionTurn(sessionId: string): Promise<void> {
   return request(`/api/games/${sessionId}/pass-turn`, { method: "POST" });
 }
 
+export function controlDiscussion(
+  sessionId: string,
+  action: "pause" | "resume" | "step",
+): Promise<void> {
+  return request(`/api/games/${sessionId}/discussion-control`, {
+    method: "POST",
+    body: JSON.stringify({ action }),
+  });
+}
+
 export function startNight(sessionId: string): Promise<void> {
   return request(`/api/games/${sessionId}/start-night`, { method: "POST" });
 }

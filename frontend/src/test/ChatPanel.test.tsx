@@ -1,23 +1,52 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { passDiscussionTurn, sendChat } from "../api/client";
+import { controlDiscussion, passDiscussionTurn, sendChat } from "../api/client";
 import { ChatPanel } from "../components/panels/ChatPanel";
 import { useGameStore } from "../state/gameStore";
 import { makeView } from "./fixtures/gameView";
 
-vi.mock("../api/client", () => ({ sendChat: vi.fn(), passDiscussionTurn: vi.fn() }));
+vi.mock("../api/client", () => ({
+  controlDiscussion: vi.fn(),
+  sendChat: vi.fn(),
+  passDiscussionTurn: vi.fn(),
+}));
 
 describe("ChatPanel", () => {
   afterEach(() => {
     useGameStore.getState().reset();
     vi.clearAllMocks();
     vi.mocked(passDiscussionTurn).mockResolvedValue(undefined);
+    vi.mocked(controlDiscussion).mockResolvedValue(undefined);
   });
 
   it("renders public chat messages", () => {
     useGameStore.setState({ view: makeView(), sessionId: "s1", playerNames: { p1: "Hanako" } });
     render(<ChatPanel />);
     expect(screen.getByText(/こんにちは/)).toBeInTheDocument();
+  });
+
+  it("shows the current day before anyone speaks and announces no overnight death", () => {
+    useGameStore.setState({
+      view: makeView({ day: 3, public_chat: [] }),
+      sessionId: "s1",
+    });
+    render(<ChatPanel />);
+
+    fireEvent.click(screen.getByRole("button", { name: "3日目" }));
+    expect(screen.getByText("昨夜は誰も死体となって発見されませんでした")).toBeInTheDocument();
+  });
+
+  it("pauses and single-steps AI discussion", async () => {
+    useGameStore.setState({ view: makeView(), sessionId: "s1" });
+    const { rerender } = render(<ChatPanel />);
+
+    fireEvent.click(screen.getByRole("button", { name: "AI議論を一時停止" }));
+    await waitFor(() => expect(controlDiscussion).toHaveBeenCalledWith("s1", "pause"));
+
+    useGameStore.setState({ view: makeView({ discussion_paused: true }) });
+    rerender(<ChatPanel />);
+    fireEvent.click(screen.getByRole("button", { name: "次の1発言" }));
+    await waitFor(() => expect(controlDiscussion).toHaveBeenCalledWith("s1", "step"));
   });
 
   it("disables the input outside the discussion phase", () => {

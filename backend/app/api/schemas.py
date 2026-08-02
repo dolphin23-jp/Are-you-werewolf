@@ -36,6 +36,10 @@ class CoRequest(BaseModel):
     claimed_role: str
 
 
+class DiscussionControlRequest(BaseModel):
+    action: str  # pause | resume | step
+
+
 class OkResponse(BaseModel):
     ok: bool = True
 

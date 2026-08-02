@@ -24,7 +24,12 @@ async def after_human_chat(session: GameSession) -> None:
     if session.coordinator is None:
         return
     latest = session.controller.state.chat_log[-1]
-    session.coordinator.resume_after_human(session, latest.reply_to)
+    paused = getattr(session, "discussion_paused", False)
+    session.coordinator.resume_after_human(
+        session, latest.reply_to, release_wait=not paused
+    )
+    if paused:
+        return
     if session.discussion_advance_task is not None and not session.discussion_advance_task.done():
         return
     task = asyncio.create_task(session.coordinator.advance_discussion(session))

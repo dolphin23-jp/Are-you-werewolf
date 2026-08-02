@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useRef, useState } from "react";
-import { passDiscussionTurn, sendChat } from "../../api/client";
+import { controlDiscussion, passDiscussionTurn, sendChat } from "../../api/client";
 import type { ChatChannel, ChatMessage } from "../../api/types";
 import { useGameStore } from "../../state/gameStore";
 import { TypingIndicator } from "../common/TypingIndicator";
@@ -32,6 +32,7 @@ export function ChatPanel() {
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [passing, setPassing] = useState(false);
+  const [controlling, setControlling] = useState(false);
   const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
   const [newMessageCount, setNewMessageCount] = useState(0);
@@ -70,7 +71,7 @@ export function ChatPanel() {
   // zero would otherwise fire a pass request on every single poll.
   const waitToken = view?.speech_wait_token ?? null;
   useEffect(() => {
-    if (!view?.awaiting_your_speech || waitRemaining > 0 || !sessionId) return;
+    if (!view?.awaiting_your_speech || view.discussion_paused || waitRemaining > 0 || !sessionId) return;
     if (waitToken === null || autoPassedToken.current === waitToken) return;
     autoPassedToken.current = waitToken;
     void passDiscussionTurn(sessionId)
@@ -78,7 +79,7 @@ export function ChatPanel() {
       .catch((error: unknown) => {
         setError(error instanceof Error ? error.message : "パスに失敗しました");
       });
-  }, [refreshView, sessionId, setError, view?.awaiting_your_speech, waitRemaining, waitToken]);
+  }, [refreshView, sessionId, setError, view?.awaiting_your_speech, view?.discussion_paused, waitRemaining, waitToken]);
 
   if (!view || !sessionId) return null;
 
@@ -93,7 +94,11 @@ export function ChatPanel() {
   const channelMessages =
     tab === "public" ? view.public_chat : view.private_chat.filter((m) => m.channel === tab);
   const availableDays = Array.from(
-    new Set([...channelMessages.map((message) => message.day), ...view.vote_history.map((vote) => vote.day)]),
+    new Set([
+      ...channelMessages.map((message) => message.day),
+      ...view.vote_history.map((vote) => vote.day),
+      ...(tab === "public" && view.day > 0 ? [view.day] : []),
+    ]),
   ).sort((a, b) => a - b);
   const messages = channelMessages.filter(
     (message) =>
@@ -175,6 +180,19 @@ export function ChatPanel() {
     }
   };
 
+  const handleDiscussionControl = async (action: "pause" | "resume" | "step") => {
+    if (controlling) return;
+    setControlling(true);
+    try {
+      await controlDiscussion(sessionId, action);
+      await refreshView();
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "AI議論の操作に失敗しました");
+    } finally {
+      setControlling(false);
+    }
+  };
+
   return (
     <div className="panel chat-panel">
       <div className="chat-panel__tabs">
@@ -231,6 +249,11 @@ export function ChatPanel() {
             ))}
             {view.players.filter((player) => publicDeathDay(player) === selectedDay && player.death_cause === "night_death").length > 0 && (
               <p className="system-message">{view.players.filter((player) => publicDeathDay(player) === selectedDay && player.death_cause === "night_death").map((player) => player.name).join("、")}が死体となって発見されました</p>
+            )}
+            {selectedDay > 1 && selectedDay <= view.day && view.players.every(
+              (player) => publicDeathDay(player) !== selectedDay || player.death_cause !== "night_death",
+            ) && (
+              <p className="system-message">昨夜は誰も死体となって発見されませんでした</p>
             )}
             {view.players.filter((player) => player.death_day === selectedDay && player.death_cause === "executed").map((player) => (
               <p className="system-message" key={`executed-${player.player_id}`}>投票の結果、{player.name}が処刑されました</p>
@@ -325,6 +348,25 @@ export function ChatPanel() {
       )}
 
       <div className="chat-panel__input">
+        {view.phase === "discussion" && isAlive && (
+          <div className="discussion-controls">
+            {view.discussion_paused ? (
+              <>
+                <strong>AI議論は一時停止中です</strong>
+                <button className="btn" type="button" disabled={controlling} onClick={() => void handleDiscussionControl("step")}>
+                  次の1発言
+                </button>
+                <button className="btn" type="button" disabled={controlling} onClick={() => void handleDiscussionControl("resume")}>
+                  自動進行を再開
+                </button>
+              </>
+            ) : (
+              <button className="btn" type="button" disabled={controlling} onClick={() => void handleDiscussionControl("pause")}>
+                AI議論を一時停止
+              </button>
+            )}
+          </div>
+        )}
         {/* Shown to living players too: while a round is segmented and paced, the
             log can sit still for a while, and "how far along is this day" is the
             question that answers. It was previously visible only after you died. */}
@@ -333,7 +375,7 @@ export function ChatPanel() {
             AI議論進行: {view.discussion_progress.spoken}/{view.discussion_progress.total}
           </small>
         )}
-        {view.awaiting_your_speech && (
+        {view.awaiting_your_speech && !view.discussion_paused && (
           <div className="speech-waiting">
             <strong>あなたの発言を待っています（残り {waitRemaining} 秒）</strong>
             <button className="btn" type="button" disabled={passing} onClick={() => void handlePass()}>

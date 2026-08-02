@@ -453,6 +453,7 @@ button {
   font-size: 0.75rem;
 }
 
+.discussion-controls,
 .speech-waiting,
 .pending-questions {
   display: flex;

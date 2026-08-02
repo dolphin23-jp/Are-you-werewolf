@@ -104,6 +104,7 @@ export interface GameView {
   speech_wait_remaining_seconds: number;
   speech_wait_token: string | null;
   discussion_progress: { spoken: number; total: number };
+  discussion_paused: boolean;
   your_divine_results: DivineResult[];
   your_medium_results: MediumResult[];
   co_declarations: CoDeclarationRecord[];
