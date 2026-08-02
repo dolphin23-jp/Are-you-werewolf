@@ -1,8 +1,14 @@
-.PHONY: serve backend-dev frontend-dev backend-test frontend-test test lint dry-run
+.PHONY: serve build frontend-build backend-dev frontend-dev backend-test frontend-test test lint dry-run
 
 # Build the UI and serve everything (API + UI + WebSocket) on one port.
 serve:
 	bash .devcontainer/start.sh
+
+# Mirror the production frontend stage in Dockerfile.
+build: frontend-build
+
+frontend-build:
+	cd frontend && pnpm build
 
 backend-dev:
 	cd backend && . .venv/bin/activate && uvicorn app.main:app --reload

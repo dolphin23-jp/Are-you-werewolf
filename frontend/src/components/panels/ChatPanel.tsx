@@ -21,12 +21,12 @@ export function ChatPanel() {
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
   const [newMessageCount, setNewMessageCount] = useState(0);
   const [waitRemaining, setWaitRemaining] = useState(0);
-  const logRef = useRef<HTMLDivElement>(null);
+  const chatLogRef = useRef<HTMLDivElement>(null);
   const previousMessageCount = useRef(0);
   const autoPassStarted = useRef(false);
 
   useEffect(() => {
-    const log = logRef.current;
+    const log = chatLogRef.current;
     if (!log || !view) return;
     const count = view.public_chat.length + view.private_chat.length;
     const added = Math.max(0, count - previousMessageCount.current);
@@ -195,7 +195,7 @@ export function ChatPanel() {
 
       <div
         className="chat-panel__log"
-        ref={logRef}
+        ref={chatLogRef}
         onScroll={(event) => {
           const element = event.currentTarget;
           if (element.scrollHeight - element.scrollTop - element.clientHeight < 80) {
@@ -291,7 +291,8 @@ export function ChatPanel() {
           className="new-message-badge"
           type="button"
           onClick={() => {
-            logRef.current?.scrollTo({ top: logRef.current.scrollHeight, behavior: "smooth" });
+            const log = chatLogRef.current;
+            log?.scrollTo({ top: log.scrollHeight, behavior: "smooth" });
             setNewMessageCount(0);
           }}
         >
