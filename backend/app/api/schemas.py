@@ -21,6 +21,7 @@ class ChatRequest(BaseModel):
     channel: str = "public"
     reply_to: str | None = None
     quote: str | None = None
+    references: list[str] = Field(default_factory=list, max_length=10)
 
 
 class VoteRequest(BaseModel):

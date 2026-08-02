@@ -207,7 +207,13 @@ async def chat(
     session = _get_session(session_id)
     author = _resolve_player_id(session, player_id)
     message_id = _run(
-        session.controller.chat, author, req.content, req.channel, req.reply_to, req.quote
+        session.controller.chat,
+        author,
+        req.content,
+        req.channel,
+        req.reply_to,
+        req.quote,
+        req.references,
     )
     if req.channel == "public":
         state = session.controller.state

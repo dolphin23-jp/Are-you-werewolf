@@ -25,6 +25,7 @@ export function makeView(overrides: Partial<GameView> = {}): GameView {
         day: 1,
         reply_to: null,
         quote: null,
+        references: [],
       },
     ],
     private_chat: [],

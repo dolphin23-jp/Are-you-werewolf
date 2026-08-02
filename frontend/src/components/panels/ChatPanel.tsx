@@ -33,7 +33,7 @@ export function ChatPanel() {
   const [sending, setSending] = useState(false);
   const [passing, setPassing] = useState(false);
   const [controlling, setControlling] = useState(false);
-  const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
+  const [replyingTo, setReplyingTo] = useState<ChatMessage[]>([]);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
   const [newMessageCount, setNewMessageCount] = useState(0);
   const [waitRemaining, setWaitRemaining] = useState(0);
@@ -140,11 +140,12 @@ export function ChatPanel() {
         sessionId,
         content,
         tab,
-        replyingTo?.message_id,
-        replyingTo?.content.slice(0, 160),
+        replyingTo[0]?.message_id,
+        replyingTo[0]?.content.slice(0, 160),
+        replyingTo.slice(1).map((message) => message.message_id),
       );
       setDraft("");
-      setReplyingTo(null);
+      setReplyingTo([]);
       await refreshView();
     } catch (e) {
       setError(e instanceof Error ? e.message : "発言に失敗しました");
@@ -161,8 +162,16 @@ export function ChatPanel() {
   };
 
   const selectReply = (message: ChatMessage) => {
-    setReplyingTo(message);
+    setReplyingTo([message]);
     jumpToMessage(message.message_id);
+  };
+
+  const toggleQuestionReply = (message: ChatMessage) => {
+    setReplyingTo((current) =>
+      current.some((item) => item.message_id === message.message_id)
+        ? current.filter((item) => item.message_id !== message.message_id)
+        : [...current, message],
+    );
   };
 
   // Passing has its own in-flight flag: sharing `sending` made a pass disable the
@@ -302,6 +311,16 @@ export function ChatPanel() {
                       <span>{m.quote || source?.content.slice(0, 160) || "元発言を表示"}</span>
                     </button>
                   )}
+                  {(m.references ?? []).length > 0 && (
+                    <div className="chat-message__references">
+                      同時返信:
+                      {(m.references ?? []).map((messageId) => (
+                        <button key={messageId} type="button" onClick={() => jumpToMessage(messageId)}>
+                          [{messageId}]
+                        </button>
+                      ))}
+                    </div>
+                  )}
                   <span className="chat-message__body">
                     <MessageBody content={m.content} onReference={jumpToMessage} />
                   </span>
@@ -394,8 +413,16 @@ export function ChatPanel() {
                 <button
                   key={question.source_message_id}
                   type="button"
-                  onClick={() => source && selectReply(source)}
+                  onClick={() => source && toggleQuestionReply(source)}
+                  aria-pressed={Boolean(source && replyingTo.some((item) => item.message_id === source.message_id))}
                 >
+                  <input
+                    type="checkbox"
+                    readOnly
+                    checked={Boolean(source && replyingTo.some((item) => item.message_id === source.message_id))}
+                    onClick={(event) => event.stopPropagation()}
+                    onChange={() => source && toggleQuestionReply(source)}
+                  />
                   [{question.source_message_id}] {playerNames[question.asker] ?? question.asker}: 「{question.question}」
                 </button>
               );
@@ -406,10 +433,10 @@ export function ChatPanel() {
           <TypingIndicator label={`${(view.typing_player_ids ?? []).map((id) => playerNames[id] ?? id).join("、")}が書き込み中…`} />
         )}
         <div className="chat-composer">
-        {replyingTo && (
+        {replyingTo.length > 0 && (
           <div className="reply-preview">
-            <span>返信先 [{replyingTo.message_id}] {playerNames[replyingTo.author_id] ?? replyingTo.author_id}: {replyingTo.content}</span>
-            <button type="button" onClick={() => setReplyingTo(null)} aria-label="返信をキャンセル">×</button>
+            <span>返信先 {replyingTo.map((message) => `[${message.message_id}] ${playerNames[message.author_id] ?? message.author_id}`).join("、")}</span>
+            <button type="button" onClick={() => setReplyingTo([])} aria-label="返信をキャンセル">×</button>
           </div>
         )}
         <div className="chat-composer__row"><textarea

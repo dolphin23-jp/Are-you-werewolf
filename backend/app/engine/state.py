@@ -53,6 +53,7 @@ class ChatMessage:
     day: int
     reply_to: str | None = None
     quote: str | None = None
+    references: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -62,6 +63,7 @@ class PendingQuestion:
     question: str
     source_message_id: str
     day: int
+    topic: str = ""
 
 
 @dataclass
@@ -365,6 +367,7 @@ def _chat_dict(m: ChatMessage) -> dict[str, Any]:
         "day": m.day,
         "reply_to": m.reply_to,
         "quote": m.quote,
+        "references": list(m.references),
     }
 
 
@@ -375,6 +378,7 @@ def _pending_question_dict(question: PendingQuestion) -> dict[str, Any]:
         "question": question.question,
         "source_message_id": question.source_message_id,
         "day": question.day,
+        "topic": question.topic,
     }
 
 

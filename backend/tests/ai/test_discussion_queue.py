@@ -55,6 +55,12 @@ def test_named_freemason_partner_is_prompted_and_confirmation_closes_line():
     assert relation.confirmed is True
 
 
+def test_question_topic_groups_equivalent_execution_questions():
+    assert AICoordinator._question_topic("今日の処刑候補は誰ですか") == "execution_candidate"
+    assert AICoordinator._question_topic("一番怪しい灰は誰ですか") == "execution_candidate"
+    assert AICoordinator._question_topic("狐候補を挙げてください") == "fox_candidate"
+
+
 class ReplyLoopProvider:
     def __init__(self) -> None:
         self.calls = 0

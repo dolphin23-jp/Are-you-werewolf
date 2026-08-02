@@ -26,7 +26,7 @@ async def after_human_chat(session: GameSession) -> None:
     latest = session.controller.state.chat_log[-1]
     paused = getattr(session, "discussion_paused", False)
     session.coordinator.resume_after_human(
-        session, latest.reply_to, release_wait=not paused
+        session, latest.reply_to, latest.references, release_wait=not paused
     )
     if paused:
         return

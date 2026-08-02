@@ -341,6 +341,22 @@ button {
   cursor: pointer;
 }
 
+.chat-message__references {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  color: var(--text-dim);
+  font-size: 0.78rem;
+}
+
+.chat-message__references button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  cursor: pointer;
+}
+
 .chat-message__quote {
   display: flex;
   width: 100%;

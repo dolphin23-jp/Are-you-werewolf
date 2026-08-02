@@ -430,7 +430,12 @@ class AICoordinator:
             round_state.queued.add(target_id)
 
     def resume_after_human(
-        self, session: object, reply_to: str | None = None, *, release_wait: bool = True
+        self,
+        session: object,
+        reply_to: str | None = None,
+        references: list[str] | None = None,
+        *,
+        release_wait: bool = True,
     ) -> None:
         """Release the human pause and prioritize the referenced AI/questioner."""
         round_state = getattr(session, "discussion_round", None)
@@ -438,13 +443,27 @@ class AICoordinator:
             return
         if release_wait:
             self._set_awaiting(round_state, False)
-        if reply_to:
+        for message_id in dict.fromkeys([reply_to, *(references or [])]):
+            if not message_id:
+                continue
             message = next(
-                (m for m in session.controller.state.chat_log if m.message_id == reply_to),  # type: ignore[attr-defined]
+                (m for m in session.controller.state.chat_log if m.message_id == message_id),  # type: ignore[attr-defined]
                 None,
             )
             if message and message.author_id in self._agents:
                 self._round_queue_reply(session.controller.state, round_state, message.author_id)  # type: ignore[attr-defined]
+
+    @staticmethod
+    def _question_topic(question: str) -> str:
+        if any(word in question for word in ("処刑", "吊り", "狼候補", "怪しい")):
+            return "execution_candidate"
+        if "狐" in question:
+            return "fox_candidate"
+        if any(word in question for word in ("CO理由", "占い理由", "選んだ理由")):
+            return "claim_reason"
+        if any(word in question for word in ("時系列", "順番", "先に")):
+            return "timeline"
+        return ""
 
     @staticmethod
     def _set_awaiting(round_state: DiscussionRoundState, awaiting: bool) -> None:
@@ -549,13 +568,24 @@ class AICoordinator:
         for question in output.directed_questions:
             if question.target_id not in state.players or not question.question.strip():
                 continue
-            self._pending_questions.setdefault(question.target_id, []).append(
+            proposed_topic = question.topic.strip()
+            topic = (
+                proposed_topic
+                if proposed_topic
+                in {"execution_candidate", "fox_candidate", "claim_reason", "timeline"}
+                else self._question_topic(question.question)
+            )
+            existing = self._pending_questions.setdefault(question.target_id, [])
+            if topic and any(item.day == state.day and item.topic == topic for item in existing):
+                continue
+            existing.append(
                 PendingQuestion(
                     asker=player_id,
                     target=question.target_id,
                     question=question.question.strip(),
                     source_message_id=message_id,
                     day=state.day,
+                    topic=topic,
                 )
             )
         self._context.record_key_point(state.day, message_id, player_id, output.key_point)
@@ -636,6 +666,7 @@ class AICoordinator:
                 ),
                 source_message_id=message_id,
                 day=state.day,
+                topic="freemason_confirmation",
             )
         )
         if partner_id in self._agents:

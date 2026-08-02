@@ -9,6 +9,7 @@ import random
 from app.engine.game import GameController
 from app.engine.phases import Phase
 from app.engine.roles import RoleName
+from app.engine.state import PendingQuestion
 from tests.conftest import make_controller, make_player_specs
 
 MAX_LOOPS = 150
@@ -55,6 +56,23 @@ def test_chat_assigns_ids_and_validates_reply_channel():
     assert controller.state.chat_log[1].quote == "公開発言"
     assert controller.state.chat_log[2].reply_to is None
     assert controller.state.chat_log[2].quote is None
+
+
+def test_chat_can_answer_multiple_pending_questions_at_once():
+    controller = make_controller(seed=1)
+    first = controller.chat("p1", "質問1", "public")
+    second = controller.chat("p2", "質問2", "public")
+    controller.state.pending_questions["p0"] = [
+        PendingQuestion("p1", "p0", "質問1", first, 1),
+        PendingQuestion("p2", "p0", "質問2", second, 1),
+    ]
+
+    controller.chat("p0", "まとめて回答", "public", first, "質問1", [second, "m999"])
+
+    message = controller.state.chat_log[-1]
+    assert message.reply_to == first
+    assert message.references == [second]
+    assert controller.state.pending_questions["p0"] == []
 
 
 def _play_random_game(seed: int) -> None:

@@ -208,6 +208,42 @@ describe("ChatPanel", () => {
     expect(screen.getByText(/返信先 \[m1\] Hanako/)).toBeInTheDocument();
   });
 
+  it("sends one response for multiple selected questions", async () => {
+    useGameStore.setState({
+      view: makeView({
+        public_chat: [
+          ...makeView().public_chat,
+          { message_id: "m2", author_id: "p2", content: "狐候補は?", channel: "public", day: 1, reply_to: null, quote: null },
+        ],
+        pending_questions: [
+          { asker: "p1", target: "p0", question: "狼候補は?", source_message_id: "m1", day: 1 },
+          { asker: "p2", target: "p0", question: "狐候補は?", source_message_id: "m2", day: 1 },
+        ],
+      }),
+      sessionId: "s1",
+      playerNames: { p1: "Hanako", p2: "Jiro" },
+    });
+    render(<ChatPanel />);
+
+    fireEvent.click(screen.getByRole("button", { name: /m1.*狼候補/ }));
+    fireEvent.click(screen.getByRole("button", { name: /m2.*狐候補/ }));
+    fireEvent.change(screen.getByPlaceholderText("発言を入力..."), {
+      target: { value: "まとめて回答します" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "送信" }));
+
+    await waitFor(() =>
+      expect(sendChat).toHaveBeenCalledWith(
+        "s1",
+        "まとめて回答します",
+        "public",
+        "m1",
+        "こんにちは",
+        ["m2"],
+      ),
+    );
+  });
+
   it("renders a quote with its source author", () => {
     useGameStore.setState({
       view: makeView({

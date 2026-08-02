@@ -49,7 +49,8 @@ DISCUSSION_OUTPUT_INSTRUCTION = """以下のJSON形式で回答してくださ�
 "key_point": "今回新たに出す論点を1行で。新規論点がなければ空文字", \
 "agrees_with": ["同意する既出発言ID(mN)"], \
 "directed_questions": [{"target_id": "質問相手pN", "question": "質問", \
-"source_message_id": "質問のきっかけになった発言IDまたはnull"}], \
+"source_message_id": "質問のきっかけになった発言IDまたはnull", \
+"topic": "execution_candidate|fox_candidate|claim_reason|timeline|other"}], \
 "ready_to_vote": trueまたはfalse, "needs_another_statement": trueまたはfalse}
 主要候補が反論し、各視点と未解決質問を検討し終えた場合だけready_to_vote=true。
 新規論点がなくagrees_withだけの場合はreactionとして60文字以内の短い同意にする。
@@ -337,8 +338,9 @@ class ContextBuilder:
     @staticmethod
     def _format_chat_line(state: GameState, message: ChatMessage) -> str:
         reply = f" →{message.reply_to}" if message.reply_to else ""
+        references = f" refs={','.join(message.references)}" if message.references else ""
         return (
-            f"[{message.message_id}{reply}] "
+            f"[{message.message_id}{reply}{references}] "
             f"{player_label(state, message.author_id)}: {message.content}"
         )
 

@@ -243,6 +243,7 @@ class GameController:
         channel: str = "public",
         reply_to: str | None = None,
         quote: str | None = None,
+        references: list[str] | None = None,
     ) -> str:
         player = self._require_alive(author_id)
         chat_channel = ChatChannel(channel)
@@ -262,6 +263,15 @@ class GameController:
         if referenced is None:
             reply_to = None
             quote = None
+        valid_references = [
+            message_id
+            for message_id in dict.fromkeys(references or [])
+            if message_id != reply_to
+            and any(
+                message.message_id == message_id and message.channel == chat_channel
+                for message in self.state.chat_log
+            )
+        ][:10]
         message_id = f"m{self.state.next_message_number}"
         self.state.next_message_number += 1
         message = ChatMessage(
@@ -272,12 +282,14 @@ class GameController:
             day=self.state.day,
             reply_to=reply_to,
             quote=quote,
+            references=valid_references,
         )
         self.state.chat_log.append(message)
-        if reply_to is not None:
+        answered_ids = {message_id for message_id in [reply_to, *valid_references] if message_id}
+        if answered_ids:
             pending = self.state.pending_questions.get(author_id, [])
             self.state.pending_questions[author_id] = [
-                question for question in pending if question.source_message_id != reply_to
+                question for question in pending if question.source_message_id not in answered_ids
             ]
         self.events.publish(
             GameEvent(
@@ -290,6 +302,7 @@ class GameController:
                     "day": self.state.day,
                     "reply_to": reply_to,
                     "quote": quote,
+                    "references": valid_references,
                 },
             )
         )

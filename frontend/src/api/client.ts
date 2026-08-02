@@ -67,10 +67,11 @@ export function sendChat(
   channel: "public" | "wolf" | "freemason" = "public",
   replyTo?: string,
   quote?: string,
+  references: string[] = [],
 ): Promise<{ ok: boolean; message_id: string }> {
   return request(`/api/games/${sessionId}/chat`, {
     method: "POST",
-    body: JSON.stringify({ content, channel, reply_to: replyTo, quote }),
+    body: JSON.stringify({ content, channel, reply_to: replyTo, quote, references }),
   });
 }
 

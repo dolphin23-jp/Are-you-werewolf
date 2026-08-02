@@ -40,6 +40,7 @@ export interface ChatMessage {
   day: number;
   reply_to: string | null;
   quote: string | null;
+  references?: string[];
 }
 
 export interface PendingQuestion {
@@ -48,6 +49,14 @@ export interface PendingQuestion {
   question: string;
   source_message_id: string;
   day: number;
+  topic?: string;
+}
+
+export interface FreemasonPartnerClaim {
+  claimant_id: string;
+  partner_id: string;
+  day: number;
+  confirmed: boolean;
 }
 
 export interface FreemasonPartnerClaim {

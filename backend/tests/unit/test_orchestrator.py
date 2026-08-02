@@ -13,9 +13,14 @@ class _BlockingCoordinator:
         self.release = asyncio.Event()
 
     def resume_after_human(
-        self, session: object, reply_to: str | None, *, release_wait: bool = True
+        self,
+        session: object,
+        reply_to: str | None,
+        references: list[str] | None = None,
+        *,
+        release_wait: bool = True,
     ) -> None:
-        del session, reply_to, release_wait
+        del session, reply_to, references, release_wait
 
     async def advance_discussion(self, session: object) -> None:
         del session
