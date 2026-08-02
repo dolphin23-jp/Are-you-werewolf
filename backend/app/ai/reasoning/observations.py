@@ -14,8 +14,9 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
+from app.ai.reasoning.facts import PublicFactLedger
 from app.engine.roles import RoleName
 from app.engine.state import GameState
 
@@ -42,20 +43,88 @@ _SHARED_ROLE_KNOWLEDGE = (RoleName.WEREWOLF, RoleName.FREEMASON)
 
 
 @dataclass(frozen=True)
+class PublicClaim:
+    """Someone said they hold a role. Whether that is true is a separate question."""
+
+    player_id: str
+    role: RoleName
+    day: int
+    source_message_id: str = ""
+
+
+@dataclass(frozen=True)
+class PublicVerdict:
+    """Someone published a seer/medium result. Likewise: said, not established."""
+
+    claimant_id: str
+    result_type: str
+    target_id: str
+    is_werewolf: bool
+    day: int
+    source_message_id: str = ""
+
+
+@dataclass(frozen=True)
 class ObservationSet:
     player_ids: tuple[str, ...]
     true_roles: Mapping[str, RoleName]
     first_victim_id: str | None = None
     board_version: str = ""
+    day: int = 0
+    alive: Mapping[str, bool] = field(default_factory=dict)
+    claims: tuple[PublicClaim, ...] = ()
+    verdicts: tuple[PublicVerdict, ...] = ()
+    executed_ids: tuple[str, ...] = ()
 
     @classmethod
     def from_state(cls, state: GameState) -> ObservationSet:
+        ledger = PublicFactLedger(state)
         return cls(
             player_ids=tuple(state.players),
             true_roles={pid: player.role for pid, player in state.players.items()},
             first_victim_id=state.first_victim_id,
             board_version=board_version(state),
+            day=state.day,
+            alive={pid: player.alive for pid, player in state.players.items()},
+            claims=tuple(
+                PublicClaim(
+                    player_id=claim.player_id,
+                    role=claim.claimed_role,
+                    day=claim.day,
+                    source_message_id=claim.source_message_id,
+                )
+                for claim in ledger.co_declarations()
+            ),
+            verdicts=tuple(
+                PublicVerdict(
+                    claimant_id=result.claimant_id,
+                    result_type=result.result_type,
+                    target_id=result.target_id,
+                    is_werewolf=result.is_werewolf,
+                    day=result.day,
+                )
+                for result in ledger.public_results()
+            ),
+            executed_ids=ledger.executed_ids(),
         )
+
+    # -- public-claim lookups --
+
+    def claimed_role_of(self, player_id: str) -> RoleName | None:
+        return next(
+            (claim.role for claim in self.claims if claim.player_id == player_id), None
+        )
+
+    def claimants_of(self, role: RoleName) -> tuple[str, ...]:
+        return tuple(claim.player_id for claim in self.claims if claim.role == role)
+
+    def verdicts_by(self, claimant_id: str) -> tuple[PublicVerdict, ...]:
+        return tuple(
+            verdict for verdict in self.verdicts if verdict.claimant_id == claimant_id
+        )
+
+    def is_alive(self, player_id: str) -> bool:
+        return self.alive.get(player_id, True)
 
     def seat_knowledge(self, player_id: str) -> SeatKnowledge:
         """The deal-time knowledge of one seat. Wolves see wolves, freemasons see

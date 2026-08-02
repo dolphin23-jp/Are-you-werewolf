@@ -74,6 +74,7 @@ class PublicCoFact:
     player_id: str
     claimed_role: RoleName
     day: int
+    source_message_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -238,7 +239,10 @@ class PublicFactLedger:
     def co_declarations(self) -> tuple[PublicCoFact, ...]:
         return tuple(
             PublicCoFact(
-                player_id=claim.player_id, claimed_role=claim.claimed_role, day=claim.day
+                player_id=claim.player_id,
+                claimed_role=claim.claimed_role,
+                day=claim.day,
+                source_message_id=claim.source_message_id,
             )
             for claim in self._state.co_declarations
         )
