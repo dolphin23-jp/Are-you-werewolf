@@ -31,6 +31,7 @@ from app.ai.reasoning.belief.corrections import (
     verify,
     vote_fact_id,
 )
+from app.ai.reasoning.belief.ranking import RankedView, rank_hypotheses
 from app.ai.reasoning.belief.state import (
     CONFIDENCE_SPREAD,
     HARD_CONFIRMED_SCORE,
@@ -40,6 +41,7 @@ from app.ai.reasoning.belief.state import (
     RankedHypothesis,
     is_hard,
 )
+from app.ai.reasoning.belief.traits import CognitiveTraits
 from app.ai.reasoning.facts import MEDIUM_RESULT, PublicFactLedger
 from app.ai.reasoning.perspectives import Perspective
 from app.ai.reasoning.solver.backend import Certainty, has_role
@@ -53,6 +55,7 @@ PUBLISHED_WHITE_WEIGHT = -1.0
 CONTESTED_CLAIM_WEIGHT = 0.6
 VOTED_FOR_CLEARED_WEIGHT = 0.4
 VOTED_FOR_WOLF_WEIGHT = -0.3
+MAJORITY_PRESSURE_WEIGHT = 0.8
 TRUST_STEP = 0.5
 
 _WOLF_CATEGORIES = frozenset(
@@ -63,6 +66,8 @@ _WOLF_CATEGORIES = frozenset(
         "voted_for_cleared",
         "voted_for_wolf",
         "misremembered_vote",
+        "majority_pressure",
+        "accusation",
     }
 )
 
@@ -83,13 +88,26 @@ class CorrectionOutcome:
 class BeliefEngine:
     """One AI seat's beliefs. Construct one per player; never share them."""
 
-    def __init__(self, player_id: str, perspective: Perspective) -> None:
+    def __init__(
+        self,
+        player_id: str,
+        perspective: Perspective,
+        traits: CognitiveTraits | None = None,
+    ) -> None:
         self.state = PlayerBeliefState(
             player_id=player_id, perspective_id=perspective.perspective_id
         )
         self._perspective = perspective
+        # Traits scale soft evidence only. Nothing here can move a hard verdict.
+        self.traits = traits or CognitiveTraits()
         self._evidence: dict[str, EvidenceRecord] = {}
         self._hard: dict[str, Certainty] = {}
+        self._ranked: tuple[RankedView, ...] = ()
+
+    @property
+    def ranked_views(self) -> tuple[RankedView, ...]:
+        """Hypotheses in bands (本線 / 有力対抗 / …), never as percentages."""
+        return self._ranked
 
     # -- evidence --
 
@@ -129,6 +147,7 @@ class BeliefEngine:
         """
         self._derive_verdict_evidence(ledger)
         self._derive_claim_evidence(ledger)
+        self._derive_majority_pressure(ledger)
         if solver is not None:
             self._derive_solver_facts(ledger, solver)
             self._derive_vote_evidence(ledger)
@@ -180,6 +199,40 @@ class BeliefEngine:
                         ),
                     )
                 )
+
+    def _derive_majority_pressure(self, ledger: PublicFactLedger) -> None:
+        """Where the table's votes actually landed.
+
+        Only a conformist is moved much by this, and a sceptic barely at all --
+        which is the difference between a table that converges because it agrees
+        and one that converges because everyone is watching everyone else.
+        """
+        days = sorted({vote.day for vote in ledger.votes()})
+        if not days:
+            return
+        latest = days[-1]
+        counts: dict[str, int] = {}
+        for vote in ledger.votes_on(latest):
+            counts[vote.target_id] = counts.get(vote.target_id, 0) + 1
+        if not counts:
+            return
+        leader = max(sorted(counts), key=lambda pid: counts[pid])
+        self.add_evidence(
+            EvidenceRecord(
+                evidence_id=f"majority:{latest}:{leader}",
+                subject_id=leader,
+                category="majority_pressure",
+                source_event_ids=tuple(
+                    vote_fact_id(vote.voter_id, vote.day, vote.round, vote.target_id)
+                    for vote in ledger.votes_on(latest)
+                    if vote.target_id == leader
+                ),
+                weight=MAJORITY_PRESSURE_WEIGHT,
+                explanation=(
+                    f"{latest}日目の投票は{leader}へ{counts[leader]}票集まった。"
+                ),
+            )
+        )
 
     def _derive_vote_evidence(self, ledger: PublicFactLedger) -> None:
         """Who someone voted for, read against what the solver has since settled."""
@@ -241,7 +294,9 @@ class BeliefEngine:
         """
         verdict = verify(correction, ledger)
         if verdict.status is CorrectionStatus.REFUTED:
-            self._adjust_trust(correction.source_player_id, -TRUST_STEP)
+            self._adjust_trust(
+                correction.source_player_id, -TRUST_STEP * self.traits.trust_sensitivity
+            )
             self.recompute(ledger)
             return CorrectionOutcome(verdict=verdict)
         if verdict.status is CorrectionStatus.UNVERIFIABLE:
@@ -250,7 +305,9 @@ class BeliefEngine:
         retracted = self.invalidate_source_facts(
             verdict.invalidated_source_ids, reason=verdict.detail
         )
-        self._adjust_trust(correction.source_player_id, TRUST_STEP)
+        self._adjust_trust(
+            correction.source_player_id, TRUST_STEP * self.traits.trust_sensitivity
+        )
         subjects = tuple(
             sorted(
                 {
@@ -285,13 +342,14 @@ class BeliefEngine:
         for record in sorted(self.active_evidence(), key=lambda item: item.evidence_id):
             if record.subject_id is None:
                 continue
+            weight = record.weight * self.traits.scale_for(record.category)
             if record.category in _WOLF_CATEGORIES:
                 wolf_scores[record.subject_id] = (
-                    wolf_scores.get(record.subject_id, 0.0) + record.weight
+                    wolf_scores.get(record.subject_id, 0.0) + weight
                 )
             elif record.category.startswith("fox"):
                 fox_scores[record.subject_id] = (
-                    fox_scores.get(record.subject_id, 0.0) + record.weight
+                    fox_scores.get(record.subject_id, 0.0) + weight
                 )
             links.setdefault(record.subject_id, []).append(record.evidence_id)
 
@@ -340,6 +398,7 @@ class BeliefEngine:
                 )
             )
         self.state.active_hypotheses = ranked
+        self._ranked = rank_hypotheses(ranked, self.traits)
 
     def _choose_targets(self, ledger: PublicFactLedger) -> None:
         """Pick today's execution candidate. Dead seats fall out on their own --
@@ -356,6 +415,20 @@ class BeliefEngine:
             self.state.alternative_target = None
             self.state.confidence = 0.0
             return
+        # Changing your mind should cost something, or a player flips on every
+        # new scrap. How much it costs is what stubbornness means in practice.
+        incumbent = self.state.current_execution_target
+        if incumbent is not None and incumbent != eligible[0][0]:
+            incumbent_score = next(
+                (score for pid, score in eligible if pid == incumbent), None
+            )
+            if (
+                incumbent_score is not None
+                and eligible[0][1] - incumbent_score < self.traits.switching_cost
+            ):
+                eligible = [(incumbent, incumbent_score)] + [
+                    item for item in eligible if item[0] != incumbent
+                ]
         self.state.current_execution_target = eligible[0][0]
         self.state.alternative_target = eligible[1][0] if len(eligible) > 1 else None
         top = eligible[0][1]
@@ -363,6 +436,8 @@ class BeliefEngine:
         if is_hard(top):
             self.state.confidence = 1.0
         else:
-            self.state.confidence = max(
-                0.0, min(1.0, (top - runner_up) / CONFIDENCE_SPREAD)
+            raw = max(0.0, min(1.0, (top - runner_up) / CONFIDENCE_SPREAD))
+            # A cautious player wants a wider gap before calling it settled.
+            self.state.confidence = (
+                0.0 if raw < self.traits.commitment_threshold else raw
             )
