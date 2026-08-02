@@ -283,6 +283,7 @@ export function ChatPanel() {
             ))}
           </section>
         )}
+        <div ref={logEndRef} />
       </div>
 
       {newMessageCount > 0 && (
