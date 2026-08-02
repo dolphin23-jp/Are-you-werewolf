@@ -36,12 +36,31 @@ def detect_public_result(
     *,
     role_claimed_in_message: bool,
 ) -> DetectedPublicResult | None:
-    """Detect one explicit seer/medium result, excluding ordinary speculation."""
+    """The first explicit seer/medium result in the text, or None."""
+    results = detect_public_results(
+        text, effective_role, candidates, role_claimed_in_message=role_claimed_in_message
+    )
+    return results[0] if results else None
+
+
+def detect_public_results(
+    text: str,
+    effective_role: RoleName | None,
+    candidates: dict[str, str],
+    *,
+    role_claimed_in_message: bool,
+) -> list[DetectedPublicResult]:
+    """Every explicit seer/medium result in the text, excluding speculation.
+
+    One message routinely carries two verdicts ("Aは白、Bは黒でした"), and
+    stopping at the first silently drops half of what was published.
+    """
     if effective_role not in (RoleName.SEER, RoleName.MEDIUM):
-        return None
+        return []
     capability_word = "占" if effective_role == RoleName.SEER else "霊"
     if not role_claimed_in_message and capability_word not in text and "結果" not in text:
-        return None
+        return []
+    found: list[DetectedPublicResult] = []
     for sentence in re.split(r"[。！？!?\n]", text):
         for target_id, name in candidates.items():
             # The trailing-digit guard is what keeps "Player11(p11)は白" from
@@ -59,10 +78,8 @@ def detect_public_result(
             result_text = _TARGET_TRAILER_RE.sub("", result_text, count=1)
             if _SPECULATION_RE.search(result_text):
                 continue
-            white = _WHITE_RE.match(result_text)
-            if white is not None:
-                return DetectedPublicResult(effective_role.value, target_id, False)
-            black = _BLACK_RE.match(result_text)
-            if black is not None:
-                return DetectedPublicResult(effective_role.value, target_id, True)
-    return None
+            if _WHITE_RE.match(result_text) is not None:
+                found.append(DetectedPublicResult(effective_role.value, target_id, False))
+            elif _BLACK_RE.match(result_text) is not None:
+                found.append(DetectedPublicResult(effective_role.value, target_id, True))
+    return found

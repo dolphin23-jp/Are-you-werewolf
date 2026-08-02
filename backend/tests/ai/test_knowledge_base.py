@@ -4,7 +4,6 @@ import pytest
 
 from app.ai.knowledge_base import KnowledgeBase, KnowledgeContext, parse_doctrine
 from app.engine.roles import RoleName
-from app.engine.state import CoDeclaration
 from tests.conftest import make_controller
 
 
@@ -40,12 +39,8 @@ def test_conditions_and_priority_are_deterministic(tmp_path: Path):
     wolf = state.players_by_role(RoleName.WEREWOLF)[0]
     other = next(player for player in state.players.values() if player.player_id != wolf.player_id)
     state.day = 1
-    state.co_declarations.extend(
-        [
-            CoDeclaration(wolf.player_id, RoleName.SEER, 1),
-            CoDeclaration(other.player_id, RoleName.SEER, 1),
-        ]
-    )
+    controller.co(wolf.player_id, RoleName.SEER.value)
+    controller.co(other.player_id, RoleName.SEER.value)
 
     selected = KnowledgeBase(tmp_path).select(
         KnowledgeContext(state, wolf.player_id, fake_role=RoleName.SEER)

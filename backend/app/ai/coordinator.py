@@ -19,28 +19,34 @@ import asyncio
 import random
 import time
 from collections import Counter
+from dataclasses import replace
 
-from app.ai.co_detection import detect_claimed_role, detect_freemason_partner
+from app.ai.co_detection import detect_claimed_role
 from app.ai.context import ContextBuilder, DaySummaryManager
 from app.ai.deception import FakeClaimGuard, assign_madman_strategy, assign_wolf_deception
 from app.ai.personalities import assign_personalities, discussion_length_range
 from app.ai.player_agent import AIPlayerAgent, truncate_at_sentence
 from app.ai.provider.base import LLMProvider
-from app.ai.public_speech import detect_public_result
 from app.ai.reasoning import (
     PublicFactLedger,
     ValidationLog,
     compose_day_summary,
     detect_vote_plan_mismatch,
-    mentions_player,
     render_public_fact_summary,
     validate_discussion_output,
     validate_public_result_claim,
+)
+from app.ai.reasoning.claims import (
+    SpeechEventDraft,
+    build_claim_drafts,
+    ensure_fact_sentences,
+    register_claim_drafts,
 )
 from app.ai.schemas import DiscussionOutput, MorningIntentOutput
 from app.ai.schemas import PublicResultClaim as SchemaPublicResultClaim
 from app.engine.phases import Phase
 from app.engine.roles import RoleName
+from app.engine.speech_events import SpeechEventType
 from app.engine.state import GameState, PendingQuestion
 from app.eval.transcript import TranscriptRecorder, Utterance
 from app.sessions.models import DiscussionRoundState
@@ -699,6 +705,16 @@ class AICoordinator:
             key_point=output.key_point,
             agrees_with=output.agrees_with,
         )
+        # The claims this turn publishes are decided before it is spoken, so the
+        # message can be made to state them. Dropping a declared verdict because
+        # the prose forgot to name its target is how a result silently vanishes.
+        drafts = build_claim_drafts(output, PublicFactLedger(state), speaker_id=player_id)
+        output.public_message = ensure_fact_sentences(
+            output.public_message,
+            drafts,
+            PublicFactLedger(state),
+            speaker_id=player_id,
+        )
         try:
             message_id = controller.chat(  # type: ignore[attr-defined]
                 player_id,
@@ -742,22 +758,7 @@ class AICoordinator:
                 )
             )
         self._context.record_key_point(state.day, message_id, player_id, output.key_point)
-        self.register_public_claim(controller, player_id, output, message_id)
-        for result in output.public_results:
-            if result.target_id not in state.players:
-                continue
-            # Boundary-aware: a plain substring test lets a result about p1
-            # attach itself to a sentence that only ever mentions p11.
-            if not mentions_player(
-                output.public_message, result.target_id, state.players[result.target_id].name
-            ):
-                continue
-            try:
-                controller.public_result(  # type: ignore[attr-defined]
-                    player_id, result.result_type, result.target_id, result.is_werewolf
-                )
-            except Exception:
-                pass
+        self._register_claim_drafts(controller, player_id, drafts, message_id)
         return output
 
     def _validate_output(
@@ -849,69 +850,54 @@ class AICoordinator:
         output: DiscussionOutput,
         message_id: str = "",
     ) -> None:
+        """Public entry point: derive this turn's claims and record them.
+
+        Used for the human path and by callers that already hold a finished
+        message; `_speak` splits the two halves so it can fix the prose first.
+        """
+        drafts = build_claim_drafts(
+            output, PublicFactLedger(controller.state), speaker_id=player_id  # type: ignore[attr-defined]
+        )
+        self._register_claim_drafts(controller, player_id, drafts, message_id)
+
+    def _register_claim_drafts(
+        self,
+        controller: object,
+        player_id: str,
+        drafts: list[SpeechEventDraft],
+        message_id: str = "",
+    ) -> None:
         state = controller.state  # type: ignore[attr-defined]
-        already = any(c.player_id == player_id for c in state.co_declarations)
-        other_names = [p.name for pid, p in state.players.items() if pid != player_id]
-        # What was actually said is authoritative.  Structured metadata is a useful
-        # hint, but models occasionally omit it even after writing an unambiguous CO.
-        # Requiring both representations used to leave those public claims out of the
-        # board analysis for the rest of the day.
-        role = detect_claimed_role(output.public_message, other_names)
-        if role is not None and not already:
-            try:
-                controller.co(player_id, role.value)  # type: ignore[attr-defined]
-            except Exception:
-                pass
-        effective_role = role or next(
-            (
-                claim.claimed_role
-                for claim in state.co_declarations
-                if claim.player_id == player_id
-            ),
-            None,
-        )
-        candidates = {
-            pid: player.name for pid, player in state.players.items() if pid != player_id
-        }
-        detected_result = detect_public_result(
-            output.public_message,
-            effective_role,
-            candidates,
-            role_claimed_in_message=role in (RoleName.SEER, RoleName.MEDIUM),
-        )
-        if detected_result is not None:
-            # Text re-parsing recovers results the model forgot to declare, but
-            # it must clear the same consistency bar as the structured field --
-            # a regex has no idea whether its target was ever executed.
+        checked: list[SpeechEventDraft] = []
+        for draft in drafts:
+            if draft.event_type is not SpeechEventType.ABILITY_RESULT:
+                checked.append(draft)
+                continue
+            # Published verdicts clear the same consistency bar however they were
+            # derived: a declared field and a regex are equally unaware of whether
+            # the target was ever executed.
             validation = validate_public_result_claim(
                 SchemaPublicResultClaim(
-                    result_type=detected_result.result_type,
-                    target_id=detected_result.target_id,
-                    is_werewolf=detected_result.is_werewolf,
+                    result_type=draft.role.value if draft.role else "",
+                    target_id=draft.target_id or "",
+                    is_werewolf=bool(draft.result_is_werewolf),
                 ),
                 PublicFactLedger(state),
                 claimant_id=player_id,
             )
             self.validation.extend(validation.issues)
             if validation.claim is not None:
-                try:
-                    controller.public_result(  # type: ignore[attr-defined]
-                        player_id,
-                        validation.claim.result_type,
-                        validation.claim.target_id,
-                        validation.claim.is_werewolf,
-                    )
-                except Exception:
-                    pass
-        if effective_role != RoleName.FREEMASON:
-            return
-        partner_id = detect_freemason_partner(output.public_message, candidates)
-        if partner_id is None:
-            return
-        try:
-            controller.claim_freemason_partner(player_id, partner_id)  # type: ignore[attr-defined]
-        except Exception:
-            return
+                checked.append(
+                    replace(draft, result_is_werewolf=validation.claim.is_werewolf)
+                )
+        register_claim_drafts(controller, player_id, checked, message_id)
+        for draft in checked:
+            if draft.event_type is SpeechEventType.PARTNER_CLAIM and draft.target_id:
+                self._prompt_partner_confirmation(state, player_id, draft.target_id, message_id)
+
+    def _prompt_partner_confirmation(
+        self, state: GameState, player_id: str, partner_id: str, message_id: str
+    ) -> None:
         relation = next(
             (
                 claim
@@ -921,6 +907,12 @@ class AICoordinator:
             None,
         )
         if relation is None or relation.confirmed:
+            return
+        already_asked = any(
+            question.asker == player_id and question.topic == "freemason_confirmation"
+            for question in self._pending_questions.get(partner_id, [])
+        )
+        if already_asked:
             return
         self._pending_questions.setdefault(partner_id, []).append(
             PendingQuestion(

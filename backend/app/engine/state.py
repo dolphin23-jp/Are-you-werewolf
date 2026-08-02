@@ -8,6 +8,13 @@ from typing import Any
 
 from app.engine.phases import Phase
 from app.engine.roles import ROLE_DEFINITIONS, RoleName, Team
+from app.engine.speech_events import (
+    SpeechEvent,
+    SpeechEventType,
+    active_results,
+    current_role_claims,
+    partner_claims,
+)
 
 
 class DeathCause(StrEnum):
@@ -112,28 +119,36 @@ class DeathRecord:
     day: int
 
 
-@dataclass
+# The three records below are compatibility views over `GameState.speech_events`,
+# not storage. They keep the shape the API, the frontend and the AI board
+# analysis already expect while the event log stays the single source of truth.
+
+
+@dataclass(frozen=True)
 class CoDeclaration:
     player_id: str
     claimed_role: RoleName
     day: int
+    source_message_id: str = ""
 
 
-@dataclass
+@dataclass(frozen=True)
 class FreemasonPartnerClaim:
     claimant_id: str
     partner_id: str
     day: int
     confirmed: bool = False
+    source_message_id: str = ""
 
 
-@dataclass
+@dataclass(frozen=True)
 class PublicResultClaim:
     claimant_id: str
     result_type: str
     target_id: str
     is_werewolf: bool
     day: int
+    source_message_id: str = ""
 
 
 @dataclass
@@ -152,9 +167,10 @@ class GameState:
     attack_records: list[AttackRecord] = field(default_factory=list)
     vote_records: list[VoteRecord] = field(default_factory=list)
     death_records: list[DeathRecord] = field(default_factory=list)
-    co_declarations: list[CoDeclaration] = field(default_factory=list)
-    freemason_partner_claims: list[FreemasonPartnerClaim] = field(default_factory=list)
-    public_result_claims: list[PublicResultClaim] = field(default_factory=list)
+    # Append-only record of every structured public claim. Role claims,
+    # published verdicts and partner claims are all derived from it.
+    speech_events: list[SpeechEvent] = field(default_factory=list)
+    next_speech_event_number: int = 1
     first_victim_id: str | None = None
     typing_channels: dict[str, str] = field(default_factory=dict)
     winner: Team | None = None
@@ -171,6 +187,87 @@ class GameState:
     # Without this a runoff is just "vote again over the whole field", which
     # rarely converges and burns through max_vote_rounds into a false draw.
     runoff_candidates: list[str] = field(default_factory=list)
+
+    # -- derived public-claim views (see app/engine/speech_events.py) --
+
+    @property
+    def co_declarations(self) -> tuple[CoDeclaration, ...]:
+        """The CO standing right now, one per player. A retracted claim
+        disappears and a slid claim reports the new role, which is what every
+        existing caller ("who has claimed seer?") actually meant."""
+        return tuple(
+            CoDeclaration(
+                player_id=claim.player_id,
+                claimed_role=claim.role,
+                day=claim.day,
+                source_message_id=claim.source_message_id,
+            )
+            for claim in current_role_claims(self.speech_events)
+            if claim.role is not None
+        )
+
+    @property
+    def public_result_claims(self) -> tuple[PublicResultClaim, ...]:
+        """Live verdicts only: superseded versions and retracted results are
+        reachable through `speech_events`, not through this view."""
+        return tuple(
+            PublicResultClaim(
+                claimant_id=version.claimant_id,
+                result_type=version.result_type,
+                target_id=version.target_id,
+                is_werewolf=version.is_werewolf,
+                day=version.day,
+                source_message_id=version.source_message_id,
+            )
+            for version in active_results(self.speech_events)
+        )
+
+    @property
+    def freemason_partner_claims(self) -> tuple[FreemasonPartnerClaim, ...]:
+        return tuple(
+            FreemasonPartnerClaim(
+                claimant_id=claim.claimant_id,
+                partner_id=claim.partner_id,
+                day=claim.day,
+                confirmed=claim.confirmed,
+                source_message_id=claim.source_message_id,
+            )
+            for claim in partner_claims(self.speech_events)
+        )
+
+    def append_speech_event(
+        self,
+        actor_id: str,
+        event_type: SpeechEventType,
+        *,
+        source_message_id: str = "",
+        target_id: str | None = None,
+        role: RoleName | None = None,
+        result_is_werewolf: bool | None = None,
+        referenced_day: int | None = None,
+        confidence: float = 1.0,
+    ) -> SpeechEvent:
+        """The only place a `SpeechEvent` is created.
+
+        `GameController.record_speech_event` wraps this with the game rules;
+        callers that already hold a state (fixtures, replays) come straight here
+        so there is never a second way to write the log.
+        """
+        event = SpeechEvent(
+            event_id=f"e{self.next_speech_event_number}",
+            source_message_id=source_message_id,
+            actor_id=actor_id,
+            event_type=event_type,
+            day=self.day,
+            target_id=target_id,
+            role=role,
+            result_is_werewolf=result_is_werewolf,
+            referenced_day=referenced_day,
+            confidence=confidence,
+        )
+        self.next_speech_event_number += 1
+        self.speech_events.append(event)
+        return event
 
     def votable_ids(self, voter_id: str) -> list[str]:
         """Who this player may vote for right now."""
@@ -249,7 +346,12 @@ class GameState:
             "your_divine_results": [_divine_dict(r) for r in my_divine],
             "your_medium_results": [_medium_dict(r) for r in my_medium],
             "co_declarations": [
-                {"player_id": c.player_id, "claimed_role": c.claimed_role, "day": c.day}
+                {
+                    "player_id": c.player_id,
+                    "claimed_role": c.claimed_role,
+                    "day": c.day,
+                    "source_message_id": c.source_message_id,
+                }
                 for c in self.co_declarations
             ],
             "freemason_partner_claims": [
@@ -268,9 +370,11 @@ class GameState:
                     "target_id": claim.target_id,
                     "is_werewolf": claim.is_werewolf,
                     "day": claim.day,
+                    "source_message_id": claim.source_message_id,
                 }
                 for claim in self.public_result_claims
             ],
+            "speech_events": [_speech_event_dict(event) for event in self.speech_events],
             "vote_history": [
                 {"voter_id": v.voter_id, "target_id": v.target_id, "day": v.day, "round": v.round}
                 for v in self.vote_records
@@ -340,7 +444,12 @@ class GameState:
                 for d in self.death_records
             ],
             "co_declarations": [
-                {"player_id": c.player_id, "claimed_role": c.claimed_role, "day": c.day}
+                {
+                    "player_id": c.player_id,
+                    "claimed_role": c.claimed_role,
+                    "day": c.day,
+                    "source_message_id": c.source_message_id,
+                }
                 for c in self.co_declarations
             ],
             "freemason_partner_claims": [
@@ -352,10 +461,26 @@ class GameState:
                 }
                 for claim in self.freemason_partner_claims
             ],
+            "speech_events": [_speech_event_dict(event) for event in self.speech_events],
             "winner": self.winner,
             "victory_reason": self.victory_reason,
             "is_draw": self.is_draw,
         }
+
+
+def _speech_event_dict(event: SpeechEvent) -> dict[str, Any]:
+    return {
+        "event_id": event.event_id,
+        "source_message_id": event.source_message_id,
+        "actor_id": event.actor_id,
+        "event_type": event.event_type,
+        "day": event.day,
+        "target_id": event.target_id,
+        "role": event.role,
+        "result_is_werewolf": event.result_is_werewolf,
+        "referenced_day": event.referenced_day,
+        "confidence": event.confidence,
+    }
 
 
 def _chat_dict(m: ChatMessage) -> dict[str, Any]:

@@ -23,7 +23,14 @@ from __future__ import annotations
 
 import re
 
+from app.ai.reasoning.facts import mentions_player
 from app.engine.roles import RoleName
+from app.engine.speech_events import CLAIM_CONFIDENCE_THRESHOLD
+
+# An unambiguous matcher hit on free text is a claim; a quoted or hedged one is
+# only evidence that something claim-shaped was said.
+SPOKEN_CLAIM_CONFIDENCE = 0.9
+AMBIGUOUS_CLAIM_CONFIDENCE = 0.4
 
 _ROLE_WORDS: dict[RoleName, str] = {
     RoleName.SEER: "(?:占い師|占い)",
@@ -50,6 +57,19 @@ CO_PATTERNS: dict[RoleName, re.Pattern[str]] = {
 }
 
 _SENTENCE_SPLIT_RE = re.compile(r"[。！？!?\n]")
+
+# Forms that make a claim-shaped sentence something other than a claim: relaying
+# what someone else said, or hedging one's own. These still produce an event --
+# something claim-shaped was said and that is worth recording -- but at a
+# confidence too low to be promoted into the board's CO composition.
+_REPORTED_SPEECH_RE = re.compile(
+    r"(?:と(?:言|いって|言って|主張|自称)|とのこと|そうです|らしい|だそう|"
+    r"と述べ|と宣言|「[^」]*」)"
+)
+_HEDGE_RE = re.compile(
+    r"(?:たぶん|多分|おそらく|かもしれ|かも$|ような気|気がし|仮に|もし|"
+    r"だとしたら|であれば|ということにし|かどうか|でしょうか)"
+)
 _PARTNER_CONFIRMATION_RE = re.compile(
     r"相方(?:は|が)[、，,\s]*私(?:[^。！？!?\n]{0,30})"
     r"(?:です|だ|で間違い(?:ありません|ない)|で合っています|で合って(?:い)?ます)"
@@ -60,11 +80,24 @@ _PARTNER_REVEAL_RE = re.compile(
 
 
 def detect_claimed_role(text: str, other_player_names: list[str] | None = None) -> RoleName | None:
-    """Return the role this text claims for the speaker, or None.
+    """Return the role this text unambiguously claims for the speaker, or None.
 
     `other_player_names` suppresses third-person reports such as
     「ハルトは占い師です」 -- a name appearing before the role word in the
     same sentence means the speaker is talking about someone else.
+    """
+    role, confidence = detect_claimed_role_with_confidence(text, other_player_names)
+    return role if confidence >= CLAIM_CONFIDENCE_THRESHOLD else None
+
+
+def detect_claimed_role_with_confidence(
+    text: str, other_player_names: list[str] | None = None
+) -> tuple[RoleName | None, float]:
+    """Same match, plus how much of a claim it actually is.
+
+    A quoted or hedged sentence is reported at `AMBIGUOUS_CLAIM_CONFIDENCE`
+    rather than dropped, so the log can show that something claim-shaped was
+    said without a phantom CO entering the board analysis.
     """
     names = [n for n in (other_player_names or []) if n]
 
@@ -73,7 +106,7 @@ def detect_claimed_role(text: str, other_player_names: list[str] | None = None) 
     # explicit self-claim, so handle this established form before the generic
     # third-person-report guard below.
     if _PARTNER_CONFIRMATION_RE.search(text):
-        return RoleName.FREEMASON
+        return RoleName.FREEMASON, SPOKEN_CLAIM_CONFIDENCE
 
     for sentence in _SENTENCE_SPLIT_RE.split(text):
         if not sentence.strip():
@@ -84,8 +117,10 @@ def detect_claimed_role(text: str, other_player_names: list[str] | None = None) 
                 continue
             if _mentions_other_before(sentence, names, match.start()):
                 continue
-            return role
-    return None
+            if _REPORTED_SPEECH_RE.search(sentence) or _HEDGE_RE.search(sentence):
+                return role, AMBIGUOUS_CLAIM_CONFIDENCE
+            return role, SPOKEN_CLAIM_CONFIDENCE
+    return None, 0.0
 
 
 def detect_freemason_partner(
@@ -124,11 +159,7 @@ def detect_freemason_partner(
 
 def _mentions_player(text: str, player_id: str, name: str) -> bool:
     """Match p1 without accidentally treating the p1 prefix in p11 as a hit."""
-    return bool(
-        name in text
-        or f"({player_id})" in text
-        or re.search(rf"(?<![A-Za-z0-9]){re.escape(player_id)}(?!\d)", text)
-    )
+    return mentions_player(text, player_id, name)
 
 
 def _mentions_other_before(sentence: str, names: list[str], role_index: int) -> bool:

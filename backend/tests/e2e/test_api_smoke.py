@@ -156,9 +156,10 @@ def test_public_chat_role_claim_is_added_to_public_information():
 
     assert response.status_code == 200
     view = client.get(f"/api/games/{session_id}/view").json()
-    assert {"player_id": human_id, "claimed_role": "seer", "day": 0} in view[
-        "co_declarations"
-    ]
+    claim = next(c for c in view["co_declarations"] if c["player_id"] == human_id)
+    assert (claim["claimed_role"], claim["day"]) == ("seer", 0)
+    # Every claim points back at the message that made it.
+    assert claim["source_message_id"] == response.json()["message_id"]
 
 
 def test_compact_human_seer_co_registers_target_and_result():
@@ -177,16 +178,21 @@ def test_compact_human_seer_co_registers_target_and_result():
     )
 
     assert response.status_code == 200
+    message_id = response.json()["message_id"]
     view = client.get(f"/api/games/{session_id}/view").json()
-    assert {"player_id": human_id, "claimed_role": "seer", "day": 0} in view[
-        "co_declarations"
-    ]
+    assert {
+        "player_id": human_id,
+        "claimed_role": "seer",
+        "day": 0,
+        "source_message_id": message_id,
+    } in view["co_declarations"]
     assert {
         "claimant_id": human_id,
         "result_type": "seer",
         "target_id": target_id,
         "is_werewolf": False,
         "day": 0,
+        "source_message_id": message_id,
     } in view["public_result_claims"]
 
 
@@ -228,6 +234,56 @@ def test_human_shared_reveal_and_partner_confirmation_are_tracked():
             "confirmed": True,
         }
     ]
+
+
+def test_a_human_slide_replaces_the_old_co_and_keeps_the_history():
+    response = client.post("/api/games", json={"human_name": "スライド", "seed": 31})
+    session_id = response.json()["session_id"]
+    human_id = response.json()["human_player_id"]
+    session = get_session_store().get(session_id)
+    assert session is not None
+    session.coordinator = None
+    session.controller.state.phase = Phase.DISCUSSION
+
+    first = client.post(f"/api/games/{session_id}/chat", json={"content": "占い師CO。"})
+    client.post(f"/api/games/{session_id}/chat", json={"content": "共有者CO。訂正します。"})
+
+    view = client.get(f"/api/games/{session_id}/view").json()
+    # The old API answers "what is claimed now", so only the slid role remains.
+    assert [c["claimed_role"] for c in view["co_declarations"] if c["player_id"] == human_id] == [
+        "freemason"
+    ]
+    claims = [
+        event
+        for event in view["speech_events"]
+        if event["actor_id"] == human_id and event["event_type"] == "role_claim"
+    ]
+    assert [event["role"] for event in claims] == ["seer", "freemason"]
+    assert claims[0]["source_message_id"] == first.json()["message_id"]
+
+
+def test_an_ambiguous_human_sentence_does_not_become_a_co():
+    response = client.post("/api/games", json={"human_name": "あいまい", "seed": 32})
+    session_id = response.json()["session_id"]
+    human_id = response.json()["human_player_id"]
+    session = get_session_store().get(session_id)
+    assert session is not None
+    session.coordinator = None
+    session.controller.state.phase = Phase.DISCUSSION
+
+    client.post(
+        f"/api/games/{session_id}/chat",
+        json={"content": "占い師のCOを待ちましょう。私は占い師ではありません。"},
+    )
+    client.post(
+        f"/api/games/{session_id}/chat", json={"content": "たぶん占い師です、くらいの話です。"}
+    )
+
+    view = client.get(f"/api/games/{session_id}/view").json()
+    assert [c for c in view["co_declarations"] if c["player_id"] == human_id] == []
+    # The hedged sentence is still on the record, just below the promotion bar.
+    hedged = [event for event in view["speech_events"] if event["actor_id"] == human_id]
+    assert [event["confidence"] for event in hedged] == [0.4]
 
 
 def test_public_view_conceals_night_death_cause():

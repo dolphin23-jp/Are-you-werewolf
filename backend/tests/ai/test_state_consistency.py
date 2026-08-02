@@ -131,11 +131,11 @@ def test_a_medium_result_about_a_living_player_never_reaches_the_board():
 
     asyncio.run(coordinator._speak(controller, controller.state, "p1", "initial_view"))
 
-    assert controller.state.public_result_claims == []
+    assert controller.state.public_result_claims == ()
     assert coordinator.validation.by_code("result_medium_target_not_executed")
 
 
-def test_a_result_about_p1_is_not_attached_to_a_sentence_naming_only_p11():
+def test_a_declared_result_names_p1_even_when_the_prose_only_names_p11():
     controller = make_controller(seed=4)
     controller.state.phase = Phase.DISCUSSION
     controller.state.day = 1
@@ -152,7 +152,13 @@ def test_a_result_about_p1_is_not_attached_to_a_sentence_naming_only_p11():
     published = {
         (claim.target_id, claim.is_werewolf) for claim in controller.state.public_result_claims
     }
-    assert published == {("p11", True)}
+    # The declared verdict is about p1 and must not slide onto p11 -- and rather
+    # than dropping it because the prose forgot to name p1, the canonical
+    # sentence is written into the message so the text matches the ledger.
+    assert published == {("p1", True)}
+    spoken = controller.state.chat_log[-1].content
+    assert "Player1(p1)は黒(人狼)です。" in spoken
+    assert spoken.endswith("占いCO。Player11(p11)は人狼でした。")
 
 
 def test_the_ballot_the_engine_holds_is_what_gets_compared_to_the_stated_plan():

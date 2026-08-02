@@ -17,6 +17,9 @@ from app.ai.reasoning.facts import (
     PublicPlayerFact,
     PublicResultFact,
     PublicVoteFact,
+    ResultVersion,
+    RoleClaimState,
+    SpeechEvent,
     mentions_player,
 )
 from app.ai.reasoning.summaries import (
@@ -51,6 +54,9 @@ __all__ = [
     "PublicResultFact",
     "PublicVoteFact",
     "ResultValidation",
+    "ResultVersion",
+    "RoleClaimState",
+    "SpeechEvent",
     "TargetResolution",
     "ValidationIssue",
     "ValidationLog",
