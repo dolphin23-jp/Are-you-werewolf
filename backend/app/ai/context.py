@@ -16,17 +16,10 @@ import json
 from typing import Any
 
 from app.ai.deception import FakeClaimGuard, WolfDeceptionAssignment
+from app.ai.knowledge_base import KnowledgeBase, KnowledgeContext
 from app.ai.personalities import Personality
 from app.ai.provider.base import Message
 from app.ai.strategy import (
-    FOX_GUIDE,
-    FREEMASON_CHAT_GUIDE,
-    HUNTER_NIGHT_GUIDE,
-    LEADER_GUIDE,
-    MEDIUM_ROLA_KNOWLEDGE,
-    PERSPECTIVE_GUIDE,
-    SEER_NIGHT_GUIDE,
-    WOLF_ATTACK_GUIDE,
     StrategyAnalyzer,
     player_label,
     player_labels,
@@ -120,6 +113,7 @@ class ContextBuilder:
         self._fake_claim_guard = fake_claim_guard
         self._observer_player_ids = observer_player_ids or set()
         self._reasoning_memos: dict[str, dict[str, Any]] = {}
+        self._knowledge = KnowledgeBase()
 
     def set_reasoning_memo(self, player_id: str, memo: dict[str, Any]) -> None:
         self._reasoning_memos[player_id] = memo
@@ -145,6 +139,7 @@ class ContextBuilder:
             "- 「AIとして」「言語モデルとして」「プロンプト」等のメタ発言は絶対に禁止です\n"
             "- 発言は200文字以内を目安にしてください\n"
             "- 他のプレイヤーの発言内容に具体的に言及してください\n"
+            "- 他プレイヤーを示すときは必ず「名前(pN)」の形で書いてください\n"
             "- 反論や質問への回答では、対象ログの発言IDをreply_toに入れてください\n"
             "- 自分自身を疑い先・処刑先・能力対象として扱ってはいけません\n"
             "- 名指しの質問には1回だけ追加返信の機会があります。返信前の相手を"
@@ -257,6 +252,13 @@ class ContextBuilder:
                 for claim in state.public_result_claims
             ]
             parts.append("【公開された判定主張】" + " / ".join(result_lines))
+        if state.vote_records:
+            vote_lines = [
+                f"{vote.day}日目R{vote.round}: {player_label(state, vote.voter_id)} → "
+                f"{player_label(state, vote.target_id)}"
+                for vote in state.vote_records
+            ]
+            parts.append("【投票履歴】\n" + "\n".join(vote_lines))
         seer_claimants = [
             declaration.player_id
             for declaration in state.co_declarations
@@ -360,7 +362,7 @@ class ContextBuilder:
                 self._layer_d_summaries(),
                 self._layer_previous_memo(player_id),
                 self._layer_e_current_log(state, ChatChannel.PUBLIC),
-                f"【議論段階】{stage}。発言長の目安は{target_chars}字です。"
+                f"【議論段階】{self._stage_label(stage)}。発言長の目安は{target_chars}字です。"
                 + stage_instruction
                 +
                 "直近の複数人がすでに述べた結論・質問を言い換えて繰り返してはいけません。"
@@ -434,7 +436,7 @@ class ContextBuilder:
         return self._assemble(
             [self._layer_a_system(state, player_id), self._layer_b_role(state, player_id)],
             [
-                self._layer_c_state(state, player_id, [WOLF_ATTACK_GUIDE]),
+                self._layer_c_state(state, player_id, self._role_specific_guides(state, player_id)),
                 self._layer_previous_memo(player_id),
                 self._layer_private_history(state, ChatChannel.WOLF),
                 "【指示】内輪チャットで襲撃先や騙り戦略、潜伏戦略を100文字以内で相談してください。",
@@ -448,7 +450,7 @@ class ContextBuilder:
         return self._assemble(
             [self._layer_a_system(state, player_id), self._layer_b_role(state, player_id)],
             [
-                self._layer_c_state(state, player_id, [FREEMASON_CHAT_GUIDE]),
+                self._layer_c_state(state, player_id, self._role_specific_guides(state, player_id)),
                 self._layer_previous_memo(player_id),
                 self._layer_private_history(state, ChatChannel.FREEMASON),
                 "【指示】共有者チャットで方針を100文字以内で相談してください。",
@@ -468,19 +470,40 @@ class ContextBuilder:
 
     def _role_specific_guides(self, state: GameState, player_id: str) -> list[str]:
         player = state.players[player_id]
-        guides: list[str] = []
-        guides.append(PERSPECTIVE_GUIDE)
-        if state.day >= 2:
-            guides.append(FOX_GUIDE)
-        if player.role == RoleName.SEER:
-            guides.append(SEER_NIGHT_GUIDE)
-        if player.role == RoleName.HUNTER:
-            guides.append(HUNTER_NIGHT_GUIDE)
-        if player.role == RoleName.WEREWOLF:
-            guides.append(WOLF_ATTACK_GUIDE)
-        if player.role in (RoleName.MEDIUM, RoleName.FREEMASON):
-            guides.append(LEADER_GUIDE)
-        medium_co_count = sum(1 for c in state.co_declarations if c.claimed_role == RoleName.MEDIUM)
-        if medium_co_count >= 2:
-            guides.append(MEDIUM_ROLA_KNOWLEDGE)
-        return guides
+        fake_role = self._wolf_deception.fake_role_by_player.get(player_id)
+        if player.role == RoleName.MADMAN:
+            fake_role = self._madman_fake_role
+        own_claims = {
+            declaration.claimed_role
+            for declaration in state.co_declarations
+            if declaration.player_id == player_id
+        }
+        perspective_needed = bool(
+            own_claims.intersection({RoleName.SEER, RoleName.MEDIUM})
+            or player.role in (RoleName.MEDIUM, RoleName.FREEMASON)
+            or not any(
+                message.day == state.day
+                and any(marker in message.content for marker in ("視点", "真と仮定", "内訳"))
+                for message in state.chat_log
+                if message.channel == ChatChannel.PUBLIC
+            )
+            and not any(memo.get("role_hypotheses") for memo in self._reasoning_memos.values())
+        )
+        context = KnowledgeContext(
+            state=state,
+            player_id=player_id,
+            fake_role=fake_role,
+            perspective_needed=perspective_needed,
+        )
+        return [doctrine.body for doctrine in self._knowledge.select(context)]
+
+    @staticmethod
+    def _stage_label(stage: str) -> str:
+        return {
+            "immediate": "朝一CO・結果発表",
+            "initial_view": "初回意見",
+            "reaction": "短い反応",
+            "rebuttal_or_reassessment": "反論・再評価",
+            "consensus_summary": "議論の整理",
+            "human_followup": "人間発言への応答",
+        }.get(stage, "議論")

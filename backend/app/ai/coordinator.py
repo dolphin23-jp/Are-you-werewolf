@@ -54,6 +54,7 @@ class AICoordinator:
         self._pacing_scale = max(0.0, pacing_scale)
         self._rng = random.Random(seed)
         self._pending_questions = state.pending_questions
+        self._metrics = getattr(provider, "_metrics", None)
 
         self._personalities = assign_personalities(self._ai_player_ids, seed=seed)
 
@@ -337,6 +338,10 @@ class AICoordinator:
             output = await self._agents[player_id].generate_discussion(system, messages)
         finally:
             controller.set_typing(player_id, False)  # type: ignore[attr-defined]
+        if self._metrics is not None:
+            self._metrics.record_discussion_result(skipped=output is None)
+        if output is None:
+            return None
         self._context.set_reasoning_memo(player_id, output.reasoning_memo.model_dump())
         self._record(
             state,

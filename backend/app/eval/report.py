@@ -90,6 +90,9 @@ def _render_metrics(summary: dict[str, Any]) -> str:
         f"| **JSON成功率** | {summary['success_rate']:.1%} |",
         f"| うち strict schema で成功 | {summary['strict_schema_rate']:.1%} |",
         f"| リトライが発生した呼び出し | {summary['retry_calls']} |",
+        f"| 議論生成スキップ | {summary.get('discussion_skips', 0)} / "
+        f"{summary.get('discussion_generation_attempts', 0)} "
+        f"({summary.get('discussion_skip_rate', 0.0):.1%}) |",
         f"| 応答時間 平均 | {summary['latency_seconds']['mean']:.3f} 秒 |",
         f"| 応答時間 p50 / p95 | "
         f"{summary['latency_seconds']['p50']:.3f} / {summary['latency_seconds']['p95']:.3f} 秒 |",
