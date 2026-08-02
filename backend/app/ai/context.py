@@ -33,7 +33,7 @@ from app.ai.strategy import (
     render_board_analysis,
 )
 from app.engine.roles import ROLE_DEFINITIONS, RoleName
-from app.engine.state import ChatChannel, GameState
+from app.engine.state import ChatChannel, ChatMessage, GameState
 
 DISCUSSION_OUTPUT_INSTRUCTION = """以下のJSON形式で回答してください:
 {"public_message": "あなたの発言(200文字以内、人格に合った口調)", \
@@ -47,7 +47,9 @@ DISCUSSION_OUTPUT_INSTRUCTION = """以下のJSON形式で回答してくださ�
 "public_claim_role": "今回公開COする役職(seer/medium/hunter/freemason)またはnull", \
 "public_results": [{"result_type": "seerまたはmedium", "target_id": "pN", \
 "is_werewolf": trueまたはfalse}], \
-"directed_questions": [{"target_id": "質問相手pN", "question": "質問"}], \
+"reply_to": "反論・回答対象の発言ID(mN)またはnull", "quote": "必要なら短い引用またはnull", \
+"directed_questions": [{"target_id": "質問相手pN", "question": "質問", \
+"source_message_id": "質問のきっかけになった発言IDまたはnull"}], \
 "ready_to_vote": trueまたはfalse, "needs_another_statement": trueまたはfalse}
 主要候補が反論し、各視点と未解決質問を検討し終えた場合だけready_to_vote=true。
 まだ反論・再評価が必要ならfalseとし、自分も追加発言が必要ならneeds_another_statement=true。"""
@@ -143,6 +145,7 @@ class ContextBuilder:
             "- 「AIとして」「言語モデルとして」「プロンプト」等のメタ発言は絶対に禁止です\n"
             "- 発言は200文字以内を目安にしてください\n"
             "- 他のプレイヤーの発言内容に具体的に言及してください\n"
+            "- 反論や質問への回答では、対象ログの発言IDをreply_toに入れてください\n"
             "- 自分自身を疑い先・処刑先・能力対象として扱ってはいけません\n"
             "- 名指しの質問には1回だけ追加返信の機会があります。返信前の相手を"
             "『答えられない』と評価せず、同じ要求を繰り返さないでください\n"
@@ -293,20 +296,38 @@ class ContextBuilder:
         todays = [m for m in state.chat_log if m.channel == channel and m.day == state.day]
         if not todays:
             return "【当日のログ】(まだ発言はありません)"
-        lines = [
-            f"{player_label(state, m.author_id)}: {m.content}"
-            for m in todays
-        ]
+        lines = [self._format_chat_line(state, message) for message in todays]
         return "【当日のログ】\n" + "\n".join(lines)
 
     def _layer_private_history(self, state: GameState, channel: ChatChannel) -> str:
         messages = [m for m in state.chat_log if m.channel == channel]
         if not messages:
             return "【過去を含む内輪ログ】(まだ発言はありません)"
-        lines = [
-            f"{m.day}日目 {player_label(state, m.author_id)}: {m.content}" for m in messages[-30:]
-        ]
+        lines = [f"{m.day}日目 {self._format_chat_line(state, m)}" for m in messages[-30:]]
         return "【過去を含む内輪ログ】\n" + "\n".join(lines)
+
+    @staticmethod
+    def _format_chat_line(state: GameState, message: ChatMessage) -> str:
+        reply = f" →{message.reply_to}" if message.reply_to else ""
+        return (
+            f"[{message.message_id}{reply}] "
+            f"{player_label(state, message.author_id)}: {message.content}"
+        )
+
+    def _layer_pending_questions(self, state: GameState, player_id: str) -> str:
+        questions = state.pending_questions.get(player_id, [])
+        if not questions:
+            return "【あなたへの未回答の質問】(ありません)"
+        lines = [
+            f"[{item.source_message_id}] {player_label(state, item.asker)} →あなた:"
+            f"「{item.question}」"
+            for item in questions
+        ]
+        return (
+            "【あなたへの未回答の質問】\n"
+            + "\n".join(lines)
+            + "\n最初にこれへ直接答えてください。答えられない場合は理由を述べてください。"
+        )
 
     def _assemble(
         self, system_layers: list[str], user_layers: list[str]
@@ -325,6 +346,7 @@ class ContextBuilder:
             [self._layer_a_system(state, player_id), self._layer_b_role(state, player_id)],
             [
                 self._layer_c_state(state, player_id, guides),
+                self._layer_pending_questions(state, player_id),
                 self._layer_d_summaries(),
                 self._layer_previous_memo(player_id),
                 self._layer_e_current_log(state, ChatChannel.PUBLIC),

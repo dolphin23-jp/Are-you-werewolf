@@ -56,7 +56,9 @@ def test_direct_reply_queue_is_globally_bounded_and_returns_control():
     asyncio.run(coordinator.run_discussion_round(session))
 
     assert provider.calls <= 5
-    assert [message.author_id for message in controller.state.chat_log][:3] == ["p1", "p2", "p1"]
+    # Questions now reach targets even before their first turn; the target can
+    # therefore be queued for a focused follow-up rather than being discarded.
+    assert [message.author_id for message in controller.state.chat_log][:3] == ["p1", "p2", "p2"]
 
 
 class MorningPriorityProvider:

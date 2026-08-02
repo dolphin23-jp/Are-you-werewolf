@@ -44,6 +44,19 @@ def test_inactive_observer_is_not_alive_or_selected_as_first_victim():
     assert all(record.player_id != "p0" for record in controller.state.death_records)
 
 
+def test_chat_assigns_ids_and_validates_reply_channel():
+    controller = make_controller(seed=1)
+    first = controller.chat("p0", "公開発言", "public")
+    second = controller.chat("p1", "返信", "public", reply_to=first, quote="公開発言")
+    invalid = controller.chat("p1", "無効参照", "public", reply_to="m999", quote="偽引用")
+
+    assert (first, second, invalid) == ("m1", "m2", "m3")
+    assert controller.state.chat_log[1].reply_to == "m1"
+    assert controller.state.chat_log[1].quote == "公開発言"
+    assert controller.state.chat_log[2].reply_to is None
+    assert controller.state.chat_log[2].quote is None
+
+
 def _play_random_game(seed: int) -> None:
     controller = make_controller(seed=seed)
     rng = random.Random(seed)
