@@ -17,6 +17,7 @@ export function ChatPanel() {
   const [selectedDay, setSelectedDay] = useState<number | "all">("all");
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
+  const [passing, setPassing] = useState(false);
   const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
   const [newMessageCount, setNewMessageCount] = useState(0);
@@ -145,16 +146,18 @@ export function ChatPanel() {
     jumpToMessage(message.message_id);
   };
 
+  // Passing has its own in-flight flag: sharing `sending` made a pass disable the
+  // send button and vice versa, even though they are independent actions.
   const handlePass = async () => {
-    if (sending) return;
-    setSending(true);
+    if (passing) return;
+    setPassing(true);
     try {
       await passDiscussionTurn(sessionId);
       await refreshView();
     } catch (error) {
       setError(error instanceof Error ? error.message : "パスに失敗しました");
     } finally {
-      setSending(false);
+      setPassing(false);
     }
   };
 
@@ -304,16 +307,18 @@ export function ChatPanel() {
       )}
 
       <div className="chat-panel__input">
-        {!view.players.find((player) => player.player_id === view.your_player_id)?.alive &&
-          view.discussion_progress && (
-            <small className="discussion-progress">
-              AI議論進行: {view.discussion_progress.spoken}/{view.discussion_progress.total}
-            </small>
-          )}
+        {/* Shown to living players too: while a round is segmented and paced, the
+            log can sit still for a while, and "how far along is this day" is the
+            question that answers. It was previously visible only after you died. */}
+        {view.discussion_progress.total > 0 && (
+          <small className="discussion-progress">
+            AI議論進行: {view.discussion_progress.spoken}/{view.discussion_progress.total}
+          </small>
+        )}
         {view.awaiting_your_speech && (
           <div className="speech-waiting">
             <strong>あなたの発言を待っています（残り {waitRemaining} 秒）</strong>
-            <button className="btn" type="button" disabled={sending} onClick={() => void handlePass()}>
+            <button className="btn" type="button" disabled={passing} onClick={() => void handlePass()}>
               パス
             </button>
           </div>

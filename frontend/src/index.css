@@ -366,6 +366,14 @@ button {
   font-weight: 700;
 }
 
+/* Grouped messages omit the author button, so an accent that lives only on the
+   name disappears from every follow-up line you write. Mark the body instead,
+   which is present on every message. */
+.chat-message--you .chat-message__content {
+  border-left: 2px solid var(--accent);
+  padding-left: 0.45rem;
+}
+
 .chat-message__reply,
 .chat-message__reply-button {
   margin-left: 0.35rem;
