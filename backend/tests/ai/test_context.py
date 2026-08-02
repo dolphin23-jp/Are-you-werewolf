@@ -317,3 +317,17 @@ def test_reaction_stage_still_asks_for_an_anchored_target():
     _, messages = builder.build_discussion_context(state, "p2", "reaction")
     prompt = "\n".join(m.content for m in messages)
     assert "reply_to" in prompt and "quote" in prompt
+
+
+def test_minority_review_requires_countercase_and_alternative():
+    controller = make_controller(seed=4)
+    builder = _builder(controller.state)
+
+    _, messages = builder.build_discussion_context(
+        controller.state, "p2", "minority_review:p0"
+    )
+    prompt = "\n".join(message.content for message in messages)
+
+    assert "Player0(p0)へ集中" in prompt
+    assert "反対仮説" in prompt
+    assert "別の処刑候補" in prompt
