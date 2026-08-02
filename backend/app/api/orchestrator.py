@@ -10,12 +10,6 @@ trigger AI turns around each human action: discussion is fire-and-forget
 (the human doesn't block on it), while votes/night-action completion is
 awaited before resolving, matching what the human is already waiting on.
 
-Known v1 limitation: if the human player has died, discussion rounds are
-only triggered by chat messages, and a dead/spectating human currently has
-no chat input, so AI discussion for that day may be sparse until a "trigger
-AI round" spectator control is added. Voting and night phases do NOT have
-this gap -- they auto-advance for a dead/absent human (see
-`after_voting_phase_entered` / `after_night_phase_entered` below).
 """
 
 from __future__ import annotations
@@ -29,7 +23,41 @@ from app.sessions.models import GameSession
 async def after_human_chat(session: GameSession) -> None:
     if session.coordinator is None:
         return
-    asyncio.create_task(session.coordinator.run_discussion_round(session))
+    latest = session.controller.state.chat_log[-1]
+    session.coordinator.resume_after_human(session, latest.reply_to)
+    if session.discussion_advance_task is not None and not session.discussion_advance_task.done():
+        return
+    task = asyncio.create_task(session.coordinator.advance_discussion(session))
+    session.discussion_advance_task = task
+
+    def clear_task(completed: asyncio.Task[None]) -> None:
+        if session.discussion_advance_task is completed:
+            session.discussion_advance_task = None
+
+    task.add_done_callback(clear_task)
+
+
+async def after_discussion_phase_entered(session: GameSession) -> None:
+    """Run morning COs immediately; dead/observer humans never pause the round."""
+    if session.coordinator is None:
+        return
+    human = session.controller.state.players[session.human_id]
+    observer = session.human_id in session.coordinator._observer_player_ids
+    if not human.alive or observer:
+        await session.coordinator.run_discussion_round(session)
+    else:
+        # There may be more immediate COs than fit in one segment. Drain only
+        # those opening segments, releasing the lock between each, then pause.
+        while True:
+            await session.coordinator.advance_discussion(session)
+            round_state = session.discussion_round
+            if (
+                round_state is None
+                or round_state.complete
+                or round_state.awaiting_human
+                or round_state.stage != "immediate"
+            ):
+                break
 
 
 async def after_human_private_chat(session: GameSession, channel: str) -> None:

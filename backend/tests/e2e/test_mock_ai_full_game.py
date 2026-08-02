@@ -27,7 +27,9 @@ def _make_session(seed: int) -> SimpleNamespace:
     controller = GameController(session_id=f"s{seed}", player_specs=specs, seed=seed)
     ai_ids = [s.player_id for s in specs if not s.is_human]
     provider = MockProvider(seed=seed)
-    coordinator = AICoordinator(controller.state, ai_ids, provider, seed=seed)
+    coordinator = AICoordinator(
+        controller.state, ai_ids, provider, seed=seed, pacing_scale=0.0
+    )
     return SimpleNamespace(
         controller=controller,
         human_id=HUMAN_ID,
