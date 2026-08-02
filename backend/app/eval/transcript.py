@@ -32,6 +32,9 @@ class Utterance:
     directed_question_targets: list[str] = field(default_factory=list)
     ready_to_vote: bool | None = None
     used_fallback: bool = False
+    effective_length_limit: int | None = None
+    key_point: str = ""
+    agrees_with: list[str] = field(default_factory=list)
 
 
 @dataclass

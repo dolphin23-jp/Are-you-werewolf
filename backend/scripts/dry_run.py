@@ -83,7 +83,9 @@ async def main() -> None:
     specs = [PlayerSpec(player_id=f"p{i}", name=f"P{i}", is_human=(i == 0)) for i in range(17)]
     controller = GameController(session_id="dry-run", player_specs=specs, seed=args.seed)
     ai_ids = [s.player_id for s in specs if not s.is_human]
-    coordinator = AICoordinator(controller.state, ai_ids, provider, seed=args.seed)
+    coordinator = AICoordinator(
+        controller.state, ai_ids, provider, seed=args.seed, pacing_scale=0.0
+    )
     session = SimpleNamespace(
         controller=controller,
         human_id=HUMAN_ID,

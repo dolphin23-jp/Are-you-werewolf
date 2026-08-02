@@ -1,6 +1,6 @@
-import { useState } from "react";
-import { sendChat } from "../../api/client";
-import type { ChatChannel } from "../../api/types";
+import { Fragment, useEffect, useRef, useState } from "react";
+import { passDiscussionTurn, sendChat } from "../../api/client";
+import type { ChatChannel, ChatMessage } from "../../api/types";
 import { useGameStore } from "../../state/gameStore";
 import { TypingIndicator } from "../common/TypingIndicator";
 
@@ -17,6 +17,49 @@ export function ChatPanel() {
   const [selectedDay, setSelectedDay] = useState<number | "all">("all");
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
+  const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
+  const [highlightedId, setHighlightedId] = useState<string | null>(null);
+  const [newMessageCount, setNewMessageCount] = useState(0);
+  const [waitRemaining, setWaitRemaining] = useState(0);
+  const logRef = useRef<HTMLDivElement>(null);
+  const previousMessageCount = useRef(0);
+  const autoPassStarted = useRef(false);
+
+  useEffect(() => {
+    const log = logRef.current;
+    if (!log || !view) return;
+    const count = view.public_chat.length + view.private_chat.length;
+    const added = Math.max(0, count - previousMessageCount.current);
+    const nearBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 80;
+    if (nearBottom || previousMessageCount.current === 0) {
+      log.scrollTo?.({ top: log.scrollHeight, behavior: "smooth" });
+      setNewMessageCount(0);
+    } else if (added > 0) {
+      setNewMessageCount((current) => current + added);
+    }
+    previousMessageCount.current = count;
+  }, [view]);
+
+  useEffect(() => {
+    setWaitRemaining(view?.speech_wait_remaining_seconds ?? 0);
+    autoPassStarted.current = false;
+    if (!view?.awaiting_your_speech) return;
+    const timer = window.setInterval(
+      () => setWaitRemaining((remaining) => Math.max(0, remaining - 1)),
+      1000,
+    );
+    return () => window.clearInterval(timer);
+  }, [view?.awaiting_your_speech, view?.speech_wait_remaining_seconds]);
+
+  useEffect(() => {
+    if (!view?.awaiting_your_speech || waitRemaining > 0 || autoPassStarted.current || !sessionId) {
+      return;
+    }
+    autoPassStarted.current = true;
+    void passDiscussionTurn(sessionId).then(refreshView).catch((error: unknown) => {
+      setError(error instanceof Error ? error.message : "パスに失敗しました");
+    });
+  }, [refreshView, sessionId, setError, view?.awaiting_your_speech, waitRemaining]);
 
   if (!view || !sessionId) return null;
 
@@ -66,14 +109,46 @@ export function ChatPanel() {
 
   const handleSend = async () => {
     const content = draft.trim();
-    if (!content || !canSend) return;
+    if (!content || !canSend || sending) return;
     setSending(true);
     try {
-      await sendChat(sessionId, content, tab);
+      await sendChat(
+        sessionId,
+        content,
+        tab,
+        replyingTo?.message_id,
+        replyingTo?.content.slice(0, 160),
+      );
       setDraft("");
+      setReplyingTo(null);
       await refreshView();
     } catch (e) {
       setError(e instanceof Error ? e.message : "発言に失敗しました");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const jumpToMessage = (messageId: string) => {
+    const element = document.getElementById(`chat-${messageId}`);
+    element?.scrollIntoView?.({ behavior: "smooth", block: "center" });
+    setHighlightedId(messageId);
+    window.setTimeout(() => setHighlightedId(null), 1600);
+  };
+
+  const selectReply = (message: ChatMessage) => {
+    setReplyingTo(message);
+    jumpToMessage(message.message_id);
+  };
+
+  const handlePass = async () => {
+    if (sending) return;
+    setSending(true);
+    try {
+      await passDiscussionTurn(sessionId);
+      await refreshView();
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "パスに失敗しました");
     } finally {
       setSending(false);
     }
@@ -118,7 +193,16 @@ export function ChatPanel() {
         </button>
       )}
 
-      <div className="chat-panel__log">
+      <div
+        className="chat-panel__log"
+        ref={logRef}
+        onScroll={(event) => {
+          const element = event.currentTarget;
+          if (element.scrollHeight - element.scrollTop - element.clientHeight < 80) {
+            setNewMessageCount(0);
+          }
+        }}
+      >
         {tab === "public" && selectedDay !== "all" && (
           <>
             {view.players.filter((player) => publicDeathDay(player) === selectedDay && player.death_cause === "first_victim").map((player) => (
@@ -133,18 +217,59 @@ export function ChatPanel() {
           </>
         )}
         {messages.length === 0 && <p className="chat-panel__empty">まだ発言はありません</p>}
-        {messages.map((m, i) => (
-          <div
-            key={i}
-            className={
-              m.author_id === view.your_player_id ? "chat-message chat-message--you" : "chat-message"
-            }
-          >
-            <button className={nameClass(m.author_id)} onClick={() => setSelectedSpeakerId(m.author_id)}>
-              {playerNames[m.author_id] ?? m.author_id}
-            </button>: {m.content}
-          </div>
-        ))}
+        {messages.map((m, index) => {
+          const source = m.reply_to
+            ? channelMessages.find((candidate) => candidate.message_id === m.reply_to)
+            : undefined;
+          const grouped = index > 0 && messages[index - 1].author_id === m.author_id;
+          const showDay = selectedDay === "all" && (index === 0 || messages[index - 1].day !== m.day);
+          return (
+            <Fragment key={m.message_id}>
+              {showDay && <div className="chat-day-separator">{m.day}日目</div>}
+              <div
+                id={`chat-${m.message_id}`}
+                className={[
+                  "chat-message",
+                  m.author_id === view.your_player_id ? "chat-message--you" : "",
+                  grouped ? "chat-message--grouped" : "",
+                  highlightedId === m.message_id ? "chat-message--highlighted" : "",
+                ].filter(Boolean).join(" ")}
+              >
+                <div className="chat-message__author-column">
+                  {!grouped && (
+                    <button
+                      className={nameClass(m.author_id)}
+                      onClick={() => setSelectedSpeakerId(m.author_id)}
+                    >
+                      {playerNames[m.author_id] ?? m.author_id}
+                    </button>
+                  )}
+                </div>
+                <div className="chat-message__content">
+                  {m.reply_to && (
+                    <button
+                      type="button"
+                      className="chat-message__quote"
+                      onClick={() => jumpToMessage(m.reply_to!)}
+                    >
+                      <strong>{source ? playerNames[source.author_id] ?? source.author_id : m.reply_to}</strong>
+                      <span>{m.quote || source?.content.slice(0, 160) || "元発言を表示"}</span>
+                    </button>
+                  )}
+                  <span className="chat-message__body">{m.content}</span>
+                  <button
+                    className="chat-message__reply-button"
+                    type="button"
+                    onClick={() => selectReply(m)}
+                    aria-label={`${m.message_id}に返信`}
+                  >
+                    返信
+                  </button>
+                </div>
+              </div>
+            </Fragment>
+          );
+        })}
         {tab === "public" && visibleVotes.length > 0 && (
           <section className="vote-history">
             <h4>投票記録</h4>
@@ -160,23 +285,81 @@ export function ChatPanel() {
         )}
       </div>
 
+      {newMessageCount > 0 && (
+        <button
+          className="new-message-badge"
+          type="button"
+          onClick={() => {
+            logRef.current?.scrollTo({ top: logRef.current.scrollHeight, behavior: "smooth" });
+            setNewMessageCount(0);
+          }}
+        >
+          新着 {newMessageCount} 件
+        </button>
+      )}
+
       <div className="chat-panel__input">
+        {!view.players.find((player) => player.player_id === view.your_player_id)?.alive &&
+          view.discussion_progress && (
+            <small className="discussion-progress">
+              AI議論進行: {view.discussion_progress.spoken}/{view.discussion_progress.total}
+            </small>
+          )}
+        {view.awaiting_your_speech && (
+          <div className="speech-waiting">
+            <strong>あなたの発言を待っています（残り {waitRemaining} 秒）</strong>
+            <button className="btn" type="button" disabled={sending} onClick={() => void handlePass()}>
+              パス
+            </button>
+          </div>
+        )}
+        {view.pending_questions.length > 0 && (
+          <div className="pending-questions">
+            <strong>あなたへの未回答質問</strong>
+            {view.pending_questions.map((question) => {
+              const source = view.public_chat.find(
+                (message) => message.message_id === question.source_message_id,
+              );
+              return (
+                <button
+                  key={question.source_message_id}
+                  type="button"
+                  onClick={() => source && selectReply(source)}
+                >
+                  [{question.source_message_id}] {playerNames[question.asker] ?? question.asker}: 「{question.question}」
+                </button>
+              );
+            })}
+          </div>
+        )}
         {(view.typing_player_ids ?? []).length > 0 && (
           <TypingIndicator label={`${(view.typing_player_ids ?? []).map((id) => playerNames[id] ?? id).join("、")}が書き込み中…`} />
         )}
-        <input
+        <div className="chat-composer">
+        {replyingTo && (
+          <div className="reply-preview">
+            <span>返信先 [{replyingTo.message_id}] {playerNames[replyingTo.author_id] ?? replyingTo.author_id}: {replyingTo.content}</span>
+            <button type="button" onClick={() => setReplyingTo(null)} aria-label="返信をキャンセル">×</button>
+          </div>
+        )}
+        <div className="chat-composer__row"><textarea
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter") void handleSend();
+            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && e.keyCode !== 229) {
+              e.preventDefault();
+              void handleSend();
+            }
           }}
           disabled={!canSend || sending}
-          maxLength={500}
+          maxLength={1500}
           placeholder={canSend ? "発言を入力..." : "現在は発言できません"}
         />
         <button className="btn" disabled={!canSend || sending || !draft.trim()} onClick={() => void handleSend()}>
           送信
         </button>
+        </div>
+        </div>
       </div>
     </div>
   );

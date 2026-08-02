@@ -65,10 +65,12 @@ export function sendChat(
   sessionId: string,
   content: string,
   channel: "public" | "wolf" | "freemason" = "public",
-): Promise<void> {
+  replyTo?: string,
+  quote?: string,
+): Promise<{ ok: boolean; message_id: string }> {
   return request(`/api/games/${sessionId}/chat`, {
     method: "POST",
-    body: JSON.stringify({ content, channel }),
+    body: JSON.stringify({ content, channel, reply_to: replyTo, quote }),
   });
 }
 
@@ -103,6 +105,10 @@ export function startDiscussion(sessionId: string): Promise<void> {
 
 export function endDiscussion(sessionId: string): Promise<void> {
   return request(`/api/games/${sessionId}/end-discussion`, { method: "POST" });
+}
+
+export function passDiscussionTurn(sessionId: string): Promise<void> {
+  return request(`/api/games/${sessionId}/pass-turn`, { method: "POST" });
 }
 
 export function startNight(sessionId: string): Promise<void> {

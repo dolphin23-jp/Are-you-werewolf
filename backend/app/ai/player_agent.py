@@ -16,7 +16,7 @@ from __future__ import annotations
 import random
 import re
 
-from app.ai.personalities import Personality
+from app.ai.personalities import Personality, discussion_length_range
 from app.ai.provider.base import LLMProvider, Message, SchemaT
 from app.ai.schemas import (
     DiscussionOutput,
@@ -54,11 +54,16 @@ class AIPlayerAgent:
         self._personality = personality
         self._max_retries = max_retries
 
-    async def generate_discussion(self, system: str, messages: list[Message]) -> DiscussionOutput:
+    async def generate_discussion(
+        self, system: str, messages: list[Message]
+    ) -> DiscussionOutput | None:
         result = await self._generate_with_retry(system, messages, DiscussionOutput)
         if result is None:
-            return DiscussionOutput(public_message=self._personality.get_fallback_message())
-        result.public_message = self._sanitize(result.public_message, max_len=200)
+            return None
+        _minimum, maximum = discussion_length_range(self._personality.verbosity)
+        result.public_message = self._sanitize(
+            result.public_message, max_len=maximum
+        )
         return result
 
     async def generate_morning_intent(

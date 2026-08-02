@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     werewolf_session_store: str = "memory"
     werewolf_rng_seed: int | None = None
     werewolf_access_password: str = ""
+    werewolf_discussion_segment_size: int = 4
+    werewolf_ai_pacing_scale: float = 1.0
+    werewolf_discussion_wait_seconds: float = 45.0
 
     werewolf_llm_provider: str = "mock"
 
