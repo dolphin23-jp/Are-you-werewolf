@@ -1,23 +1,52 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { passDiscussionTurn, sendChat } from "../api/client";
+import { controlDiscussion, passDiscussionTurn, sendChat } from "../api/client";
 import { ChatPanel } from "../components/panels/ChatPanel";
 import { useGameStore } from "../state/gameStore";
 import { makeView } from "./fixtures/gameView";
 
-vi.mock("../api/client", () => ({ sendChat: vi.fn(), passDiscussionTurn: vi.fn() }));
+vi.mock("../api/client", () => ({
+  controlDiscussion: vi.fn(),
+  sendChat: vi.fn(),
+  passDiscussionTurn: vi.fn(),
+}));
 
 describe("ChatPanel", () => {
   afterEach(() => {
     useGameStore.getState().reset();
     vi.clearAllMocks();
     vi.mocked(passDiscussionTurn).mockResolvedValue(undefined);
+    vi.mocked(controlDiscussion).mockResolvedValue(undefined);
   });
 
   it("renders public chat messages", () => {
     useGameStore.setState({ view: makeView(), sessionId: "s1", playerNames: { p1: "Hanako" } });
     render(<ChatPanel />);
     expect(screen.getByText(/こんにちは/)).toBeInTheDocument();
+  });
+
+  it("shows the current day before anyone speaks and announces no overnight death", () => {
+    useGameStore.setState({
+      view: makeView({ day: 3, public_chat: [] }),
+      sessionId: "s1",
+    });
+    render(<ChatPanel />);
+
+    fireEvent.click(screen.getByRole("button", { name: "3日目" }));
+    expect(screen.getByText("昨夜は誰も死体となって発見されませんでした")).toBeInTheDocument();
+  });
+
+  it("pauses and single-steps AI discussion", async () => {
+    useGameStore.setState({ view: makeView(), sessionId: "s1" });
+    const { rerender } = render(<ChatPanel />);
+
+    fireEvent.click(screen.getByRole("button", { name: "AI議論を一時停止" }));
+    await waitFor(() => expect(controlDiscussion).toHaveBeenCalledWith("s1", "pause"));
+
+    useGameStore.setState({ view: makeView({ discussion_paused: true }) });
+    rerender(<ChatPanel />);
+    fireEvent.click(screen.getByRole("button", { name: "次の1発言" }));
+    await waitFor(() => expect(controlDiscussion).toHaveBeenCalledWith("s1", "step"));
   });
 
   it("disables the input outside the discussion phase", () => {
@@ -260,6 +289,25 @@ describe("ChatPanel", () => {
     // The author button really is absent on the grouped line -- that is why the
     // accent had to move off it.
     expect(grouped?.querySelector(".chat-message__author")).toBeNull();
+  });
+
+  it("links inline message ids and keeps the author beside quoted follow-ups", () => {
+    useGameStore.setState({
+      view: makeView({
+        public_chat: [
+          { message_id: "m1", author_id: "p1", content: "最初", channel: "public", day: 1, reply_to: null, quote: null },
+          { message_id: "m2", author_id: "p1", content: "【m1への回答】と[m1]", channel: "public", day: 1, reply_to: "m1", quote: "最初" },
+        ],
+      }),
+      sessionId: "s1",
+      playerNames: { p1: "Hanako" },
+    });
+    const { container } = render(<ChatPanel />);
+
+    const followUp = container.querySelector("#chat-m2");
+    expect(followUp?.className).not.toContain("chat-message--grouped");
+    expect(followUp?.textContent).toContain("Hanako");
+    expect(followUp?.querySelectorAll(".chat-message__reference")).toHaveLength(2);
   });
 
   it("scrolls to the newest message while already near the bottom", () => {

@@ -225,6 +225,13 @@ class AICoordinator:
                 and human.alive
                 and human_id not in self._observer_player_ids
             )
+            if (
+                can_pause
+                and getattr(session, "discussion_paused", False)
+                and not getattr(session, "discussion_step_budget", None)
+            ):
+                self._set_awaiting(round_state, True)
+                return
             if round_state.awaiting_human and can_pause:
                 return
             self._set_awaiting(round_state, False)
@@ -257,6 +264,17 @@ class AICoordinator:
                 round_state.outputs.append((pid, output))
                 round_state.speech_counts[pid] = round_state.speech_counts.get(pid, 0) + 1
                 spoken += 1
+                step_budget = getattr(session, "discussion_step_budget", None)
+                if step_budget is not None:
+                    session.discussion_step_budget = max(0, step_budget - 1)  # type: ignore[attr-defined]
+                if getattr(session, "discussion_pause_requested", False):
+                    session.discussion_pause_requested = False  # type: ignore[attr-defined]
+                    session.discussion_paused = True  # type: ignore[attr-defined]
+                if getattr(session, "discussion_step_budget", None) == 0:
+                    session.discussion_paused = True  # type: ignore[attr-defined]
+                if can_pause and getattr(session, "discussion_paused", False):
+                    self._set_awaiting(round_state, True)
+                    break
                 if stage == "consensus_summary":
                     round_state.complete = True
                     break
@@ -407,12 +425,15 @@ class AICoordinator:
             round_state.reply_queue.append(target_id)
             round_state.queued.add(target_id)
 
-    def resume_after_human(self, session: object, reply_to: str | None = None) -> None:
+    def resume_after_human(
+        self, session: object, reply_to: str | None = None, *, release_wait: bool = True
+    ) -> None:
         """Release the human pause and prioritize the referenced AI/questioner."""
         round_state = getattr(session, "discussion_round", None)
         if round_state is None:
             return
-        self._set_awaiting(round_state, False)
+        if release_wait:
+            self._set_awaiting(round_state, False)
         if reply_to:
             message = next(
                 (m for m in session.controller.state.chat_log if m.message_id == reply_to),  # type: ignore[attr-defined]
@@ -538,15 +559,13 @@ class AICoordinator:
         already = any(c.player_id == player_id for c in state.co_declarations)
         if already:
             return
-        if output.public_claim_role is None:
-            return
-        try:
-            role = RoleName(output.public_claim_role)
-        except ValueError:
-            return
         other_names = [p.name for pid, p in state.players.items() if pid != player_id]
-        detected = detect_claimed_role(output.public_message, other_names)
-        if detected != role:
+        # What was actually said is authoritative.  Structured metadata is a useful
+        # hint, but models occasionally omit it even after writing an unambiguous CO.
+        # Requiring both representations used to leave those public claims out of the
+        # board analysis for the rest of the day.
+        role = detect_claimed_role(output.public_message, other_names)
+        if role is None:
             return
         try:
             controller.co(player_id, role.value)  # type: ignore[attr-defined]

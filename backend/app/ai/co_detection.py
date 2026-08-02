@@ -50,6 +50,10 @@ CO_PATTERNS: dict[RoleName, re.Pattern[str]] = {
 }
 
 _SENTENCE_SPLIT_RE = re.compile(r"[。！？!?\n]")
+_PARTNER_CONFIRMATION_RE = re.compile(
+    r"相方(?:は|が)[、，,\s]*私(?:[^。！？!?\n]{0,30})"
+    r"(?:です|だ|で間違い(?:ありません|ない)|で合っています|で合って(?:い)?ます)"
+)
 
 
 def detect_claimed_role(text: str, other_player_names: list[str] | None = None) -> RoleName | None:
@@ -60,6 +64,13 @@ def detect_claimed_role(text: str, other_player_names: list[str] | None = None) 
     same sentence means the speaker is talking about someone else.
     """
     names = [n for n in (other_player_names or []) if n]
+
+    # A shared partner confirmation necessarily mentions the first claimant before
+    # describing oneself (「ユイの共有CO、相方は私…」).  It is nevertheless an
+    # explicit self-claim, so handle this established form before the generic
+    # third-person-report guard below.
+    if _PARTNER_CONFIRMATION_RE.search(text):
+        return RoleName.FREEMASON
 
     for sentence in _SENTENCE_SPLIT_RE.split(text):
         if not sentence.strip():
