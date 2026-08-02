@@ -19,6 +19,7 @@ from fastapi import APIRouter, HTTPException, Query
 from app.ai.co_detection import detect_claimed_role, detect_freemason_partner
 from app.ai.coordinator import AICoordinator
 from app.ai.provider.factory import LLMProviderConfigError, build_llm_provider
+from app.ai.public_speech import detect_public_result
 from app.ai.schemas import DiscussionOutput
 from app.api import orchestrator
 from app.api.schemas import (
@@ -247,26 +248,23 @@ async def chat(
                 partner_id = detect_freemason_partner(req.content, candidates)
                 if partner_id is not None:
                     _run(session.controller.claim_freemason_partner, author, partner_id)
-        result_type = (
-            "seer" if "占い結果" in req.content else "medium" if "霊媒結果" in req.content else None
-        )
-        if result_type is not None:
-            for target_id, target in state.players.items():
-                if target_id == author or target.name not in req.content:
-                    continue
-                black = any(word in req.content for word in ("黒", "人狼でした", "は人狼"))
-                white = any(
-                    word in req.content for word in ("白", "人狼ではありません", "人狼ではない")
+            candidates = {
+                pid: player.name for pid, player in state.players.items() if pid != author
+            }
+            detected_result = detect_public_result(
+                req.content,
+                effective_role,
+                candidates,
+                role_claimed_in_message=claimed_role in (RoleName.SEER, RoleName.MEDIUM),
+            )
+            if detected_result is not None:
+                _run(
+                    session.controller.public_result,
+                    author,
+                    detected_result.result_type,
+                    detected_result.target_id,
+                    detected_result.is_werewolf,
                 )
-                if black or white:
-                    _run(
-                        session.controller.public_result,
-                        author,
-                        result_type,
-                        target_id,
-                        black and not white,
-                    )
-                    break
         await orchestrator.after_human_chat(session)
     else:
         await orchestrator.after_human_private_chat(session, req.channel)

@@ -264,9 +264,6 @@ export function ChatPanel() {
             ) && (
               <p className="system-message">昨夜は誰も死体となって発見されませんでした</p>
             )}
-            {view.players.filter((player) => player.death_day === selectedDay && player.death_cause === "executed").map((player) => (
-              <p className="system-message" key={`executed-${player.player_id}`}>投票の結果、{player.name}が処刑されました</p>
-            ))}
           </>
         )}
         {messages.length === 0 && <p className="chat-panel__empty">まだ発言はありません</p>}
@@ -337,6 +334,13 @@ export function ChatPanel() {
             </Fragment>
           );
         })}
+        {tab === "public" && selectedDay !== "all" && view.players
+          .filter((player) => player.death_day === selectedDay && player.death_cause === "executed")
+          .map((player) => (
+            <p className="system-message" key={`executed-${player.player_id}`}>
+              投票の結果、{player.name}が処刑されました
+            </p>
+          ))}
         {tab === "public" && visibleVotes.length > 0 && (
           <section className="vote-history">
             <h4>投票記録</h4>

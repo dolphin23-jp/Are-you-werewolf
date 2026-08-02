@@ -89,3 +89,9 @@ def test_extracts_partner_from_reveal_and_confirmation_forms():
 def test_partner_id_matching_does_not_confuse_p1_with_p11():
     candidates = {"p1": "アカリ", "p11": "ツムギ"}
     assert detect_freemason_partner("共有CO、相方はツムギ(p11)です。", candidates) == "p11"
+
+
+def test_partner_parser_stops_before_later_execution_target():
+    candidates = {"p0": "ドルフィン", "p8": "カイト"}
+    text = "共有者CO。相方はカイト(p8)。ドルフィン(p0)処刑で霊視します。"
+    assert detect_freemason_partner(text, candidates) == "p8"

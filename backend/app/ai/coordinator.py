@@ -26,6 +26,7 @@ from app.ai.deception import FakeClaimGuard, assign_madman_strategy, assign_wolf
 from app.ai.personalities import assign_personalities, discussion_length_range
 from app.ai.player_agent import AIPlayerAgent, truncate_at_sentence
 from app.ai.provider.base import LLMProvider
+from app.ai.public_speech import detect_public_result
 from app.ai.schemas import DiscussionOutput, MorningIntentOutput
 from app.engine.phases import Phase
 from app.engine.roles import RoleName
@@ -704,11 +705,27 @@ class AICoordinator:
             ),
             None,
         )
-        if effective_role != RoleName.FREEMASON:
-            return
         candidates = {
             pid: player.name for pid, player in state.players.items() if pid != player_id
         }
+        detected_result = detect_public_result(
+            output.public_message,
+            effective_role,
+            candidates,
+            role_claimed_in_message=role in (RoleName.SEER, RoleName.MEDIUM),
+        )
+        if detected_result is not None:
+            try:
+                controller.public_result(  # type: ignore[attr-defined]
+                    player_id,
+                    detected_result.result_type,
+                    detected_result.target_id,
+                    detected_result.is_werewolf,
+                )
+            except Exception:
+                pass
+        if effective_role != RoleName.FREEMASON:
+            return
         partner_id = detect_freemason_partner(output.public_message, candidates)
         if partner_id is None:
             return

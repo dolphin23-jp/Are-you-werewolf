@@ -36,6 +36,19 @@ describe("ChatPanel", () => {
     expect(screen.getByText("昨夜は誰も死体となって発見されませんでした")).toBeInTheDocument();
   });
 
+  it("renders execution after that day's discussion", () => {
+    useGameStore.setState({ view: makeView(), sessionId: "s1", playerNames: { p1: "Hanako" } });
+    const { container } = render(<ChatPanel />);
+
+    fireEvent.click(screen.getByRole("button", { name: "1日目" }));
+    const discussion = container.querySelector("#chat-m1");
+    const execution = screen.getByText("投票の結果、Saburoが処刑されました");
+    expect(discussion).not.toBeNull();
+    expect(
+      discussion!.compareDocumentPosition(execution) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
   it("pauses and single-steps AI discussion", async () => {
     useGameStore.setState({ view: makeView(), sessionId: "s1" });
     const { rerender } = render(<ChatPanel />);

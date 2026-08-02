@@ -54,6 +54,9 @@ _PARTNER_CONFIRMATION_RE = re.compile(
     r"相方(?:は|が)[、，,\s]*私(?:[^。！？!?\n]{0,30})"
     r"(?:です|だ|で間違い(?:ありません|ない)|で合っています|で合って(?:い)?ます)"
 )
+_PARTNER_REVEAL_RE = re.compile(
+    r"相方(?:は|が|[:：])[、，,\s]*(?P<label>[^、，。！？!?\n]{1,30})"
+)
 
 
 def detect_claimed_role(text: str, other_player_names: list[str] | None = None) -> RoleName | None:
@@ -97,16 +100,25 @@ def detect_freemason_partner(
     if "相方" not in text:
         return None
     confirmation = _PARTNER_CONFIRMATION_RE.search(text)
-    for player_id, name in candidates.items():
-        if confirmation is not None:
-            prefix = text[: confirmation.start()]
-            if _mentions_player(prefix, player_id, name):
-                return player_id
-            continue
-        partner_index = text.find("相方")
-        suffix = text[partner_index : partner_index + 50]
-        if _mentions_player(suffix, player_id, name):
-            return player_id
+    if confirmation is not None:
+        prefix = text[: confirmation.start()]
+        matches = [
+            (max(prefix.rfind(name), prefix.rfind(f"({player_id})")), player_id)
+            for player_id, name in candidates.items()
+            if _mentions_player(prefix, player_id, name)
+        ]
+        return max(matches)[1] if matches else None
+    reveal = _PARTNER_REVEAL_RE.search(text)
+    if reveal is None:
+        return None
+    label = reveal.group("label")
+    matches = [
+        player_id
+        for player_id, name in candidates.items()
+        if _mentions_player(label, player_id, name)
+    ]
+    if len(matches) == 1:
+        return matches[0]
     return None
 
 

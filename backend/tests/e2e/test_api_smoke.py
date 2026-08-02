@@ -161,6 +161,35 @@ def test_public_chat_role_claim_is_added_to_public_information():
     ]
 
 
+def test_compact_human_seer_co_registers_target_and_result():
+    response = client.post("/api/games", json={"human_name": "Compact", "seed": 27})
+    session_id = response.json()["session_id"]
+    human_id = response.json()["human_player_id"]
+    session = get_session_store().get(session_id)
+    assert session is not None
+    session.controller.state.phase = Phase.DISCUSSION
+    target_id = "p1"
+    target_name = session.controller.state.players[target_id].name
+
+    response = client.post(
+        f"/api/games/{session_id}/chat",
+        json={"content": f"占いCO{target_name}は人狼ではない。理由は初日なので特にない。"},
+    )
+
+    assert response.status_code == 200
+    view = client.get(f"/api/games/{session_id}/view").json()
+    assert {"player_id": human_id, "claimed_role": "seer", "day": 0} in view[
+        "co_declarations"
+    ]
+    assert {
+        "claimant_id": human_id,
+        "result_type": "seer",
+        "target_id": target_id,
+        "is_werewolf": False,
+        "day": 0,
+    } in view["public_result_claims"]
+
+
 def test_human_shared_reveal_and_partner_confirmation_are_tracked():
     response = client.post("/api/games", json={"human_name": "共有本人", "seed": 26})
     session_id = response.json()["session_id"]
