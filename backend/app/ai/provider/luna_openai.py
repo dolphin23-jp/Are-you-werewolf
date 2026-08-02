@@ -26,8 +26,8 @@ than assumes -- see `app/ai/dialect.py` -- and is defensive throughout:
     invalid-target safety nets built on top of this.
 
 When a `MetricsCollector` is attached, every logical call records which
-parse path actually worked, the wall-clock latency the player waited, and
-the token usage summed across retries. See `app/ai/metrics.py`.
+parse path actually worked, its real HTTP request count, the wall-clock
+latency, and token usage summed across all responses. See `app/ai/metrics.py`.
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from openai import AsyncOpenAI
+from openai import APIConnectionError, APIStatusError, APITimeoutError, AsyncOpenAI, RateLimitError
 from pydantic import ValidationError
 
 from app.ai.dialect import EndpointDialect
@@ -54,6 +54,13 @@ class _Attempt:
     prompt_tokens: int = 0
     completion_tokens: int = 0
     error: str | None = None
+    http_requests: int = 0
+
+
+# This is the single retry boundary. One logical generation uses strict schema
+# and, only if that fails, json_object. Therefore its absolute HTTP ceiling is
+# 2 * (max_retries + 1). Agent code never retries the same contract.
+DEFAULT_MAX_HTTP_RETRIES = 2
 
 
 class LunaOpenAIProvider:
@@ -65,10 +72,14 @@ class LunaOpenAIProvider:
         model: str,
         max_concurrency: int = 6,
         timeout_seconds: float = 30.0,
-        max_retries: int = 2,
+        max_retries: int = DEFAULT_MAX_HTTP_RETRIES,
         metrics: MetricsCollector | None = None,
     ) -> None:
-        self._client = AsyncOpenAI(api_key=api_key, base_url=base_url, timeout=timeout_seconds)
+        # SDK retries are disabled: doing them here makes every actual request
+        # countable and prevents a hidden second retry layer.
+        self._client = AsyncOpenAI(
+            api_key=api_key, base_url=base_url, timeout=timeout_seconds, max_retries=0
+        )
         self._model = model
         self._max_retries = max_retries
         self._semaphore = asyncio.Semaphore(max_concurrency)
@@ -97,39 +108,56 @@ class LunaOpenAIProvider:
         prompt_tokens = 0
         completion_tokens = 0
         last_error: str | None = None
-        attempt_index = 0
+        http_requests = 0
         started = asyncio.get_running_loop().time()
 
         async with self._semaphore:
-            for attempt_index in range(self._max_retries + 1):
-                for attempt in (
-                    await self._try_strict_schema(
-                        openai_messages, response_schema, max_tokens, temperature
-                    ),
-                    await self._try_json_object_mode(
-                        openai_messages, response_schema, max_tokens, temperature
-                    ),
-                ):
-                    prompt_tokens += attempt.prompt_tokens
-                    completion_tokens += attempt.completion_tokens
-                    last_error = attempt.error or last_error
-                    if attempt.result is not None:
-                        self._record(
-                            response_schema,
-                            attempt.path,
-                            started,
-                            attempt_index,
-                            prompt_tokens,
-                            completion_tokens,
-                            None,
-                        )
-                        return attempt.result  # type: ignore[no-any-return]
+            strict = await self._try_strict_schema(
+                openai_messages, response_schema, max_tokens, temperature
+            )
+            prompt_tokens += strict.prompt_tokens
+            completion_tokens += strict.completion_tokens
+            http_requests += strict.http_requests
+            last_error = strict.error
+            if strict.result is not None:
+                self._record(
+                    response_schema,
+                    strict.path,
+                    started,
+                    max(0, http_requests - 1),
+                    http_requests,
+                    prompt_tokens,
+                    completion_tokens,
+                    None,
+                )
+                return strict.result  # type: ignore[no-any-return]
+
+            fallback = await self._try_json_object_mode(
+                openai_messages, response_schema, max_tokens, temperature
+            )
+            prompt_tokens += fallback.prompt_tokens
+            completion_tokens += fallback.completion_tokens
+            http_requests += fallback.http_requests
+            last_error = fallback.error or last_error
+            if fallback.result is not None:
+                self._record(
+                    response_schema,
+                    fallback.path,
+                    started,
+                    max(0, http_requests - 2),
+                    http_requests,
+                    prompt_tokens,
+                    completion_tokens,
+                    None,
+                )
+                return fallback.result  # type: ignore[no-any-return]
 
         self._record(
             response_schema,
             ParsePath.FAILED,
             started,
-            attempt_index,
+            max(0, http_requests - 2),
+            http_requests,
             prompt_tokens,
             completion_tokens,
             last_error,
@@ -142,6 +170,7 @@ class LunaOpenAIProvider:
         path: ParsePath,
         started: float,
         attempt: int,
+        http_requests: int,
         prompt_tokens: int,
         completion_tokens: int,
         error: str | None,
@@ -155,6 +184,7 @@ class LunaOpenAIProvider:
                 path=path,
                 latency_seconds=elapsed,
                 attempt=attempt,
+                http_requests=http_requests,
                 # None (not 0) when the endpoint reported no usage, so the
                 # summary can say "unknown" instead of implying zero spend.
                 prompt_tokens=prompt_tokens or None,
@@ -170,11 +200,14 @@ class LunaOpenAIProvider:
         max_tokens: int,
         temperature: float,
     ) -> Any:
-        """One chat completion, retried once per rejected optional
-        parameter -- see app/ai/dialect.py. Bounded: `adapt` only reports
-        True when it actually changed something, so a genuinely bad request
-        surfaces instead of looping."""
-        while True:
+        """Run one response mode with the sole HTTP/API retry budget.
+
+        Dialect negotiation consumes the same bounded budget rather than
+        creating another retry layer.
+        """
+        requests = 0
+        last_error: Exception | None = None
+        for _ in range(self._max_retries + 1):
             kwargs: dict[str, Any] = {
                 "model": self._model,
                 "messages": openai_messages,
@@ -182,10 +215,15 @@ class LunaOpenAIProvider:
             }
             self._dialect.apply(kwargs, max_tokens=max_tokens, temperature=temperature)
             try:
-                return await self._client.chat.completions.create(**kwargs)
+                requests += 1
+                return await self._client.chat.completions.create(**kwargs), requests
             except Exception as exc:
-                if not self._dialect.adapt(exc):
-                    raise
+                last_error = exc
+                adapted = self._dialect.adapt(exc)
+                if not adapted and not _is_retryable(exc):
+                    raise _RequestFailure(exc, requests) from exc
+        assert last_error is not None
+        raise _RequestFailure(last_error, requests)
 
     async def _try_strict_schema(
         self,
@@ -203,9 +241,11 @@ class LunaOpenAIProvider:
             },
         }
         try:
-            response = await self._create(openai_messages, response_format, max_tokens, temperature)
+            response, requests = await self._create(
+                openai_messages, response_format, max_tokens, temperature
+            )
         except Exception as exc:
-            return _Attempt(error=_describe(exc))
+            return _Attempt(error=_describe(_root_error(exc)), http_requests=_request_count(exc))
 
         prompt_tokens, completion_tokens = _usage(response)
         content = response.choices[0].message.content if response.choices else None
@@ -216,6 +256,7 @@ class LunaOpenAIProvider:
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             error=None if parsed is not None else "strict schema response did not validate",
+            http_requests=requests,
         )
 
     async def _try_json_object_mode(
@@ -226,11 +267,11 @@ class LunaOpenAIProvider:
         temperature: float,
     ) -> _Attempt:
         try:
-            response = await self._create(
+            response, requests = await self._create(
                 openai_messages, {"type": "json_object"}, max_tokens, temperature
             )
         except Exception as exc:
-            return _Attempt(error=_describe(exc))
+            return _Attempt(error=_describe(_root_error(exc)), http_requests=_request_count(exc))
 
         prompt_tokens, completion_tokens = _usage(response)
         content = response.choices[0].message.content if response.choices else None
@@ -240,7 +281,13 @@ class LunaOpenAIProvider:
         # ignores the response_format contract.
         direct = _parse_strict(content, response_schema)
         if direct is not None:
-            return _Attempt(direct, ParsePath.JSON_OBJECT, prompt_tokens, completion_tokens)
+            return _Attempt(
+                direct,
+                ParsePath.JSON_OBJECT,
+                prompt_tokens,
+                completion_tokens,
+                http_requests=requests,
+            )
 
         salvaged = _parse_permissive(content, response_schema)
         return _Attempt(
@@ -249,7 +296,29 @@ class LunaOpenAIProvider:
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             error=None if salvaged is not None else "response was not parseable as JSON",
+            http_requests=requests,
         )
+
+
+class _RequestFailure(Exception):
+    def __init__(self, cause: Exception, requests: int) -> None:
+        super().__init__(str(cause))
+        self.cause = cause
+        self.requests = requests
+
+
+def _request_count(exc: Exception) -> int:
+    return exc.requests if isinstance(exc, _RequestFailure) else 0
+
+
+def _root_error(exc: Exception) -> Exception:
+    return exc.cause if isinstance(exc, _RequestFailure) else exc
+
+
+def _is_retryable(exc: Exception) -> bool:
+    if isinstance(exc, (APIConnectionError, APITimeoutError, RateLimitError)):
+        return True
+    return isinstance(exc, APIStatusError) and exc.status_code >= 500
 
 
 def _usage(response: Any) -> tuple[int, int]:
