@@ -42,7 +42,13 @@ from app.ai.reasoning.claims import (
     ensure_fact_sentences,
     register_claim_drafts,
 )
-from app.ai.schemas import DiscussionOutput, MorningIntentOutput
+from app.ai.reasoning.runtime import ReasoningRuntime
+from app.ai.schemas import (
+    DiscussionOutput,
+    MorningIntentOutput,
+    NightActionOutput,
+    VoteOutput,
+)
 from app.ai.schemas import PublicResultClaim as SchemaPublicResultClaim
 from app.engine.phases import Phase
 from app.engine.roles import RoleName
@@ -79,6 +85,7 @@ class AICoordinator:
         max_discussion_followups: int = 4,
         discussion_segment_size: int = 4,
         pacing_scale: float = 0.0,
+        reasoning: ReasoningRuntime | None = None,
     ) -> None:
         self._ai_player_ids = list(ai_player_ids)
         self._observer_player_ids = observer_player_ids or set()
@@ -108,6 +115,9 @@ class AICoordinator:
             leader, partner = plan_rng.sample(freemasons, 2)
             self._freemason_public_plan = (leader, partner, plan_rng.random() < 0.5)
         self._metrics = getattr(provider, "_metrics", None)
+        # Present only in v2. When it is, votes, night actions and the speaking
+        # order are decided in code and the model is asked for wording alone.
+        self.reasoning = reasoning
         # Every state-consistency repair and every say-one-thing-vote-another
         # discrepancy lands here, so a game can be audited after the fact
         # without the AI layer having to be re-run.
@@ -558,8 +568,11 @@ class AICoordinator:
         round_state.awaiting_since = time.time() if awaiting else None
 
     async def _morning_intent(self, state: GameState, player_id: str) -> MorningIntentOutput:
-        system, messages = self._context.build_morning_intent_context(state, player_id)
-        output = await self._agents[player_id].generate_morning_intent(system, messages)
+        if self.reasoning is not None:
+            output = self._coded_morning_intent(state, player_id)
+        else:
+            system, messages = self._context.build_morning_intent_context(state, player_id)
+            output = await self._agents[player_id].generate_morning_intent(system, messages)
         player = state.players[player_id]
         if self._freemason_public_plan is not None and player.role == RoleName.FREEMASON:
             leader, partner, full_reveal = self._freemason_public_plan
@@ -597,6 +610,37 @@ class AICoordinator:
             output.intent = "publish_result"
             output.public_claim_role = player.role.value
         return output
+
+    def _coded_morning_intent(self, state: GameState, player_id: str) -> MorningIntentOutput:
+        """Who speaks first is a scheduling question, not a language one.
+
+        Holding an unpublished result outranks everything; the rest follows the
+        speech-value ranking the runtime already computes. One request per AI
+        per morning disappears.
+        """
+        assert self.reasoning is not None
+        player = state.players[player_id]
+        has_result = any(r.seer_id == player_id for r in state.divine_records) or any(
+            r.medium_id == player_id for r in state.medium_records
+        )
+        if has_result and player.role in (RoleName.SEER, RoleName.MEDIUM):
+            return MorningIntentOutput(
+                timing="immediate",
+                intent="publish_result",
+                public_claim_role=player.role.value,
+                priority_reason="未公開の能力結果を持つ",
+            )
+        candidates = {
+            item.player_id: item for item in self.reasoning.speech_candidates(state)
+        }
+        candidate = candidates.get(player_id)
+        if candidate is None or candidate.value <= 0:
+            return MorningIntentOutput(timing="hold", intent="normal")
+        return MorningIntentOutput(
+            timing="normal" if candidate.value < 2.5 else "after_results",
+            intent="lead" if candidate.value >= 2.5 else "normal",
+            priority_reason="、".join(candidate.reasons),
+        )
 
     async def _speak(
         self, controller: object, state: GameState, player_id: str, stage: str
@@ -776,6 +820,30 @@ class AICoordinator:
         )
         self.validation.extend(issues)
 
+    def _coded_night_target(
+        self, player_id: str, action_type: str, candidates: list[str]
+    ) -> NightActionOutput | None:
+        """Night targeting from beliefs, when v2 is on.
+
+        Chasing the top suspect (divine, attack) or covering the most trusted
+        seat (guard) is a ranking the belief engine already computes. Spending a
+        request to re-derive it produced a worse answer, not a better one.
+        """
+        if self.reasoning is None:
+            return None
+        target = self.reasoning.night_target(player_id, action_type, candidates)
+        if target is None:
+            return None
+        seat = self.reasoning.seats.get(player_id)
+        reason = ""
+        if seat is not None:
+            score = seat.belief.state.wolf_scores.get(target, 0.0)
+            reason = (
+                f"{target}への疑い度は{score:+.1f}で、"
+                f"{'最も高い' if action_type != 'guard' else '最も低い'}。"
+            )
+        return NightActionOutput(target=target, reason=reason)
+
     def _belief_targets(self, player_id: str) -> list[str]:
         """This player's own stated beliefs, best first. Used to repair an
         invalid target without reaching for a random seat."""
@@ -842,6 +910,20 @@ class AICoordinator:
         exact match is a reliable signal, and it keeps the agent's return
         types unchanged."""
         return text.strip() == self._personalities[player_id].get_fallback_message()
+
+    def note_human_message(self, state: GameState, speaker_id: str, text: str) -> list[str]:
+        """Handle one human message for the whole table, once.
+
+        Factual corrections are matched in code and applied to each seat's own
+        evidence, so a sentence costs zero model calls however many AIs are
+        listening. Returns the seats that actually had a reason withdrawn --
+        the ones with something to say back.
+        """
+        if self.reasoning is None:
+            return []
+        self.reasoning.refresh(state)
+        outcomes = self.reasoning.apply_human_message(state, speaker_id, text)
+        return self.reasoning.seats_that_moved(outcomes)
 
     def register_public_claim(
         self,
@@ -967,11 +1049,30 @@ class AICoordinator:
         candidates = [pid for pid in candidates if pid not in self._observer_player_ids]
         if not candidates:
             return
-        stated_target = (self._context.get_reasoning_memo(player_id) or {}).get("execution_target")
-        system, messages = self._context.build_vote_context(state, player_id, candidates)
-        output = await self._agents[player_id].generate_vote(
-            system, messages, candidates, preferred_targets=self._belief_targets(player_id)
+        stated_target = (self._context.get_reasoning_memo(player_id) or {}).get(
+            "execution_target"
         )
+        if self.reasoning is not None:
+            # A vote is an argmax over evidence the engine already holds, so it
+            # costs no request and the reason is the evidence itself.
+            self.reasoning.refresh(state)
+            target, reason = self.reasoning.vote_decision(player_id, candidates)
+            stated_target = self.reasoning.seats[
+                player_id
+            ].belief.state.current_execution_target
+            output = VoteOutput(
+                vote_target=target,
+                reason=reason,
+                decisive_evidence=reason,
+                alternative_target=self.reasoning.seats[
+                    player_id
+                ].belief.state.alternative_target,
+            )
+        else:
+            system, messages = self._context.build_vote_context(state, player_id, candidates)
+            output = await self._agents[player_id].generate_vote(
+                system, messages, candidates, preferred_targets=self._belief_targets(player_id)
+            )
         self._record(
             state,
             player_id,
@@ -1014,6 +1115,15 @@ class AICoordinator:
             self._day_summaries.compress_if_needed()
             return
         narrator_id = alive_ai[0]
+        if self.reasoning is not None:
+            # The disagreements are already structured events; narrating them
+            # back through a model adds a request and a chance to lose one.
+            self.reasoning.refresh(state)
+            commentary = "。".join(self.reasoning.conflict_points(state))
+            self._record(state, narrator_id, "summary", text=commentary)
+            self._day_summaries.set_summary(state.day, commentary, facts)
+            self._day_summaries.compress_if_needed()
+            return
         system, messages = self._context.build_summary_context(state, narrator_id)
         output = await self._agents[narrator_id].generate_summary(system, messages)
         self._record(state, narrator_id, "summary", text=output.summary)
@@ -1083,9 +1193,13 @@ class AICoordinator:
         system, messages = self._context.build_night_action_context(
             state, seer_id, "divine", candidates
         )
-        output = await self._agents[seer_id].generate_night_action(
-            system, messages, candidates, preferred_targets=self._belief_targets(seer_id)
-        )
+        coded = self._coded_night_target(seer_id, "divine", candidates)
+        if coded is not None:
+            output = coded
+        else:
+            output = await self._agents[seer_id].generate_night_action(
+                system, messages, candidates, preferred_targets=self._belief_targets(seer_id)
+            )
         self._record(state, seer_id, "night_action", text=output.reason, target=output.target)
         try:
             controller.submit_night_action(seer_id, "divine", output.target)  # type: ignore[attr-defined]
@@ -1108,9 +1222,13 @@ class AICoordinator:
             for value in (memo.get("trusted_seer"), *(memo.get("trusted") or []))
             if isinstance(value, str) and value
         ]
-        output = await self._agents[hunter_id].generate_night_action(
-            system, messages, candidates, preferred_targets=trusted
-        )
+        coded = self._coded_night_target(hunter_id, "guard", candidates)
+        if coded is not None:
+            output = coded
+        else:
+            output = await self._agents[hunter_id].generate_night_action(
+                system, messages, candidates, preferred_targets=trusted
+            )
         self._record(state, hunter_id, "night_action", text=output.reason, target=output.target)
         try:
             controller.submit_night_action(hunter_id, "guard", output.target)  # type: ignore[attr-defined]
@@ -1129,9 +1247,13 @@ class AICoordinator:
         system, messages = self._context.build_night_action_context(
             state, alpha_id, "attack", candidates
         )
-        output = await self._agents[alpha_id].generate_night_action(
-            system, messages, candidates, preferred_targets=self._belief_targets(alpha_id)
-        )
+        coded = self._coded_night_target(alpha_id, "attack", candidates)
+        if coded is not None:
+            output = coded
+        else:
+            output = await self._agents[alpha_id].generate_night_action(
+                system, messages, candidates, preferred_targets=self._belief_targets(alpha_id)
+            )
         self._record(state, alpha_id, "night_action", text=output.reason, target=output.target)
         try:
             controller.submit_night_action(alpha_id, "attack", output.target)  # type: ignore[attr-defined]
@@ -1144,6 +1266,11 @@ class AICoordinator:
             for pid in self._ai_player_ids
             if state.players[pid].alive and state.players[pid].role == RoleName.WEREWOLF
         ]
+        if self.reasoning is not None and wolf_ids:
+            # One plan for the team, not one soliloquy each. Wolves share every
+            # fact they have, so N requests bought N restatements of it.
+            await self._run_team_plan(controller, state, wolf_ids, "wolf")
+            return
         for pid in wolf_ids:
             system, messages = self._context.build_wolf_chat_context(state, pid)
             output = await self._agents[pid].generate_wolf_chat(system, messages)
@@ -1166,6 +1293,9 @@ class AICoordinator:
             for pid in self._ai_player_ids
             if state.players[pid].alive and state.players[pid].role == RoleName.FREEMASON
         ]
+        if self.reasoning is not None and mason_ids:
+            await self._run_team_plan(controller, state, mason_ids, "freemason")
+            return
         for pid in mason_ids:
             system, messages = self._context.build_freemason_chat_context(state, pid)
             output = await self._agents[pid].generate_wolf_chat(system, messages)
@@ -1181,6 +1311,41 @@ class AICoordinator:
                 controller.chat(pid, output.message, "freemason")  # type: ignore[attr-defined]
             except Exception:
                 pass
+
+    async def _run_team_plan(
+        self, controller: object, state: GameState, member_ids: list[str], channel: str
+    ) -> None:
+        """One request for the whole team's night plan."""
+        assert self.reasoning is not None
+        speaker = member_ids[0]
+        builder = (
+            self._context.build_freemason_chat_context
+            if channel == "freemason"
+            else self._context.build_wolf_chat_context
+        )
+        system, messages = builder(state, speaker)
+        output = await self._agents[speaker].generate_wolf_chat(system, messages)
+        self._record(
+            state,
+            speaker,
+            f"{channel}_chat",
+            text=output.message,
+            used_fallback=self._is_fallback(speaker, output.message),
+            effective_length_limit=_PRIVATE_CHAT_MAX_CHARS,
+        )
+        try:
+            controller.chat(speaker, output.message, channel)  # type: ignore[attr-defined]
+        except Exception:
+            return
+        # The rest of the team acknowledges in code: their agreement carries no
+        # information the plan does not already state.
+        for pid in member_ids[1:]:
+            target = self.reasoning.seats[pid].belief.state.current_execution_target
+            note = f"了解。自分の第一候補は{target}。" if target else "了解。"
+            try:
+                controller.chat(pid, note, channel)  # type: ignore[attr-defined]
+            except Exception:
+                continue
 
     async def respond_to_private_chat(self, session: object, channel: str) -> None:
         """Let living AI teammates answer a human private message immediately."""

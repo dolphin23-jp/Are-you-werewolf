@@ -329,6 +329,10 @@ class BeliefEngine:
 
     # -- recomputation --
 
+    def recompute_public(self, state: object) -> None:
+        """Convenience for callers holding a `GameState` rather than a ledger."""
+        self.recompute(PublicFactLedger(state))  # type: ignore[arg-type]
+
     def recompute(self, ledger: PublicFactLedger) -> None:
         """Rebuild every score from the evidence that is still active.
 
