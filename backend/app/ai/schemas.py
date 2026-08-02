@@ -35,6 +35,13 @@ class ReasoningMemo(BaseModel):
     private_team_thought: str = ""
 
 
+class Reassessment(BaseModel):
+    player_id: str
+    accepted_point: str = ""
+    remaining_reason: str = ""
+    changed_mind: bool = False
+
+
 class DiscussionOutput(BaseModel):
     public_message: str
     key_point: str = ""
@@ -48,6 +55,9 @@ class DiscussionOutput(BaseModel):
     directed_questions: list[DirectedQuestion] = Field(default_factory=list)
     ready_to_vote: bool = False
     needs_another_statement: bool = False
+    reassessments: list[Reassessment] = Field(default_factory=list)
+    alternative_execution_target: str | None = None
+    strongest_case_against_execution: str = ""
 
 
 class BriefDiscussionOutput(BaseModel):

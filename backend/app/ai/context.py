@@ -51,7 +51,14 @@ DISCUSSION_OUTPUT_INSTRUCTION = """以下のJSON形式で回答してくださ�
 "directed_questions": [{"target_id": "質問相手pN", "question": "質問", \
 "source_message_id": "質問のきっかけになった発言IDまたはnull", \
 "topic": "execution_candidate|fox_candidate|claim_reason|timeline|other"}], \
-"ready_to_vote": trueまたはfalse, "needs_another_statement": trueまたはfalse}
+"ready_to_vote": trueまたはfalse, "needs_another_statement": trueまたはfalse, \
+"reassessments": [{"player_id": "pN", "accepted_point": \
+"反論で妥当だった点", "remaining_reason": "それでも残る独立した疑い。なければ空", \
+"changed_mind": trueまたはfalse}], \
+"alternative_execution_target": "第二候補のpNまたはnull", \
+"strongest_case_against_execution": "第一候補を処刑しない最も強い理由"}
+反論を読んだ場合はreassessmentsを入れ、主要処刑候補がいる場合は第二候補と、
+第一候補を処刑しない最も強い理由を必ず入れる。
 主要候補が反論し、各視点と未解決質問を検討し終えた場合だけready_to_vote=true。
 新規論点がなくagrees_withだけの場合はreactionとして60文字以内の短い同意にする。
 まだ反論・再評価が必要ならfalseとし、自分も追加発言が必要ならneeds_another_statement=true。"""
@@ -399,6 +406,24 @@ class ContextBuilder:
             else "未検討の論点を一つ提示する、具体的な相手へ根拠を問う、直前の意見へ反論する、"
             "または発言から処刑候補を絞る、のいずれかを行ってください。"
         )
+        if stage == "rebuttal_or_reassessment":
+            stage_instruction = (
+                "対象の反論を最も強い形で捉え、妥当な点を一つ認めてください。"
+                "疑いを維持するなら反論後にも残る独立根拠を示し、それがなければ候補順位を下げます。"
+            )
+        elif stage.startswith("minority_review:"):
+            target_id = stage.split(":", 1)[1]
+            target = player_label(state, target_id) if target_id in state.players else target_id
+            stage_instruction = (
+                f"票・疑いが{target}へ集中しています。多数派の理由を再掲せず、"
+                "この人物が村側である反対仮説、本人の反論で妥当な点、別の処刑候補を"
+                "必ず比較してください。疑いを維持する場合も独立根拠だけを述べます。"
+            )
+        elif stage == "consensus_summary":
+            stage_instruction = (
+                "第一候補だけでなく第二候補、第一候補を処刑しない最強の理由、"
+                "本人の反論後にも残った独立根拠、少数意見を整理してください。"
+            )
         return self._assemble(
             [self._layer_a_system(state, player_id), self._layer_b_role(state, player_id)],
             [
@@ -550,6 +575,8 @@ class ContextBuilder:
 
     @staticmethod
     def _stage_label(stage: str) -> str:
+        if stage.startswith("minority_review:"):
+            return "多数派への反証・代替候補の比較"
         return {
             "immediate": "朝一CO・結果発表",
             "initial_view": "初回意見",

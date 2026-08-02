@@ -61,6 +61,32 @@ def test_question_topic_groups_equivalent_execution_questions():
     assert AICoordinator._question_topic("狐候補を挙げてください") == "fox_candidate"
 
 
+def test_concentrated_pressure_schedules_a_minority_review_before_summary():
+    controller = make_controller(seed=4)
+    coordinator = AICoordinator(
+        controller.state, ["p1", "p2", "p3", "p4"], MorningPriorityProvider(), seed=1
+    )
+    outputs = []
+    for player_id in ("p1", "p2", "p3", "p4"):
+        output = DiscussionOutput(public_message="p0を疑います")
+        output.reasoning_memo.execution_target = "p0"
+        outputs.append((player_id, output))
+    round_state = DiscussionRoundState(
+        day=1,
+        order=[],
+        outputs=outputs,
+        speech_counts={player_id: 1 for player_id, _output in outputs},
+        major_targets_ready=True,
+        max_total=20,
+    )
+
+    speaker, stage = coordinator._next_discussion_speaker(controller.state, round_state)
+
+    assert speaker in {"p1", "p2", "p3", "p4"}
+    assert stage == "minority_review:p0"
+    assert round_state.summary_done is False
+
+
 class ReplyLoopProvider:
     def __init__(self) -> None:
         self.calls = 0

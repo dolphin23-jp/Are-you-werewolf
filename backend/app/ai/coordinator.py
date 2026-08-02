@@ -340,13 +340,14 @@ class AICoordinator:
             # Restricted to seats this coordinator speaks for: the pressure list
             # drives speaking limits and the rebuttal sweep, neither of which can
             # apply to the human.
-            pressure: Counter[str] = Counter(
-                target
-                for _speaker, output in round_state.outputs
+            latest_targets = {
+                speaker: target
+                for speaker, output in round_state.outputs
                 if isinstance((target := output.reasoning_memo.execution_target), str)
                 and target in self._agents
                 and state.players[target].alive
-            )
+            }
+            pressure: Counter[str] = Counter(latest_targets.values())
             round_state.major_targets = [target for target, _count in pressure.most_common(2)]
             round_state.major_targets_ready = True
             for target in round_state.major_targets:
@@ -389,6 +390,34 @@ class AICoordinator:
             round_state.major_target_sweeps += 1
             for target in owed:
                 self._round_queue_reply(state, round_state, target)
+        if (
+            not round_state.minority_review_done
+            and len(round_state.outputs) < round_state.max_total
+        ):
+            latest_public_targets = {
+                speaker: target
+                for speaker, output in round_state.outputs
+                if isinstance((target := output.reasoning_memo.execution_target), str)
+                and target in state.players
+                and state.players[target].alive
+            }
+            public_pressure: Counter[str] = Counter(latest_public_targets.values())
+            round_state.minority_review_done = True
+            if public_pressure:
+                top_target, top_count = public_pressure.most_common(1)[0]
+                stated_count = sum(public_pressure.values())
+                if stated_count >= 4 and top_count / stated_count >= 0.6:
+                    reviewers = [
+                        pid
+                        for pid in self._agents
+                        if state.players[pid].alive and pid != top_target
+                    ]
+                    if reviewers:
+                        reviewer = min(
+                            reviewers,
+                            key=lambda pid: (round_state.speech_counts.get(pid, 0), pid),
+                        )
+                        return reviewer, f"minority_review:{top_target}"
         if not round_state.summary_done and len(round_state.outputs) < round_state.max_total:
             leader = next(
                 (
@@ -499,6 +528,19 @@ class AICoordinator:
             self._metrics.record_discussion_result(skipped=output is None)
         if output is None:
             return None
+        valid_reassessments = [
+            item for item in output.reassessments if item.player_id in state.players
+        ]
+        output.reassessments = valid_reassessments
+        if any(
+            item.changed_mind
+            and item.player_id == output.reasoning_memo.execution_target
+            and not item.remaining_reason.strip()
+            for item in valid_reassessments
+        ):
+            output.reasoning_memo.execution_target = None
+        if output.alternative_execution_target not in state.players:
+            output.alternative_execution_target = None
         pending_relation = next(
             (
                 claim

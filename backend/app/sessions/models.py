@@ -32,6 +32,7 @@ class DiscussionRoundState:
     summary_done: bool = False
     major_targets_ready: bool = False
     major_target_sweeps: int = 0
+    minority_review_done: bool = False
 
 
 @dataclass
