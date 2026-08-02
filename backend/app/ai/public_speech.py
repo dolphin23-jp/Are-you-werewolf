@@ -19,8 +19,13 @@ class DetectedPublicResult:
     is_werewolf: bool
 
 
-_WHITE_RE = re.compile(r"(?:人狼ではな(?:い|かった)|白|○)")
-_BLACK_RE = re.compile(r"(?:人狼(?:でした|だった|です|だ)?|黒|●)")
+_TARGET_TRAILER_RE = re.compile(r"^(?:\(p\d+\))?(?:さん|君|ちゃん|氏)?\s*")
+_WHITE_RE = re.compile(
+    r"^(?:は|が|=|＝|を占って[、，,]?)?\s*(?:人狼ではな(?:い|かった)|白|○)"
+)
+_BLACK_RE = re.compile(
+    r"^(?:は|が|=|＝|を占って[、，,]?)?\s*(?:人狼(?:でした|だった|です|だ)?|黒|●)"
+)
 _SPECULATION_RE = re.compile(r"(?:と思|に見え|かもしれ|可能性)")
 
 
@@ -47,13 +52,15 @@ def detect_public_result(
             if not positions:
                 continue
             start = min(positions)
-            result_text = sentence[start : start + 50]
+            matched_label = name if sentence.startswith(name, start) else f"({target_id})"
+            result_text = sentence[start + len(matched_label) : start + len(matched_label) + 50]
+            result_text = _TARGET_TRAILER_RE.sub("", result_text, count=1)
             if _SPECULATION_RE.search(result_text):
                 continue
-            white = _WHITE_RE.search(result_text)
+            white = _WHITE_RE.match(result_text)
             if white is not None:
                 return DetectedPublicResult(effective_role.value, target_id, False)
-            black = _BLACK_RE.search(result_text)
+            black = _BLACK_RE.match(result_text)
             if black is not None:
                 return DetectedPublicResult(effective_role.value, target_id, True)
     return None

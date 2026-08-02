@@ -1,4 +1,4 @@
-from app.ai.public_speech import detect_public_result
+from app.ai.public_speech import DetectedPublicResult, detect_public_result
 from app.engine.roles import RoleName
 
 
@@ -34,3 +34,25 @@ def test_role_talk_and_speculation_are_not_ability_results():
         )
         is None
     )
+
+
+def test_another_seers_black_result_is_not_re_registered_as_the_speakers_result():
+    result = detect_public_result(
+        "ホノカも占いCOしてソウタに黒出しとなると、占い内訳は真狂狼が濃厚。",
+        RoleName.SEER,
+        {"p4": "ソウタ", "p13": "ホノカ"},
+        role_claimed_in_message=False,
+    )
+
+    assert result is None
+
+
+def test_result_with_player_id_and_honorific_is_detected():
+    result = detect_public_result(
+        "占い師COです。初日占い結果はドルフィン(p0)さん●でした。",
+        RoleName.SEER,
+        {"p0": "ドルフィン"},
+        role_claimed_in_message=True,
+    )
+
+    assert result == DetectedPublicResult("seer", "p0", True)

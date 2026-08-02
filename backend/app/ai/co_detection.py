@@ -102,23 +102,23 @@ def detect_freemason_partner(
     confirmation = _PARTNER_CONFIRMATION_RE.search(text)
     if confirmation is not None:
         prefix = text[: confirmation.start()]
-        matches = [
+        confirmation_matches = [
             (max(prefix.rfind(name), prefix.rfind(f"({player_id})")), player_id)
             for player_id, name in candidates.items()
             if _mentions_player(prefix, player_id, name)
         ]
-        return max(matches)[1] if matches else None
+        return max(confirmation_matches)[1] if confirmation_matches else None
     reveal = _PARTNER_REVEAL_RE.search(text)
     if reveal is None:
         return None
     label = reveal.group("label")
-    matches = [
+    reveal_matches = [
         player_id
         for player_id, name in candidates.items()
         if _mentions_player(label, player_id, name)
     ]
-    if len(matches) == 1:
-        return matches[0]
+    if len(reveal_matches) == 1:
+        return reveal_matches[0]
     return None
 
 
