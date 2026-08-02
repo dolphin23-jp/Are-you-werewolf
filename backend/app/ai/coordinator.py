@@ -272,6 +272,9 @@ class AICoordinator:
                     continue
                 consecutive_failures = 0
                 round_state.outputs.append((pid, output))
+                for target_id in tuple(self._forced_partner_confirmations):
+                    self._round_queue_reply(state, round_state, target_id)
+                    self._forced_partner_confirmations.discard(target_id)
                 round_state.speech_counts[pid] = round_state.speech_counts.get(pid, 0) + 1
                 spoken += 1
                 step_budget = getattr(session, "discussion_step_budget", None)
