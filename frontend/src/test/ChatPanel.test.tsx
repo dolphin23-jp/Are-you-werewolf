@@ -1,23 +1,65 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { passDiscussionTurn, sendChat } from "../api/client";
+import { controlDiscussion, passDiscussionTurn, sendChat } from "../api/client";
 import { ChatPanel } from "../components/panels/ChatPanel";
 import { useGameStore } from "../state/gameStore";
 import { makeView } from "./fixtures/gameView";
 
-vi.mock("../api/client", () => ({ sendChat: vi.fn(), passDiscussionTurn: vi.fn() }));
+vi.mock("../api/client", () => ({
+  controlDiscussion: vi.fn(),
+  sendChat: vi.fn(),
+  passDiscussionTurn: vi.fn(),
+}));
 
 describe("ChatPanel", () => {
   afterEach(() => {
     useGameStore.getState().reset();
     vi.clearAllMocks();
     vi.mocked(passDiscussionTurn).mockResolvedValue(undefined);
+    vi.mocked(controlDiscussion).mockResolvedValue(undefined);
   });
 
   it("renders public chat messages", () => {
     useGameStore.setState({ view: makeView(), sessionId: "s1", playerNames: { p1: "Hanako" } });
     render(<ChatPanel />);
     expect(screen.getByText(/こんにちは/)).toBeInTheDocument();
+  });
+
+  it("shows the current day before anyone speaks and announces no overnight death", () => {
+    useGameStore.setState({
+      view: makeView({ day: 3, public_chat: [] }),
+      sessionId: "s1",
+    });
+    render(<ChatPanel />);
+
+    fireEvent.click(screen.getByRole("button", { name: "3日目" }));
+    expect(screen.getByText("昨夜は誰も死体となって発見されませんでした")).toBeInTheDocument();
+  });
+
+  it("renders execution after that day's discussion", () => {
+    useGameStore.setState({ view: makeView(), sessionId: "s1", playerNames: { p1: "Hanako" } });
+    const { container } = render(<ChatPanel />);
+
+    fireEvent.click(screen.getByRole("button", { name: "1日目" }));
+    const discussion = container.querySelector("#chat-m1");
+    const execution = screen.getByText("投票の結果、Saburoが処刑されました");
+    expect(discussion).not.toBeNull();
+    expect(
+      discussion!.compareDocumentPosition(execution) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("pauses and single-steps AI discussion", async () => {
+    useGameStore.setState({ view: makeView(), sessionId: "s1" });
+    const { rerender } = render(<ChatPanel />);
+
+    fireEvent.click(screen.getByRole("button", { name: "AI議論を一時停止" }));
+    await waitFor(() => expect(controlDiscussion).toHaveBeenCalledWith("s1", "pause"));
+
+    useGameStore.setState({ view: makeView({ discussion_paused: true }) });
+    rerender(<ChatPanel />);
+    fireEvent.click(screen.getByRole("button", { name: "次の1発言" }));
+    await waitFor(() => expect(controlDiscussion).toHaveBeenCalledWith("s1", "step"));
   });
 
   it("disables the input outside the discussion phase", () => {
@@ -174,9 +216,45 @@ describe("ChatPanel", () => {
     });
     render(<ChatPanel />);
 
-    fireEvent.click(screen.getByRole("button", { name: /\[m1\] Hanako: 「理由は\?」/ }));
+    fireEvent.click(screen.getByLabelText(/\[m1\] Hanako: 「理由は\?」/));
 
     expect(screen.getByText(/返信先 \[m1\] Hanako/)).toBeInTheDocument();
+  });
+
+  it("sends one response for multiple selected questions", async () => {
+    useGameStore.setState({
+      view: makeView({
+        public_chat: [
+          ...makeView().public_chat,
+          { message_id: "m2", author_id: "p2", content: "狐候補は?", channel: "public", day: 1, reply_to: null, quote: null },
+        ],
+        pending_questions: [
+          { asker: "p1", target: "p0", question: "狼候補は?", source_message_id: "m1", day: 1 },
+          { asker: "p2", target: "p0", question: "狐候補は?", source_message_id: "m2", day: 1 },
+        ],
+      }),
+      sessionId: "s1",
+      playerNames: { p1: "Hanako", p2: "Jiro" },
+    });
+    render(<ChatPanel />);
+
+    fireEvent.click(screen.getByLabelText(/m1.*狼候補/));
+    fireEvent.click(screen.getByLabelText(/m2.*狐候補/));
+    fireEvent.change(screen.getByPlaceholderText("発言を入力..."), {
+      target: { value: "まとめて回答します" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "送信" }));
+
+    await waitFor(() =>
+      expect(sendChat).toHaveBeenCalledWith(
+        "s1",
+        "まとめて回答します",
+        "public",
+        "m1",
+        "こんにちは",
+        ["m2"],
+      ),
+    );
   });
 
   it("renders a quote with its source author", () => {
@@ -260,6 +338,25 @@ describe("ChatPanel", () => {
     // The author button really is absent on the grouped line -- that is why the
     // accent had to move off it.
     expect(grouped?.querySelector(".chat-message__author")).toBeNull();
+  });
+
+  it("links inline message ids and keeps the author beside quoted follow-ups", () => {
+    useGameStore.setState({
+      view: makeView({
+        public_chat: [
+          { message_id: "m1", author_id: "p1", content: "最初", channel: "public", day: 1, reply_to: null, quote: null },
+          { message_id: "m2", author_id: "p1", content: "【m1への回答】と[m1]", channel: "public", day: 1, reply_to: "m1", quote: "最初" },
+        ],
+      }),
+      sessionId: "s1",
+      playerNames: { p1: "Hanako" },
+    });
+    const { container } = render(<ChatPanel />);
+
+    const followUp = container.querySelector("#chat-m2");
+    expect(followUp?.className).not.toContain("chat-message--grouped");
+    expect(followUp?.textContent).toContain("Hanako");
+    expect(followUp?.querySelectorAll(".chat-message__reference")).toHaveLength(2);
   });
 
   it("scrolls to the newest message while already near the bottom", () => {

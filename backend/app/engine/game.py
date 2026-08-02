@@ -16,6 +16,7 @@ from app.engine.state import (
     ChatChannel,
     ChatMessage,
     CoDeclaration,
+    FreemasonPartnerClaim,
     GameState,
     PlayerState,
     PublicResultClaim,
@@ -242,6 +243,7 @@ class GameController:
         channel: str = "public",
         reply_to: str | None = None,
         quote: str | None = None,
+        references: list[str] | None = None,
     ) -> str:
         player = self._require_alive(author_id)
         chat_channel = ChatChannel(channel)
@@ -261,6 +263,15 @@ class GameController:
         if referenced is None:
             reply_to = None
             quote = None
+        valid_references = [
+            message_id
+            for message_id in dict.fromkeys(references or [])
+            if message_id != reply_to
+            and any(
+                message.message_id == message_id and message.channel == chat_channel
+                for message in self.state.chat_log
+            )
+        ][:10]
         message_id = f"m{self.state.next_message_number}"
         self.state.next_message_number += 1
         message = ChatMessage(
@@ -271,12 +282,14 @@ class GameController:
             day=self.state.day,
             reply_to=reply_to,
             quote=quote,
+            references=valid_references,
         )
         self.state.chat_log.append(message)
-        if reply_to is not None:
+        answered_ids = {message_id for message_id in [reply_to, *valid_references] if message_id}
+        if answered_ids:
             pending = self.state.pending_questions.get(author_id, [])
             self.state.pending_questions[author_id] = [
-                question for question in pending if question.source_message_id != reply_to
+                question for question in pending if question.source_message_id not in answered_ids
             ]
         self.events.publish(
             GameEvent(
@@ -289,6 +302,7 @@ class GameController:
                     "day": self.state.day,
                     "reply_to": reply_to,
                     "quote": quote,
+                    "references": valid_references,
                 },
             )
         )
@@ -350,6 +364,35 @@ class GameController:
         self.events.publish(
             GameEvent(GameEventType.CO_DECLARED, {"player_id": player_id, "claimed_role": role})
         )
+
+    def claim_freemason_partner(self, claimant_id: str, partner_id: str) -> None:
+        """Record only the public relationship claim, never the secret role truth."""
+        self._require_alive(claimant_id)
+        if partner_id not in self.state.players or partner_id == claimant_id:
+            raise GameError("invalid freemason partner")
+        reverse = next(
+            (
+                claim
+                for claim in self.state.freemason_partner_claims
+                if claim.claimant_id == partner_id and claim.partner_id == claimant_id
+            ),
+            None,
+        )
+        if reverse is not None:
+            reverse.confirmed = True
+            return
+        duplicate = any(
+            claim.claimant_id == claimant_id and claim.partner_id == partner_id
+            for claim in self.state.freemason_partner_claims
+        )
+        if not duplicate:
+            self.state.freemason_partner_claims.append(
+                FreemasonPartnerClaim(
+                    claimant_id=claimant_id,
+                    partner_id=partner_id,
+                    day=self.state.day,
+                )
+            )
 
     def public_result(
         self, claimant_id: str, result_type: str, target_id: str, is_werewolf: bool
