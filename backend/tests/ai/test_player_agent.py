@@ -3,7 +3,7 @@ import pytest
 from app.ai.personalities import PERSONALITIES
 from app.ai.player_agent import AIPlayerAgent
 from app.ai.provider.base import Message
-from app.ai.schemas import DiscussionOutput, VoteOutput
+from app.ai.schemas import BriefDiscussionOutput, DiscussionOutput, VoteOutput
 
 
 class _AlwaysNoneProvider:
@@ -48,3 +48,50 @@ async def test_invalid_vote_target_falls_back_to_random_valid_choice():
     valid = ["p1", "p2", "p3"]
     result = await agent.generate_vote("system", [Message(role="user", content="hi")], valid)
     assert result.vote_target in valid
+
+
+class _TruncatingProvider:
+    """Fails the full contract the way a cut-off JSON response does, but answers
+    the minimal one. Records the token budget it was asked for."""
+
+    def __init__(self) -> None:
+        self.budgets: list[int] = []
+        self.schemas: list[str] = []
+
+    async def generate_structured(self, *, response_schema, max_tokens=800, **kwargs):
+        self.budgets.append(max_tokens)
+        self.schemas.append(response_schema.__name__)
+        if response_schema is BriefDiscussionOutput:
+            return BriefDiscussionOutput(public_message="占い理由を説明します。")
+        return None
+
+
+@pytest.mark.asyncio
+async def test_a_truncated_full_contract_still_produces_a_real_turn():
+    # Going silent here is what leaves "書き込み中" on screen resolving to nothing.
+    agent = AIPlayerAgent(_TruncatingProvider(), PERSONALITIES[0], max_retries=1)
+    result = await agent.generate_discussion("system", [Message(role="user", content="hi")])
+    assert result is not None
+    assert result.public_message == "占い理由を説明します。"
+
+
+@pytest.mark.asyncio
+async def test_wordy_speakers_get_a_bigger_token_budget_than_terse_ones():
+    # A flat budget fits a terse speaker and truncates a wordy one mid-JSON.
+    terse = next(p for p in PERSONALITIES if p.verbosity == "terse")
+    wordy = next(p for p in PERSONALITIES if p.verbosity == "wordy")
+
+    terse_provider = _TruncatingProvider()
+    await AIPlayerAgent(terse_provider, terse, max_retries=0).generate_discussion(
+        "system", [Message(role="user", content="hi")]
+    )
+    wordy_provider = _TruncatingProvider()
+    await AIPlayerAgent(wordy_provider, wordy, max_retries=0).generate_discussion(
+        "system", [Message(role="user", content="hi")]
+    )
+
+    assert wordy_provider.budgets[0] > terse_provider.budgets[0]
+    # The visible sentence alone can be 400 Japanese characters for a wordy
+    # speaker, before the twelve-field envelope around it.
+    assert wordy_provider.budgets[0] >= 2000
+    assert "BriefDiscussionOutput" in wordy_provider.schemas

@@ -49,6 +49,15 @@ class DiscussionOutput(BaseModel):
     needs_another_statement: bool = False
 
 
+class BriefDiscussionOutput(BaseModel):
+    """Minimal fallback contract. When the full `DiscussionOutput` fails every
+    attempt -- almost always because the JSON was cut off mid-object -- asking for
+    only the sentence the player would say still produces a real turn, instead of
+    a typing indicator that resolves to nothing."""
+
+    public_message: str
+
+
 class MorningIntentOutput(BaseModel):
     timing: str = "normal"  # immediate | after_results | normal | hold
     intent: str = "normal"  # publish_result | claim | lead | question | normal

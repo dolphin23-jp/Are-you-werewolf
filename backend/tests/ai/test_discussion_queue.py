@@ -3,7 +3,8 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
-from app.ai.coordinator import AICoordinator
+from app.ai.coordinator import _MAX_CONSECUTIVE_SPEECH_FAILURES, AICoordinator
+from app.ai.player_agent import DEFAULT_MAX_RETRIES
 from app.ai.provider.base import Message, SchemaT
 from app.ai.schemas import DirectedQuestion, DiscussionOutput, MorningIntentOutput
 from app.engine.phases import Phase
@@ -190,7 +191,12 @@ def test_segment_gives_up_instead_of_retrying_a_silent_speaker_forever():
     asyncio.run(asyncio.wait_for(coordinator.run_discussion_round(session), timeout=5))
 
     assert controller.state.chat_log == []
-    assert provider.discussion_calls <= 12
+    # Each failed slot costs the full contract's attempts plus the brief fallback's,
+    # and the segment gives up after a bounded number of consecutive silent slots.
+    # Derived rather than hardcoded so the ceiling tracks the constants, while an
+    # unbounded retry loop still trips it.
+    attempts_per_slot = (DEFAULT_MAX_RETRIES + 1) * 2
+    assert provider.discussion_calls <= _MAX_CONSECUTIVE_SPEECH_FAILURES * attempts_per_slot
 
 
 class PhaseEndingProvider:
