@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import random
+import time
 from collections import Counter
 
 from app.ai.co_detection import detect_claimed_role
@@ -207,11 +208,11 @@ class AICoordinator:
             )
             if round_state.awaiting_human and can_pause:
                 return
-            round_state.awaiting_human = False
+            self._set_awaiting(round_state, False)
             if round_state.stage == "immediate" and round_state.immediate_count == 0:
                 round_state.stage = "initial_view"
                 if can_pause:
-                    round_state.awaiting_human = True
+                    self._set_awaiting(round_state, True)
                     return
 
             spoken = 0
@@ -243,7 +244,7 @@ class AICoordinator:
                 ):
                     round_state.stage = "initial_view"
                     if can_pause:
-                        round_state.awaiting_human = True
+                        self._set_awaiting(round_state, True)
                         break
             if (
                 can_pause
@@ -251,7 +252,7 @@ class AICoordinator:
                 and not round_state.complete
                 and spoken >= self._segment_size
             ):
-                round_state.awaiting_human = True
+                self._set_awaiting(round_state, True)
 
     async def _start_discussion_round(self, state: GameState) -> DiscussionRoundState:
         alive = [pid for pid in self._ai_player_ids if state.players[pid].alive]
@@ -357,7 +358,7 @@ class AICoordinator:
         round_state = getattr(session, "discussion_round", None)
         if round_state is None:
             return
-        round_state.awaiting_human = False
+        self._set_awaiting(round_state, False)
         if reply_to:
             message = next(
                 (m for m in session.controller.state.chat_log if m.message_id == reply_to),  # type: ignore[attr-defined]
@@ -365,6 +366,11 @@ class AICoordinator:
             )
             if message and message.author_id in self._agents:
                 self._round_queue_reply(session.controller.state, round_state, message.author_id)  # type: ignore[attr-defined]
+
+    @staticmethod
+    def _set_awaiting(round_state: DiscussionRoundState, awaiting: bool) -> None:
+        round_state.awaiting_human = awaiting
+        round_state.awaiting_since = time.time() if awaiting else None
 
     async def _morning_intent(self, state: GameState, player_id: str) -> MorningIntentOutput:
         system, messages = self._context.build_morning_intent_context(state, player_id)

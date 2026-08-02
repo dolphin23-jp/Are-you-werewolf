@@ -101,6 +101,7 @@ export interface GameView {
   private_chat: ChatMessage[];
   pending_questions: PendingQuestion[];
   awaiting_your_speech: boolean;
+  speech_wait_remaining_seconds: number;
   discussion_progress: { spoken: number; total: number };
   your_divine_results: DivineResult[];
   your_medium_results: MediumResult[];

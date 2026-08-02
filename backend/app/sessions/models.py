@@ -25,6 +25,7 @@ class DiscussionRoundState:
     outputs: list[tuple[str, Any]] = field(default_factory=list)
     major_targets: list[str] = field(default_factory=list)
     awaiting_human: bool = False
+    awaiting_since: float | None = None
     immediate_count: int = 0
     max_total: int = 0
     complete: bool = False

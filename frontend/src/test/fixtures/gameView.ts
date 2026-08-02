@@ -30,6 +30,7 @@ export function makeView(overrides: Partial<GameView> = {}): GameView {
     private_chat: [],
     pending_questions: [],
     awaiting_your_speech: false,
+    speech_wait_remaining_seconds: 0,
     discussion_progress: { spoken: 0, total: 0 },
     your_divine_results: [],
     your_medium_results: [],

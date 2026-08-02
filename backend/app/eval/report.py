@@ -187,6 +187,9 @@ def _render_speech_stats(games: list[tuple[GameTranscript, AnalysisResult]]) -> 
     def weighted(key: str) -> float:
         return float(sum(s[key] * s["utterances"] for s in collected) / max(total, 1))
 
+    def weighted(key: str) -> float:
+        return float(sum(s[key] * s["utterances"] for s in collected) / max(total, 1))
+
     return "\n".join(
         [
             "| 指標 | 値 |",

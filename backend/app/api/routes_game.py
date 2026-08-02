@@ -10,6 +10,7 @@ any seat if ever needed. In normal frontend use the field is simply omitted.
 
 from __future__ import annotations
 
+import time
 import uuid
 from typing import Any
 
@@ -165,6 +166,7 @@ def get_view(session_id: str, player_id: str | None = Query(default=None)) -> di
     viewer = _resolve_player_id(session, player_id)
     view = session.controller.get_player_view(viewer)
     round_state = session.discussion_round
+    settings = get_settings()
     view["awaiting_your_speech"] = bool(
         round_state and round_state.awaiting_human and viewer == session.human_id
     )
@@ -172,6 +174,16 @@ def get_view(session_id: str, player_id: str | None = Query(default=None)) -> di
         "spoken": len(round_state.outputs) if round_state else 0,
         "total": round_state.max_total if round_state else 0,
     }
+    elapsed = (
+        time.time() - round_state.awaiting_since
+        if round_state and round_state.awaiting_human and round_state.awaiting_since
+        else 0.0
+    )
+    view["speech_wait_remaining_seconds"] = (
+        max(0, int(settings.werewolf_discussion_wait_seconds - elapsed + 0.999))
+        if round_state and round_state.awaiting_human
+        else 0
+    )
     return view
 
 
