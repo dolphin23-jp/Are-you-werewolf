@@ -27,7 +27,18 @@ from app.ai.personalities import assign_personalities, discussion_length_range
 from app.ai.player_agent import AIPlayerAgent, truncate_at_sentence
 from app.ai.provider.base import LLMProvider
 from app.ai.public_speech import detect_public_result
+from app.ai.reasoning import (
+    PublicFactLedger,
+    ValidationLog,
+    compose_day_summary,
+    detect_vote_plan_mismatch,
+    mentions_player,
+    render_public_fact_summary,
+    validate_discussion_output,
+    validate_public_result_claim,
+)
 from app.ai.schemas import DiscussionOutput, MorningIntentOutput
+from app.ai.schemas import PublicResultClaim as SchemaPublicResultClaim
 from app.engine.phases import Phase
 from app.engine.roles import RoleName
 from app.engine.state import GameState, PendingQuestion
@@ -91,6 +102,10 @@ class AICoordinator:
             leader, partner = plan_rng.sample(freemasons, 2)
             self._freemason_public_plan = (leader, partner, plan_rng.random() < 0.5)
         self._metrics = getattr(provider, "_metrics", None)
+        # Every state-consistency repair and every say-one-thing-vote-another
+        # discrepancy lands here, so a game can be audited after the fact
+        # without the AI layer having to be re-run.
+        self.validation = ValidationLog()
 
         self._personalities = assign_personalities(self._ai_player_ids, seed=seed)
 
@@ -627,15 +642,11 @@ class AICoordinator:
             for item in valid_reassessments
         ):
             output.reasoning_memo.execution_target = None
-        if (
-            output.alternative_execution_target not in state.players
-            or output.alternative_execution_target == player_id
-            or (
-                output.alternative_execution_target is not None
-                and not state.players[output.alternative_execution_target].alive
-            )
-        ):
-            output.alternative_execution_target = None
+        # Nothing below may read an unvalidated target. A dead execution
+        # candidate, a flipped verdict or a medium result about someone who was
+        # never executed is state corruption, not a human-style misread, and it
+        # is repaired deterministically here before it reaches the engine.
+        self._validate_output(state, player_id, output)
         pending_relation = next(
             (
                 claim
@@ -735,10 +746,10 @@ class AICoordinator:
         for result in output.public_results:
             if result.target_id not in state.players:
                 continue
-            target_name = state.players[result.target_id].name
-            if (
-                target_name not in output.public_message
-                and result.target_id not in output.public_message
+            # Boundary-aware: a plain substring test lets a result about p1
+            # attach itself to a sentence that only ever mentions p11.
+            if not mentions_player(
+                output.public_message, result.target_id, state.players[result.target_id].name
             ):
                 continue
             try:
@@ -748,6 +759,31 @@ class AICoordinator:
             except Exception:
                 pass
         return output
+
+    def _validate_output(
+        self, state: GameState, player_id: str, output: DiscussionOutput
+    ) -> None:
+        """Reconcile one discussion turn with the public fact ledger."""
+        previous = self._context.get_reasoning_memo(player_id) or {}
+        previous_target = previous.get("execution_target")
+        _output, issues = validate_discussion_output(
+            output,
+            PublicFactLedger(state),
+            speaker_id=player_id,
+            previous_execution_target=previous_target if isinstance(previous_target, str) else None,
+            excluded_target_ids=self._observer_player_ids,
+        )
+        self.validation.extend(issues)
+
+    def _belief_targets(self, player_id: str) -> list[str]:
+        """This player's own stated beliefs, best first. Used to repair an
+        invalid target without reaching for a random seat."""
+        memo = self._context.get_reasoning_memo(player_id) or {}
+        preferred: list[str] = []
+        for value in (memo.get("execution_target"), *(memo.get("suspects") or [])):
+            if isinstance(value, str) and value and value not in preferred:
+                preferred.append(value)
+        return preferred
 
     def _freemason_must_hide(self, state: GameState, player_id: str) -> bool:
         if self._freemason_public_plan is None:
@@ -844,15 +880,29 @@ class AICoordinator:
             role_claimed_in_message=role in (RoleName.SEER, RoleName.MEDIUM),
         )
         if detected_result is not None:
-            try:
-                controller.public_result(  # type: ignore[attr-defined]
-                    player_id,
-                    detected_result.result_type,
-                    detected_result.target_id,
-                    detected_result.is_werewolf,
-                )
-            except Exception:
-                pass
+            # Text re-parsing recovers results the model forgot to declare, but
+            # it must clear the same consistency bar as the structured field --
+            # a regex has no idea whether its target was ever executed.
+            validation = validate_public_result_claim(
+                SchemaPublicResultClaim(
+                    result_type=detected_result.result_type,
+                    target_id=detected_result.target_id,
+                    is_werewolf=detected_result.is_werewolf,
+                ),
+                PublicFactLedger(state),
+                claimant_id=player_id,
+            )
+            self.validation.extend(validation.issues)
+            if validation.claim is not None:
+                try:
+                    controller.public_result(  # type: ignore[attr-defined]
+                        player_id,
+                        validation.claim.result_type,
+                        validation.claim.target_id,
+                        validation.claim.is_werewolf,
+                    )
+                except Exception:
+                    pass
         if effective_role != RoleName.FREEMASON:
             return
         partner_id = detect_freemason_partner(output.public_message, candidates)
@@ -925,8 +975,11 @@ class AICoordinator:
         candidates = [pid for pid in candidates if pid not in self._observer_player_ids]
         if not candidates:
             return
+        stated_target = (self._context.get_reasoning_memo(player_id) or {}).get("execution_target")
         system, messages = self._context.build_vote_context(state, player_id, candidates)
-        output = await self._agents[player_id].generate_vote(system, messages, candidates)
+        output = await self._agents[player_id].generate_vote(
+            system, messages, candidates, preferred_targets=self._belief_targets(player_id)
+        )
         self._record(
             state,
             player_id,
@@ -940,18 +993,47 @@ class AICoordinator:
         try:
             controller.vote(player_id, output.vote_target)  # type: ignore[attr-defined]
         except Exception:
-            pass
+            return
+        # Voting against your own stated plan is legal play, not corruption, so
+        # this is recorded rather than corrected -- but silently losing it means
+        # nobody can tell a change of mind from an AI that lost track of itself.
+        # The ballot the engine actually holds, not the model's own answer:
+        # `controller.vote` may have rejected it, and `vote_records` is only
+        # written at tally time.
+        mismatch = detect_vote_plan_mismatch(
+            PublicFactLedger(state),
+            voter_id=player_id,
+            stated_target=stated_target if isinstance(stated_target, str) else None,
+            day=state.day,
+            round_number=state.vote_round,
+            actual_target=state.pending_votes.get(player_id),
+        )
+        if mismatch is not None:
+            self.validation.vote_plan_mismatches.append(mismatch)
 
     async def _generate_day_summary(self, controller: object, state: GameState) -> None:
+        # The factual half is rendered from the ledger, not asked for: who died,
+        # who COed, which verdicts were published and who voted for whom are
+        # already known exactly, and a model restating them can only lose them.
+        facts = render_public_fact_summary(PublicFactLedger(state), state.day)
         alive_ai = [pid for pid in self._ai_player_ids if state.players[pid].alive]
         if not alive_ai:
+            self._day_summaries.set_summary(state.day, "", facts)
+            self._day_summaries.compress_if_needed()
             return
         narrator_id = alive_ai[0]
         system, messages = self._context.build_summary_context(state, narrator_id)
         output = await self._agents[narrator_id].generate_summary(system, messages)
         self._record(state, narrator_id, "summary", text=output.summary)
-        self._day_summaries.set_summary(state.day, output.summary)
+        self._day_summaries.set_summary(state.day, output.summary, facts)
         self._day_summaries.compress_if_needed()
+
+    def day_summary_text(self, day: int) -> str:
+        """The stored summary for a day: deterministic facts plus the labelled
+        commentary the narrator generated on top of them."""
+        return compose_day_summary(
+            self._day_summaries.facts.get(day, ""), self._day_summaries.summaries.get(day, "")
+        )
 
     # -- night --
 
@@ -1009,7 +1091,9 @@ class AICoordinator:
         system, messages = self._context.build_night_action_context(
             state, seer_id, "divine", candidates
         )
-        output = await self._agents[seer_id].generate_night_action(system, messages, candidates)
+        output = await self._agents[seer_id].generate_night_action(
+            system, messages, candidates, preferred_targets=self._belief_targets(seer_id)
+        )
         self._record(state, seer_id, "night_action", text=output.reason, target=output.target)
         try:
             controller.submit_night_action(seer_id, "divine", output.target)  # type: ignore[attr-defined]
@@ -1024,7 +1108,17 @@ class AICoordinator:
         system, messages = self._context.build_night_action_context(
             state, hunter_id, "guard", candidates
         )
-        output = await self._agents[hunter_id].generate_night_action(system, messages, candidates)
+        # The hunter protects who they trust, so their fallback preference is the
+        # trusted list rather than the suspect list every other action uses.
+        memo = self._context.get_reasoning_memo(hunter_id) or {}
+        trusted = [
+            value
+            for value in (memo.get("trusted_seer"), *(memo.get("trusted") or []))
+            if isinstance(value, str) and value
+        ]
+        output = await self._agents[hunter_id].generate_night_action(
+            system, messages, candidates, preferred_targets=trusted
+        )
         self._record(state, hunter_id, "night_action", text=output.reason, target=output.target)
         try:
             controller.submit_night_action(hunter_id, "guard", output.target)  # type: ignore[attr-defined]
@@ -1043,7 +1137,9 @@ class AICoordinator:
         system, messages = self._context.build_night_action_context(
             state, alpha_id, "attack", candidates
         )
-        output = await self._agents[alpha_id].generate_night_action(system, messages, candidates)
+        output = await self._agents[alpha_id].generate_night_action(
+            system, messages, candidates, preferred_targets=self._belief_targets(alpha_id)
+        )
         self._record(state, alpha_id, "night_action", text=output.reason, target=output.target)
         try:
             controller.submit_night_action(alpha_id, "attack", output.target)  # type: ignore[attr-defined]

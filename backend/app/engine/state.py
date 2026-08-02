@@ -198,7 +198,7 @@ class GameState:
                 "player_id": p.player_id,
                 "name": p.name,
                 "alive": p.alive,
-                "death_cause": _public_death_cause(p.death_cause),
+                "death_cause": public_death_cause(p.death_cause),
                 "death_day": p.death_day,
             }
             for p in self.players.values()
@@ -382,7 +382,12 @@ def _pending_question_dict(question: PendingQuestion) -> dict[str, Any]:
     }
 
 
-def _public_death_cause(cause: DeathCause | None) -> PublicDeathCause | None:
+def public_death_cause(cause: DeathCause | None) -> PublicDeathCause | None:
+    """The only death information the table is allowed to see.
+
+    Attacked and cursed both surface as a plain night death; anything reading
+    a public projection must go through here rather than `PlayerState.death_cause`.
+    """
     if cause is None:
         return None
     if cause == DeathCause.EXECUTED:

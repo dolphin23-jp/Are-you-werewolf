@@ -44,15 +44,17 @@ def detect_public_result(
         return None
     for sentence in re.split(r"[。！？!?\n]", text):
         for target_id, name in candidates.items():
-            positions = [
-                index
-                for index in (sentence.find(name), sentence.find(f"({target_id})"))
-                if index >= 0
+            # The trailing-digit guard is what keeps "Player11(p11)は白" from
+            # being read as a verdict about Player1.
+            matches = [
+                (match.start(), label)
+                for label in (name, f"({target_id})")
+                for match in [re.search(rf"{re.escape(label)}(?![0-9])", sentence)]
+                if match is not None
             ]
-            if not positions:
+            if not matches:
                 continue
-            start = min(positions)
-            matched_label = name if sentence.startswith(name, start) else f"({target_id})"
+            start, matched_label = min(matches)
             result_text = sentence[start + len(matched_label) : start + len(matched_label) + 50]
             result_text = _TARGET_TRAILER_RE.sub("", result_text, count=1)
             if _SPECULATION_RE.search(result_text):

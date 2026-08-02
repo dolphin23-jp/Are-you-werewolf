@@ -63,11 +63,30 @@ async def test_strips_meta_phrases():
 
 
 @pytest.mark.asyncio
-async def test_invalid_vote_target_falls_back_to_random_valid_choice():
+async def test_invalid_vote_target_falls_back_deterministically():
     agent = AIPlayerAgent(_HallucinatingVoteProvider(), PERSONALITIES[0])
     valid = ["p1", "p2", "p3"]
-    result = await agent.generate_vote("system", [Message(role="user", content="hi")], valid)
-    assert result.vote_target in valid
+
+    first = await agent.generate_vote("system", [Message(role="user", content="hi")], valid)
+    second = await agent.generate_vote("system", [Message(role="user", content="hi")], valid)
+
+    # A random substitute turns a bad response into a vote nobody can account
+    # for afterwards; the same invalid output must always land the same way.
+    assert first.vote_target == second.vote_target == "p1"
+
+
+@pytest.mark.asyncio
+async def test_invalid_vote_target_prefers_the_players_own_stated_beliefs():
+    agent = AIPlayerAgent(_HallucinatingVoteProvider(), PERSONALITIES[0])
+
+    result = await agent.generate_vote(
+        "system",
+        [Message(role="user", content="hi")],
+        ["p1", "p2", "p3"],
+        preferred_targets=["p9", "p3"],
+    )
+
+    assert result.vote_target == "p3"
 
 
 @pytest.mark.asyncio

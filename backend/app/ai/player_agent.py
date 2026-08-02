@@ -8,18 +8,20 @@ can never crash or stall on bad LLM output:
   - for discussion, a failed full contract falls back once to a
     minimal "just the sentence" request rather than a canned line, so a turn
     still produces something the player actually said
-  - any hallucinated/invalid target name falls back to a random valid
-    candidate
+  - any hallucinated/invalid target name is replaced deterministically, from
+    the player's own stated beliefs first (see `resolve_target`), so a bad
+    response never becomes an unexplainable vote for a random seat
 """
 
 from __future__ import annotations
 
-import random
 import re
+from collections.abc import Sequence
 
 from app.ai.context import BRIEF_DISCUSSION_OUTPUT_INSTRUCTION
 from app.ai.personalities import Personality, discussion_length_range
 from app.ai.provider.base import LLMProvider, Message, SchemaT
+from app.ai.reasoning.validation import resolve_target
 from app.ai.schemas import (
     BriefDiscussionOutput,
     DiscussionOutput,
@@ -110,29 +112,62 @@ class AIPlayerAgent:
         return result or MorningIntentOutput()
 
     async def generate_vote(
-        self, system: str, messages: list[Message], valid_targets: list[str]
+        self,
+        system: str,
+        messages: list[Message],
+        valid_targets: list[str],
+        preferred_targets: Sequence[str | None] = (),
     ) -> VoteOutput:
+        """`preferred_targets` carries the player's existing beliefs (their
+        execution target, then their suspects). A response that names nobody
+        votable resolves through those before falling back to the first
+        candidate, so the repair follows what this player already argued."""
         result = await self._generate_with_retry(system, messages, VoteOutput)
         if result is None:
-            return VoteOutput(vote_target=random.choice(valid_targets))
+            resolved = resolve_target(
+                None,
+                candidates=valid_targets,
+                preferred=preferred_targets,
+                code="vote_target_invalid",
+            )
+            return VoteOutput(vote_target=resolved.target if resolved else "")
         if result.alternative_target not in valid_targets or (
             result.alternative_target == result.vote_target
         ):
             result.alternative_target = None
         if result.vote_target not in valid_targets:
-            fallback_target = result.alternative_target or random.choice(valid_targets)
-            result.vote_target = fallback_target
+            resolved = resolve_target(
+                result.vote_target,
+                candidates=valid_targets,
+                preferred=(result.alternative_target, *preferred_targets),
+                code="vote_target_invalid",
+            )
+            if resolved is not None:
+                result.vote_target = resolved.target
             result.alternative_target = None
         return result
 
     async def generate_night_action(
-        self, system: str, messages: list[Message], valid_targets: list[str]
+        self,
+        system: str,
+        messages: list[Message],
+        valid_targets: list[str],
+        preferred_targets: Sequence[str | None] = (),
     ) -> NightActionOutput:
         result = await self._generate_with_retry(system, messages, NightActionOutput)
-        if result is None or result.target not in valid_targets:
-            reason = result.reason if result else ""
-            return NightActionOutput(target=random.choice(valid_targets), reason=reason)
-        return result
+        proposed = result.target if result is not None else None
+        if result is not None and proposed in valid_targets:
+            return result
+        resolved = resolve_target(
+            proposed,
+            candidates=valid_targets,
+            preferred=preferred_targets,
+            code="night_target_invalid",
+        )
+        return NightActionOutput(
+            target=resolved.target if resolved else "",
+            reason=result.reason if result else "",
+        )
 
     async def generate_wolf_chat(self, system: str, messages: list[Message]) -> WolfChatOutput:
         result = await self._generate_with_retry(system, messages, WolfChatOutput)
