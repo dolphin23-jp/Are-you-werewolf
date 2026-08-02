@@ -410,21 +410,18 @@ export function ChatPanel() {
                 (message) => message.message_id === question.source_message_id,
               );
               return (
-                <button
+                <label
                   key={question.source_message_id}
-                  type="button"
-                  onClick={() => source && toggleQuestionReply(source)}
-                  aria-pressed={Boolean(source && replyingTo.some((item) => item.message_id === source.message_id))}
+                  className="pending-question"
                 >
                   <input
                     type="checkbox"
-                    readOnly
                     checked={Boolean(source && replyingTo.some((item) => item.message_id === source.message_id))}
-                    onClick={(event) => event.stopPropagation()}
                     onChange={() => source && toggleQuestionReply(source)}
+                    disabled={!source}
                   />
                   [{question.source_message_id}] {playerNames[question.asker] ?? question.asker}: 「{question.question}」
-                </button>
+                </label>
               );
             })}
           </div>

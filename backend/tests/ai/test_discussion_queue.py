@@ -22,7 +22,7 @@ def test_public_claim_registration_falls_back_to_spoken_message():
         contains_co_claim=False,
     )
 
-    coordinator._register_public_claim(controller, "p1", output)
+    coordinator.register_public_claim(controller, "p1", output)
 
     claims = [(claim.player_id, claim.claimed_role) for claim in controller.state.co_declarations]
     assert claims == [("p1", RoleName.MEDIUM)]
@@ -32,7 +32,7 @@ def test_named_freemason_partner_is_prompted_and_confirmation_closes_line():
     controller = make_controller(seed=4)
     coordinator = AICoordinator(controller.state, ["p1", "p2"], MorningPriorityProvider(), seed=1)
 
-    coordinator._register_public_claim(
+    coordinator.register_public_claim(
         controller,
         "p1",
         DiscussionOutput(public_message="共有者CO、相方はPlayer2(p2)です。"),
@@ -43,7 +43,7 @@ def test_named_freemason_partner_is_prompted_and_confirmation_closes_line():
     assert (relation.claimant_id, relation.partner_id, relation.confirmed) == ("p1", "p2", False)
     assert controller.state.pending_questions["p2"][0].source_message_id == "m1"
 
-    coordinator._register_public_claim(
+    coordinator.register_public_claim(
         controller,
         "p2",
         DiscussionOutput(
@@ -53,6 +53,25 @@ def test_named_freemason_partner_is_prompted_and_confirmation_closes_line():
     )
 
     assert relation.confirmed is True
+
+
+def test_named_ai_partner_speaks_before_remaining_initial_order():
+    controller = make_controller(seed=4)
+    coordinator = AICoordinator(
+        controller.state, ["p1", "p2", "p3"], MorningPriorityProvider(), seed=1
+    )
+    coordinator.register_public_claim(
+        controller,
+        "p1",
+        DiscussionOutput(public_message="共有者CO、相方はPlayer2(p2)です。"),
+        "m1",
+    )
+    round_state = DiscussionRoundState(day=1, order=["p3", "p2"], max_total=10)
+
+    speaker, stage = coordinator._next_discussion_speaker(controller.state, round_state)
+
+    assert (speaker, stage) == ("p2", "freemason_confirmation")
+    assert round_state.order == ["p3"]
 
 
 def test_question_topic_groups_equivalent_execution_questions():

@@ -161,6 +161,46 @@ def test_public_chat_role_claim_is_added_to_public_information():
     ]
 
 
+def test_human_shared_reveal_and_partner_confirmation_are_tracked():
+    response = client.post("/api/games", json={"human_name": "共有本人", "seed": 26})
+    session_id = response.json()["session_id"]
+    human_id = response.json()["human_player_id"]
+    session = get_session_store().get(session_id)
+    assert session is not None
+    session.coordinator = None
+    session.controller.state.phase = Phase.DISCUSSION
+    partner_id = "p11"
+    partner_name = session.controller.state.players[partner_id].name
+    human_name = session.controller.state.players[human_id].name
+
+    client.post(f"/api/games/{session_id}/chat", json={"content": "共有者CO、相方生存"})
+    reveal = client.post(
+        f"/api/games/{session_id}/chat",
+        json={"content": f"相方は{partner_name}({partner_id})です"},
+    )
+    confirmation = client.post(
+        f"/api/games/{session_id}/chat",
+        params={"player_id": partner_id},
+        json={
+            "content": (
+                f"{human_name}({human_id})の共有者CO、相方は私{partner_name}で間違いありません"
+            )
+        },
+    )
+
+    assert reveal.status_code == 200
+    assert confirmation.status_code == 200
+    view = client.get(f"/api/games/{session_id}/view").json()
+    assert view["freemason_partner_claims"] == [
+        {
+            "claimant_id": human_id,
+            "partner_id": partner_id,
+            "day": 0,
+            "confirmed": True,
+        }
+    ]
+
+
 def test_public_view_conceals_night_death_cause():
     resp = client.post("/api/games", json={"human_name": "Viewer", "seed": 16})
     session_id = resp.json()["session_id"]

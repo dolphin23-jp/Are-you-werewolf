@@ -332,6 +332,17 @@ class AICoordinator:
     def _next_discussion_speaker(
         self, state: GameState, round_state: DiscussionRoundState
     ) -> tuple[str | None, str]:
+        for target_id in sorted(self._forced_partner_confirmations):
+            self._forced_partner_confirmations.discard(target_id)
+            if target_id not in self._agents or not state.players[target_id].alive:
+                continue
+            try:
+                pending_index = round_state.order.index(target_id, round_state.cursor)
+            except ValueError:
+                pass
+            else:
+                round_state.order.pop(pending_index)
+            return target_id, "freemason_confirmation"
         if round_state.cursor < len(round_state.order):
             pid = round_state.order[round_state.cursor]
             round_state.cursor += 1
@@ -529,7 +540,9 @@ class AICoordinator:
         if output is None:
             return None
         valid_reassessments = [
-            item for item in output.reassessments if item.player_id in state.players
+            item
+            for item in output.reassessments
+            if item.player_id in state.players and item.player_id != player_id
         ]
         output.reassessments = valid_reassessments
         if any(
@@ -539,7 +552,14 @@ class AICoordinator:
             for item in valid_reassessments
         ):
             output.reasoning_memo.execution_target = None
-        if output.alternative_execution_target not in state.players:
+        if (
+            output.alternative_execution_target not in state.players
+            or output.alternative_execution_target == player_id
+            or (
+                output.alternative_execution_target is not None
+                and not state.players[output.alternative_execution_target].alive
+            )
+        ):
             output.alternative_execution_target = None
         pending_relation = next(
             (
@@ -631,7 +651,7 @@ class AICoordinator:
                 )
             )
         self._context.record_key_point(state.day, message_id, player_id, output.key_point)
-        self._register_public_claim(controller, player_id, output, message_id)
+        self.register_public_claim(controller, player_id, output, message_id)
         for result in output.public_results:
             if result.target_id not in state.players:
                 continue
@@ -656,7 +676,7 @@ class AICoordinator:
         types unchanged."""
         return text.strip() == self._personalities[player_id].get_fallback_message()
 
-    def _register_public_claim(
+    def register_public_claim(
         self,
         controller: object,
         player_id: str,
@@ -676,7 +696,15 @@ class AICoordinator:
                 controller.co(player_id, role.value)  # type: ignore[attr-defined]
             except Exception:
                 pass
-        if role != RoleName.FREEMASON:
+        effective_role = role or next(
+            (
+                claim.claimed_role
+                for claim in state.co_declarations
+                if claim.player_id == player_id
+            ),
+            None,
+        )
+        if effective_role != RoleName.FREEMASON:
             return
         candidates = {
             pid: player.name for pid, player in state.players.items() if pid != player_id

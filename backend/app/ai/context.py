@@ -411,6 +411,11 @@ class ContextBuilder:
                 "対象の反論を最も強い形で捉え、妥当な点を一つ認めてください。"
                 "疑いを維持するなら反論後にも残る独立根拠を示し、それがなければ候補順位を下げます。"
             )
+        elif stage == "freemason_confirmation":
+            stage_instruction = (
+                "共有相方として名指しされています。真の相方なら確認共有COを最初に述べ、"
+                "相方でなければ明確に否定してください。他の論点を先に話してはいけません。"
+            )
         elif stage.startswith("minority_review:"):
             target_id = stage.split(":", 1)[1]
             target = player_label(state, target_id) if target_id in state.players else target_id
@@ -582,6 +587,7 @@ class ContextBuilder:
             "initial_view": "初回意見",
             "reaction": "短い反応",
             "rebuttal_or_reassessment": "反論・再評価",
+            "freemason_confirmation": "共有相方の確認",
             "consensus_summary": "議論の整理",
             "human_followup": "人間発言への応答",
         }.get(stage, "議論")

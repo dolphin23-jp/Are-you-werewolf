@@ -203,7 +203,7 @@ describe("ChatPanel", () => {
     });
     render(<ChatPanel />);
 
-    fireEvent.click(screen.getByRole("button", { name: /\[m1\] Hanako: 「理由は\?」/ }));
+    fireEvent.click(screen.getByLabelText(/\[m1\] Hanako: 「理由は\?」/));
 
     expect(screen.getByText(/返信先 \[m1\] Hanako/)).toBeInTheDocument();
   });
@@ -225,8 +225,8 @@ describe("ChatPanel", () => {
     });
     render(<ChatPanel />);
 
-    fireEvent.click(screen.getByRole("button", { name: /m1.*狼候補/ }));
-    fireEvent.click(screen.getByRole("button", { name: /m2.*狐候補/ }));
+    fireEvent.click(screen.getByLabelText(/m1.*狼候補/));
+    fireEvent.click(screen.getByLabelText(/m2.*狐候補/));
     fireEvent.change(screen.getByPlaceholderText("発言を入力..."), {
       target: { value: "まとめて回答します" },
     });

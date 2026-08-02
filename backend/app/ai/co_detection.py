@@ -98,17 +98,25 @@ def detect_freemason_partner(
         return None
     confirmation = _PARTNER_CONFIRMATION_RE.search(text)
     for player_id, name in candidates.items():
-        labels = (name, player_id, f"({player_id})")
         if confirmation is not None:
             prefix = text[: confirmation.start()]
-            if any(label in prefix for label in labels):
+            if _mentions_player(prefix, player_id, name):
                 return player_id
             continue
         partner_index = text.find("相方")
         suffix = text[partner_index : partner_index + 50]
-        if any(label in suffix for label in labels):
+        if _mentions_player(suffix, player_id, name):
             return player_id
     return None
+
+
+def _mentions_player(text: str, player_id: str, name: str) -> bool:
+    """Match p1 without accidentally treating the p1 prefix in p11 as a hit."""
+    return bool(
+        name in text
+        or f"({player_id})" in text
+        or re.search(rf"(?<![A-Za-z0-9]){re.escape(player_id)}(?!\d)", text)
+    )
 
 
 def _mentions_other_before(sentence: str, names: list[str], role_index: int) -> bool:

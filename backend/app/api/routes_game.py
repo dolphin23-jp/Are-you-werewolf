@@ -16,9 +16,10 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 
-from app.ai.co_detection import detect_claimed_role
+from app.ai.co_detection import detect_claimed_role, detect_freemason_partner
 from app.ai.coordinator import AICoordinator
 from app.ai.provider.factory import LLMProviderConfigError, build_llm_provider
+from app.ai.schemas import DiscussionOutput
 from app.api import orchestrator
 from app.api.schemas import (
     ChatRequest,
@@ -35,6 +36,7 @@ from app.api.ws_hub import SessionWSHub
 from app.config import get_settings
 from app.engine.game import GameController, GameError, PlayerSpec
 from app.engine.phases import Phase
+from app.engine.roles import RoleName
 from app.eval.transcript import TranscriptRecorder
 from app.sessions.models import GameSession
 from app.sessions.store import get_session_store
@@ -217,11 +219,34 @@ async def chat(
     )
     if req.channel == "public":
         state = session.controller.state
-        if not any(claim.player_id == author for claim in state.co_declarations):
+        if session.coordinator is not None:
+            session.coordinator.register_public_claim(
+                session.controller,
+                author,
+                DiscussionOutput(public_message=req.content),
+                message_id,
+            )
+        else:
             other_names = [player.name for pid, player in state.players.items() if pid != author]
             claimed_role = detect_claimed_role(req.content, other_names)
-            if claimed_role is not None:
+            already_claimed = any(claim.player_id == author for claim in state.co_declarations)
+            if claimed_role is not None and not already_claimed:
                 _run(session.controller.co, author, claimed_role.value)
+            effective_role = claimed_role or next(
+                (
+                    claim.claimed_role
+                    for claim in state.co_declarations
+                    if claim.player_id == author
+                ),
+                None,
+            )
+            if effective_role == RoleName.FREEMASON:
+                candidates = {
+                    pid: player.name for pid, player in state.players.items() if pid != author
+                }
+                partner_id = detect_freemason_partner(req.content, candidates)
+                if partner_id is not None:
+                    _run(session.controller.claim_freemason_partner, author, partner_id)
         result_type = (
             "seer" if "占い結果" in req.content else "medium" if "霊媒結果" in req.content else None
         )
