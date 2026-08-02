@@ -21,6 +21,7 @@ class ChatRequest(BaseModel):
     channel: str = "public"
     reply_to: str | None = None
     quote: str | None = None
+    references: list[str] = Field(default_factory=list, max_length=10)
 
 
 class VoteRequest(BaseModel):
@@ -34,6 +35,10 @@ class NightActionRequest(BaseModel):
 
 class CoRequest(BaseModel):
     claimed_role: str
+
+
+class DiscussionControlRequest(BaseModel):
+    action: str  # pause | resume | step
 
 
 class OkResponse(BaseModel):

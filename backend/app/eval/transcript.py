@@ -35,6 +35,9 @@ class Utterance:
     effective_length_limit: int | None = None
     key_point: str = ""
     agrees_with: list[str] = field(default_factory=list)
+    decision_evidence: str = ""
+    countercase: str = ""
+    alternative_target: str | None = None
 
 
 @dataclass

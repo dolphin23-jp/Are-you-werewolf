@@ -8,8 +8,176 @@ from app.ai.player_agent import DEFAULT_MAX_RETRIES
 from app.ai.provider.base import Message, SchemaT
 from app.ai.schemas import DirectedQuestion, DiscussionOutput, MorningIntentOutput
 from app.engine.phases import Phase
+from app.engine.roles import RoleName
+from app.engine.state import PendingQuestion
 from app.sessions.models import DiscussionRoundState
 from tests.conftest import make_controller
+
+
+def test_public_claim_registration_falls_back_to_spoken_message():
+    controller = make_controller(seed=4)
+    coordinator = AICoordinator(controller.state, ["p1"], MorningPriorityProvider(), seed=1)
+    output = DiscussionOutput(
+        public_message="霊媒師CO。現時点で処刑結果はありません。",
+        public_claim_role=None,
+        contains_co_claim=False,
+    )
+
+    coordinator.register_public_claim(controller, "p1", output)
+
+    claims = [(claim.player_id, claim.claimed_role) for claim in controller.state.co_declarations]
+    assert claims == [("p1", RoleName.MEDIUM)]
+
+
+def test_named_freemason_partner_is_prompted_and_confirmation_closes_line():
+    controller = make_controller(seed=4)
+    coordinator = AICoordinator(controller.state, ["p1", "p2"], MorningPriorityProvider(), seed=1)
+
+    coordinator.register_public_claim(
+        controller,
+        "p1",
+        DiscussionOutput(public_message="共有者CO、相方はPlayer2(p2)です。"),
+        "m1",
+    )
+
+    relation = controller.state.freemason_partner_claims[0]
+    assert (relation.claimant_id, relation.partner_id, relation.confirmed) == ("p1", "p2", False)
+    assert controller.state.pending_questions["p2"][0].source_message_id == "m1"
+
+    coordinator.register_public_claim(
+        controller,
+        "p2",
+        DiscussionOutput(
+            public_message="Player1(p1)の共有者CO、相方は私Player2で間違いありません。"
+        ),
+        "m2",
+    )
+
+    assert relation.confirmed is True
+
+
+def test_named_ai_partner_speaks_before_remaining_initial_order():
+    controller = make_controller(seed=4)
+    coordinator = AICoordinator(
+        controller.state, ["p1", "p2", "p3"], MorningPriorityProvider(), seed=1
+    )
+    coordinator.register_public_claim(
+        controller,
+        "p1",
+        DiscussionOutput(public_message="共有者CO、相方はPlayer2(p2)です。"),
+        "m1",
+    )
+    round_state = DiscussionRoundState(day=1, order=["p3", "p2"], max_total=10)
+
+    speaker, stage = coordinator._next_discussion_speaker(controller.state, round_state)
+
+    assert (speaker, stage) == ("p2", "freemason_confirmation")
+    assert round_state.order == ["p3"]
+
+
+def test_ai_freemasons_can_use_a_hidden_partner_opening_and_reveal_after_death():
+    controller = make_controller(seed=4)
+    controller.state.players["p1"].role = RoleName.FREEMASON
+    controller.state.players["p2"].role = RoleName.FREEMASON
+    coordinator = AICoordinator(
+        controller.state, ["p1", "p2"], MorningPriorityProvider(), seed=1
+    )
+    coordinator._freemason_public_plan = ("p1", "p2", False)
+
+    assert coordinator._freemason_opening(controller.state, "p1") == (
+        "共有者CO。相方は生存しています。"
+    )
+    assert coordinator._freemason_must_hide(controller.state, "p2") is True
+
+    controller.co("p1", RoleName.FREEMASON.value)
+    controller.state.players["p1"].alive = False
+    assert coordinator._freemason_opening(controller.state, "p2") == (
+        "共有者CO。相方は死亡したPlayer1(p1)です。"
+    )
+
+
+def test_full_reveal_names_partner_then_allows_confirmation():
+    controller = make_controller(seed=4)
+    controller.state.players["p1"].role = RoleName.FREEMASON
+    controller.state.players["p2"].role = RoleName.FREEMASON
+    coordinator = AICoordinator(
+        controller.state, ["p1", "p2"], MorningPriorityProvider(), seed=1
+    )
+    coordinator._freemason_public_plan = ("p1", "p2", True)
+
+    assert coordinator._freemason_opening(controller.state, "p1") == (
+        "共有者CO。相方はPlayer2(p2)です。"
+    )
+    assert coordinator._freemason_must_hide(controller.state, "p2") is True
+
+    coordinator.register_public_claim(
+        controller,
+        "p1",
+        DiscussionOutput(public_message="共有者CO。相方はPlayer2(p2)です。"),
+        "m1",
+    )
+    assert coordinator._freemason_must_hide(controller.state, "p2") is False
+
+
+def test_hidden_partner_reveals_immediately_when_given_a_public_black_result():
+    controller = make_controller(seed=4)
+    controller.state.players["p1"].role = RoleName.FREEMASON
+    controller.state.players["p2"].role = RoleName.FREEMASON
+    coordinator = AICoordinator(
+        controller.state, ["p1", "p2"], MorningPriorityProvider(), seed=1
+    )
+    coordinator._freemason_public_plan = ("p1", "p2", False)
+    controller.public_result("p3", "seer", "p2", True)
+
+    assert coordinator._freemason_must_hide(controller.state, "p2") is False
+    assert coordinator._freemason_opening(controller.state, "p2") == (
+        "共有者CO。相方はPlayer1(p1)です。"
+    )
+
+
+def test_question_topic_groups_equivalent_execution_questions():
+    assert AICoordinator._question_topic("今日の処刑候補は誰ですか") == "execution_candidate"
+    assert AICoordinator._question_topic("一番怪しい灰は誰ですか") == "execution_candidate"
+    assert AICoordinator._question_topic("狐候補を挙げてください") == "fox_candidate"
+
+
+def test_question_topic_ledger_is_seeded_from_existing_pending_questions():
+    controller = make_controller(seed=4)
+    controller.state.pending_questions["p2"] = [
+        PendingQuestion("p1", "p2", "初日占い理由は?", "m1", 1, "claim_reason")
+    ]
+
+    coordinator = AICoordinator(
+        controller.state, ["p1", "p2"], MorningPriorityProvider(), seed=1
+    )
+
+    assert (1, "p2", "claim_reason") in coordinator._asked_question_topics
+
+
+def test_concentrated_pressure_schedules_a_minority_review_before_summary():
+    controller = make_controller(seed=4)
+    coordinator = AICoordinator(
+        controller.state, ["p1", "p2", "p3", "p4"], MorningPriorityProvider(), seed=1
+    )
+    outputs = []
+    for player_id in ("p1", "p2", "p3", "p4"):
+        output = DiscussionOutput(public_message="p0を疑います")
+        output.reasoning_memo.execution_target = "p0"
+        outputs.append((player_id, output))
+    round_state = DiscussionRoundState(
+        day=1,
+        order=[],
+        outputs=outputs,
+        speech_counts={player_id: 1 for player_id, _output in outputs},
+        major_targets_ready=True,
+        max_total=20,
+    )
+
+    speaker, stage = coordinator._next_discussion_speaker(controller.state, round_state)
+
+    assert speaker in {"p1", "p2", "p3", "p4"}
+    assert stage == "minority_review:p0"
+    assert round_state.summary_done is False
 
 
 class ReplyLoopProvider:

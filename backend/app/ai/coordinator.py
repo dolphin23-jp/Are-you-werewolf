@@ -20,12 +20,13 @@ import random
 import time
 from collections import Counter
 
-from app.ai.co_detection import detect_claimed_role
+from app.ai.co_detection import detect_claimed_role, detect_freemason_partner
 from app.ai.context import ContextBuilder, DaySummaryManager
 from app.ai.deception import FakeClaimGuard, assign_madman_strategy, assign_wolf_deception
 from app.ai.personalities import assign_personalities, discussion_length_range
 from app.ai.player_agent import AIPlayerAgent, truncate_at_sentence
 from app.ai.provider.base import LLMProvider
+from app.ai.public_speech import detect_public_result
 from app.ai.schemas import DiscussionOutput, MorningIntentOutput
 from app.engine.phases import Phase
 from app.engine.roles import RoleName
@@ -69,6 +70,26 @@ class AICoordinator:
         self._pacing_scale = max(0.0, pacing_scale)
         self._rng = random.Random(seed)
         self._pending_questions = state.pending_questions
+        # Pending questions disappear when answered, but their topic must remain in
+        # the day's ledger or another AI immediately asks the same thing again.
+        self._asked_question_topics: set[tuple[int, str, str]] = {
+            (question.day, target_id, question.topic)
+            for target_id, questions in state.pending_questions.items()
+            for question in questions
+            if question.topic
+        }
+        self._forced_partner_confirmations: set[str] = set()
+        self._freemason_public_plan: tuple[str, str, bool] | None = None
+        self._freemason_death_announced: set[str] = set()
+        freemasons = [
+            player.player_id
+            for player in state.players_by_role(RoleName.FREEMASON)
+            if player.player_id in self._ai_player_ids
+        ]
+        if len(freemasons) == 2:
+            plan_rng = random.Random(f"{seed}:freemason-public-plan")
+            leader, partner = plan_rng.sample(freemasons, 2)
+            self._freemason_public_plan = (leader, partner, plan_rng.random() < 0.5)
         self._metrics = getattr(provider, "_metrics", None)
 
         self._personalities = assign_personalities(self._ai_player_ids, seed=seed)
@@ -152,6 +173,9 @@ class AICoordinator:
         effective_length_limit: int | None = None,
         key_point: str = "",
         agrees_with: list[str] | None = None,
+        decision_evidence: str = "",
+        countercase: str = "",
+        alternative_target: str | None = None,
     ) -> None:
         if self._recorder is None:
             return
@@ -179,6 +203,9 @@ class AICoordinator:
                 effective_length_limit=effective_length_limit,
                 key_point=key_point,
                 agrees_with=agrees_with or [],
+                decision_evidence=decision_evidence,
+                countercase=countercase,
+                alternative_target=alternative_target,
             )
         )
 
@@ -225,6 +252,13 @@ class AICoordinator:
                 and human.alive
                 and human_id not in self._observer_player_ids
             )
+            if (
+                can_pause
+                and getattr(session, "discussion_paused", False)
+                and not getattr(session, "discussion_step_budget", None)
+            ):
+                self._set_awaiting(round_state, True)
+                return
             if round_state.awaiting_human and can_pause:
                 return
             self._set_awaiting(round_state, False)
@@ -257,6 +291,17 @@ class AICoordinator:
                 round_state.outputs.append((pid, output))
                 round_state.speech_counts[pid] = round_state.speech_counts.get(pid, 0) + 1
                 spoken += 1
+                step_budget = getattr(session, "discussion_step_budget", None)
+                if step_budget is not None:
+                    session.discussion_step_budget = max(0, step_budget - 1)  # type: ignore[attr-defined]
+                if getattr(session, "discussion_pause_requested", False):
+                    session.discussion_pause_requested = False  # type: ignore[attr-defined]
+                    session.discussion_paused = True  # type: ignore[attr-defined]
+                if getattr(session, "discussion_step_budget", None) == 0:
+                    session.discussion_paused = True  # type: ignore[attr-defined]
+                if can_pause and getattr(session, "discussion_paused", False):
+                    self._set_awaiting(round_state, True)
+                    break
                 if stage == "consensus_summary":
                     round_state.complete = True
                     break
@@ -310,6 +355,17 @@ class AICoordinator:
     def _next_discussion_speaker(
         self, state: GameState, round_state: DiscussionRoundState
     ) -> tuple[str | None, str]:
+        for target_id in sorted(self._forced_partner_confirmations):
+            self._forced_partner_confirmations.discard(target_id)
+            if target_id not in self._agents or not state.players[target_id].alive:
+                continue
+            try:
+                pending_index = round_state.order.index(target_id, round_state.cursor)
+            except ValueError:
+                pass
+            else:
+                round_state.order.pop(pending_index)
+            return target_id, "freemason_confirmation"
         if round_state.cursor < len(round_state.order):
             pid = round_state.order[round_state.cursor]
             round_state.cursor += 1
@@ -318,13 +374,14 @@ class AICoordinator:
             # Restricted to seats this coordinator speaks for: the pressure list
             # drives speaking limits and the rebuttal sweep, neither of which can
             # apply to the human.
-            pressure: Counter[str] = Counter(
-                target
-                for _speaker, output in round_state.outputs
+            latest_targets = {
+                speaker: target
+                for speaker, output in round_state.outputs
                 if isinstance((target := output.reasoning_memo.execution_target), str)
                 and target in self._agents
                 and state.players[target].alive
-            )
+            }
+            pressure: Counter[str] = Counter(latest_targets.values())
             round_state.major_targets = [target for target, _count in pressure.most_common(2)]
             round_state.major_targets_ready = True
             for target in round_state.major_targets:
@@ -367,6 +424,34 @@ class AICoordinator:
             round_state.major_target_sweeps += 1
             for target in owed:
                 self._round_queue_reply(state, round_state, target)
+        if (
+            not round_state.minority_review_done
+            and len(round_state.outputs) < round_state.max_total
+        ):
+            latest_public_targets = {
+                speaker: target
+                for speaker, output in round_state.outputs
+                if isinstance((target := output.reasoning_memo.execution_target), str)
+                and target in state.players
+                and state.players[target].alive
+            }
+            public_pressure: Counter[str] = Counter(latest_public_targets.values())
+            round_state.minority_review_done = True
+            if public_pressure:
+                top_target, top_count = public_pressure.most_common(1)[0]
+                stated_count = sum(public_pressure.values())
+                if stated_count >= 4 and top_count / stated_count >= 0.6:
+                    reviewers = [
+                        pid
+                        for pid in self._agents
+                        if state.players[pid].alive and pid != top_target
+                    ]
+                    if reviewers:
+                        reviewer = min(
+                            reviewers,
+                            key=lambda pid: (round_state.speech_counts.get(pid, 0), pid),
+                        )
+                        return reviewer, f"minority_review:{top_target}"
         if not round_state.summary_done and len(round_state.outputs) < round_state.max_total:
             leader = next(
                 (
@@ -407,19 +492,41 @@ class AICoordinator:
             round_state.reply_queue.append(target_id)
             round_state.queued.add(target_id)
 
-    def resume_after_human(self, session: object, reply_to: str | None = None) -> None:
+    def resume_after_human(
+        self,
+        session: object,
+        reply_to: str | None = None,
+        references: list[str] | None = None,
+        *,
+        release_wait: bool = True,
+    ) -> None:
         """Release the human pause and prioritize the referenced AI/questioner."""
         round_state = getattr(session, "discussion_round", None)
         if round_state is None:
             return
-        self._set_awaiting(round_state, False)
-        if reply_to:
+        if release_wait:
+            self._set_awaiting(round_state, False)
+        for message_id in dict.fromkeys([reply_to, *(references or [])]):
+            if not message_id:
+                continue
             message = next(
-                (m for m in session.controller.state.chat_log if m.message_id == reply_to),  # type: ignore[attr-defined]
+                (m for m in session.controller.state.chat_log if m.message_id == message_id),  # type: ignore[attr-defined]
                 None,
             )
             if message and message.author_id in self._agents:
                 self._round_queue_reply(session.controller.state, round_state, message.author_id)  # type: ignore[attr-defined]
+
+    @staticmethod
+    def _question_topic(question: str) -> str:
+        if any(word in question for word in ("処刑", "吊り", "狼候補", "怪しい")):
+            return "execution_candidate"
+        if "狐" in question:
+            return "fox_candidate"
+        if any(word in question for word in ("CO理由", "占い理由", "選んだ理由")):
+            return "claim_reason"
+        if any(word in question for word in ("時系列", "順番", "先に")):
+            return "timeline"
+        return ""
 
     @staticmethod
     def _set_awaiting(round_state: DiscussionRoundState, awaiting: bool) -> None:
@@ -430,6 +537,33 @@ class AICoordinator:
         system, messages = self._context.build_morning_intent_context(state, player_id)
         output = await self._agents[player_id].generate_morning_intent(system, messages)
         player = state.players[player_id]
+        if self._freemason_public_plan is not None and player.role == RoleName.FREEMASON:
+            leader, partner, full_reveal = self._freemason_public_plan
+            leader_alive = state.players[leader].alive
+            partner_alive = state.players[partner].alive
+            already_claimed = any(
+                claim.player_id == player_id for claim in state.co_declarations
+            )
+            if player_id == leader and not already_claimed:
+                output.timing = "after_results"
+                output.intent = "claim"
+                output.public_claim_role = RoleName.FREEMASON.value
+            elif player_id == partner and not already_claimed:
+                under_black = any(
+                    claim.target_id == player_id and claim.is_werewolf
+                    for claim in state.public_result_claims
+                )
+                if leader_alive and not under_black:
+                    output.timing = "hold"
+                    output.intent = "normal"
+                    output.public_claim_role = None
+                else:
+                    output.timing = "immediate"
+                    output.intent = "claim"
+                    output.public_claim_role = RoleName.FREEMASON.value
+            elif player_id == leader and already_claimed and not partner_alive and not full_reveal:
+                output.timing = "immediate"
+                output.intent = "lead"
         has_divine = any(r.seer_id == player_id for r in state.divine_records)
         has_medium = any(r.medium_id == player_id for r in state.medium_records)
         if (player.role == RoleName.SEER and has_divine) or (
@@ -446,6 +580,18 @@ class AICoordinator:
         if state.phase != Phase.DISCUSSION:
             return None
         system, messages = self._context.build_discussion_context(state, player_id, stage)
+        freemason_opening = self._freemason_opening(state, player_id)
+        freemason_must_hide = self._freemason_must_hide(state, player_id)
+        if freemason_opening is not None:
+            system += (
+                "\n\n【共有公開計画】この発言では指定された共有CO文を最初に"
+                "そのまま述べてください。"
+            )
+        elif freemason_must_hide:
+            system += (
+                "\n\n【共有公開計画】あなたは潜伏側です。共有CO、相方の名前、共有者だと"
+                "推測できる表現を公開発言に絶対に含めないでください。"
+            )
         controller.set_typing(player_id, True)  # type: ignore[attr-defined]
         try:
             output = await self._agents[player_id].generate_discussion(system, messages)
@@ -455,6 +601,66 @@ class AICoordinator:
             self._metrics.record_discussion_result(skipped=output is None)
         if output is None:
             return None
+        if freemason_opening is not None:
+            output.public_message = freemason_opening
+            output.public_claim_role = RoleName.FREEMASON.value
+            output.contains_co_claim = True
+            if "死亡" in freemason_opening:
+                self._freemason_death_announced.add(player_id)
+        elif freemason_must_hide and detect_claimed_role(output.public_message) is not None:
+            output.public_message = "現時点ではCOしません。既出の判定と灰の発言を比較します。"
+            output.public_claim_role = None
+            output.contains_co_claim = False
+        valid_reassessments = [
+            item
+            for item in output.reassessments
+            if item.player_id in state.players and item.player_id != player_id
+        ]
+        output.reassessments = valid_reassessments
+        if any(
+            item.changed_mind
+            and item.player_id == output.reasoning_memo.execution_target
+            and not item.remaining_reason.strip()
+            for item in valid_reassessments
+        ):
+            output.reasoning_memo.execution_target = None
+        if (
+            output.alternative_execution_target not in state.players
+            or output.alternative_execution_target == player_id
+            or (
+                output.alternative_execution_target is not None
+                and not state.players[output.alternative_execution_target].alive
+            )
+        ):
+            output.alternative_execution_target = None
+        pending_relation = next(
+            (
+                claim
+                for claim in state.freemason_partner_claims
+                if claim.partner_id == player_id
+                and not claim.confirmed
+                and state.players[claim.claimant_id].role == RoleName.FREEMASON
+                and state.players[player_id].role == RoleName.FREEMASON
+            ),
+            None,
+        )
+        if pending_relation is not None:
+            claimant = state.players[pending_relation.claimant_id]
+            output.public_message = (
+                f"共有者CO。{claimant.name}({pending_relation.claimant_id})の相方は"
+                f"私{state.players[player_id].name}({player_id})で間違いありません。"
+            )
+            output.public_claim_role = RoleName.FREEMASON.value
+            source_question = next(
+                (
+                    question
+                    for question in self._pending_questions.get(player_id, [])
+                    if question.asker == pending_relation.claimant_id
+                ),
+                None,
+            )
+            if source_question is not None:
+                output.reply_to = source_question.source_message_id
         if output.agrees_with and not output.key_point.strip():
             # Agreement with no new argument is a reaction, not an analysis. Cut at a
             # sentence boundary so the shortened line still reads as finished Japanese.
@@ -496,17 +702,33 @@ class AICoordinator:
         for question in output.directed_questions:
             if question.target_id not in state.players or not question.question.strip():
                 continue
-            self._pending_questions.setdefault(question.target_id, []).append(
+            proposed_topic = question.topic.strip()
+            topic = (
+                proposed_topic
+                if proposed_topic
+                in {"execution_candidate", "fox_candidate", "claim_reason", "timeline"}
+                else self._question_topic(question.question)
+            )
+            existing = self._pending_questions.setdefault(question.target_id, [])
+            if topic:
+                topic_key = (state.day, question.target_id, topic)
+                if topic_key in self._asked_question_topics or any(
+                    item.day == state.day and item.topic == topic for item in existing
+                ):
+                    continue
+                self._asked_question_topics.add(topic_key)
+            existing.append(
                 PendingQuestion(
                     asker=player_id,
                     target=question.target_id,
                     question=question.question.strip(),
                     source_message_id=message_id,
                     day=state.day,
+                    topic=topic,
                 )
             )
         self._context.record_key_point(state.day, message_id, player_id, output.key_point)
-        self._register_public_claim(controller, player_id, output)
+        self.register_public_claim(controller, player_id, output, message_id)
         for result in output.public_results:
             if result.target_id not in state.players:
                 continue
@@ -524,6 +746,56 @@ class AICoordinator:
                 pass
         return output
 
+    def _freemason_must_hide(self, state: GameState, player_id: str) -> bool:
+        if self._freemason_public_plan is None:
+            return False
+        leader, partner, full_reveal = self._freemason_public_plan
+        named_for_confirmation = any(
+            claim.partner_id == player_id for claim in state.freemason_partner_claims
+        )
+        partner_under_black = any(
+            claim.target_id == player_id and claim.is_werewolf
+            for claim in state.public_result_claims
+        )
+        return (
+            player_id == partner
+            and state.players[leader].alive
+            and not partner_under_black
+            and (not full_reveal or not named_for_confirmation)
+            and not any(claim.player_id == player_id for claim in state.co_declarations)
+        )
+
+    def _freemason_opening(self, state: GameState, player_id: str) -> str | None:
+        """Return the public line required by the AI-only shared-role plan."""
+        if self._freemason_public_plan is None:
+            return None
+        leader, partner, full_reveal = self._freemason_public_plan
+        if any(claim.player_id == player_id for claim in state.co_declarations):
+            if (
+                player_id == leader
+                and not state.players[partner].alive
+                and not full_reveal
+                and player_id not in self._freemason_death_announced
+            ):
+                return "共有者として報告します。相方は死亡しました。"
+            return None
+        if player_id == leader:
+            if full_reveal:
+                partner_player = state.players[partner]
+                return f"共有者CO。相方は{partner_player.name}({partner})です。"
+            return "共有者CO。相方は生存しています。"
+        partner_under_black = any(
+            claim.target_id == player_id and claim.is_werewolf
+            for claim in state.public_result_claims
+        )
+        if player_id == partner and (
+            not state.players[leader].alive or partner_under_black
+        ):
+            leader_player = state.players[leader]
+            status = "死亡した" if not state.players[leader].alive else ""
+            return f"共有者CO。相方は{status}{leader_player.name}({leader})です。"
+        return None
+
     def _is_fallback(self, player_id: str, text: str) -> bool:
         """The agent substitutes a personality-specific canned line when the
         model fails entirely. Those lines are distinctive enough that an
@@ -531,27 +803,87 @@ class AICoordinator:
         types unchanged."""
         return text.strip() == self._personalities[player_id].get_fallback_message()
 
-    def _register_public_claim(
-        self, controller: object, player_id: str, output: DiscussionOutput
+    def register_public_claim(
+        self,
+        controller: object,
+        player_id: str,
+        output: DiscussionOutput,
+        message_id: str = "",
     ) -> None:
         state = controller.state  # type: ignore[attr-defined]
         already = any(c.player_id == player_id for c in state.co_declarations)
-        if already:
-            return
-        if output.public_claim_role is None:
-            return
-        try:
-            role = RoleName(output.public_claim_role)
-        except ValueError:
-            return
         other_names = [p.name for pid, p in state.players.items() if pid != player_id]
-        detected = detect_claimed_role(output.public_message, other_names)
-        if detected != role:
+        # What was actually said is authoritative.  Structured metadata is a useful
+        # hint, but models occasionally omit it even after writing an unambiguous CO.
+        # Requiring both representations used to leave those public claims out of the
+        # board analysis for the rest of the day.
+        role = detect_claimed_role(output.public_message, other_names)
+        if role is not None and not already:
+            try:
+                controller.co(player_id, role.value)  # type: ignore[attr-defined]
+            except Exception:
+                pass
+        effective_role = role or next(
+            (
+                claim.claimed_role
+                for claim in state.co_declarations
+                if claim.player_id == player_id
+            ),
+            None,
+        )
+        candidates = {
+            pid: player.name for pid, player in state.players.items() if pid != player_id
+        }
+        detected_result = detect_public_result(
+            output.public_message,
+            effective_role,
+            candidates,
+            role_claimed_in_message=role in (RoleName.SEER, RoleName.MEDIUM),
+        )
+        if detected_result is not None:
+            try:
+                controller.public_result(  # type: ignore[attr-defined]
+                    player_id,
+                    detected_result.result_type,
+                    detected_result.target_id,
+                    detected_result.is_werewolf,
+                )
+            except Exception:
+                pass
+        if effective_role != RoleName.FREEMASON:
+            return
+        partner_id = detect_freemason_partner(output.public_message, candidates)
+        if partner_id is None:
             return
         try:
-            controller.co(player_id, role.value)  # type: ignore[attr-defined]
+            controller.claim_freemason_partner(player_id, partner_id)  # type: ignore[attr-defined]
         except Exception:
-            pass
+            return
+        relation = next(
+            (
+                claim
+                for claim in state.freemason_partner_claims
+                if claim.claimant_id == player_id and claim.partner_id == partner_id
+            ),
+            None,
+        )
+        if relation is None or relation.confirmed:
+            return
+        self._pending_questions.setdefault(partner_id, []).append(
+            PendingQuestion(
+                asker=player_id,
+                target=partner_id,
+                question=(
+                    "共有相方として指名されました。本人ならこの発言で確認共有COし、"
+                    "相方でなければ明確に否定してください。"
+                ),
+                source_message_id=message_id,
+                day=state.day,
+                topic="freemason_confirmation",
+            )
+        )
+        if partner_id in self._agents:
+            self._forced_partner_confirmations.add(partner_id)
 
     # -- voting (loops across runoff rounds) --
 
@@ -592,7 +924,16 @@ class AICoordinator:
             return
         system, messages = self._context.build_vote_context(state, player_id, candidates)
         output = await self._agents[player_id].generate_vote(system, messages, candidates)
-        self._record(state, player_id, "vote", text=output.reason, target=output.vote_target)
+        self._record(
+            state,
+            player_id,
+            "vote",
+            text=output.reason,
+            target=output.vote_target,
+            decision_evidence=output.decisive_evidence,
+            countercase=output.countercase,
+            alternative_target=output.alternative_target,
+        )
         try:
             controller.vote(player_id, output.vote_target)  # type: ignore[attr-defined]
         except Exception:
