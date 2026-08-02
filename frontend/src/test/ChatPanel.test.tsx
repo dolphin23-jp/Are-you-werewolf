@@ -195,6 +195,73 @@ describe("ChatPanel", () => {
     expect(screen.getByRole("button", { name: /Hanako こんにちは/ })).toBeInTheDocument();
   });
 
+  it("shows discussion progress to living players, not only after death", () => {
+    useGameStore.setState({
+      view: makeView({ discussion_progress: { spoken: 3, total: 12 } }),
+      sessionId: "s1",
+    });
+    render(<ChatPanel />);
+    expect(screen.getByText("AI議論進行: 3/12")).toBeInTheDocument();
+  });
+
+  it("hides discussion progress before a round has started", () => {
+    useGameStore.setState({ view: makeView(), sessionId: "s1" });
+    render(<ChatPanel />);
+    expect(screen.queryByText(/AI議論進行/)).not.toBeInTheDocument();
+  });
+
+  it("keeps the send button usable while a pass is in flight", async () => {
+    // Pass and send are independent actions; they used to share one `sending`
+    // flag, so passing disabled sending and vice versa.
+    let releasePass: () => void = () => {};
+    vi.mocked(passDiscussionTurn).mockReturnValue(
+      new Promise<void>((resolve) => {
+        releasePass = resolve;
+      }),
+    );
+    useGameStore.setState({
+      view: makeView({ awaiting_your_speech: true, speech_wait_remaining_seconds: 30 }),
+      sessionId: "s1",
+    });
+    render(<ChatPanel />);
+
+    fireEvent.change(screen.getByPlaceholderText("発言を入力..."), {
+      target: { value: "考えを述べます" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "パス" }));
+
+    await waitFor(() => expect(passDiscussionTurn).toHaveBeenCalled());
+    expect(screen.getByRole("button", { name: "パス" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "送信" })).not.toBeDisabled();
+    releasePass();
+  });
+
+  it("keeps a your-message body wrapper on grouped follow-up lines", () => {
+    // The "this is yours" accent hangs off .chat-message--you .chat-message__content
+    // because grouped lines omit the author button. jsdom cannot evaluate the
+    // stylesheet, so pin the structure the selector needs instead.
+    useGameStore.setState({
+      view: makeView({
+        your_player_id: "p1",
+        public_chat: [
+          { message_id: "m1", author_id: "p1", content: "一言目", channel: "public", day: 1, reply_to: null, quote: null },
+          { message_id: "m2", author_id: "p1", content: "続けて二言目", channel: "public", day: 1, reply_to: null, quote: null },
+        ],
+      }),
+      sessionId: "s1",
+      playerNames: { p1: "Hanako" },
+    });
+    const { container } = render(<ChatPanel />);
+
+    const grouped = container.querySelector("#chat-m2");
+    expect(grouped?.className).toContain("chat-message--you");
+    expect(grouped?.className).toContain("chat-message--grouped");
+    expect(grouped?.querySelector(".chat-message__content")).not.toBeNull();
+    // The author button really is absent on the grouped line -- that is why the
+    // accent had to move off it.
+    expect(grouped?.querySelector(".chat-message__author")).toBeNull();
+  });
+
   it("scrolls to the newest message while already near the bottom", () => {
     const scrollTo = vi.fn();
     Element.prototype.scrollTo = scrollTo;
