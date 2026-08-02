@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 
 from app.ai.reasoning.facts import PublicFactLedger
 from app.engine.roles import RoleName
-from app.engine.state import GameState
+from app.engine.state import DeathCause, GameState
 
 
 @dataclass(frozen=True)
@@ -65,6 +65,42 @@ class PublicVerdict:
 
 
 @dataclass(frozen=True)
+class NightDeath:
+    """Someone died overnight. Which of the two night causes it was is not
+    public -- attacked and cursed look identical from the table."""
+
+    player_id: str
+    night: int
+
+
+@dataclass(frozen=True)
+class NightAction:
+    actor_id: str
+    target_id: str
+    night: int
+
+
+@dataclass(frozen=True)
+class NightKnowledge:
+    """Night actions a viewpoint legitimately knows, keyed by night.
+
+    Empty for the public view by construction, so the real guard and attack
+    targets have no route into a village-side deduction.
+    """
+
+    divines: Mapping[int, str] = field(default_factory=dict)
+    guards: Mapping[int, str] = field(default_factory=dict)
+    attacks: Mapping[int, str] = field(default_factory=dict)
+
+    @property
+    def is_empty(self) -> bool:
+        return not (self.divines or self.guards or self.attacks)
+
+
+EMPTY_NIGHT_KNOWLEDGE = NightKnowledge()
+
+
+@dataclass(frozen=True)
 class ObservationSet:
     player_ids: tuple[str, ...]
     true_roles: Mapping[str, RoleName]
@@ -75,6 +111,12 @@ class ObservationSet:
     claims: tuple[PublicClaim, ...] = ()
     verdicts: tuple[PublicVerdict, ...] = ()
     executed_ids: tuple[str, ...] = ()
+    night_deaths: tuple[NightDeath, ...] = ()
+    # True night actions. Reachable only through a perspective, exactly like
+    # `true_roles` -- never read directly by a rule module.
+    divine_actions: tuple[NightAction, ...] = ()
+    guard_actions: tuple[NightAction, ...] = ()
+    attack_actions: tuple[NightAction, ...] = ()
 
     @classmethod
     def from_state(cls, state: GameState) -> ObservationSet:
@@ -106,6 +148,64 @@ class ObservationSet:
                 for result in ledger.public_results()
             ),
             executed_ids=ledger.executed_ids(),
+            night_deaths=tuple(
+                NightDeath(player_id=record.player_id, night=record.day)
+                for record in state.death_records
+                if record.cause in (DeathCause.ATTACKED, DeathCause.CURSED)
+            ),
+            divine_actions=tuple(
+                NightAction(actor_id=r.seer_id, target_id=r.target_id, night=r.day)
+                for r in state.divine_records
+            ),
+            guard_actions=tuple(
+                NightAction(actor_id=r.hunter_id, target_id=r.target_id, night=r.day)
+                for r in state.guard_records
+            ),
+            attack_actions=tuple(
+                NightAction(actor_id=r.wolf_id, target_id=r.target_id, night=r.day)
+                for r in state.attack_records
+            ),
+        )
+
+    # -- night lookups --
+
+    def deaths_on(self, night: int) -> tuple[NightDeath, ...]:
+        return tuple(death for death in self.night_deaths if death.night == night)
+
+    def nights_with_deaths(self) -> tuple[int, ...]:
+        return tuple(sorted({death.night for death in self.night_deaths}))
+
+    def night_knowledge_for(self, player_id: str) -> NightKnowledge:
+        """What this seat did at night. Wolves share the team's attack, so any
+        wolf may reason from it, not only the alpha who submitted it."""
+        role = self.true_roles[player_id]
+        wolf_ids = {
+            pid for pid, dealt in self.true_roles.items() if dealt == RoleName.WEREWOLF
+        }
+        return NightKnowledge(
+            divines={
+                action.night: action.target_id
+                for action in self.divine_actions
+                if action.actor_id == player_id
+            },
+            guards={
+                action.night: action.target_id
+                for action in self.guard_actions
+                if action.actor_id == player_id
+            },
+            attacks={
+                action.night: action.target_id
+                for action in self.attack_actions
+                if role is RoleName.WEREWOLF and action.actor_id in wolf_ids
+            },
+        )
+
+    def all_night_knowledge(self) -> NightKnowledge:
+        """Everything. Debug and evaluation only, via `TrueWorldPerspective`."""
+        return NightKnowledge(
+            divines={action.night: action.target_id for action in self.divine_actions},
+            guards={action.night: action.target_id for action in self.guard_actions},
+            attacks={action.night: action.target_id for action in self.attack_actions},
         )
 
     # -- public-claim lookups --

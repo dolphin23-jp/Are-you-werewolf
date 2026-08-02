@@ -1,9 +1,8 @@
 """Hard-constraint rule modules.
 
-`DEFAULT_RULE_MODULES` is the whole deduction ruleset for this stage: the fixed
-composition, what a seat knows about itself, what it knows about its allies, and
-the Day-0 victim. Later stages append modules here rather than editing the
-solver.
+One deduction rule per module, assembled here. Adding a new death cause or a new
+role means a new file and one line in `default_rule_modules` -- never a change to
+the solver, which is the property that has to survive the next few stages.
 """
 
 from __future__ import annotations
@@ -13,6 +12,12 @@ from collections.abc import Sequence
 from app.ai.reasoning.solver.rules.allies import AllyKnowledgeRuleModule
 from app.ai.reasoning.solver.rules.base import BaseRuleModule, RuleModule
 from app.ai.reasoning.solver.rules.first_victim import FirstVictimRuleModule
+from app.ai.reasoning.solver.rules.night import (
+    AttackRuleModule,
+    DeathRuleModule,
+    FoxCurseRuleModule,
+    GuardRuleModule,
+)
 from app.ai.reasoning.solver.rules.role_counts import RoleCountRuleModule
 from app.ai.reasoning.solver.rules.self_knowledge import SelfKnowledgeRuleModule
 
@@ -24,13 +29,21 @@ def default_rule_modules() -> Sequence[RuleModule]:
         SelfKnowledgeRuleModule(),
         AllyKnowledgeRuleModule(),
         FirstVictimRuleModule(),
+        DeathRuleModule(),
+        AttackRuleModule(),
+        GuardRuleModule(),
+        FoxCurseRuleModule(),
     )
 
 
 __all__ = [
     "AllyKnowledgeRuleModule",
+    "AttackRuleModule",
     "BaseRuleModule",
+    "DeathRuleModule",
     "FirstVictimRuleModule",
+    "FoxCurseRuleModule",
+    "GuardRuleModule",
     "RoleCountRuleModule",
     "RuleModule",
     "SelfKnowledgeRuleModule",

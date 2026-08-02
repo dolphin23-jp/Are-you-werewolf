@@ -12,7 +12,15 @@ from app.ai.reasoning.observations import ObservationSet
 from app.engine.phases import Phase
 from app.engine.roles import ROLE_DEFINITIONS, RoleName
 from app.engine.speech_events import SpeechEventType, result_role
-from app.engine.state import DeathCause, DeathRecord, GameState, PlayerState
+from app.engine.state import (
+    AttackRecord,
+    DeathCause,
+    DeathRecord,
+    DivineRecord,
+    GameState,
+    GuardRecord,
+    PlayerState,
+)
 
 PLAYER_IDS = tuple(f"p{i}" for i in range(17))
 
@@ -60,6 +68,40 @@ def _kill(state: GameState, player_id: str, cause: DeathCause, day: int) -> None
     player.death_cause = cause
     player.death_day = day
     state.death_records.append(DeathRecord(player_id=player_id, cause=cause, day=day))
+
+
+def divine(state: GameState, seer_id: str, target_id: str, night: int) -> None:
+    """Record what the seer actually looked at, and let the curse land if it hits."""
+    state.divine_records.append(
+        DivineRecord(
+            seer_id=seer_id,
+            target_id=target_id,
+            day=night,
+            is_werewolf=state.players[target_id].role is RoleName.WEREWOLF,
+        )
+    )
+
+
+def guard(state: GameState, hunter_id: str, target_id: str, night: int) -> None:
+    state.guard_records.append(
+        GuardRecord(hunter_id=hunter_id, target_id=target_id, day=night)
+    )
+
+
+def attack(
+    state: GameState, wolf_id: str, target_id: str, night: int, *, succeeded: bool
+) -> None:
+    state.attack_records.append(
+        AttackRecord(wolf_id=wolf_id, target_id=target_id, day=night, succeeded=succeeded)
+    )
+
+
+def die_by_attack(state: GameState, player_id: str, night: int) -> None:
+    _kill(state, player_id, DeathCause.ATTACKED, night)
+
+
+def die_by_curse(state: GameState, player_id: str, night: int) -> None:
+    _kill(state, player_id, DeathCause.CURSED, night)
 
 
 def claim(state: GameState, player_id: str, role: RoleName, day: int = 1) -> None:

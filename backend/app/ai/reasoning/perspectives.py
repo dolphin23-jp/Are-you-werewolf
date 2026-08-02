@@ -15,7 +15,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from app.ai.reasoning.observations import ObservationSet
+from app.ai.reasoning.observations import (
+    EMPTY_NIGHT_KNOWLEDGE,
+    NightKnowledge,
+    ObservationSet,
+)
 from app.engine.roles import RoleName
 
 
@@ -29,6 +33,15 @@ class Perspective:
 
     def known_roles(self, observations: ObservationSet) -> dict[str, RoleName]:
         return {}
+
+    def known_night_actions(self, observations: ObservationSet) -> NightKnowledge:
+        """Night actions this viewpoint may reason from. Nothing, by default.
+
+        The same gate as `known_roles`, for the same reason: the real guard and
+        attack targets are the two facts a village-side deduction must never be
+        able to reach around and pick up.
+        """
+        return EMPTY_NIGHT_KNOWLEDGE
 
 
 @dataclass(frozen=True)
@@ -74,6 +87,10 @@ class PlayerPrivatePerspective(Perspective):
         assert self.viewer_id is not None
         return observations.seat_knowledge(self.viewer_id).as_role_map()
 
+    def known_night_actions(self, observations: ObservationSet) -> NightKnowledge:
+        assert self.viewer_id is not None
+        return observations.night_knowledge_for(self.viewer_id)
+
 
 @dataclass(frozen=True)
 class ClaimedStoryPerspective(Perspective):
@@ -101,6 +118,24 @@ class ClaimedStoryPerspective(Perspective):
         assert self.viewer_id is not None
         return {self.viewer_id: self.claimed_role}
 
+    def known_night_actions(self, observations: ObservationSet) -> NightKnowledge:
+        """The nights the story says happened, not the ones that did.
+
+        A fake seer's account of who they looked at is exactly the list of
+        targets they published. Reasoning from it is how the bluffer finds out
+        whether their own story survives contact with the corpses.
+        """
+        assert self.viewer_id is not None
+        if self.claimed_role is not RoleName.SEER:
+            return EMPTY_NIGHT_KNOWLEDGE
+        return NightKnowledge(
+            divines={
+                verdict.day - 1: verdict.target_id
+                for verdict in observations.verdicts_by(self.viewer_id)
+                if verdict.result_type == "seer"
+            }
+        )
+
 
 @dataclass(frozen=True)
 class TrueWorldPerspective(Perspective):
@@ -111,6 +146,9 @@ class TrueWorldPerspective(Perspective):
 
     def known_roles(self, observations: ObservationSet) -> dict[str, RoleName]:
         return dict(observations.true_roles)
+
+    def known_night_actions(self, observations: ObservationSet) -> NightKnowledge:
+        return observations.all_night_knowledge()
 
 
 class PerspectiveLeakError(RuntimeError):
