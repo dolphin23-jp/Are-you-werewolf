@@ -36,6 +36,8 @@ class ReasoningMemo(BaseModel):
 
 class DiscussionOutput(BaseModel):
     public_message: str
+    key_point: str = ""
+    agrees_with: list[str] = Field(default_factory=list)
     reply_to: str | None = None
     quote: str | None = None
     reasoning_memo: ReasoningMemo = Field(default_factory=ReasoningMemo)

@@ -59,7 +59,7 @@ class KnowledgeBase:
             parse_doctrine(path.read_text(encoding="utf-8")) for path in root.glob("*.md")
         ]
 
-    def select(self, context: KnowledgeContext, limit: int = 8) -> list[Doctrine]:
+    def select(self, context: KnowledgeContext, limit: int = 16) -> list[Doctrine]:
         matched = [item for item in self.doctrines if self._matches(item, context)]
         return sorted(matched, key=lambda item: (-item.priority, item.metadata["id"]))[:limit]
 
@@ -74,10 +74,11 @@ class KnowledgeBase:
         if roles and player.role.value not in roles:
             return False
         factions = _csv(meta.get("factions"))
-        if factions and player.team.value not in factions:
+        if factions and not factions.intersection({player.team.value, player.role.value}):
             return False
-        if _bool(meta.get("fake_only")) and context.fake_role is None:
-            return False
+        if "fake_only" in meta:
+            if _bool(meta["fake_only"]) != (context.fake_role is not None):
+                return False
         claimed = _csv(meta.get("claimed_roles"))
         own_claims = {
             claim.claimed_role.value

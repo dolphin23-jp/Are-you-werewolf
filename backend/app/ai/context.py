@@ -41,10 +41,13 @@ DISCUSSION_OUTPUT_INSTRUCTION = """以下のJSON形式で回答してくださ�
 "public_results": [{"result_type": "seerまたはmedium", "target_id": "pN", \
 "is_werewolf": trueまたはfalse}], \
 "reply_to": "反論・回答対象の発言ID(mN)またはnull", "quote": "必要なら短い引用またはnull", \
+"key_point": "今回新たに出す論点を1行で。新規論点がなければ空文字", \
+"agrees_with": ["同意する既出発言ID(mN)"], \
 "directed_questions": [{"target_id": "質問相手pN", "question": "質問", \
 "source_message_id": "質問のきっかけになった発言IDまたはnull"}], \
 "ready_to_vote": trueまたはfalse, "needs_another_statement": trueまたはfalse}
 主要候補が反論し、各視点と未解決質問を検討し終えた場合だけready_to_vote=true。
+新規論点がなくagrees_withだけの場合はreactionとして60文字以内の短い同意にする。
 まだ反論・再評価が必要ならfalseとし、自分も追加発言が必要ならneeds_another_statement=true。"""
 
 MORNING_INTENT_OUTPUT_INSTRUCTION = """公開発言前の非公開判断です。JSONで回答してください:
@@ -113,10 +116,18 @@ class ContextBuilder:
         self._fake_claim_guard = fake_claim_guard
         self._observer_player_ids = observer_player_ids or set()
         self._reasoning_memos: dict[str, dict[str, Any]] = {}
+        self._key_points: dict[int, list[tuple[str, str, str]]] = {}
         self._knowledge = KnowledgeBase()
 
     def set_reasoning_memo(self, player_id: str, memo: dict[str, Any]) -> None:
         self._reasoning_memos[player_id] = memo
+
+    def record_key_point(
+        self, day: int, message_id: str, player_id: str, key_point: str
+    ) -> None:
+        normalized = key_point.strip()
+        if normalized:
+            self._key_points.setdefault(day, []).append((message_id, player_id, normalized))
 
     def _layer_previous_memo(self, player_id: str) -> str:
         memo = self._reasoning_memos.get(player_id)
@@ -332,6 +343,21 @@ class ContextBuilder:
             + "\n最初にこれへ直接答えてください。答えられない場合は理由を述べてください。"
         )
 
+    def _layer_existing_key_points(self, state: GameState) -> str:
+        points = self._key_points.get(state.day, [])
+        if not points:
+            return "【すでに卓に出ている論点】(まだありません)"
+        lines = [
+            f"[{message_id}] {player_label(state, player_id)}: {key_point}"
+            for message_id, player_id, key_point in points
+        ]
+        return (
+            "【すでに卓に出ている論点】\n"
+            + "\n".join(lines)
+            + "\n既出と同じ論点ならagrees_withへ発言IDを入れ、短い同意で済ませてください。"
+            "同じ内容を別の言葉で繰り返してはいけません。"
+        )
+
     def _assemble(
         self, system_layers: list[str], user_layers: list[str]
     ) -> tuple[str, list[Message]]:
@@ -359,6 +385,7 @@ class ContextBuilder:
             [
                 self._layer_c_state(state, player_id, guides),
                 self._layer_pending_questions(state, player_id),
+                self._layer_existing_key_points(state),
                 self._layer_d_summaries(),
                 self._layer_previous_memo(player_id),
                 self._layer_e_current_log(state, ChatChannel.PUBLIC),

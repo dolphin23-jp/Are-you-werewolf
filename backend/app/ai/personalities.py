@@ -30,6 +30,7 @@ class Personality:
     fallback_message: str
     talkativeness: float = 1.0
     verbosity: str = "normal"
+    sample_lines: tuple[str, ...] = ()
 
     def to_prompt_section(self) -> str:
         return (
@@ -39,7 +40,8 @@ class Personality:
             f"- 議論スタイル: {self.discussion_style}\n"
             f"- 感情傾向: {self.emotional_tendency}\n"
             f"- 発言頻度: {self.talkativeness:.1f}\n"
-            f"- 発言量: {self.verbosity}"
+            f"- 発言量: {self.verbosity}\n"
+            "- 口調の例:\n  - " + "\n  - ".join(self.sample_lines)
         )
 
     def get_fallback_message(self) -> str:
@@ -168,14 +170,57 @@ PERSONALITIES: list[Personality] = [
         "みんな、ここが勝負所ですよ!",
     ),
     Personality(
-        "素朴な聞き手", "飾らない素直な口調", "疑問を一つずつ確かめる", "短い相槌と質問が中心",
-        "驚きや納得を率直に示す", "そこをもう少し聞きたいです。",
+        "素朴な聞き手",
+        "飾らない素直な口調",
+        "疑問を一つずつ確かめる",
+        "短い相槌と質問が中心",
+        "驚きや納得を率直に示す",
+        "そこをもう少し聞きたいです。",
     ),
     Personality(
-        "長考する参謀", "慎重で整然とした敬語", "複数視点を比較してから結論を出す",
-        "要点を整理した長めの分析を出す", "表面上は冷静", "整理してから結論を述べます。",
+        "長考する参謀",
+        "慎重で整然とした敬語",
+        "複数視点を比較してから結論を出す",
+        "要点を整理した長めの分析を出す",
+        "表面上は冷静",
+        "整理してから結論を述べます。",
     ),
 ]
+
+_SAMPLE_LINES: dict[str, tuple[str, ...]] = {
+    "冷静な論客": (
+        "投票と発言の差を分けて確認しましょう。",
+        "その結論になる根拠を一つ示してください。",
+    ),
+    "元気なムードメーカー": ("よし、COを並べて見ていこう!", "そこ気になる! 理由を聞かせて。"),
+    "慎重な観察者": ("今は断定せず、回答を待ちたいです。", "昨日との発言の変化を見ています。"),
+    "自信家のリーダー": ("今日はこの二人まで絞ります。", "反論を聞いてから本指定を出します。"),
+    "疑り深い探偵": ("その説明、投票先と噛み合いませんね。", "なぜ今になって意見を変えたんです?"),
+    "優しい世話役": ("順番に聞けば整理できそうです。", "反対意見も一度聞いてみませんか。"),
+    "皮肉屋の理系": (
+        "その推理は前提が一つ抜けています。",
+        "確率より、まず結果の整合を見ましょう。",
+    ),
+    "熱血な正義漢": ("曖昧なまま吊るのは認めない!", "疑うなら根拠まで言い切ろう。"),
+    "のんびり屋": (
+        "まあ、回答を聞いてからでも遅くないよ。",
+        "今のところはこっちが少し気になるかな。",
+    ),
+    "策略家": ("あえてこの二人の反応を見たいですね。", "結論は伏せますが、その質問は重要です。"),
+    "新人風の初々しさ": (
+        "えっと、投票理由を教えてもらえますか。",
+        "まだ迷っていますが、ここが気になります。",
+    ),
+    "ベテランの古参": ("急いで結論を出す場面ではない。", "昨日の票を踏まえて順に整理しよう。"),
+    "陽気なお調子者": ("おっと、その票替えは見逃せないね。", "冗談はさておき、理由は聞きたいな。"),
+    "無口な実務家": ("結論。今日はp3を疑う。", "理由は投票と回答の不一致。"),
+    "情熱的な扇動家": ("ここで意見を揃えましょう!", "この矛盾を放置してはいけません。"),
+    "素朴な聞き手": ("その理由をもう少し聞いていいですか。", "今の説明で少し納得しました。"),
+    "長考する参謀": (
+        "二つの視点を分けて整理します。",
+        "判定と投票を合わせると、この内訳が自然です。",
+    ),
+}
 
 # The cadence axes are part of the presets (rather than assigned per game),
 # so a seeded assignment still returns one of the canonical personalities.
@@ -186,6 +231,7 @@ PERSONALITIES = [
         personality,
         talkativeness=_ACTIVITY[index % len(_ACTIVITY)],
         verbosity=_VERBOSITY[index % len(_VERBOSITY)],
+        sample_lines=_SAMPLE_LINES[personality.name],
     )
     for index, personality in enumerate(PERSONALITIES)
 ]

@@ -163,6 +163,20 @@ def test_pending_question_enters_target_prompt_and_reply_resolves_it():
     assert state.pending_questions["p2"] == []
 
 
+def test_existing_key_points_are_rendered_with_message_ids():
+    controller = make_controller(seed=4)
+    state = controller.state
+    state.day = 1
+    builder = _builder(state)
+    builder.record_key_point(1, "m7", "p1", "初日の投票先を比較する")
+
+    _system, messages = builder.build_discussion_context(state, "p2")
+
+    assert "【すでに卓に出ている論点】" in messages[0].content
+    assert "[m7] Player1(p1): 初日の投票先を比較する" in messages[0].content
+    assert "agrees_with" in messages[0].content
+
+
 def test_role_owner_receives_private_results_but_other_player_does_not():
     controller = make_controller(seed=4)
     state = controller.state

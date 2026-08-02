@@ -22,3 +22,10 @@ def test_prompt_section_mentions_all_axes():
     assert personality.thinking_style in section
     assert personality.discussion_style in section
     assert personality.emotional_tendency in section
+
+
+def test_every_personality_has_multiple_concrete_sample_lines():
+    for personality in PERSONALITIES:
+        assert len(personality.sample_lines) >= 2
+        section = personality.to_prompt_section()
+        assert all(line in section for line in personality.sample_lines)

@@ -52,3 +52,29 @@ def test_conditions_and_priority_are_deterministic(tmp_path: Path):
     )
 
     assert [item.metadata["id"] for item in selected] == ["high", "low"]
+
+
+def test_false_fake_only_selects_only_non_fakers(tmp_path: Path):
+    (tmp_path / "lurker.md").write_text(
+        "---\nid: lurker\nplayer_roles: werewolf\nfake_only: false\n---\nlurk",
+        encoding="utf-8",
+    )
+    controller = make_controller(seed=4)
+    state = controller.state
+    wolf = state.players_by_role(RoleName.WEREWOLF)[0]
+    knowledge = KnowledgeBase(tmp_path)
+
+    assert knowledge.select(KnowledgeContext(state, wolf.player_id))
+    assert not knowledge.select(KnowledgeContext(state, wolf.player_id, fake_role=RoleName.SEER))
+
+
+def test_madman_can_match_role_named_faction(tmp_path: Path):
+    (tmp_path / "madman.md").write_text(
+        "---\nid: madman\nfactions: madman\n---\nconfuse",
+        encoding="utf-8",
+    )
+    controller = make_controller(seed=4)
+    state = controller.state
+    madman = state.players_by_role(RoleName.MADMAN)[0]
+
+    assert KnowledgeBase(tmp_path).select(KnowledgeContext(state, madman.player_id))

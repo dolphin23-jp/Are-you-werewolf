@@ -135,6 +135,8 @@ class AICoordinator:
         directed_question_targets: list[str] | None = None,
         ready_to_vote: bool | None = None,
         effective_length_limit: int | None = None,
+        key_point: str = "",
+        agrees_with: list[str] | None = None,
     ) -> None:
         if self._recorder is None:
             return
@@ -160,6 +162,8 @@ class AICoordinator:
                 ready_to_vote=ready_to_vote,
                 used_fallback=used_fallback,
                 effective_length_limit=effective_length_limit,
+                key_point=key_point,
+                agrees_with=agrees_with or [],
             )
         )
 
@@ -401,6 +405,8 @@ class AICoordinator:
             self._metrics.record_discussion_result(skipped=output is None)
         if output is None:
             return None
+        if output.agrees_with and not output.key_point.strip():
+            output.public_message = output.public_message[:60]
         self._context.set_reasoning_memo(player_id, output.reasoning_memo.model_dump())
         self._record(
             state,
@@ -416,6 +422,8 @@ class AICoordinator:
             effective_length_limit=discussion_length_range(
                 self._personalities[player_id].verbosity
             )[1],
+            key_point=output.key_point,
+            agrees_with=output.agrees_with,
         )
         try:
             message_id = controller.chat(  # type: ignore[attr-defined]
@@ -443,6 +451,7 @@ class AICoordinator:
                     day=state.day,
                 )
             )
+        self._context.record_key_point(state.day, message_id, player_id, output.key_point)
         self._register_public_claim(controller, player_id, output)
         for result in output.public_results:
             if result.target_id not in state.players:
