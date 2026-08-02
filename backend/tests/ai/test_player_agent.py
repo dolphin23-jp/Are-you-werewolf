@@ -26,17 +26,18 @@ class _HallucinatingVoteProvider:
 
 
 @pytest.mark.asyncio
-async def test_falls_back_to_personality_line_on_total_failure():
+async def test_discussion_returns_none_on_total_failure():
     personality = PERSONALITIES[0]
     agent = AIPlayerAgent(_AlwaysNoneProvider(), personality, max_retries=1)
     result = await agent.generate_discussion("system", [Message(role="user", content="hi")])
-    assert result.public_message == personality.get_fallback_message()
+    assert result is None
 
 
 @pytest.mark.asyncio
 async def test_strips_meta_phrases():
     agent = AIPlayerAgent(_MetaLeakProvider(), PERSONALITIES[0])
     result = await agent.generate_discussion("system", [Message(role="user", content="hi")])
+    assert result is not None
     assert "AIとして" not in result.public_message
     assert "人狼だと思います" in result.public_message
 

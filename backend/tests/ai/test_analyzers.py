@@ -255,6 +255,43 @@ def test_speech_stats_track_fallbacks_and_repeats():
     assert stats["fallback_lines"] == 1
 
 
+def test_discussion_quality_metrics_cover_overlap_balance_replies_and_questions():
+    utterances = [
+        _say("p1", "占い結果を比較して判断します。", directed_question_targets=["p2"]),
+        _say("p2", "占い結果を比較して判断します。"),
+        _say("p1", "投票先も比較します。"),
+    ]
+    t = _transcript(
+        utterances=utterances,
+        final_state={
+            "chat_log": [
+                {"channel": "public", "reply_to": None},
+                {"channel": "public", "reply_to": "m1"},
+            ],
+            "pending_questions": {"p2": [{"source_message_id": "m1"}]},
+        },
+    )
+
+    stats = analyze(t).stats["speech"]
+
+    assert stats["cross_player_topic_overlap_rate"] > 0
+    assert stats["speech_count_gini"] > 0
+    assert stats["reply_rate"] == 0.5
+    assert stats["unanswered_question_rate"] == 1.0
+    assert stats["length_variance"] > 0
+
+
+def test_length_limit_uses_each_recorded_personality_limit():
+    t = _transcript(
+        utterances=[
+            _say("p1", "短" * 101, effective_length_limit=100),
+            _say("p2", "長" * 201, effective_length_limit=400),
+        ]
+    )
+
+    assert analyze(t).stats["speech"]["over_length_limit"] == 1
+
+
 def test_clean_transcript_produces_no_findings():
     t = _transcript(
         utterances=[

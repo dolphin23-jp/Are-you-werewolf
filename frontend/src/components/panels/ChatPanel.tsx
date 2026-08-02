@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { sendChat } from "../../api/client";
-import type { ChatChannel } from "../../api/types";
+import type { ChatChannel, ChatMessage } from "../../api/types";
 import { useGameStore } from "../../state/gameStore";
 import { TypingIndicator } from "../common/TypingIndicator";
 
@@ -17,6 +17,12 @@ export function ChatPanel() {
   const [selectedDay, setSelectedDay] = useState<number | "all">("all");
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
+  const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
+  const logEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    logEndRef.current?.scrollIntoView?.({ behavior: "smooth", block: "end" });
+  }, [view?.public_chat.length, view?.private_chat.length]);
 
   if (!view || !sessionId) return null;
 
@@ -66,11 +72,18 @@ export function ChatPanel() {
 
   const handleSend = async () => {
     const content = draft.trim();
-    if (!content || !canSend) return;
+    if (!content || !canSend || sending) return;
     setSending(true);
     try {
-      await sendChat(sessionId, content, tab);
+      await sendChat(
+        sessionId,
+        content,
+        tab,
+        replyingTo?.message_id,
+        replyingTo?.content.slice(0, 160),
+      );
       setDraft("");
+      setReplyingTo(null);
       await refreshView();
     } catch (e) {
       setError(e instanceof Error ? e.message : "発言に失敗しました");
@@ -133,16 +146,25 @@ export function ChatPanel() {
           </>
         )}
         {messages.length === 0 && <p className="chat-panel__empty">まだ発言はありません</p>}
-        {messages.map((m, i) => (
+        {messages.map((m) => (
           <div
-            key={i}
+            key={m.message_id}
             className={
               m.author_id === view.your_player_id ? "chat-message chat-message--you" : "chat-message"
             }
           >
             <button className={nameClass(m.author_id)} onClick={() => setSelectedSpeakerId(m.author_id)}>
               {playerNames[m.author_id] ?? m.author_id}
-            </button>: {m.content}
+            </button>
+            {m.reply_to && <small className="chat-message__reply"> ↪ {m.reply_to}</small>}: {m.content}
+            <button
+              className="chat-message__reply-button"
+              type="button"
+              onClick={() => setReplyingTo(m)}
+              aria-label={`${m.message_id}に返信`}
+            >
+              返信
+            </button>
           </div>
         ))}
         {tab === "public" && visibleVotes.length > 0 && (
@@ -158,20 +180,36 @@ export function ChatPanel() {
             ))}
           </section>
         )}
+        <div ref={logEndRef} />
       </div>
 
       <div className="chat-panel__input">
+        {!view.players.find((player) => player.player_id === view.your_player_id)?.alive &&
+          view.discussion_progress && (
+            <small className="discussion-progress">
+              AI議論進行: {view.discussion_progress.spoken}/{view.discussion_progress.total}
+            </small>
+          )}
         {(view.typing_player_ids ?? []).length > 0 && (
           <TypingIndicator label={`${(view.typing_player_ids ?? []).map((id) => playerNames[id] ?? id).join("、")}が書き込み中…`} />
         )}
-        <input
+        {replyingTo && (
+          <div className="reply-preview">
+            <span>返信先 [{replyingTo.message_id}] {playerNames[replyingTo.author_id] ?? replyingTo.author_id}: {replyingTo.content}</span>
+            <button type="button" onClick={() => setReplyingTo(null)} aria-label="返信をキャンセル">×</button>
+          </div>
+        )}
+        <textarea
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter") void handleSend();
+            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && e.keyCode !== 229) {
+              e.preventDefault();
+              void handleSend();
+            }
           }}
           disabled={!canSend || sending}
-          maxLength={500}
+          maxLength={1500}
           placeholder={canSend ? "発言を入力..." : "現在は発言できません"}
         />
         <button className="btn" disabled={!canSend || sending || !draft.trim()} onClick={() => void handleSend()}>

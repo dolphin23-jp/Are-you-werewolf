@@ -63,6 +63,27 @@ def test_health_endpoint():
     assert resp.json()["status"] == "ok"
 
 
+def test_discussion_runs_without_waiting_when_human_is_dead():
+    response = client.post("/api/games", json={"human_name": "Spectator", "seed": 44})
+    session_id = response.json()["session_id"]
+    session = get_session_store().get(session_id)
+    assert session is not None
+    session.controller.state.phase = Phase.DAWN
+    session.controller.state.day = 1
+    session.controller.state.players[session.human_id].alive = False
+
+    response = client.post(f"/api/games/{session_id}/start-discussion")
+
+    assert response.status_code == 200
+    assert any(
+        message.author_id != session.human_id
+        for message in session.controller.state.chat_log
+    )
+    view = client.get(f"/api/games/{session_id}/view").json()
+    assert view["awaiting_your_speech"] is False
+    assert view["discussion_progress"]["spoken"] > 0
+
+
 def test_view_is_filtered_but_debug_is_not():
     resp = client.post("/api/games", json={"human_name": "Tester", "seed": 5})
     session_id = resp.json()["session_id"]

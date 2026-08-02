@@ -14,6 +14,25 @@ from app.eval.transcript import TranscriptRecorder
 
 
 @dataclass
+class DiscussionRoundState:
+    day: int
+    order: list[str]
+    cursor: int = 0
+    stage: str = "immediate"
+    speech_counts: dict[str, int] = field(default_factory=dict)
+    reply_queue: list[str] = field(default_factory=list)
+    queued: set[str] = field(default_factory=set)
+    outputs: list[tuple[str, Any]] = field(default_factory=list)
+    major_targets: list[str] = field(default_factory=list)
+    awaiting_human: bool = False
+    immediate_count: int = 0
+    max_total: int = 0
+    complete: bool = False
+    summary_done: bool = False
+    major_targets_ready: bool = False
+
+
+@dataclass
 class GameSession:
     session_id: str
     controller: GameController
@@ -27,6 +46,8 @@ class GameSession:
     # Serializes discussion rounds so rapid-fire human chat messages queue
     # sequential AI rounds instead of interleaving overlapping ones.
     discussion_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    discussion_round: DiscussionRoundState | None = None
+    discussion_advance_task: asyncio.Task[Any] | None = None
 
     def touch(self) -> None:
         self.last_active_at = time.time()

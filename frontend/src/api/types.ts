@@ -33,9 +33,20 @@ export interface PublicPlayer {
 }
 
 export interface ChatMessage {
+  message_id: string;
   author_id: string;
   content: string;
   channel: ChatChannel;
+  day: number;
+  reply_to: string | null;
+  quote: string | null;
+}
+
+export interface PendingQuestion {
+  asker: string;
+  target: string;
+  question: string;
+  source_message_id: string;
   day: number;
 }
 
@@ -88,6 +99,9 @@ export interface GameView {
   players: PublicPlayer[];
   public_chat: ChatMessage[];
   private_chat: ChatMessage[];
+  pending_questions: PendingQuestion[];
+  awaiting_your_speech: boolean;
+  discussion_progress: { spoken: number; total: number };
   your_divine_results: DivineResult[];
   your_medium_results: MediumResult[];
   co_declarations: CoDeclarationRecord[];
