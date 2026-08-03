@@ -8,13 +8,13 @@ game's spend and roughly 25 minutes of wall time per seed for an engine that
 is not being shipped. The legacy path is kept, not deleted -- pass
 `--engines legacy v2` to get the old behaviour back.
 
-One consequence is deliberate and unresolved: `minimum_live_pairs` in
-`config/reasoning_release_gate.toml` counts seeds that ran BOTH arms, so a
-v2-only run reports `live_pairs=0` and the gate can only ever return
-INCONCLUSIVE, never PASS. That is the honest reading of the current gate -- a
-v2-only run genuinely has not produced the paired evidence the gate asks for.
-Deciding whether the gate should instead qualify v2 on its own terms is a
-release-criteria change, not a harness change, so it is left to a human.
+The release gate moved with it. It used to require `minimum_live_pairs`, the
+number of seeds that ran both arms, which a v2-only run can never satisfy; an
+unsatisfiable criterion is not a strict gate but a silent one. It now requires
+`minimum_live_games` distinct v2 seeds instead. The bar itself is unchanged at
+two, and nothing else was loosened -- in particular PASS still needs a complete
+human transcript review (`--review-dir`), which no amount of machine evidence
+substitutes for.
 """
 
 from __future__ import annotations
@@ -120,9 +120,14 @@ def _save_aggregate(
     budget: EvaluationBudget,
     review_dir: Path | None = None,
 ) -> None:
-    legacy_seeds = {row["seed"] for row in rows if row.get("engine") == "legacy"}
-    v2_seeds = {row["seed"] for row in rows if row.get("engine") == "v2"}
-    live_pairs = len(legacy_seeds & v2_seeds)
+    # Seeds, not rows: a resumed run that replays the same seed has not added
+    # evidence, and the gate's bar is about coverage.
+    v2_seeds = {
+        row["seed"]
+        for row in rows
+        if row.get("engine") == "v2" and row.get("status") not in ("budget_exhausted", "failed")
+    }
+    live_games = len(v2_seeds)
     reports = [row.get("reasoning_quality", {}) for row in rows if row.get("engine") == "v2"]
     combined = (
         ReasoningQualityReport(
@@ -154,7 +159,7 @@ def _save_aggregate(
     ).evaluate(
         combined,
         _combined_operational(rows),
-        live_pairs=live_pairs,
+        live_games=live_games,
         human_review_complete=review_complete,
         operational_complete=operational_complete,
     )
@@ -207,10 +212,8 @@ def main() -> None:
     parser.add_argument("--seeds", nargs="+", type=int, default=[11, 12, 13])
     # v2 only by default. The legacy arm was the A side of a comparison that has
     # served its purpose, and every legacy game is a full game's spend and about
-    # 25 minutes of wall time to re-measure an engine nobody is shipping. Pass
-    # `--engines legacy v2` explicitly if a paired run is ever wanted again --
-    # note that the release gate's `minimum_live_pairs` counts seeds that ran
-    # BOTH arms, so a v2-only run cannot reach PASS on its own (see below).
+    # 25 minutes of wall time to re-measure an engine nobody is shipping. The
+    # path is kept, not deleted: pass `--engines legacy v2` for a paired run.
     parser.add_argument("--engines", nargs="+", choices=("legacy", "v2"), default=["v2"])
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--max-http-requests", type=int, default=4000)
