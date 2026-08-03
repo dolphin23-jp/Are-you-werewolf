@@ -26,7 +26,7 @@ from app.ai.context import ContextBuilder, DaySummaryManager
 from app.ai.deception import FakeClaimGuard, assign_madman_strategy, assign_wolf_deception
 from app.ai.personalities import assign_personalities, discussion_length_range
 from app.ai.player_agent import AIPlayerAgent, truncate_at_sentence
-from app.ai.provider.base import LLMProvider
+from app.ai.provider.base import LLMProvider, Message
 from app.ai.reasoning import (
     PublicFactLedger,
     ValidationLog,
@@ -377,6 +377,8 @@ class AICoordinator:
 
     async def _start_discussion_round(self, state: GameState) -> DiscussionRoundState:
         alive = [pid for pid in self._ai_player_ids if state.players[pid].alive]
+        if self.reasoning is not None:
+            return self._coded_discussion_round(state, alive)
         shuffled = list(alive)
         self._rng.shuffle(shuffled)
         intents = await asyncio.gather(*(self._morning_intent(state, pid) for pid in shuffled))
@@ -398,9 +400,45 @@ class AICoordinator:
             max_total=max(len(alive) + self._max_discussion_followups, int(len(alive) * 2.5)),
         )
 
+    def _coded_discussion_round(
+        self, state: GameState, alive: list[str]
+    ) -> DiscussionRoundState:
+        """Open the day with the seats that have something to say.
+
+        Everyone forms an opinion -- the belief engine updates all of them -- but
+        a morning where sixteen AIs each state a view is a wall of text nobody
+        reads. Duty speakers (a held result, a planned CO, a direct question)
+        are never dropped; the rest speak when they are answered or challenged.
+        """
+        assert self.reasoning is not None
+        self.reasoning.refresh(state)
+        duty = [
+            pid
+            for pid in alive
+            if self.reasoning.holds_unpublished_result(state, pid)
+            or self._pending_questions.get(pid)
+        ]
+        chosen = self.reasoning.select_opening_speakers(
+            state,
+            pending_question_targets=[
+                pid for pid in alive if self._pending_questions.get(pid)
+            ],
+        )
+        order = list(dict.fromkeys(duty + chosen))
+        return DiscussionRoundState(
+            day=state.day,
+            order=order,
+            stage="immediate",
+            immediate_count=len(duty),
+            max_total=max(len(alive) + self._max_discussion_followups, len(order) * 3),
+        )
+
     def _next_discussion_speaker(
         self, state: GameState, round_state: DiscussionRoundState
     ) -> tuple[str | None, str]:
+        if self.reasoning is not None:
+            for player_id in self.reasoning.take_reassessment_speakers():
+                self._round_queue_reply(state, round_state, player_id)
         for target_id in sorted(self._forced_partner_confirmations):
             self._forced_partner_confirmations.discard(target_id)
             if target_id not in self._agents or not state.players[target_id].alive:
@@ -660,6 +698,20 @@ class AICoordinator:
         if state.phase != Phase.DISCUSSION:
             return None
         system, messages = self._context.build_discussion_context(state, player_id, stage)
+        decision = None
+        if self.reasoning is not None:
+            decision = self.reasoning.discussion_decision(
+                state,
+                player_id,
+                pending_question=bool(self._pending_questions.get(player_id)),
+                under_pressure=stage.startswith("rebuttal")
+                or stage.startswith("minority_review"),
+            )
+            messages = [
+                *messages[:-1],
+                Message(role="user", content=decision.render_brief()),
+                messages[-1],
+            ]
         freemason_opening = self._freemason_opening(state, player_id)
         freemason_must_hide = self._freemason_must_hide(state, player_id)
         if freemason_opening is not None:
@@ -709,6 +761,14 @@ class AICoordinator:
         # never executed is state corruption, not a human-style misread, and it
         # is repaired deterministically here before it reaches the engine.
         self._validate_output(state, player_id, output)
+        if decision is not None:
+            # The model rendered the turn; it does not get to revise the
+            # conclusion. Two reasoning systems running side by side is what
+            # let an AI argue one name all day and then vote for another.
+            output.reasoning_memo.execution_target = decision.execution_target
+            output.alternative_execution_target = decision.alternative_target
+            assert self.reasoning is not None
+            self.reasoning.record_stated_target(player_id, decision.execution_target)
         pending_relation = next(
             (
                 claim
@@ -920,7 +980,9 @@ class AICoordinator:
         types unchanged."""
         return text.strip() == self._personalities[player_id].get_fallback_message()
 
-    def note_human_message(self, state: GameState, speaker_id: str, text: str) -> list[str]:
+    def note_human_message(
+        self, state: GameState, speaker_id: str, text: str, source_message_id: str = ""
+    ) -> list[str]:
         """Handle one human message for the whole table, once.
 
         Factual corrections are matched in code and applied to each seat's own
@@ -931,8 +993,15 @@ class AICoordinator:
         if self.reasoning is None:
             return []
         self.reasoning.refresh(state)
-        outcomes = self.reasoning.apply_human_message(state, speaker_id, text)
-        return self.reasoning.seats_that_moved(outcomes)
+        outcomes = self.reasoning.apply_human_message(
+            state, speaker_id, text, source_message_id
+        )
+        moved = self.reasoning.seats_that_moved(outcomes)
+        # A seat whose reason was withdrawn owes the table an explanation, so it
+        # is queued to speak. Dropping this list was why a correction landed and
+        # nobody said anything about it.
+        self.reasoning.queue_reassessment_speakers(moved)
+        return moved
 
     def register_public_claim(
         self,
@@ -1066,9 +1135,10 @@ class AICoordinator:
             # costs no request and the reason is the evidence itself.
             self.reasoning.refresh(state)
             target, reason = self.reasoning.vote_decision(player_id, candidates)
-            stated_target = self.reasoning.seats[
-                player_id
-            ].belief.state.current_execution_target
+            # Compared against what this seat actually told the table, not
+            # against another internal number -- otherwise the check is the
+            # runtime marking its own homework.
+            stated_target = self.reasoning.stated_target(player_id)
             output = VoteOutput(
                 vote_target=target,
                 reason=reason,
@@ -1112,6 +1182,17 @@ class AICoordinator:
         )
         if mismatch is not None:
             self.validation.vote_plan_mismatches.append(mismatch)
+            self._record(
+                state,
+                player_id,
+                "vote_change",
+                text=(
+                    f"公開発言では{mismatch.stated_target}を第一候補としたが、"
+                    f"最終判断で{mismatch.actual_target}へ変更した。{output.reason}"
+                ),
+                target=mismatch.actual_target,
+                alternative_target=mismatch.stated_target,
+            )
 
     async def _generate_day_summary(self, controller: object, state: GameState) -> None:
         # The factual half is rendered from the ledger, not asked for: who died,
