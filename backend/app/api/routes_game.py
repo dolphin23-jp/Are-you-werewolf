@@ -234,7 +234,9 @@ async def chat(
                 message_id,
             )
             # Corrections are checked once, in code, for the whole table.
-            session.coordinator.note_human_message(state, author, req.content)
+            session.coordinator.note_human_message(
+                state, author, req.content, message_id
+            )
         else:
             # Same conversion the coordinator uses, so a human claim becomes the
             # same kind of event whether or not AI players are in the game.

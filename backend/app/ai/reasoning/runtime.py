@@ -29,13 +29,20 @@ from app.ai.reasoning.belief import (
     StoryStatus,
     assign_traits,
     deception_state_for,
-    parse_fact_corrections,
     profile_name,
     rank_hypotheses,
     refresh_story,
     summarise,
 )
-from app.ai.reasoning.belief.state import tiebreak
+from app.ai.reasoning.belief.state import EvidenceRecord, tiebreak
+from app.ai.reasoning.dialogue import (
+    ArgumentEvent,
+    BeliefChange,
+    ConclusionType,
+    DiscussionDecision,
+    SpeechGoal,
+    parse_argument,
+)
 from app.ai.reasoning.facts import PublicFactLedger
 from app.ai.reasoning.observations import ObservationSet
 from app.ai.reasoning.perspectives import Perspective, PlayerPrivatePerspective
@@ -58,6 +65,15 @@ VALUE_BELIEF_MOVED = 2.0
 VALUE_AGAINST_MAJORITY = 1.5
 VALUE_NEW_EVIDENCE = 1.0
 VALUE_STORY_COLLAPSED = 3.0
+
+# How much a human's structured argument is worth as soft evidence, before the
+# listener's traits and their trust in the speaker scale it.
+_ARGUMENT_WEIGHTS: dict[ConclusionType, tuple[float, str]] = {
+    ConclusionType.ACCUSATION: (0.9, "accusation"),
+    ConclusionType.DEFENCE: (-0.9, "accusation"),
+    ConclusionType.STRATEGIC_CLAIM: (0.4, "accusation"),
+    ConclusionType.CLOSED_WORLD_CHALLENGE: (0.5, "accusation"),
+}
 
 
 @dataclass
@@ -116,6 +132,11 @@ class ReasoningRuntime:
         # Measurement, not behaviour. The roadmap's targets are claims about
         # this layer, and a claim you cannot measure is a hope.
         self.human_messages_considered = 0
+        # What each seat last told the table. A vote is compared against this,
+        # never against another internal candidate.
+        self.stated_targets: dict[str, str | None] = {}
+        self.argument_log: list[ArgumentEvent] = []
+        self.reassessment_queue: list[str] = []
         self.correction_belief_deltas: list[float] = []
         self.stale_premise_turns = 0
         self._minority_checks = 0
@@ -186,7 +207,11 @@ class ReasoningRuntime:
         eligible = [pid for pid in candidates if pid not in self._observers]
         if not eligible:
             eligible = list(candidates)
-        salt = f"{seat.player_id}:vote"
+        # The *same* salt the belief state uses to pick `current_execution_target`.
+        # A different one here would let the stated candidate and the ballot
+        # diverge purely from tie-breaking, which reads as a change of mind that
+        # nobody made.
+        salt = f"{seat.player_id}:execution"
         scored = sorted(
             eligible,
             # Utility first; the per-seat tiebreak only separates candidates the
@@ -270,7 +295,7 @@ class ReasoningRuntime:
                 continue
             value = 0.0
             reasons: list[str] = []
-            if self._holds_unpublished_result(state, player_id):
+            if self.holds_unpublished_result(state, player_id):
                 value += VALUE_HAS_RESULT
                 reasons.append("未公開の能力結果を持つ")
             if player_id in planned_claims:
@@ -337,7 +362,13 @@ class ReasoningRuntime:
             counts[vote.target_id] = counts.get(vote.target_id, 0) + 1
         return max(sorted(counts), key=lambda pid: counts[pid]) if counts else None
 
-    def _holds_unpublished_result(self, state: GameState, player_id: str) -> bool:
+    def holds_unpublished_result(self, state: GameState, player_id: str) -> bool:
+        """Whether this seat is sitting on a result the table has not heard.
+
+        Public because the coordinator uses it to guarantee a duty speaker is
+        never dropped by the value ranking -- a seer who cannot get a word in
+        is a lost game, not a quiet morning.
+        """
         published = {
             (result.result_type, result.target_id)
             for result in PublicFactLedger(state).public_results()
@@ -359,10 +390,125 @@ class ReasoningRuntime:
         target = seat.belief.state.current_execution_target
         return bool(target and seat.belief.state.reasons_for(target))
 
+    # -- what a turn is allowed to say --
+
+    def discussion_decision(
+        self,
+        state: GameState,
+        player_id: str,
+        *,
+        pending_question: bool = False,
+        under_pressure: bool = False,
+    ) -> DiscussionDecision:
+        """Fix this turn's conclusions before any wording exists.
+
+        The model receives this and renders it. Letting it re-derive the target
+        is what allowed a day of arguing for one name and a ballot for another.
+        """
+        self.refresh(state)
+        seat = self.seats[player_id]
+        belief = seat.belief.state
+        target = belief.current_execution_target
+        supporting = tuple(
+            record.explanation
+            for record in seat.belief.active_evidence()
+            if target is not None and record.evidence_id in belief.reasons_for(target)
+        )[:3]
+        counter = tuple(
+            record.explanation
+            for record in seat.belief.active_evidence()
+            if record.subject_id == target and record.weight < 0
+        )[:2]
+        rank = self.top_rank(player_id)
+        return DiscussionDecision(
+            speaker_id=player_id,
+            execution_target=target,
+            alternative_target=belief.alternative_target,
+            target_confidence_band=rank.value if rank is not None else "unranked",
+            supporting_evidence=supporting,
+            counter_evidence=counter,
+            belief_changes=self._belief_changes(seat),
+            strongest_countercase=self._countercase(seat, target),
+            public_story_status=(
+                seat.deception.status.value if seat.deception is not None else None
+            ),
+            speech_goal=self._speech_goal(
+                state,
+                seat,
+                pending_question=pending_question,
+                under_pressure=under_pressure,
+            ),
+        )
+
+    def _belief_changes(self, seat: SeatReasoning) -> tuple[BeliefChange, ...]:
+        current = seat.belief.state.public_suspicion_scores
+        changes = []
+        for subject, before in sorted(seat.last_scores.items()):
+            after = current.get(subject, 0.0)
+            if abs(after - before) <= 0.5:
+                continue
+            reasons = seat.belief.state.reasons_for(subject)
+            explanation = next(
+                (
+                    record.explanation
+                    for record in seat.belief.active_evidence()
+                    if record.evidence_id in reasons
+                ),
+                "根拠が更新された",
+            )
+            changes.append(
+                BeliefChange(
+                    subject_id=subject, before=before, after=after, reason=explanation
+                )
+            )
+        return tuple(changes[:3])
+
+    def _countercase(self, seat: SeatReasoning, target: str | None) -> str:
+        if target is None:
+            return ""
+        alternative = seat.belief.state.alternative_target
+        if alternative is None:
+            return f"{target}を疑う独立した根拠がまだ薄い。"
+        return f"{alternative}の方が疑わしいという見方も残っている。"
+
+    def _speech_goal(
+        self,
+        state: GameState,
+        seat: SeatReasoning,
+        *,
+        pending_question: bool,
+        under_pressure: bool,
+    ) -> SpeechGoal:
+        if seat.deception is not None and seat.deception.status is StoryStatus.COLLAPSED:
+            return SpeechGoal.RECOVER_STORY
+        if self.holds_unpublished_result(state, seat.player_id):
+            return SpeechGoal.PUBLISH_RESULT
+        if pending_question:
+            return SpeechGoal.ANSWER_QUESTION
+        if under_pressure:
+            return SpeechGoal.DEFEND
+        if self._belief_moved(seat):
+            return SpeechGoal.REASSESS
+        if seat.belief.state.current_execution_target is not None:
+            return SpeechGoal.PRESS_CANDIDATE
+        return SpeechGoal.OBSERVE
+
+    def record_stated_target(self, player_id: str, target: str | None) -> None:
+        """Remember what a seat told the table, so the ballot is checked against
+        the statement rather than against another internal number."""
+        self.stated_targets[player_id] = target
+
+    def stated_target(self, player_id: str) -> str | None:
+        return self.stated_targets.get(player_id)
+
     # -- human input --
 
     def apply_human_message(
-        self, state: GameState, speaker_id: str, text: str
+        self,
+        state: GameState,
+        speaker_id: str,
+        text: str,
+        source_message_id: str = "",
     ) -> list[CorrectionOutcome]:
         """Match a human message against the record, once, for the whole table.
 
@@ -372,7 +518,11 @@ class ReasoningRuntime:
         """
         ledger = PublicFactLedger(state)
         self.human_messages_considered += 1
-        corrections = parse_fact_corrections(text, ledger, speaker_id)
+        argument = parse_argument(text, ledger, speaker_id, source_message_id)
+        if argument is not None:
+            self.argument_log.append(argument)
+            self._apply_argument(argument, ledger)
+        corrections = list(argument.factual_claims) if argument is not None else []
         outcomes: list[CorrectionOutcome] = []
         for correction in corrections:
             for seat in self.seats.values():
@@ -390,6 +540,56 @@ class ReasoningRuntime:
                     outcomes.append(outcome)
         self.correction_log.extend(outcomes)
         return outcomes
+
+    def _apply_argument(self, argument: ArgumentEvent, ledger: PublicFactLedger) -> None:
+        """Let every seat weigh the same argument on its own terms.
+
+        Facts are corrected identically for everyone -- the record is the record.
+        A *strategic* claim is advice, and how persuasive it is depends on who
+        said it and who is listening, so it enters as ordinary soft evidence and
+        each seat's traits and trust do the rest.
+        """
+        subject = argument.conclusion_target_id
+        if subject is None or argument.conclusion_type is ConclusionType.FACT_CORRECTION:
+            return
+        weight, category = _ARGUMENT_WEIGHTS.get(
+            argument.conclusion_type, (0.0, "accusation")
+        )
+        if weight == 0.0:
+            return
+        for seat in self.seats.values():
+            if seat.player_id == argument.speaker_id:
+                continue
+            trust = seat.belief.state.source_trust.get(argument.speaker_id, 0.0)
+            scaled = weight * argument.rhetorical_strength * (1.0 + 0.5 * trust)
+            seat.belief.add_evidence(
+                EvidenceRecord(
+                    evidence_id=f"{argument.argument_id}:{subject}",
+                    subject_id=subject,
+                    category=category,
+                    source_event_ids=(
+                        argument.source_message_id or argument.argument_id,
+                    ),
+                    weight=scaled,
+                    explanation=(
+                        f"{argument.speaker_id}の主張"
+                        f"({argument.conclusion_type.value}): {argument.premises[0].text}"
+                        if argument.premises
+                        else f"{argument.speaker_id}の主張"
+                    ),
+                )
+            )
+            seat.belief.recompute(ledger)
+
+    def queue_reassessment_speakers(self, player_ids: Sequence[str]) -> None:
+        """Seats whose reasons were withdrawn owe the table an explanation."""
+        for player_id in player_ids:
+            if player_id in self.seats and player_id not in self.reassessment_queue:
+                self.reassessment_queue.append(player_id)
+
+    def take_reassessment_speakers(self) -> list[str]:
+        queued, self.reassessment_queue = list(self.reassessment_queue), []
+        return queued
 
     def seats_that_moved(self, outcomes: Sequence[CorrectionOutcome]) -> list[str]:
         """Which AIs actually had a reason withdrawn -- the ones worth hearing from."""
