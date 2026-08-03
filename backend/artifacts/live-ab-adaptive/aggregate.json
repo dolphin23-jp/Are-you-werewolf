@@ -1,0 +1,207 @@
+{
+  "games": [
+    {
+      "seed": 11,
+      "engine": "v2",
+      "game_id": "live-11-v2",
+      "provider": "luna",
+      "model": "gpt-5.6-luna",
+      "days": 9,
+      "llm_requests": 119,
+      "http_requests": 127,
+      "tokens": {
+        "prompt": 748855,
+        "completion": 179657,
+        "total": 928512
+      },
+      "operational_metrics": {
+        "total_calls": 119,
+        "http_requests": 127,
+        "success_rate": 1.0,
+        "parse_path_counts": {
+          "strict_schema": 0,
+          "json_object": 119,
+          "permissive": 0,
+          "failed": 0
+        },
+        "strict_schema_rate": 0.0,
+        "strict_schema_failures": 119,
+        "json_object_successes": 119,
+        "complete_failures": 0,
+        "retry_calls": 7,
+        "finish_reason_counts": {
+          "stop": 119
+        },
+        "truncated_calls": 0,
+        "truncated_failure_rate": 0.0,
+        "reasoning_tokens": 81343,
+        "reasoning_token_share": 0.4527683307636218,
+        "latency_seconds": {
+          "mean": 14.451,
+          "p50": 13.185,
+          "p95": 26.83,
+          "max": 47.413
+        },
+        "by_schema": {
+          "DiscussionOutput": {
+            "calls": 111,
+            "success_rate": 1.0,
+            "mean_latency_seconds": 15.138
+          },
+          "WolfChatOutput": {
+            "calls": 8,
+            "success_rate": 1.0,
+            "mean_latency_seconds": 4.92
+          }
+        },
+        "errors": [],
+        "discussion_generation_attempts": 0,
+        "discussion_skips": 0,
+        "discussion_skip_rate": 0.0,
+        "total_game_wall_time": 1742.712582629,
+        "time_per_game_day": 193.63473140322222,
+        "time_per_public_utterance": 15.700113357018019,
+        "time_waiting_for_llm": 1719.660487160001,
+        "time_spent_in_solver": 17.117325429011828,
+        "solver_query_count": 22790,
+        "solver_cache_hit_rate": 0.0,
+        "tokens": {
+          "prompt": 748855,
+          "completion": 179657,
+          "total": 928512
+        },
+        "estimated_cost": 0.0,
+        "pricing_supplied": false
+      },
+      "dead_target_selections": 0,
+      "public_fact_flips": 0,
+      "vote_history_misreads": 0,
+      "vote_plan_mismatches": 16,
+      "timeline_conflicts": [
+        "4日目に処刑されたのはp9であり、p14が霊媒結果を主張しているp8ではありません。",
+        "4日目に処刑されたのはp9であり、p7が霊媒結果を主張しているp12ではありません。",
+        "4日目に処刑されたのはp9であり、p7が霊媒結果を主張しているp3ではありません。",
+        "4日目に処刑されたのはp9であり、p7が霊媒結果を主張しているp8ではありません。",
+        "p12は1日目に死亡しており、2日目の夜に占うことはできません。",
+        "p8は2日目の夜についてp12とp14の2件の占い結果を出しています。占いは一晩に1人だけです。",
+        "p8は2日目の夜についてp12とp9の2件の占い結果を出しています。占いは一晩に1人だけです。"
+      ],
+      "solver_query_count": 22790,
+      "solver_cache_hit_rate": 0.0,
+      "time_spent_in_solver": 17.117325,
+      "human_messages_considered": 0,
+      "seats_considering_each_human_message": 0.0,
+      "corrections_heard": 0,
+      "corrections_applied": 0,
+      "mean_belief_delta_after_correction": 0.0,
+      "stale_premise_turns": 0,
+      "vote_citations_heard": 1,
+      "inaccurate_vote_citations": 0,
+      "minority_opinion_persistence": 0.629,
+      "opinion_spread": 0.625,
+      "target_distribution_by_profile": {
+        "impulsive": {
+          "p4": 2,
+          "p0": 1
+        },
+        "stubborn": {
+          "p16": 2
+        },
+        "cautious": {
+          "p0": 1,
+          "p16": 2
+        },
+        "conformist": {
+          "p4": 2,
+          "p16": 1
+        },
+        "sceptic": {
+          "p0": 1,
+          "p16": 1
+        },
+        "evidence_driven": {
+          "p0": 2,
+          "p4": 1
+        }
+      },
+      "transcript": "artifacts/live-ab-adaptive/11-v2-transcript.json",
+      "reasoning_quality": {
+        "decision_count": 111,
+        "vote_count": 55,
+        "dead_target_selection_count": 0,
+        "invalid_action_target_count": 0,
+        "public_fact_flip_count": 0,
+        "vote_history_fabrication_count": 0,
+        "private_evidence_exposed_count": 0,
+        "team_private_evidence_exposed_count": 0,
+        "displayed_target_mismatch_count": 0,
+        "missing_required_result_count": 0,
+        "duplicate_required_result_count": 0,
+        "stale_evidence_used_in_brief_count": 0,
+        "stale_evidence_cited_publicly_count": 0,
+        "stale_evidence_attempt_count": 0,
+        "stale_evidence_blocked_count": 0,
+        "stale_evidence_publicly_emitted_count": 0,
+        "justified_vote_change_count": 9,
+        "unexplained_vote_change_count": 2,
+        "wolf_ally_vote_count": 0,
+        "planned_wolf_ally_vote_count": 0,
+        "unplanned_wolf_ally_vote_count": 0,
+        "illegal_timeline_claim_count": 1,
+        "duplicate_night_action_count": 0,
+        "correction_messages_heard": 0,
+        "corrections_confirmed": 0,
+        "corrections_refuted": 0,
+        "corrections_unverifiable": 0,
+        "confirmed_corrections_with_effect": 0,
+        "seat_evidence_retractions": 0,
+        "affected_seat_count": 0,
+        "mean_belief_delta_per_affected_seat": 0.0,
+        "median_belief_delta_per_affected_seat": 0.0,
+        "vote_change_rate": 0.2,
+        "unexplained_vote_change_rate": 0.03636363636363636
+      }
+    }
+  ],
+  "stages": {
+    "stage_a_v2_smoke": {
+      "status": "passed",
+      "game_ids": [
+        "live-11-v2"
+      ],
+      "stop_reason": "",
+      "updated_at": "2026-08-03T16:52:39.182880+00:00"
+    },
+    "stage_b_paired_smoke": {
+      "status": "pending",
+      "game_ids": [
+        "live-11-v2"
+      ],
+      "stop_reason": "",
+      "updated_at": "2026-08-03T16:52:39.183108+00:00"
+    },
+    "stage_c_small_evaluation": {
+      "status": "pending",
+      "game_ids": [],
+      "stop_reason": "",
+      "updated_at": "2026-08-03T16:52:39.183114+00:00"
+    }
+  },
+  "http_requests": 127,
+  "estimated_cost": 0.3653594,
+  "budget": {
+    "max_requests": 4000,
+    "used_requests": 127,
+    "max_estimated_cost": 5.0,
+    "input_price_per_million": 0.2,
+    "output_price_per_million": 1.2,
+    "prompt_tokens": 748855,
+    "completion_tokens": 179657,
+    "estimated_cost": 0.3653594,
+    "pricing_supplied": true
+  },
+  "release_decision": "fail",
+  "release_reasons": [
+    "unexplained_vote_change_count"
+  ]
+}
