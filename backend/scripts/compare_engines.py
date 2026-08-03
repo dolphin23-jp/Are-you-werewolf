@@ -28,6 +28,8 @@ from app.ai.schemas import DiscussionOutput
 from app.engine.game import GameController, PlayerSpec
 from app.engine.phases import Phase
 from app.engine.roles import RoleName
+from app.engine.state import DeathCause
+from app.eval.reasoning_analyzer import ReasoningTranscriptAnalyzer
 from app.eval.transcript import TranscriptRecorder
 
 MAX_LOOPS = 150
@@ -52,6 +54,11 @@ class EngineRun:
     opinion_spread: list[float] = field(default_factory=list)
     target_distribution_by_profile: dict[str, dict[str, int]] = field(default_factory=dict)
     reasoning_metrics: dict[str, Any] = field(default_factory=dict)
+    winner: str | None = None
+    executions: list[str] = field(default_factory=list)
+    role_survival_days: dict[str, list[int]] = field(default_factory=dict)
+    public_utterances: int = 0
+    reasoning_quality: dict[str, Any] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -67,6 +74,11 @@ class EngineRun:
                 self.vote_plan_mismatches / max(self.votes_cast, 1), 3
             ),
             "days": self.days,
+            "winner": self.winner,
+            "executions": self.executions,
+            "role_survival_days": self.role_survival_days,
+            "public_utterances": self.public_utterances,
+            "reasoning_quality": self.reasoning_quality,
             "mean_top_candidate_concentration": _mean(self.top_candidate_concentration),
             "mean_opinion_spread": _mean(self.opinion_spread),
             "target_distribution_by_profile": self.target_distribution_by_profile,
@@ -79,10 +91,7 @@ def _mean(values: list[float]) -> float:
 
 
 def _specs() -> list[PlayerSpec]:
-    return [
-        PlayerSpec(player_id=f"p{i}", name=f"Player{i}", is_human=(i == 0))
-        for i in range(17)
-    ]
+    return [PlayerSpec(player_id=f"p{i}", name=f"Player{i}", is_human=(i == 0)) for i in range(17)]
 
 
 async def play(engine: str, seed: int) -> EngineRun:
@@ -94,14 +103,17 @@ async def play(engine: str, seed: int) -> EngineRun:
     # own sentences into the count of messages the AIs "considered".
     ai_ids = [f"p{i}" for i in range(1, 17)]
     reasoning = (
-        ReasoningRuntime(controller.state, ai_ids, seed=seed) if engine == "v2" else None
+        ReasoningRuntime(controller.state, ai_ids, seed=seed, metrics=metrics)
+        if engine == "v2"
+        else None
     )
+    recorder = TranscriptRecorder()
     coordinator = AICoordinator(
         controller.state,
         ai_ids,
         provider,
         seed=seed,
-        recorder=TranscriptRecorder(),
+        recorder=recorder,
         reasoning=reasoning,
         pacing_scale=0.0,
     )
@@ -144,6 +156,7 @@ async def play(engine: str, seed: int) -> EngineRun:
             break
 
     if reasoning is not None:
+        reasoning.flush_metrics()
         run.reasoning_metrics = dict(reasoning.metrics())
         run.reasoning_metrics.pop("target_distribution_by_profile", None)
     summary = metrics.summary()
@@ -162,6 +175,22 @@ async def play(engine: str, seed: int) -> EngineRun:
     run.vote_plan_mismatches = len(coordinator.validation.vote_plan_mismatches)
     run.votes_cast = len(controller.state.vote_records)
     run.top_candidate_concentration = _concentration(controller)
+    run.winner = controller.state.winner.value if controller.state.winner else None
+    run.executions = [
+        record.player_id
+        for record in controller.state.death_records
+        if record.cause is DeathCause.EXECUTED
+    ]
+    for player in controller.state.players.values():
+        survived = player.death_day if player.death_day is not None else controller.state.day
+        run.role_survival_days.setdefault(player.role.value, []).append(survived)
+    recorder.transcript.metrics = {
+        **summary,
+        **(reasoning.metrics() if reasoning is not None else {}),
+    }
+    transcript = recorder.finalize(controller.get_debug_view())
+    run.public_utterances = len(transcript.by_kind("discussion"))
+    run.reasoning_quality = ReasoningTranscriptAnalyzer().analyze(transcript).to_dict()
     return run
 
 
@@ -202,9 +231,7 @@ def _human_line(controller: GameController, rng: random.Random) -> str:
         return "様子を見ます。"
     recorded = ledger.vote_of(HUMAN_ID, state.day - 1) if state.day > 1 else None
     if recorded is not None:
-        wrong = next(
-            (pid for pid in others if pid != recorded.target_id), recorded.target_id
-        )
+        wrong = next((pid for pid in others if pid != recorded.target_id), recorded.target_id)
         if wrong != recorded.target_id:
             return (
                 f"{state.day - 1}日目、私は{wrong}には投票していません。"
@@ -227,11 +254,7 @@ def _human_night(controller: GameController, rng: random.Random) -> None:
         controller.submit_night_action(HUMAN_ID, "divine", rng.choice(candidates))
     elif state.day > 0 and human.role is RoleName.HUNTER:
         controller.submit_night_action(HUMAN_ID, "guard", rng.choice(candidates))
-    elif (
-        state.day > 0
-        and human.role is RoleName.WEREWOLF
-        and controller.alpha_wolf_id == HUMAN_ID
-    ):
+    elif state.day > 0 and human.role is RoleName.WEREWOLF and controller.alpha_wolf_id == HUMAN_ID:
         prey = [pid for pid in candidates if state.players[pid].role is not RoleName.WEREWOLF]
         if prey:
             controller.submit_night_action(HUMAN_ID, "attack", rng.choice(prey))
@@ -242,11 +265,7 @@ def _concentration(controller: GameController) -> list[float]:
     for vote in controller.state.vote_records:
         bucket = per_day.setdefault(vote.day, {})
         bucket[vote.target_id] = bucket.get(vote.target_id, 0) + 1
-    return [
-        max(counts.values()) / sum(counts.values())
-        for counts in per_day.values()
-        if counts
-    ]
+    return [max(counts.values()) / sum(counts.values()) for counts in per_day.values() if counts]
 
 
 class _Session:

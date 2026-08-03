@@ -33,6 +33,7 @@ class SolverCache:
         self._entries: OrderedDict[QueryKey, Any] = OrderedDict()
         self.hits = 0
         self.misses = 0
+        self.query_seconds = 0.0
 
     def get(self, key: QueryKey) -> Any | None:
         if key not in self._entries:
@@ -55,3 +56,4 @@ class SolverCache:
         self._entries.clear()
         self.hits = 0
         self.misses = 0
+        self.query_seconds = 0.0

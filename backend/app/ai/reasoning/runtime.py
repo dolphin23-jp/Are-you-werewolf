@@ -17,8 +17,9 @@ from __future__ import annotations
 
 import random
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
+from app.ai.metrics import MetricsCollector
 from app.ai.reasoning.belief import (
     BeliefEngine,
     CognitiveTraits,
@@ -122,11 +123,16 @@ class ReasoningRuntime:
         *,
         seed: int | None = None,
         observer_player_ids: Sequence[str] = (),
+        metrics: MetricsCollector | None = None,
     ) -> None:
         self._seed = seed
         self._rng = random.Random(f"{seed}:reasoning-runtime")
         self._observers = set(observer_player_ids)
         self._cache = SolverCache()
+        self._metrics_collector = metrics
+        self._reported_solver_queries = 0
+        self._reported_solver_hits = 0
+        self._reported_solver_seconds = 0.0
         self._traits = assign_traits(list(ai_player_ids), seed=seed)
         self.seats: dict[str, SeatReasoning] = {}
         for player_id in ai_player_ids:
@@ -288,7 +294,7 @@ class ReasoningRuntime:
             return f"{target_id}が現時点で最も情報が少なく、他に有力な根拠がない。"
         explanations = [
             record.explanation
-            for record in seat.belief.active_evidence()
+            for record in seat.belief.public_argument_evidence_for(target_id)
             if record.evidence_id in reasons
         ]
         return "".join(explanations[:2])
@@ -481,12 +487,12 @@ class ReasoningRuntime:
         self._count_stale_premises(seat, target)
         supporting = tuple(
             record.explanation
-            for record in seat.belief.active_evidence()
+            for record in seat.belief.public_argument_evidence_for(target)
             if target is not None and record.evidence_id in belief.reasons_for(target)
         )[:3]
         counter = tuple(
             record.explanation
-            for record in seat.belief.active_evidence()
+            for record in seat.belief.public_argument_evidence_for(target)
             if record.subject_id == target and record.weight < 0
         )[:2]
         rank = self.top_rank(player_id)
@@ -608,8 +614,13 @@ class ReasoningRuntime:
                 )
                 if delta:
                     self.correction_belief_deltas.append(delta)
-                if outcome.changed_anything or not outcome.verdict.is_confirmed:
-                    outcomes.append(outcome)
+                outcome = replace(
+                    outcome,
+                    seat_id=seat.player_id,
+                    correction_id=correction.correction_id,
+                    belief_delta=delta,
+                )
+                outcomes.append(outcome)
         self.correction_log.extend(outcomes)
         return outcomes
 
@@ -792,6 +803,10 @@ class ReasoningRuntime:
     def metrics(self) -> dict[str, float | int | dict[str, dict[str, int]]]:
         """Everything the evaluation harness needs from this layer."""
         return {
+            "solver_query_count": self._cache.hits + self._cache.misses,
+            "solver_cache_hit_rate": self._cache.hits
+            / max(self._cache.hits + self._cache.misses, 1),
+            "time_spent_in_solver": round(self._cache.query_seconds, 6),
             "human_messages_considered": self.human_messages_considered,
             "seats_considering_each_human_message": (
                 round(self._seat_evaluations / self.human_messages_considered, 2)
@@ -836,3 +851,22 @@ class ReasoningRuntime:
         if total == 0:
             return 0.0
         return 1.0 - max(counts.values()) / total
+
+    def flush_metrics(self) -> None:
+        """Publish solver deltas once into the shared operational collector."""
+        if self._metrics_collector is None:
+            return
+        queries = self._cache.hits + self._cache.misses
+        with self._metrics_collector._lock:
+            self._metrics_collector.solver_query_count += (
+                queries - self._reported_solver_queries
+            )
+            self._metrics_collector.solver_cache_hits += (
+                self._cache.hits - self._reported_solver_hits
+            )
+            self._metrics_collector.time_spent_in_solver += (
+                self._cache.query_seconds - self._reported_solver_seconds
+            )
+        self._reported_solver_queries = queries
+        self._reported_solver_hits = self._cache.hits
+        self._reported_solver_seconds = self._cache.query_seconds

@@ -75,6 +75,52 @@ _CACHE_LIMIT = 64
 _conflict_cache: dict[str, tuple[TimelineConflict, ...]] = {}
 
 
+def _execution_day(observations: ObservationSet, player_id: str) -> int | None:
+    return next((e.day for e in observations.executions if e.player_id == player_id), None)
+
+
+def _night_death(observations: ObservationSet, player_id: str) -> int | None:
+    return next((d.night for d in observations.night_deaths if d.player_id == player_id), None)
+
+
+def can_act_on_night(observations: ObservationSet, player_id: str, night: int) -> bool:
+    """Whether a submitted action is legal, using public timing only.
+
+    Execution precedes that day's night; an overnight death is simultaneous
+    with already submitted actions and therefore only prevents later nights.
+    """
+    execution = _execution_day(observations, player_id)
+    death = _night_death(observations, player_id)
+    return not (
+        (execution is not None and execution <= night)
+        or (death is not None and death < night)
+    )
+
+
+def can_be_targeted_on_night(observations: ObservationSet, player_id: str, night: int) -> bool:
+    if night == 0 and player_id == observations.first_victim_id:
+        return False
+    return can_act_on_night(observations, player_id, night)
+
+
+def could_publish_on_day(observations: ObservationSet, player_id: str, day: int) -> bool:
+    execution = _execution_day(observations, player_id)
+    death = _night_death(observations, player_id)
+    return not ((execution is not None and execution < day) or (death is not None and death < day))
+
+
+def disclosable_result_nights(
+    observations: ObservationSet, player_id: str, as_of_day: int
+) -> frozenset[int]:
+    """Result nights whose owner lived to a following public discussion."""
+    return frozenset(
+        night
+        for night in range(max(0, as_of_day))
+        if can_act_on_night(observations, player_id, night)
+        and could_publish_on_day(observations, player_id, night + 1)
+    )
+
+
 def find_timeline_conflicts(
     observations: ObservationSet,
 ) -> tuple[TimelineConflict, ...]:
@@ -160,7 +206,7 @@ def _seer_conflicts(
         )
     seer_nights.setdefault(night, verdict.target_id)
 
-    if night >= observations.day:
+    if night >= verdict.day:
         conflicts.append(
             _conflict(
                 verdict,
@@ -171,7 +217,7 @@ def _seer_conflicts(
         )
 
     own_death = observations.death_day_of(claimant)
-    if own_death is not None and night > own_death:
+    if not can_act_on_night(observations, claimant, night):
         conflicts.append(
             _conflict(
                 verdict,
@@ -183,7 +229,7 @@ def _seer_conflicts(
         )
 
     target_death = observations.death_day_of(verdict.target_id)
-    if target_death is not None and night > target_death:
+    if not can_be_targeted_on_night(observations, verdict.target_id, night):
         conflicts.append(
             _conflict(
                 verdict,
@@ -233,6 +279,10 @@ def _medium_conflicts(
 __all__ = [
     "ConflictKind",
     "TimelineConflict",
+    "can_act_on_night",
+    "can_be_targeted_on_night",
+    "could_publish_on_day",
+    "disclosable_result_nights",
     "conflicts_by_claimant",
     "find_timeline_conflicts",
 ]

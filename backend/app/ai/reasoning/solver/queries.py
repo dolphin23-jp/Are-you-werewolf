@@ -8,6 +8,7 @@ constraints to a backend, and memoizes every question. It satisfies
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from time import perf_counter
 from typing import TypeVar, cast
 
 from app.ai.reasoning.observations import ObservationSet
@@ -216,7 +217,9 @@ class RoleSolver:
         if hit is not None:
             self._stats.cache_hits += 1
             return cast("_T", hit)
+        started = perf_counter()
         value = compute()
+        self._cache.query_seconds += perf_counter() - started
         self._cache.put(key, value)
         return value
 

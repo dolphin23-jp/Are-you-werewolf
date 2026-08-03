@@ -43,6 +43,7 @@ from pydantic import ValidationError
 from app.ai.dialect import EndpointDialect
 from app.ai.metrics import CallRecord, MetricsCollector, ParsePath
 from app.ai.provider.base import Message, SchemaT
+from app.ai.provider.budget import EvaluationBudget
 
 _FENCED_JSON_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
 
@@ -87,6 +88,11 @@ class LunaOpenAIProvider:
         # Learned from the endpoint's own rejections on the first call, then
         # reused for the rest of the process.
         self._dialect = EndpointDialect()
+        self._request_budget: EvaluationBudget | None = None
+
+    def set_request_budget(self, budget: EvaluationBudget) -> None:
+        """Attach the manual evaluation budget at the actual HTTP boundary."""
+        self._request_budget = budget
 
     @property
     def dialect(self) -> EndpointDialect:
@@ -215,6 +221,8 @@ class LunaOpenAIProvider:
             }
             self._dialect.apply(kwargs, max_tokens=max_tokens, temperature=temperature)
             try:
+                if self._request_budget is not None:
+                    self._request_budget.claim_request()
                 requests += 1
                 return await self._client.chat.completions.create(**kwargs), requests
             except Exception as exc:
@@ -248,6 +256,8 @@ class LunaOpenAIProvider:
             return _Attempt(error=_describe(_root_error(exc)), http_requests=_request_count(exc))
 
         prompt_tokens, completion_tokens = _usage(response)
+        if self._request_budget is not None:
+            self._request_budget.record_usage(prompt_tokens, completion_tokens)
         content = response.choices[0].message.content if response.choices else None
         parsed = _parse_strict(content, response_schema)
         return _Attempt(
@@ -274,6 +284,8 @@ class LunaOpenAIProvider:
             return _Attempt(error=_describe(_root_error(exc)), http_requests=_request_count(exc))
 
         prompt_tokens, completion_tokens = _usage(response)
+        if self._request_budget is not None:
+            self._request_budget.record_usage(prompt_tokens, completion_tokens)
         content = response.choices[0].message.content if response.choices else None
 
         # Distinguish "the body was already clean JSON" from "we had to dig

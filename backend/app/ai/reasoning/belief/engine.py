@@ -130,6 +130,9 @@ class CorrectionOutcome:
     verdict: CorrectionVerdict
     invalidated_evidence_ids: tuple[str, ...] = ()
     changed_subjects: tuple[str, ...] = ()
+    seat_id: str = ""
+    correction_id: str = ""
+    belief_delta: float = 0.0
 
     @property
     def changed_anything(self) -> bool:
@@ -175,10 +178,25 @@ class BeliefEngine:
     def active_evidence(self) -> tuple[EvidenceRecord, ...]:
         return tuple(record for record in self._evidence.values() if record.active)
 
+    def public_argument_evidence_for(
+        self, subject_id: str | None = None
+    ) -> tuple[EvidenceRecord, ...]:
+        """Only reasons safe to put into speech; private certainty stays usable internally."""
+        from app.ai.reasoning.belief.state import EvidenceVisibility
+
+        return tuple(record for record in self.active_evidence()
+                     if record.visibility is EvidenceVisibility.PUBLIC_ARGUMENT
+                     and (subject_id is None or record.subject_id == subject_id))
+
     def add_evidence(self, record: EvidenceRecord) -> EvidenceRecord:
         """Register a reason. Re-adding an id keeps the first, so re-observing
         the same public fact does not double its weight."""
-        return self._evidence.setdefault(record.evidence_id, record)
+        existing = self._evidence.get(record.evidence_id)
+        if existing is None or not existing.active:
+            self._evidence[record.evidence_id] = record
+        elif existing.weight != record.weight:
+            self._evidence[record.evidence_id] = existing.reweighed(record.weight)
+        return self._evidence[record.evidence_id]
 
     def invalidate_source_facts(
         self, source_ids: Sequence[str], reason: str = ""
