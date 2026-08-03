@@ -91,6 +91,20 @@ class ReasoningTranscriptAnalyzer:
             for correction in corrections
             for delta in correction.belief_delta_by_seat.values()
         ]
+        public_results: dict[tuple[str, str, int | None], set[bool]] = {}
+        for utterance in transcript.utterances:
+            for result in utterance.public_results:
+                key = (
+                    utterance.player_id,
+                    str(result.get("target_id", "")),
+                    result.get("referenced_day"),
+                )
+                public_results.setdefault(key, set()).add(bool(result.get("is_werewolf")))
+        night_keys = [
+            (utterance.player_id, utterance.day, utterance.kind)
+            for utterance in transcript.utterances
+            if utterance.kind == "night_action"
+        ]
         return ReasoningQualityReport(
             decision_count=len(decisions),
             vote_count=len(changes),
@@ -114,6 +128,8 @@ class ReasoningTranscriptAnalyzer:
             duplicate_required_result_count=sum(
                 len(record.duplicate_result_ids) for record in publications
             ),
+            public_fact_flip_count=sum(len(colours) > 1 for colours in public_results.values()),
+            duplicate_night_action_count=len(night_keys) - len(set(night_keys)),
             stale_evidence_used_in_brief_count=stale_attempts,
             stale_evidence_cited_publicly_count=stale_emitted,
             stale_evidence_attempt_count=stale_attempts,

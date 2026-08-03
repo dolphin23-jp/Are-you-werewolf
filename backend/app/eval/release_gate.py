@@ -54,6 +54,9 @@ class ReleaseGate:
         *,
         live_pairs: int,
         mock_llm_reduction: float | None = None,
+        transcript_schema_version: int = 2,
+        human_review_complete: bool = False,
+        operational_complete: bool = False,
     ) -> ReleaseGateResult:
         failures = [field for field in HARD_FAILURE_FIELDS if getattr(report, field) > 0]
         reliability = self.config.get("reliability", {})
@@ -72,10 +75,16 @@ class ReleaseGate:
             failures.append("mock_logical_call_reduction")
         if failures:
             return ReleaseGateResult(ReleaseDecision.FAIL, tuple(failures))
+        incomplete: list[str] = []
+        if transcript_schema_version < 2:
+            incomplete.append("transcript_schema_version")
+        if not operational_complete:
+            incomplete.append("operational_metrics_missing")
+        if not human_review_complete:
+            incomplete.append("human_review_incomplete")
         minimum_pairs = self.config.get("qualification", {}).get("minimum_live_pairs", 2)
         if live_pairs < minimum_pairs:
-            return ReleaseGateResult(
-                ReleaseDecision.INCONCLUSIVE,
-                (f"live_pairs={live_pairs}; required={minimum_pairs}",),
-            )
+            incomplete.append(f"live_pairs={live_pairs}; required={minimum_pairs}")
+        if incomplete:
+            return ReleaseGateResult(ReleaseDecision.INCONCLUSIVE, tuple(incomplete))
         return ReleaseGateResult(ReleaseDecision.PASS, ())

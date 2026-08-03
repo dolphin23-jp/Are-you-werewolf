@@ -9,7 +9,9 @@ CONFIG = Path(__file__).parents[2] / "config" / "reasoning_release_gate.toml"
 def test_release_gate_fails_hard_error():
     gate = ReleaseGate.from_toml(CONFIG)
     result = gate.evaluate(
-        ReasoningQualityReport(private_evidence_exposed_count=1), {}, live_pairs=3,
+        ReasoningQualityReport(private_evidence_exposed_count=1),
+        {},
+        live_pairs=3,
         mock_llm_reduction=0.6,
     )
     assert result.decision is ReleaseDecision.FAIL
@@ -24,6 +26,11 @@ def test_release_gate_is_inconclusive_without_live_pairs():
 
 def test_release_gate_passes_only_qualified_live_evaluation():
     result = ReleaseGate.from_toml(CONFIG).evaluate(
-        ReasoningQualityReport(), {}, live_pairs=2, mock_llm_reduction=0.6
+        ReasoningQualityReport(),
+        {},
+        live_pairs=2,
+        mock_llm_reduction=0.6,
+        human_review_complete=True,
+        operational_complete=True,
     )
     assert result.decision is ReleaseDecision.PASS

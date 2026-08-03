@@ -10,6 +10,7 @@ next to the utterance, which is exactly what this captures.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+from dataclasses import replace as dataclass_replace
 from typing import Any
 
 
@@ -88,6 +89,7 @@ class Utterance:
 
 @dataclass
 class GameTranscript:
+    schema_version: int = 2
     game_id: str = ""
     seed: int | None = None
     provider: str = "unknown"
@@ -105,6 +107,8 @@ class GameTranscript:
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "schema_version": self.schema_version,
+            "game_id": self.game_id,
             "seed": self.seed,
             "provider": self.provider,
             "names": self.names,
@@ -121,6 +125,34 @@ class GameTranscript:
             ],
             "metrics": self.metrics,
         }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> GameTranscript:
+        """Restore an exported debug transcript for offline qualification."""
+        return cls(
+            schema_version=int(data.get("schema_version", 1)),
+            game_id=str(data.get("game_id", "")),
+            seed=data.get("seed"),
+            provider=str(data.get("provider", "unknown")),
+            names=dict(data.get("names", {})),
+            roles=dict(data.get("roles", {})),
+            teams=dict(data.get("teams", {})),
+            personalities=dict(data.get("personalities", {})),
+            deception=dict(data.get("deception", {})),
+            utterances=[Utterance(**item) for item in data.get("utterances", [])],
+            final_state=dict(data.get("final_state", {})),
+            decision_audits=[
+                DecisionAuditRecord(**item) for item in data.get("decision_audits", [])
+            ],
+            correction_audits=[
+                CorrectionAuditRecord(**item) for item in data.get("correction_audits", [])
+            ],
+            result_publication_audits=[
+                ResultPublicationAuditRecord(**item)
+                for item in data.get("result_publication_audits", [])
+            ],
+            metrics=dict(data.get("metrics", {})),
+        )
 
     def by_kind(self, kind: str) -> list[Utterance]:
         return [u for u in self.utterances if u.kind == kind]
@@ -156,6 +188,14 @@ class TranscriptRecorder:
 
     def record_decision_audit(self, record: DecisionAuditRecord) -> None:
         self.transcript.decision_audits.append(record)
+
+    def update_latest_decision(self, player_id: str, day: int, **changes: Any) -> None:
+        """Attach the accepted ballot to the decision that preceded it."""
+        for index in range(len(self.transcript.decision_audits) - 1, -1, -1):
+            record = self.transcript.decision_audits[index]
+            if record.player_id == player_id and record.day == day:
+                self.transcript.decision_audits[index] = dataclass_replace(record, **changes)
+                return
 
     def record_correction_audit(self, record: CorrectionAuditRecord) -> None:
         self.transcript.correction_audits.append(record)

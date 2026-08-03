@@ -33,6 +33,7 @@ import json
 import random
 import sys
 from pathlib import Path
+from time import perf_counter
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -88,6 +89,7 @@ def _human_night(controller: GameController, rng: random.Random) -> None:
 
 
 async def run(seed: int, transcript_path: Path | None, engine: str = "v2") -> dict[str, Any]:
+    started = perf_counter()
     settings = get_settings()
     if settings.werewolf_llm_provider == "mock":
         raise SystemExit(
@@ -142,6 +144,10 @@ async def run(seed: int, transcript_path: Path | None, engine: str = "v2") -> di
         else:
             break
 
+    metrics.total_game_wall_time = perf_counter() - started
+    metrics.game_days = controller.state.day
+    metrics.public_utterances = len(recorder.transcript.by_kind("discussion"))
+    metric_summary = metrics.summary()
     codes = coordinator.validation.codes()
     report: dict[str, Any] = {
         "seed": seed,
@@ -149,8 +155,10 @@ async def run(seed: int, transcript_path: Path | None, engine: str = "v2") -> di
         "provider": settings.werewolf_llm_provider,
         "model": settings.luna_model,
         "days": controller.state.day,
-        "llm_requests": metrics.summary().get("total_calls", 0),
-        "tokens": metrics.summary().get("tokens", {}),
+        "llm_requests": metric_summary.get("total_calls", 0),
+        "http_requests": metric_summary.get("http_requests", 0),
+        "tokens": metric_summary.get("tokens", {}),
+        "operational_metrics": metric_summary,
         # Must be zero against a live model exactly as against a mock.
         "dead_target_selections": sum(
             code.endswith("_dead") or code.endswith("target_invalid") for code in codes
