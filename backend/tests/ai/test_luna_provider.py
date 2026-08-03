@@ -12,7 +12,7 @@ from openai import APIStatusError
 
 from app.ai.metrics import MetricsCollector
 from app.ai.provider.base import Message
-from app.ai.provider.luna_openai import LunaOpenAIProvider
+from app.ai.provider.luna_openai import _REASONING_BUDGET_MARGIN, LunaOpenAIProvider
 from app.ai.schemas import VoteOutput
 
 
@@ -256,7 +256,9 @@ async def test_unrelated_bad_request_does_not_disable_strict_schema():
 @pytest.mark.asyncio
 async def test_truncated_response_is_reported_as_truncation_not_bad_json():
     """46% of the seed-11 calls failed as 'not parseable as JSON' with no way to
-    tell an output-budget problem from a prompting one."""
+    tell an output-budget problem from a prompting one. A model that truncates
+    at every budget it is given (rather than recovering on the one retry) still
+    has to end up reported as truncated, not as bad JSON."""
     metrics = MetricsCollector()
     provider = LunaOpenAIProvider(
         api_key="sk-test",
@@ -264,9 +266,11 @@ async def test_truncated_response_is_reported_as_truncation_not_bad_json():
         model="gpt-5.6-luna",
         metrics=metrics,
     )
+    provider._strict_schema_supported = False  # isolate from strict-schema probing
 
     async def fake_create(**kwargs):
-        # Cut off mid-object, exactly as an exhausted completion budget leaves it.
+        # Cut off mid-object, exactly as an exhausted completion budget leaves it,
+        # regardless of how large a budget this call was given.
         return _fake_response(
             '{"vote_target":"p1","rea',
             prompt_tokens=2700,
@@ -285,5 +289,119 @@ async def test_truncated_response_is_reported_as_truncation_not_bad_json():
     assert summary["finish_reason_counts"] == {"length": 1}
     assert summary["truncated_calls"] == 1
     assert summary["truncated_failure_rate"] == 1.0
+    # The one retry ran too, so the reported spend is both calls' cost, not
+    # just the first.
     assert summary["reasoning_tokens"] == 1520
     assert "cut off before the JSON closed" in summary["errors"][0]["error"]
+
+
+@pytest.mark.asyncio
+async def test_a_truncated_turn_is_retried_once_at_double_the_budget():
+    """The seed-11 run lost 46% of its turns to truncation and reported them as
+    plain failures. Given one more try at a larger budget, a turn that only
+    needed more room should complete instead of being thrown away."""
+    provider = _make_provider()
+    provider._strict_schema_supported = False
+    budgets: list[int] = []
+
+    async def fake_create(**kwargs):
+        budgets.append(kwargs["max_completion_tokens"])
+        if len(budgets) == 1:
+            return _fake_response(
+                None,
+                prompt_tokens=500,
+                completion_tokens=800,
+                finish_reason="length",
+                reasoning_tokens=800,
+            )
+        return _fake_response(
+            '{"vote_target":"p1","reason":"ok"}',
+            prompt_tokens=500,
+            completion_tokens=120,
+            finish_reason="stop",
+            reasoning_tokens=40,
+        )
+
+    provider._client.chat.completions.create = fake_create  # type: ignore[method-assign]
+    result = await provider.generate_structured(
+        system="sys", messages=[], response_schema=VoteOutput, max_tokens=800
+    )
+
+    assert result == VoteOutput(vote_target="p1", reason="ok")
+    assert budgets == [800, 1600]
+    assert provider.reasoning_overhead == 800
+
+
+@pytest.mark.asyncio
+async def test_a_retry_that_still_truncates_is_not_retried_again():
+    """Bounded: a model that never finishes is reported as failed, not chased
+    with an ever-larger budget."""
+    provider = _make_provider()
+    provider._strict_schema_supported = False
+    budgets: list[int] = []
+
+    async def fake_create(**kwargs):
+        budget = kwargs["max_completion_tokens"]
+        budgets.append(budget)
+        return _fake_response(
+            None,
+            prompt_tokens=500,
+            completion_tokens=budget,
+            finish_reason="length",
+            reasoning_tokens=budget,
+        )
+
+    provider._client.chat.completions.create = fake_create  # type: ignore[method-assign]
+    result = await provider.generate_structured(
+        system="sys", messages=[], response_schema=VoteOutput, max_tokens=800
+    )
+
+    assert result is None
+    assert budgets == [800, 1600]
+
+
+@pytest.mark.asyncio
+async def test_no_reasoning_history_sends_the_requested_budget_unchanged():
+    provider = _make_provider()
+    provider._strict_schema_supported = False
+    budgets: list[int] = []
+
+    async def fake_create(**kwargs):
+        budgets.append(kwargs["max_completion_tokens"])
+        return _fake_response('{"vote_target":"p1","reason":"ok"}')
+
+    provider._client.chat.completions.create = fake_create  # type: ignore[method-assign]
+    await provider.generate_structured(
+        system="sys", messages=[], response_schema=VoteOutput, max_tokens=800
+    )
+
+    assert budgets == [800]
+    assert provider.reasoning_overhead == 0
+
+
+@pytest.mark.asyncio
+async def test_learned_overhead_pads_a_later_turns_request_up_front():
+    """Once one truncated turn has taught the provider how much a real answer's
+    thinking costs, a later turn should not have to fail first to find out --
+    the padding is applied before the request is ever sent."""
+    provider = _make_provider()
+    provider._strict_schema_supported = False
+    provider._reasoning_overhead = 1400  # as if an earlier turn already taught it this
+    budgets: list[int] = []
+
+    async def fake_create(**kwargs):
+        budgets.append(kwargs["max_completion_tokens"])
+        return _fake_response(
+            '{"vote_target":"p1","reason":"ok"}',
+            prompt_tokens=500,
+            completion_tokens=300,
+            finish_reason="stop",
+            reasoning_tokens=300,
+        )
+
+    provider._client.chat.completions.create = fake_create  # type: ignore[method-assign]
+    await provider.generate_structured(
+        system="sys", messages=[], response_schema=VoteOutput, max_tokens=800
+    )
+
+    assert budgets == [800 + 1400 + _REASONING_BUDGET_MARGIN]

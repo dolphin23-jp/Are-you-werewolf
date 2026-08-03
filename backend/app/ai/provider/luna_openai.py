@@ -24,6 +24,13 @@ than assumes -- see `app/ai/dialect.py` -- and is defensive throughout:
   - `generate_structured` returns None (never raises) on total failure;
     `player_agent.py` is responsible for the retry/fallback-line/
     invalid-target safety nets built on top of this.
+  - A reasoning model bills its private thinking against the same
+    completion budget as the visible answer, so a budget sized without
+    that in mind runs out mid-object instead of producing a short answer.
+    The largest `reasoning_tokens` seen on any call is remembered and
+    added to every later request's budget (`_padded_max_tokens`); a call
+    that still truncates is retried once at double the budget before it
+    is counted as failed.
 
 When a `MetricsCollector` is attached, every logical call records which
 parse path actually worked, its real HTTP request count, the wall-clock
@@ -46,6 +53,11 @@ from app.ai.provider.base import Message, SchemaT
 from app.ai.provider.budget import EvaluationBudget
 
 _FENCED_JSON_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
+
+# Headroom reserved for the visible JSON on top of the learned reasoning
+# overhead below -- the overhead alone covers only what the thinking used
+# last time, not the structural cost of the answer that has to follow it.
+_REASONING_BUDGET_MARGIN = 200
 
 
 @dataclass
@@ -99,10 +111,31 @@ class LunaOpenAIProvider:
         # that merely came back malformed -- a model having a bad turn must not
         # cost the whole process its strict-schema path.
         self._strict_schema_supported: bool | None = None
+        # The largest `reasoning_tokens` this endpoint has spent on any call so
+        # far. A reasoning model bills its private thinking against the same
+        # completion budget as the visible answer, so a budget sized without
+        # this ran out mid-object on the seed-11 live run in 46% of calls, all
+        # of them finish_reason=length. Grows monotonically and is applied to
+        # every subsequent request before it is sent, so later turns do not
+        # have to fail first to find out how much room they need.
+        self._reasoning_overhead: int = 0
 
     @property
     def strict_schema_supported(self) -> bool | None:
         return self._strict_schema_supported
+
+    @property
+    def reasoning_overhead(self) -> int:
+        return self._reasoning_overhead
+
+    def _padded_max_tokens(self, max_tokens: int) -> int:
+        if self._reasoning_overhead == 0:
+            return max_tokens
+        return max_tokens + self._reasoning_overhead + _REASONING_BUDGET_MARGIN
+
+    def _learn_reasoning_overhead(self, reasoning_tokens: int) -> None:
+        if reasoning_tokens > self._reasoning_overhead:
+            self._reasoning_overhead = reasoning_tokens
 
     def set_request_budget(self, budget: EvaluationBudget) -> None:
         """Attach the manual evaluation budget at the actual HTTP boundary."""
@@ -137,11 +170,12 @@ class LunaOpenAIProvider:
         # again -- on the seed-11 live run that was 125 certain-fail 400s out
         # of 253 requests, doubling both the request count and the latency.
         modes = 1 if self._strict_schema_supported is False else 2
+        padded_max_tokens = self._padded_max_tokens(max_tokens)
 
         async with self._semaphore:
             if self._strict_schema_supported is not False:
                 strict = await self._try_strict_schema(
-                    openai_messages, response_schema, max_tokens, temperature
+                    openai_messages, response_schema, padded_max_tokens, temperature
                 )
                 prompt_tokens += strict.prompt_tokens
                 completion_tokens += strict.completion_tokens
@@ -149,6 +183,7 @@ class LunaOpenAIProvider:
                 last_error = strict.error
                 finish_reason = strict.finish_reason or finish_reason
                 reasoning_tokens += strict.reasoning_tokens
+                self._learn_reasoning_overhead(strict.reasoning_tokens)
                 if strict.strict_unsupported:
                     self._strict_schema_supported = False
                 if strict.result is not None:
@@ -168,7 +203,7 @@ class LunaOpenAIProvider:
                     return strict.result  # type: ignore[no-any-return]
 
             fallback = await self._try_json_object_mode(
-                openai_messages, response_schema, max_tokens, temperature
+                openai_messages, response_schema, padded_max_tokens, temperature
             )
             prompt_tokens += fallback.prompt_tokens
             completion_tokens += fallback.completion_tokens
@@ -316,6 +351,41 @@ class LunaOpenAIProvider:
         )
 
     async def _try_json_object_mode(
+        self,
+        openai_messages: list[dict[str, str]],
+        response_schema: type[SchemaT],
+        max_tokens: int,
+        temperature: float,
+    ) -> _Attempt:
+        attempt = await self._json_object_attempt(
+            openai_messages, response_schema, max_tokens, temperature
+        )
+        self._learn_reasoning_overhead(attempt.reasoning_tokens)
+        if attempt.result is not None or attempt.finish_reason != "length":
+            return attempt
+        # The budget just learned from was exhausted by reasoning before the
+        # answer got a chance to run -- padding did not carry over from an
+        # earlier call because there was nothing to learn from yet, or this
+        # turn's own thinking simply ran longer than any turn before it. One
+        # retry at double the budget recovers the turn instead of leaving it
+        # as a silent skip; the budget is not raised again beyond that, so a
+        # model that never finishes is reported as failed rather than chased.
+        retry = await self._json_object_attempt(
+            openai_messages, response_schema, max_tokens * 2, temperature
+        )
+        self._learn_reasoning_overhead(retry.reasoning_tokens)
+        return _Attempt(
+            result=retry.result,
+            path=retry.path,
+            prompt_tokens=attempt.prompt_tokens + retry.prompt_tokens,
+            completion_tokens=attempt.completion_tokens + retry.completion_tokens,
+            error=retry.error,
+            http_requests=attempt.http_requests + retry.http_requests,
+            finish_reason=retry.finish_reason,
+            reasoning_tokens=attempt.reasoning_tokens + retry.reasoning_tokens,
+        )
+
+    async def _json_object_attempt(
         self,
         openai_messages: list[dict[str, str]],
         response_schema: type[SchemaT],
