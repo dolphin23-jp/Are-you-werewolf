@@ -288,7 +288,7 @@ class ReasoningRuntime:
             return f"{target_id}が現時点で最も情報が少なく、他に有力な根拠がない。"
         explanations = [
             record.explanation
-            for record in seat.belief.active_evidence()
+            for record in seat.belief.public_argument_evidence_for(target_id)
             if record.evidence_id in reasons
         ]
         return "".join(explanations[:2])
@@ -481,12 +481,12 @@ class ReasoningRuntime:
         self._count_stale_premises(seat, target)
         supporting = tuple(
             record.explanation
-            for record in seat.belief.active_evidence()
+            for record in seat.belief.public_argument_evidence_for(target)
             if target is not None and record.evidence_id in belief.reasons_for(target)
         )[:3]
         counter = tuple(
             record.explanation
-            for record in seat.belief.active_evidence()
+            for record in seat.belief.public_argument_evidence_for(target)
             if record.subject_id == target and record.weight < 0
         )[:2]
         rank = self.top_rank(player_id)
