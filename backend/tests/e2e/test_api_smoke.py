@@ -63,7 +63,9 @@ def test_full_game_via_api_reaches_a_terminal_or_later_phase():
 def test_health_endpoint():
     resp = client.get("/api/health")
     assert resp.status_code == 200
-    assert resp.json()["status"] == "ok"
+    body = resp.json()
+    assert body["status"] == "ok"
+    assert body["reasoning_engine"] in ("legacy", "v2")
 
 
 def test_discussion_runs_without_waiting_when_human_is_dead():

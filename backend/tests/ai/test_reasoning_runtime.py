@@ -272,10 +272,15 @@ def test_v2_casts_a_vote_without_calling_the_model():
     assert controller.state.pending_votes["p1"] in controller.state.alive_ids()
 
 
-def test_legacy_remains_the_default_and_keeps_the_old_path():
+def test_v2_is_now_the_default_and_legacy_remains_selectable():
     from app.config import Settings
 
-    assert Settings().werewolf_reasoning_engine == "legacy"
+    assert Settings().werewolf_reasoning_engine == "v2"
+    assert Settings(werewolf_reasoning_engine="legacy").werewolf_reasoning_engine == "legacy"
+    # AICoordinator itself doesn't read Settings -- app/api/routes_game.py is
+    # what bridges the config flag to `reasoning=`, so what stays true here is
+    # just that the old path (no reasoning runtime at all) is still reachable
+    # by construction, for whichever caller wants it.
     controller = make_controller(seed=4)
     coordinator = AICoordinator(controller.state, ["p1"], MockProvider(seed=4), seed=4)
     assert coordinator.reasoning is None

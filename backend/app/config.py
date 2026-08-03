@@ -3,6 +3,13 @@ from typing import Literal
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Shared by the field default below and by `_normalize_reasoning_engine`'s
+# blank-value fallback, so the two can never drift apart again -- a blank
+# `WEREWOLF_REASONING_ENGINE=` line in a `.env` (the form `.env.example` uses
+# for every other optional setting) must resolve to whatever the real default
+# is, not to a value hardcoded independently of it.
+_DEFAULT_REASONING_ENGINE: Literal["legacy", "v2"] = "v2"
+
 
 class Settings(BaseSettings):
     # `.env` is read relative to the process's working directory (i.e. run
@@ -27,11 +34,13 @@ class Settings(BaseSettings):
     werewolf_discussion_wait_seconds: float = 45.0
 
     werewolf_llm_provider: str = "mock"
-    # legacy: every decision goes through the model, as before.
+    # legacy: every decision goes through the model.
     # v2: the reasoning layer decides votes, night actions and the speaking
-    # order in code, and the model is left with wording. Defaults to legacy so
-    # the switch is a deliberate act, not a side effect of upgrading.
-    werewolf_reasoning_engine: Literal["legacy", "v2"] = "legacy"
+    # order in code, and the model is left with wording. Defaulted to legacy
+    # while v2 was only exercised through manual live-evaluation scripts;
+    # now the default so real gameplay (not just those scripts) is what gets
+    # manually playtested. Set WEREWOLF_REASONING_ENGINE=legacy to compare.
+    werewolf_reasoning_engine: Literal["legacy", "v2"] = _DEFAULT_REASONING_ENGINE
 
     luna_api_key: str = ""
     luna_base_url: str = "https://api.example.com/v1"
@@ -58,14 +67,16 @@ class Settings(BaseSettings):
     def _normalize_reasoning_engine(cls, value: object) -> object:
         """Normalize the spelling, then let the Literal reject anything else.
 
-        A typo used to fall through to legacy in silence, so a deployment that
-        meant to run v2 would run the old engine and look like the new one had
-        changed nothing. Failing at startup is the only honest option.
+        A typo used to fall through to a hardcoded engine in silence, so a
+        deployment that meant to pick one engine would run the other and look
+        like nothing had changed. Failing at startup is the only honest
+        option -- and the blank-value fallback has to be the same default the
+        field itself uses, or the two silently disagree.
         """
         if not isinstance(value, str):
             return value
         normalized = value.strip().strip('"\'').lower()
-        return normalized or "legacy"
+        return normalized or _DEFAULT_REASONING_ENGINE
 
     @field_validator("werewolf_rng_seed", mode="before")
     @classmethod
