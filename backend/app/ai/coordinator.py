@@ -55,7 +55,12 @@ from app.engine.phases import Phase
 from app.engine.roles import RoleName
 from app.engine.speech_events import SpeechEventType
 from app.engine.state import GameState, PendingQuestion
-from app.eval.transcript import TranscriptRecorder, Utterance
+from app.eval.transcript import (
+    DecisionAuditRecord,
+    ResultPublicationAuditRecord,
+    TranscriptRecorder,
+    Utterance,
+)
 from app.sessions.models import DiscussionRoundState
 
 
@@ -741,6 +746,7 @@ class AICoordinator:
             self._metrics.record_discussion_result(skipped=output is None)
         if output is None:
             return None
+        model_requested_target = output.reasoning_memo.execution_target
         if freemason_opening is not None:
             output.public_message = freemason_opening
             output.public_claim_role = RoleName.FREEMASON.value
@@ -893,6 +899,41 @@ class AICoordinator:
             )
         except Exception:
             return None
+        if self._recorder is not None and decision is not None and self.reasoning is not None:
+            belief = self.reasoning.seats[player_id].belief
+            public_records = belief.public_argument_evidence_for(decision.execution_target)
+            required_ids = tuple(
+                f"{item.result_type}:{item.referenced_day}:{item.target_id}"
+                for item in output.public_results
+            )
+            self._recorder.record_decision_audit(
+                DecisionAuditRecord(
+                    game_id=state.session_id,
+                    day=state.day,
+                    phase=state.phase.value,
+                    player_id=player_id,
+                    decision_target=decision.execution_target,
+                    displayed_target=decision.execution_target,
+                    public_evidence_ids=tuple(r.evidence_id for r in public_records),
+                    required_public_result_ids=required_ids,
+                    published_result_ids=required_ids,
+                    model_requested_target=model_requested_target,
+                    model_target_was_overridden=(
+                        model_requested_target != decision.execution_target
+                    ),
+                    active_evidence_ids=tuple(r.evidence_id for r in belief.active_evidence()),
+                    publicly_emitted_evidence_ids=tuple(r.evidence_id for r in public_records),
+                )
+            )
+            if required_ids:
+                self._recorder.record_result_publication_audit(
+                    ResultPublicationAuditRecord(
+                        player_id=player_id,
+                        day=state.day,
+                        required_result_ids=required_ids,
+                        published_result_ids=required_ids,
+                    )
+                )
         if self._pacing_scale:
             base = 0.35 + len(output.public_message) * 0.012
             delay = min(3.0, base) * self._pacing_scale * self._rng.uniform(0.8, 1.2)

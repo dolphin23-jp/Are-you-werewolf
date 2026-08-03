@@ -66,10 +66,7 @@ class _Session:
 
 
 def _specs() -> list[PlayerSpec]:
-    return [
-        PlayerSpec(player_id=f"p{i}", name=f"Player{i}", is_human=(i == 0))
-        for i in range(17)
-    ]
+    return [PlayerSpec(player_id=f"p{i}", name=f"Player{i}", is_human=(i == 0)) for i in range(17)]
 
 
 def _human_night(controller: GameController, rng: random.Random) -> None:
@@ -84,19 +81,13 @@ def _human_night(controller: GameController, rng: random.Random) -> None:
         controller.submit_night_action(HUMAN_ID, "divine", rng.choice(candidates))
     elif state.day > 0 and human.role is RoleName.HUNTER:
         controller.submit_night_action(HUMAN_ID, "guard", rng.choice(candidates))
-    elif (
-        state.day > 0
-        and human.role is RoleName.WEREWOLF
-        and controller.alpha_wolf_id == HUMAN_ID
-    ):
-        prey = [
-            pid for pid in candidates if state.players[pid].role is not RoleName.WEREWOLF
-        ]
+    elif state.day > 0 and human.role is RoleName.WEREWOLF and controller.alpha_wolf_id == HUMAN_ID:
+        prey = [pid for pid in candidates if state.players[pid].role is not RoleName.WEREWOLF]
         if prey:
             controller.submit_night_action(HUMAN_ID, "attack", rng.choice(prey))
 
 
-async def run(seed: int, transcript_path: Path | None) -> dict[str, Any]:
+async def run(seed: int, transcript_path: Path | None, engine: str = "v2") -> dict[str, Any]:
     settings = get_settings()
     if settings.werewolf_llm_provider == "mock":
         raise SystemExit(
@@ -104,10 +95,8 @@ async def run(seed: int, transcript_path: Path | None) -> dict[str, Any]:
         )
     metrics = MetricsCollector()
     provider = build_llm_provider(settings, seed=seed, metrics=metrics)
-    controller = GameController(
-        session_id=f"live-{seed}", player_specs=_specs(), seed=seed
-    )
-    reasoning = ReasoningRuntime(controller.state, AI_IDS, seed=seed)
+    controller = GameController(session_id=f"live-{seed}", player_specs=_specs(), seed=seed)
+    reasoning = ReasoningRuntime(controller.state, AI_IDS, seed=seed) if engine == "v2" else None
     recorder = TranscriptRecorder()
     coordinator = AICoordinator(
         controller.state,
@@ -134,11 +123,12 @@ async def run(seed: int, transcript_path: Path | None) -> dict[str, Any]:
             controller.start_discussion()
         elif state.phase is Phase.DISCUSSION:
             await coordinator.run_discussion_round(session)
-            reasoning.refresh(state)
-            conflicts.extend(
-                conflict.explanation
-                for conflict in find_timeline_conflicts(reasoning.observations)
-            )
+            if reasoning is not None:
+                reasoning.refresh(state)
+                conflicts.extend(
+                    conflict.explanation
+                    for conflict in find_timeline_conflicts(reasoning.observations)
+                )
             controller.end_discussion()
         elif state.phase in (Phase.VOTING, Phase.RUNOFF):
             human = state.players[HUMAN_ID]
@@ -155,6 +145,7 @@ async def run(seed: int, transcript_path: Path | None) -> dict[str, Any]:
     codes = coordinator.validation.codes()
     report: dict[str, Any] = {
         "seed": seed,
+        "engine": engine,
         "provider": settings.werewolf_llm_provider,
         "model": settings.luna_model,
         "days": controller.state.day,
@@ -169,7 +160,7 @@ async def run(seed: int, transcript_path: Path | None) -> dict[str, Any]:
         # Does the enforcement carry weight, or was the model going to agree?
         "vote_plan_mismatches": len(coordinator.validation.vote_plan_mismatches),
         "timeline_conflicts": sorted(set(conflicts)),
-        **reasoning.metrics(),
+        **(reasoning.metrics() if reasoning is not None else {}),
     }
     if transcript_path is not None:
         transcript = recorder.finalize(controller.get_debug_view())
@@ -184,6 +175,7 @@ async def run(seed: int, transcript_path: Path | None) -> dict[str, Any]:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--seed", type=int, default=11)
+    parser.add_argument("--engine", choices=("legacy", "v2"), default="v2")
     parser.add_argument(
         "--transcript",
         type=Path,
@@ -191,7 +183,7 @@ def main() -> None:
         help="どこへ解析用ログを書くか。指定しなければ書かない。",
     )
     args = parser.parse_args()
-    report = asyncio.run(run(args.seed, args.transcript))
+    report = asyncio.run(run(args.seed, args.transcript, args.engine))
     print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
 
 
