@@ -35,6 +35,7 @@ from app.ai.reasoning.belief import (
     summarise,
 )
 from app.ai.reasoning.belief.state import EvidenceRecord, tiebreak
+from app.ai.reasoning.citations import VoteCitation, parse_vote_citations
 from app.ai.reasoning.dialogue import (
     ArgumentEvent,
     BeliefChange,
@@ -70,6 +71,11 @@ VALUE_BELIEF_MOVED = 2.0
 VALUE_AGAINST_MAJORITY = 1.5
 VALUE_NEW_EVIDENCE = 1.0
 VALUE_STORY_COLLAPSED = 3.0
+
+# What someone else's account of a ballot is worth before traits and trust. Low:
+# a quote is weaker than the record, and this one is already known to disagree
+# with it. It exists so that correcting it has something to retract.
+CITED_VOTE_WEIGHT = 0.5
 
 # How much a human's structured argument is worth as soft evidence, before the
 # listener's traits and their trust in the speaker scale it.
@@ -141,9 +147,16 @@ class ReasoningRuntime:
         # never against another internal candidate.
         self.stated_targets: dict[str, str | None] = {}
         self.argument_log: list[ArgumentEvent] = []
+        self.vote_citations: list[VoteCitation] = []
         self.reassessment_queue: list[str] = []
         self.correction_belief_deltas: list[float] = []
+        # Heard vs applied are different numbers and only one of them is a
+        # quality claim: a correction that corrected nothing corrected nothing.
+        self.corrections_heard = 0
         self.stale_premise_turns = 0
+        # Seat-by-message evaluations that actually happened, not seats times
+        # messages. See `_apply_argument`.
+        self._seat_evaluations = 0
         self._minority_checks = 0
         self._minority_survivals = 0
 
@@ -426,6 +439,26 @@ class ReasoningRuntime:
         target = seat.belief.state.current_execution_target
         return bool(target and seat.belief.state.reasons_for(target))
 
+    def _count_stale_premises(self, seat: SeatReasoning, target: str | None) -> None:
+        """Is this turn about to argue from a reason that has been withdrawn?
+
+        Measured, not asserted. The obvious way to report this number is to
+        return zero and note that retraction happens inside `apply_correction`,
+        so it cannot happen -- but a metric that cannot move is not evidence
+        that the thing it names does not occur. This checks the reasons the
+        seat is *actually* about to cite against the records behind them.
+        """
+        if target is None:
+            return
+        active = {
+            record.evidence_id for record in seat.belief.active_evidence()
+        }
+        if any(
+            evidence_id not in active
+            for evidence_id in seat.belief.state.reasons_for(target)
+        ):
+            self.stale_premise_turns += 1
+
     # -- what a turn is allowed to say --
 
     def discussion_decision(
@@ -445,6 +478,7 @@ class ReasoningRuntime:
         seat = self.seats[player_id]
         belief = seat.belief.state
         target = belief.current_execution_target
+        self._count_stale_premises(seat, target)
         supporting = tuple(
             record.explanation
             for record in seat.belief.active_evidence()
@@ -557,11 +591,13 @@ class ReasoningRuntime:
         argument = parse_argument(text, ledger, speaker_id, source_message_id)
         if argument is not None:
             self.argument_log.append(argument)
-            self._apply_argument(argument, ledger)
+            self._seat_evaluations += self._apply_argument(argument, ledger)
         corrections = list(argument.factual_claims) if argument is not None else []
+        self.corrections_heard += len(corrections)
         outcomes: list[CorrectionOutcome] = []
         for correction in corrections:
             for seat in self.seats.values():
+                self._seat_evaluations += 1
                 before = dict(seat.belief.state.public_suspicion_scores)
                 outcome = seat.belief.apply_correction(correction, ledger)
                 after = seat.belief.state.public_suspicion_scores
@@ -577,22 +613,28 @@ class ReasoningRuntime:
         self.correction_log.extend(outcomes)
         return outcomes
 
-    def _apply_argument(self, argument: ArgumentEvent, ledger: PublicFactLedger) -> None:
+    def _apply_argument(self, argument: ArgumentEvent, ledger: PublicFactLedger) -> int:
         """Let every seat weigh the same argument on its own terms.
 
         Facts are corrected identically for everyone -- the record is the record.
         A *strategic* claim is advice, and how persuasive it is depends on who
         said it and who is listening, so it enters as ordinary soft evidence and
         each seat's traits and trust do the rest.
+
+        Returns how many seats actually took the argument into account, which is
+        the number the harness reports. Assuming every seat did -- because the
+        message existed -- would make the metric unable to notice the case it is
+        there to catch.
         """
         subject = argument.conclusion_target_id
         if subject is None or argument.conclusion_type is ConclusionType.FACT_CORRECTION:
-            return
+            return 0
         weight, category = _ARGUMENT_WEIGHTS.get(
             argument.conclusion_type, (0.0, "accusation")
         )
         if weight == 0.0:
-            return
+            return 0
+        evaluated = 0
         for seat in self.seats.values():
             if seat.player_id == argument.speaker_id:
                 continue
@@ -616,6 +658,52 @@ class ReasoningRuntime:
                 )
             )
             seat.belief.recompute(ledger)
+            evaluated += 1
+        return evaluated
+
+    def record_public_speech(
+        self, state: GameState, speaker_id: str, text: str, source_message_id: str = ""
+    ) -> tuple[VoteCitation, ...]:
+        """Absorb one public message's account of who voted for whom.
+
+        Only *inaccurate* citations become evidence, keyed on the ballot as
+        cited. Repeating the record correctly says nothing about anybody, and
+        recording it would put a reason in every seat that no correction could
+        ever be about.
+
+        The listener does not silently check the record and dismiss the quote --
+        taking a confident misquote at face value is on the list of errors an AI
+        is allowed to make. What is not allowed is keeping it after someone
+        produces the ballot.
+        """
+        ledger = PublicFactLedger(state)
+        citations = parse_vote_citations(text, ledger, speaker_id, source_message_id)
+        wrong = [
+            citation
+            for citation in citations
+            if citation.is_verifiable and not citation.is_accurate
+        ]
+        for citation in wrong:
+            for seat in self.seats.values():
+                if seat.player_id == speaker_id:
+                    continue
+                seat.belief.add_evidence(
+                    EvidenceRecord(
+                        evidence_id=f"cited:{citation.fact_id}:{speaker_id}",
+                        subject_id=citation.voter_id,
+                        category="misremembered_vote",
+                        source_event_ids=(citation.fact_id,),
+                        weight=CITED_VOTE_WEIGHT,
+                        explanation=(
+                            f"{speaker_id}によれば、{citation.day}日目に"
+                            f"{citation.voter_id}は{citation.cited_target_id}へ"
+                            "投票したとのこと。"
+                        ),
+                    )
+                )
+                seat.belief.recompute(ledger)
+        self.vote_citations.extend(citations)
+        return citations
 
     def queue_reassessment_speakers(self, player_ids: Sequence[str]) -> None:
         """Seats whose reasons were withdrawn owe the table an explanation."""
@@ -706,8 +794,11 @@ class ReasoningRuntime:
         return {
             "human_messages_considered": self.human_messages_considered,
             "seats_considering_each_human_message": (
-                len(self.seats) if self.human_messages_considered else 0
+                round(self._seat_evaluations / self.human_messages_considered, 2)
+                if self.human_messages_considered
+                else 0.0
             ),
+            "corrections_heard": self.corrections_heard,
             "corrections_applied": len(self.correction_log),
             "mean_belief_delta_after_correction": (
                 round(
@@ -718,9 +809,13 @@ class ReasoningRuntime:
                 if self.correction_belief_deltas
                 else 0.0
             ),
-            # Retraction happens inside `apply_correction`, so a refuted premise
-            # never survives into a later turn by construction.
             "stale_premise_turns": self.stale_premise_turns,
+            "vote_citations_heard": len(self.vote_citations),
+            "inaccurate_vote_citations": sum(
+                1
+                for citation in self.vote_citations
+                if citation.is_verifiable and not citation.is_accurate
+            ),
             "minority_opinion_persistence": (
                 round(self._minority_survivals / self._minority_checks, 3)
                 if self._minority_checks

@@ -22,7 +22,9 @@ from typing import Any
 from app.ai.coordinator import AICoordinator
 from app.ai.metrics import MetricsCollector
 from app.ai.provider.mock import MockProvider
+from app.ai.reasoning.facts import PublicFactLedger
 from app.ai.reasoning.runtime import ReasoningRuntime
+from app.ai.schemas import DiscussionOutput
 from app.engine.game import GameController, PlayerSpec
 from app.engine.phases import Phase
 from app.engine.roles import RoleName
@@ -87,7 +89,10 @@ async def play(engine: str, seed: int) -> EngineRun:
     metrics = MetricsCollector()
     provider = MockProvider(seed=seed, metrics=metrics)
     controller = GameController(session_id=f"cmp-{engine}", player_specs=_specs(), seed=seed)
-    ai_ids = [f"p{i}" for i in range(17)]
+    # p0 is the human seat. Listing it as an AI too made the coordinator wait
+    # for a turn the human stub was also supposed to take, and put the human's
+    # own sentences into the count of messages the AIs "considered".
+    ai_ids = [f"p{i}" for i in range(1, 17)]
     reasoning = (
         ReasoningRuntime(controller.state, ai_ids, seed=seed) if engine == "v2" else None
     )
@@ -119,8 +124,7 @@ async def play(engine: str, seed: int) -> EngineRun:
             controller.start_discussion()
             run.days += 1
         elif state.phase is Phase.DISCUSSION:
-            if state.players[HUMAN_ID].alive:
-                controller.chat(HUMAN_ID, "よろしくお願いします。", "public")
+            _human_speak(controller, coordinator, rng)
             await coordinator.run_discussion_round(session)
             controller.end_discussion()
         elif state.phase in (Phase.VOTING, Phase.RUNOFF):
@@ -159,6 +163,56 @@ async def play(engine: str, seed: int) -> EngineRun:
     run.votes_cast = len(controller.state.vote_records)
     run.top_candidate_concentration = _concentration(controller)
     return run
+
+
+def _human_speak(
+    controller: GameController, coordinator: AICoordinator, rng: random.Random
+) -> None:
+    """One human turn per day, through the same path the chat route uses.
+
+    The old stub said "よろしくお願いします" straight into `controller.chat`,
+    which meant every human-facing metric in this report was measured against a
+    sentence containing no claim, delivered by a route that never told the
+    reasoning layer it had happened. Both halves are fixed here: the message
+    carries something the record can check, and it goes through
+    `register_public_claim` / `note_human_message` exactly as the API does.
+    """
+    state = controller.state
+    if not state.players[HUMAN_ID].alive:
+        return
+    text = _human_line(controller, rng)
+    message_id = controller.chat(HUMAN_ID, text, "public")
+    coordinator.register_public_claim(
+        controller, HUMAN_ID, DiscussionOutput(public_message=text), message_id
+    )
+    coordinator.note_human_message(state, HUMAN_ID, text, message_id)
+
+
+def _human_line(controller: GameController, rng: random.Random) -> str:
+    """A rotating script: an accusation, a correction of the record, advice.
+
+    The correction is built from the ledger so it is genuinely checkable -- it
+    denies a ballot that did not happen and asserts the one that did, which is
+    the case a confirmed correction is supposed to cover.
+    """
+    state = controller.state
+    ledger = PublicFactLedger(state)
+    others = [pid for pid in state.alive_ids() if pid != HUMAN_ID]
+    if not others:
+        return "様子を見ます。"
+    recorded = ledger.vote_of(HUMAN_ID, state.day - 1) if state.day > 1 else None
+    if recorded is not None:
+        wrong = next(
+            (pid for pid in others if pid != recorded.target_id), recorded.target_id
+        )
+        if wrong != recorded.target_id:
+            return (
+                f"{state.day - 1}日目、私は{wrong}には投票していません。"
+                f"{recorded.target_id}へ投票しました。"
+            )
+    if state.day % 2 == 0:
+        return f"{rng.choice(others)}が怪しいと思います。"
+    return "占い師を残すべきです。まだ吊る必要はありません。"
 
 
 def _human_night(controller: GameController, rng: random.Random) -> None:
@@ -240,7 +294,15 @@ def main() -> None:
         before = sum(row[key] for row in legacy)
         after = sum(row[key] for row in v2)
         print(f"{key:<34}{before:>12}{after:>12}{'':>12}")
-    for key in ("mean_top_candidate_concentration", "mean_opinion_spread"):
+    for key in (
+        "mean_top_candidate_concentration",
+        "mean_opinion_spread",
+        # A stated candidate the ballot did not name. Not a correctness counter:
+        # the board moves between speaking and voting, and changing your mind is
+        # legal. It is here because a rate near zero and a rate near one mean
+        # different things and neither is visible from the others.
+        "vote_plan_mismatch_rate",
+    ):
         before = _mean([row[key] for row in legacy])
         after = _mean([row[key] for row in v2])
         print(f"{key:<34}{before:>12}{after:>12}{'':>12}")

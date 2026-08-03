@@ -875,6 +875,10 @@ class AICoordinator:
             )
         self._context.record_key_point(state.day, message_id, player_id, output.key_point)
         self._register_claim_drafts(controller, player_id, drafts, message_id)
+        if self.reasoning is not None:
+            self.reasoning.record_public_speech(
+                state, player_id, output.public_message, message_id
+            )
         return output
 
     def _validate_output(
@@ -1015,10 +1019,18 @@ class AICoordinator:
         Used for the human path and by callers that already hold a finished
         message; `_speak` splits the two halves so it can fix the prose first.
         """
+        state = controller.state  # type: ignore[attr-defined]
         drafts = build_claim_drafts(
-            output, PublicFactLedger(controller.state), speaker_id=player_id  # type: ignore[attr-defined]
+            output, PublicFactLedger(state), speaker_id=player_id
         )
         self._register_claim_drafts(controller, player_id, drafts, message_id)
+        if self.reasoning is not None:
+            # What this message said about other people's ballots. A quote the
+            # record contradicts becomes a reason the listeners hold -- and the
+            # thing a later correction is able to take away from them.
+            self.reasoning.record_public_speech(
+                state, player_id, output.public_message, message_id
+            )
 
     def _register_claim_drafts(
         self,
