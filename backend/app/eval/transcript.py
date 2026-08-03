@@ -37,6 +37,39 @@ class DecisionAuditRecord:
     target_alive: bool = True
     ally_vote: bool = False
     ally_vote_planned: bool = False
+    board_version: str = ""
+    public_result_ids_at_decision: tuple[str, ...] = ()
+    correction_ids_at_decision: tuple[str, ...] = ()
+    votable_ids_at_decision: tuple[str, ...] = ()
+    attempted_public_evidence_ids: tuple[str, ...] = ()
+    brief_public_evidence_ids: tuple[str, ...] = ()
+    emitted_public_evidence_ids: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class NightActionAuditRecord:
+    action_id: str
+    actor_id: str
+    target_id: str
+    night: int
+    action_type: str
+    accepted: bool
+    rejection_reason: str = ""
+    actor_alive: bool = True
+    target_was_legal: bool = True
+
+
+@dataclass(frozen=True)
+class WolfAllyVotePlan:
+    plan_id: str
+    voter_id: str
+    target_id: str
+    day: int
+    round_number: int
+    public_evidence_ids: tuple[str, ...]
+    story_reason: str
+    strategy_reason: str
+    source_event_id: str
 
 
 @dataclass(frozen=True)
@@ -89,7 +122,7 @@ class Utterance:
 
 @dataclass
 class GameTranscript:
-    schema_version: int = 2
+    schema_version: int = 3
     game_id: str = ""
     seed: int | None = None
     provider: str = "unknown"
@@ -103,6 +136,8 @@ class GameTranscript:
     decision_audits: list[DecisionAuditRecord] = field(default_factory=list)
     correction_audits: list[CorrectionAuditRecord] = field(default_factory=list)
     result_publication_audits: list[ResultPublicationAuditRecord] = field(default_factory=list)
+    night_action_audits: list[NightActionAuditRecord] = field(default_factory=list)
+    wolf_ally_vote_plans: list[WolfAllyVotePlan] = field(default_factory=list)
     metrics: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -123,6 +158,8 @@ class GameTranscript:
             "result_publication_audits": [
                 asdict(record) for record in self.result_publication_audits
             ],
+            "night_action_audits": [asdict(record) for record in self.night_action_audits],
+            "wolf_ally_vote_plans": [asdict(record) for record in self.wolf_ally_vote_plans],
             "metrics": self.metrics,
         }
 
@@ -150,6 +187,12 @@ class GameTranscript:
             result_publication_audits=[
                 ResultPublicationAuditRecord(**item)
                 for item in data.get("result_publication_audits", [])
+            ],
+            night_action_audits=[
+                NightActionAuditRecord(**item) for item in data.get("night_action_audits", [])
+            ],
+            wolf_ally_vote_plans=[
+                WolfAllyVotePlan(**item) for item in data.get("wolf_ally_vote_plans", [])
             ],
             metrics=dict(data.get("metrics", {})),
         )
@@ -197,11 +240,46 @@ class TranscriptRecorder:
                 self.transcript.decision_audits[index] = dataclass_replace(record, **changes)
                 return
 
+    def latest_decision(self, player_id: str, day: int) -> DecisionAuditRecord | None:
+        return next(
+            (
+                record
+                for record in reversed(self.transcript.decision_audits)
+                if record.player_id == player_id and record.day == day
+            ),
+            None,
+        )
+
     def record_correction_audit(self, record: CorrectionAuditRecord) -> None:
         self.transcript.correction_audits.append(record)
 
     def record_result_publication_audit(self, record: ResultPublicationAuditRecord) -> None:
         self.transcript.result_publication_audits.append(record)
+
+    def record_night_action_audit(self, record: NightActionAuditRecord) -> None:
+        self.transcript.night_action_audits.append(record)
+
+    def record_wolf_ally_vote_plan(self, plan: WolfAllyVotePlan) -> None:
+        self.transcript.wolf_ally_vote_plans.append(plan)
+
+    def matching_wolf_ally_vote_plan(
+        self, voter_id: str, target_id: str, day: int, round_number: int
+    ) -> WolfAllyVotePlan | None:
+        return next(
+            (
+                plan
+                for plan in reversed(self.transcript.wolf_ally_vote_plans)
+                if plan.voter_id == voter_id
+                and plan.target_id == target_id
+                and plan.day == day
+                and plan.round_number == round_number
+                and plan.public_evidence_ids
+                and plan.story_reason
+                and plan.strategy_reason
+                and plan.source_event_id
+            ),
+            None,
+        )
 
     def finalize(self, final_state: dict[str, Any]) -> GameTranscript:
         self.transcript.final_state = final_state

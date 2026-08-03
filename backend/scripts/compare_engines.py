@@ -28,6 +28,8 @@ from app.ai.schemas import DiscussionOutput
 from app.engine.game import GameController, PlayerSpec
 from app.engine.phases import Phase
 from app.engine.roles import RoleName
+from app.engine.state import DeathCause
+from app.eval.reasoning_analyzer import ReasoningTranscriptAnalyzer
 from app.eval.transcript import TranscriptRecorder
 
 MAX_LOOPS = 150
@@ -53,6 +55,10 @@ class EngineRun:
     target_distribution_by_profile: dict[str, dict[str, int]] = field(default_factory=dict)
     reasoning_metrics: dict[str, Any] = field(default_factory=dict)
     winner: str | None = None
+    executions: list[str] = field(default_factory=list)
+    role_survival_days: dict[str, list[int]] = field(default_factory=dict)
+    public_utterances: int = 0
+    reasoning_quality: dict[str, Any] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -69,6 +75,10 @@ class EngineRun:
             ),
             "days": self.days,
             "winner": self.winner,
+            "executions": self.executions,
+            "role_survival_days": self.role_survival_days,
+            "public_utterances": self.public_utterances,
+            "reasoning_quality": self.reasoning_quality,
             "mean_top_candidate_concentration": _mean(self.top_candidate_concentration),
             "mean_opinion_spread": _mean(self.opinion_spread),
             "target_distribution_by_profile": self.target_distribution_by_profile,
@@ -92,13 +102,18 @@ async def play(engine: str, seed: int) -> EngineRun:
     # for a turn the human stub was also supposed to take, and put the human's
     # own sentences into the count of messages the AIs "considered".
     ai_ids = [f"p{i}" for i in range(1, 17)]
-    reasoning = ReasoningRuntime(controller.state, ai_ids, seed=seed) if engine == "v2" else None
+    reasoning = (
+        ReasoningRuntime(controller.state, ai_ids, seed=seed, metrics=metrics)
+        if engine == "v2"
+        else None
+    )
+    recorder = TranscriptRecorder()
     coordinator = AICoordinator(
         controller.state,
         ai_ids,
         provider,
         seed=seed,
-        recorder=TranscriptRecorder(),
+        recorder=recorder,
         reasoning=reasoning,
         pacing_scale=0.0,
     )
@@ -141,6 +156,7 @@ async def play(engine: str, seed: int) -> EngineRun:
             break
 
     if reasoning is not None:
+        reasoning.flush_metrics()
         run.reasoning_metrics = dict(reasoning.metrics())
         run.reasoning_metrics.pop("target_distribution_by_profile", None)
     summary = metrics.summary()
@@ -160,6 +176,21 @@ async def play(engine: str, seed: int) -> EngineRun:
     run.votes_cast = len(controller.state.vote_records)
     run.top_candidate_concentration = _concentration(controller)
     run.winner = controller.state.winner.value if controller.state.winner else None
+    run.executions = [
+        record.player_id
+        for record in controller.state.death_records
+        if record.cause is DeathCause.EXECUTED
+    ]
+    for player in controller.state.players.values():
+        survived = player.death_day if player.death_day is not None else controller.state.day
+        run.role_survival_days.setdefault(player.role.value, []).append(survived)
+    recorder.transcript.metrics = {
+        **summary,
+        **(reasoning.metrics() if reasoning is not None else {}),
+    }
+    transcript = recorder.finalize(controller.get_debug_view())
+    run.public_utterances = len(transcript.by_kind("discussion"))
+    run.reasoning_quality = ReasoningTranscriptAnalyzer().analyze(transcript).to_dict()
     return run
 
 

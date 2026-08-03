@@ -7,6 +7,7 @@ import argparse
 import asyncio
 import json
 import math
+import statistics
 import sys
 from pathlib import Path
 from typing import Any
@@ -43,8 +44,18 @@ async def campaign(seeds: list[int], engines: list[str]) -> dict[str, Any]:
             winner_counts[winner] = winner_counts.get(winner, 0) + 1
         aggregate["engines"][engine] = {
             "games": len(subset),
+            "completed_games": sum(row.get("winner") is not None for row in subset),
+            "aborted_games": sum(row.get("winner") is None for row in subset),
             "logical_calls": sum(row["llm_requests"] for row in subset),
             "http_requests": sum(row["http_requests"] for row in subset),
+            "public_utterances": sum(row.get("public_utterances", 0) for row in subset),
+            "executions": [item for row in subset for item in row.get("executions", [])],
+            "reasoning_quality": {
+                key: sum(row.get("reasoning_quality", {}).get(key, 0) for row in subset)
+                for key in (subset[0].get("reasoning_quality", {}) if subset else {})
+            },
+            "sample_size_warning": len(subset) < 100,
+            "role_survival": _role_survival(subset),
             "wins_by_team": {
                 team: {
                     "wins": wins,
@@ -55,7 +66,42 @@ async def campaign(seeds: list[int], engines: list[str]) -> dict[str, Any]:
                 for team, wins in winner_counts.items()
             },
         }
+    legacy = aggregate["engines"].get("legacy")
+    v2 = aggregate["engines"].get("v2")
+    if legacy and v2:
+        aggregate["comparison"] = {
+            "logical_call_reduction": _reduction(
+                legacy["logical_calls"], v2["logical_calls"]
+            ),
+            "http_request_reduction": _reduction(
+                legacy["http_requests"], v2["http_requests"]
+            ),
+        }
     return aggregate
+
+
+def _reduction(before: int, after: int) -> float | None:
+    return (before - after) / before if before else None
+
+
+def _role_survival(rows: list[dict[str, Any]]) -> dict[str, dict[str, float | int]]:
+    by_role: dict[str, list[int]] = {}
+    for row in rows:
+        if row.get("winner") is None:
+            continue
+        for role, days in row.get("role_survival_days", {}).items():
+            by_role.setdefault(role, []).extend(days)
+    return {
+        role: {
+            "observations": len(days),
+            "mean": statistics.fmean(days),
+            "median": statistics.median(days),
+            "min": min(days),
+            "max": max(days),
+        }
+        for role, days in by_role.items()
+        if days
+    }
 
 
 def main() -> None:

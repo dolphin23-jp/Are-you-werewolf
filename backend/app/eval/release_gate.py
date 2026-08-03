@@ -54,7 +54,7 @@ class ReleaseGate:
         *,
         live_pairs: int,
         mock_llm_reduction: float | None = None,
-        transcript_schema_version: int = 2,
+        transcript_schema_version: int = 3,
         human_review_complete: bool = False,
         operational_complete: bool = False,
     ) -> ReleaseGateResult:
@@ -76,7 +76,7 @@ class ReleaseGate:
         if failures:
             return ReleaseGateResult(ReleaseDecision.FAIL, tuple(failures))
         incomplete: list[str] = []
-        if transcript_schema_version < 2:
+        if transcript_schema_version < 3:
             incomplete.append("transcript_schema_version")
         if not operational_complete:
             incomplete.append("operational_metrics_missing")

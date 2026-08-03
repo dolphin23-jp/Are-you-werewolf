@@ -40,6 +40,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.ai.coordinator import AICoordinator  # noqa: E402
 from app.ai.metrics import MetricsCollector  # noqa: E402
+from app.ai.provider.budget import BudgetedProvider, EvaluationBudget  # noqa: E402
 from app.ai.provider.factory import build_llm_provider  # noqa: E402
 from app.ai.reasoning.runtime import ReasoningRuntime  # noqa: E402
 from app.ai.reasoning.timeline import find_timeline_conflicts  # noqa: E402
@@ -88,7 +89,12 @@ def _human_night(controller: GameController, rng: random.Random) -> None:
             controller.submit_night_action(HUMAN_ID, "attack", rng.choice(prey))
 
 
-async def run(seed: int, transcript_path: Path | None, engine: str = "v2") -> dict[str, Any]:
+async def run(
+    seed: int,
+    transcript_path: Path | None,
+    engine: str = "v2",
+    request_budget: EvaluationBudget | None = None,
+) -> dict[str, Any]:
     started = perf_counter()
     settings = get_settings()
     if settings.werewolf_llm_provider == "mock":
@@ -97,8 +103,16 @@ async def run(seed: int, transcript_path: Path | None, engine: str = "v2") -> di
         )
     metrics = MetricsCollector()
     provider = build_llm_provider(settings, seed=seed, metrics=metrics)
-    controller = GameController(session_id=f"live-{seed}", player_specs=_specs(), seed=seed)
-    reasoning = ReasoningRuntime(controller.state, AI_IDS, seed=seed) if engine == "v2" else None
+    if request_budget is not None:
+        provider = BudgetedProvider(provider, request_budget)
+    controller = GameController(
+        session_id=f"live-{seed}-{engine}", player_specs=_specs(), seed=seed
+    )
+    reasoning = (
+        ReasoningRuntime(controller.state, AI_IDS, seed=seed, metrics=metrics)
+        if engine == "v2"
+        else None
+    )
     recorder = TranscriptRecorder()
     coordinator = AICoordinator(
         controller.state,
@@ -144,6 +158,8 @@ async def run(seed: int, transcript_path: Path | None, engine: str = "v2") -> di
         else:
             break
 
+    if reasoning is not None:
+        reasoning.flush_metrics()
     metrics.total_game_wall_time = perf_counter() - started
     metrics.game_days = controller.state.day
     metrics.public_utterances = len(recorder.transcript.by_kind("discussion"))
@@ -152,6 +168,7 @@ async def run(seed: int, transcript_path: Path | None, engine: str = "v2") -> di
     report: dict[str, Any] = {
         "seed": seed,
         "engine": engine,
+        "game_id": controller.state.session_id,
         "provider": settings.werewolf_llm_provider,
         "model": settings.luna_model,
         "days": controller.state.day,
@@ -171,6 +188,10 @@ async def run(seed: int, transcript_path: Path | None, engine: str = "v2") -> di
         **(reasoning.metrics() if reasoning is not None else {}),
     }
     if transcript_path is not None:
+        recorder.transcript.metrics = {
+            **metric_summary,
+            **(reasoning.metrics() if reasoning is not None else {}),
+        }
         transcript = recorder.finalize(controller.get_debug_view())
         transcript_path.write_text(
             json.dumps(transcript.to_dict(), ensure_ascii=False, indent=2),

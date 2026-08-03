@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import json
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
+
 from app.eval.reasoning_analyzer import ReasoningQualityReport
 from app.eval.release_gate import ReleaseGateResult
 
@@ -17,6 +21,38 @@ REVIEW_ITEMS = (
     "騙りの物語が一貫していた、または破綻後に反応した",
     "公開発言と投票が自然につながっていた",
 )
+
+
+@dataclass(frozen=True)
+class HumanTranscriptReview:
+    game_id: str
+    reviewer: str
+    reviewed_at: str
+    answers: dict[str, bool | None] = field(default_factory=dict)
+    notes: str = ""
+    revision: int = 1
+
+    @property
+    def complete(self) -> bool:
+        return bool(self.reviewer and self.reviewed_at) and all(
+            self.answers.get(item) is not None for item in REVIEW_ITEMS
+        )
+
+    @classmethod
+    def from_json(cls, path: Path) -> HumanTranscriptReview:
+        return cls(**json.loads(path.read_text(encoding="utf-8")))
+
+    def write_json(self, path: Path) -> None:
+        path.write_text(json.dumps(asdict(self), ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def empty_review(game_id: str) -> HumanTranscriptReview:
+    return HumanTranscriptReview(
+        game_id=game_id,
+        reviewer="",
+        reviewed_at="",
+        answers={item: None for item in REVIEW_ITEMS},
+    )
 
 
 def render_release_report(

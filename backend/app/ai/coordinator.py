@@ -59,6 +59,7 @@ from app.engine.state import GameState, PendingQuestion
 from app.eval.transcript import (
     CorrectionAuditRecord,
     DecisionAuditRecord,
+    NightActionAuditRecord,
     ResultPublicationAuditRecord,
     TranscriptRecorder,
     Utterance,
@@ -171,7 +172,9 @@ class AICoordinator:
 
         self._recorder = recorder
         if recorder is not None:
-            recorder.transcript.game_id = state.session_id
+            transcript = getattr(recorder, "transcript", None)
+            if transcript is not None:
+                transcript.game_id = state.session_id
             recorder.set_roster(
                 names={pid: p.name for pid, p in state.players.items()},
                 roles={pid: p.role.value for pid, p in state.players.items()},
@@ -912,13 +915,41 @@ class AICoordinator:
                     private_evidence_ids=tuple(r.evidence_id for r in private_records),
                     team_private_evidence_ids=tuple(r.evidence_id for r in team_records),
                     required_public_result_ids=required_ids,
-                    published_result_ids=required_ids,
+                    published_result_ids=(),
                     model_requested_target=model_requested_target,
                     model_target_was_overridden=(
                         model_requested_target != decision.execution_target
                     ),
                     active_evidence_ids=tuple(r.evidence_id for r in belief.active_evidence()),
                     publicly_emitted_evidence_ids=tuple(r.evidence_id for r in public_records),
+                    attempted_public_evidence_ids=(
+                        belief.state.reasons_for(decision.execution_target)
+                        if decision.execution_target
+                        else ()
+                    ),
+                    brief_public_evidence_ids=tuple(r.evidence_id for r in public_records),
+                    emitted_public_evidence_ids=tuple(r.evidence_id for r in public_records),
+                    board_version=self.reasoning.observations.board_version,
+                    public_result_ids_at_decision=tuple(
+                        sorted(
+                            f"{r.claimant_id}:{r.result_type}:{r.referenced_day}:"
+                            f"{r.target_id}:{r.is_werewolf}"
+                            for r in PublicFactLedger(state).public_results()
+                        )
+                    ),
+                    correction_ids_at_decision=tuple(
+                        sorted(
+                            {
+                                item.correction_id
+                                for item in self._recorder.transcript.correction_audits
+                            }
+                        )
+                    ),
+                    votable_ids_at_decision=tuple(state.votable_ids(player_id)),
+                    target_alive=(
+                        decision.execution_target is None
+                        or state.players[decision.execution_target].alive
+                    ),
                 )
             )
         if self._pacing_scale:
@@ -962,6 +993,9 @@ class AICoordinator:
                 if result.claimant_id == player_id and result.source_message_id == message_id
             ]
             published_ids = tuple(dict.fromkeys(published_list))
+            self._recorder.update_latest_decision(
+                player_id, state.day, published_result_ids=published_ids
+            )
             self._recorder.record_result_publication_audit(
                 ResultPublicationAuditRecord(
                     player_id=player_id,
@@ -1090,14 +1124,6 @@ class AICoordinator:
         if self.reasoning is None:
             return []
         self.reasoning.refresh(state)
-        before_evidence = {
-            pid: {record.evidence_id for record in seat.belief.active_evidence()}
-            for pid, seat in self.reasoning.seats.items()
-        }
-        before_scores = {
-            pid: sum(seat.belief.state.public_suspicion_scores.values())
-            for pid, seat in self.reasoning.seats.items()
-        }
         outcomes = self.reasoning.apply_human_message(state, speaker_id, text, source_message_id)
         moved = self.reasoning.seats_that_moved(outcomes)
         if self._recorder is not None and outcomes:
@@ -1107,12 +1133,9 @@ class AICoordinator:
                     outcome
                 )
             for correction_id, grouped in by_correction.items():
-                retracted_by_seat = {
-                    pid: before_evidence[pid]
-                    - {record.evidence_id for record in seat.belief.active_evidence()}
-                    for pid, seat in self.reasoning.seats.items()
-                }
-                affected = tuple(sorted(pid for pid, ids in retracted_by_seat.items() if ids))
+                affected = tuple(
+                    sorted({outcome.seat_id for outcome in grouped if outcome.changed_anything})
+                )
                 first = grouped[0]
                 self._recorder.record_correction_audit(
                     CorrectionAuditRecord(
@@ -1122,13 +1145,18 @@ class AICoordinator:
                         verdict=first.verdict.status.value,
                         affected_seat_ids=affected,
                         retracted_evidence_ids=tuple(
-                            sorted({item for ids in retracted_by_seat.values() for item in ids})
+                            sorted(
+                                {
+                                    item
+                                    for outcome in grouped
+                                    for item in outcome.invalidated_evidence_ids
+                                }
+                            )
                         ),
                         belief_delta_by_seat={
-                            pid: sum(seat.belief.state.public_suspicion_scores.values())
-                            - before_scores[pid]
-                            for pid, seat in self.reasoning.seats.items()
-                            if pid in affected
+                            outcome.seat_id: outcome.belief_delta
+                            for outcome in grouped
+                            if outcome.seat_id in affected
                         },
                     )
                 )
@@ -1307,7 +1335,9 @@ class AICoordinator:
         except Exception:
             return
         actual_target = state.pending_votes.get(player_id)
-        if self._recorder is not None:
+        if self._recorder is not None and hasattr(
+            self._recorder, "update_latest_decision"
+        ):
             change_kind = "none"
             change_reason = ""
             if isinstance(stated_target, str) and actual_target != stated_target:
@@ -1318,13 +1348,42 @@ class AICoordinator:
                     change_kind = "target_became_invalid"
                     change_reason = "発言後に対象が無効化"
                 else:
-                    change_kind = "unexplained"
-                    change_reason = output.reason
+                    audited = self._recorder.latest_decision(player_id, state.day)
+                    current_results = {
+                        f"{r.claimant_id}:{r.result_type}:{r.referenced_day}:"
+                        f"{r.target_id}:{r.is_werewolf}"
+                        for r in PublicFactLedger(state).public_results()
+                    }
+                    current_corrections = {
+                        item.correction_id for item in self._recorder.transcript.correction_audits
+                    }
+                    if audited and current_corrections - set(
+                        audited.correction_ids_at_decision
+                    ):
+                        change_kind = "correction_accepted"
+                        change_reason = "発言後に事実訂正を受理"
+                    elif audited and current_results - set(
+                        audited.public_result_ids_at_decision
+                    ):
+                        change_kind = "new_public_evidence"
+                        change_reason = "発言後に能力結果が公開"
+                    else:
+                        change_kind = "unexplained"
+                        change_reason = output.reason
             player = state.players[player_id]
             ally_vote = bool(
                 actual_target
                 and state.players[actual_target].role is RoleName.WEREWOLF
                 and player.role is RoleName.WEREWOLF
+            )
+            ally_plan = (
+                self._recorder.matching_wolf_ally_vote_plan(
+                    player_id, actual_target, state.day, state.vote_round
+                )
+                if ally_vote
+                and actual_target is not None
+                and hasattr(self._recorder, "matching_wolf_ally_vote_plan")
+                else None
             )
             self._recorder.update_latest_decision(
                 player_id,
@@ -1335,7 +1394,7 @@ class AICoordinator:
                 ally_vote=ally_vote,
                 # A strategic team decision must be explicitly recorded; no
                 # such plan exists in the current strategy state.
-                ally_vote_planned=False,
+                ally_vote_planned=ally_plan is not None,
             )
         # Voting against your own stated plan is legal play, not corruption, so
         # this is recorded rather than corrected -- but silently losing it means
@@ -1460,10 +1519,9 @@ class AICoordinator:
                 system, messages, candidates, preferred_targets=self._belief_targets(seer_id)
             )
         self._record(state, seer_id, "night_action", text=output.reason, target=output.target)
-        try:
-            controller.submit_night_action(seer_id, "divine", output.target)  # type: ignore[attr-defined]
-        except Exception:
-            pass
+        self._submit_audited_night_action(
+            controller, state, seer_id, "divine", output.target, candidates
+        )
 
     async def _cast_guard(self, controller: object, state: GameState, hunter_id: str) -> None:
         candidates = [pid for pid in state.alive_ids() if pid != hunter_id]
@@ -1489,10 +1547,9 @@ class AICoordinator:
                 system, messages, candidates, preferred_targets=trusted
             )
         self._record(state, hunter_id, "night_action", text=output.reason, target=output.target)
-        try:
-            controller.submit_night_action(hunter_id, "guard", output.target)  # type: ignore[attr-defined]
-        except Exception:
-            pass
+        self._submit_audited_night_action(
+            controller, state, hunter_id, "guard", output.target, candidates
+        )
 
     async def _cast_attack(self, controller: object, state: GameState, alpha_id: str) -> None:
         candidates = [
@@ -1513,10 +1570,42 @@ class AICoordinator:
                 system, messages, candidates, preferred_targets=self._belief_targets(alpha_id)
             )
         self._record(state, alpha_id, "night_action", text=output.reason, target=output.target)
+        self._submit_audited_night_action(
+            controller, state, alpha_id, "attack", output.target, candidates
+        )
+
+    def _submit_audited_night_action(
+        self,
+        controller: object,
+        state: GameState,
+        actor_id: str,
+        action_type: str,
+        target_id: str,
+        candidates: list[str],
+    ) -> None:
+        accepted = False
+        rejection = ""
         try:
-            controller.submit_night_action(alpha_id, "attack", output.target)  # type: ignore[attr-defined]
-        except Exception:
-            pass
+            controller.submit_night_action(actor_id, action_type, target_id)  # type: ignore[attr-defined]
+            accepted = True
+        except Exception as exc:
+            rejection = type(exc).__name__
+        if self._recorder is not None and hasattr(
+            self._recorder, "record_night_action_audit"
+        ):
+            self._recorder.record_night_action_audit(
+                NightActionAuditRecord(
+                    action_id=f"{state.session_id}:{state.day}:{action_type}:{actor_id}",
+                    actor_id=actor_id,
+                    target_id=target_id,
+                    night=state.day,
+                    action_type=action_type,
+                    accepted=accepted,
+                    rejection_reason=rejection,
+                    actor_alive=state.players[actor_id].alive,
+                    target_was_legal=target_id in candidates,
+                )
+            )
 
     async def _run_wolf_chat_round(self, controller: object, state: GameState) -> None:
         wolf_ids = [

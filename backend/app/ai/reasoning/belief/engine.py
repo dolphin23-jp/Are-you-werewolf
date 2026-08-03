@@ -130,6 +130,9 @@ class CorrectionOutcome:
     verdict: CorrectionVerdict
     invalidated_evidence_ids: tuple[str, ...] = ()
     changed_subjects: tuple[str, ...] = ()
+    seat_id: str = ""
+    correction_id: str = ""
+    belief_delta: float = 0.0
 
     @property
     def changed_anything(self) -> bool:

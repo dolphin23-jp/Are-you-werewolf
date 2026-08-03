@@ -14,6 +14,11 @@ Corrections are counted once by correction id. Seat retractions and affected sea
 impact measures. Publication audits compare required and published result identities and retain
 omissions and duplicates.
 
+Schema version 3 also records accepted/rejected night actions with action type and legality,
+decision-time public-result/correction/votable snapshots, evidence attempted at each rendering
+stage, and fully grounded wolf ally-vote plans. Offline analysis therefore does not infer these
+hard boundaries from prose.
+
 ## Denominators
 
 Vote-change rates use audited ballots. Failure/skip rates use logical generation and discussion
@@ -39,6 +44,14 @@ python scripts/live_ab_reasoning_check.py --seeds 11 12 13 --engines legacy v2 \
 Prices must be supplied through CLI flags or `LLM_INPUT_PRICE_PER_MILLION` and
 `LLM_OUTPUT_PRICE_PER_MILLION`. The runner writes after every game so interruption preserves work.
 No live run means `INCONCLUSIVE`; mock results can never qualify a release alone.
+
+The runner enforces Stage A (v2 smoke), Stage B (the matching legacy game), and then the remaining
+paired seeds. A hard v2 error stops later stages. `--max-http-requests` is also enforced before each
+logical provider call, so a game cannot start another generation after exhausting the shared budget.
+
+Human reviews are JSON files supplied with `--review-dir`. Every v2 game must have a complete review
+covering all checklist items before the gate can pass; missing or partial reviews are
+`INCONCLUSIVE`, never an implicit approval.
 
 ## Gate
 
