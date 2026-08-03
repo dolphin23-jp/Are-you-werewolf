@@ -149,6 +149,10 @@ class PublicResultClaim:
     is_werewolf: bool
     day: int
     source_message_id: str = ""
+    # Which night/day the result is *about*, as opposed to when it was said.
+    # None means the claimant never specified, and readers fall back to the
+    # night before publication.
+    referenced_day: int | None = None
 
 
 @dataclass
@@ -218,6 +222,7 @@ class GameState:
                 is_werewolf=version.is_werewolf,
                 day=version.day,
                 source_message_id=version.source_message_id,
+                referenced_day=version.referenced_day,
             )
             for version in active_results(self.speech_events)
         )
@@ -371,6 +376,7 @@ class GameState:
                     "is_werewolf": claim.is_werewolf,
                     "day": claim.day,
                     "source_message_id": claim.source_message_id,
+                    "referenced_day": claim.referenced_day,
                 }
                 for claim in self.public_result_claims
             ],

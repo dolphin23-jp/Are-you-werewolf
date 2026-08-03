@@ -35,7 +35,9 @@ from app.ai.reasoning.belief.ranking import RankedView, rank_hypotheses
 from app.ai.reasoning.belief.state import (
     CONFIDENCE_SPREAD,
     HARD_EXCLUDED_SCORE,
+    EvidenceOrigin,
     EvidenceRecord,
+    OriginKind,
     PlayerBeliefState,
     RankedHypothesis,
     is_hard,
@@ -54,6 +56,7 @@ from app.ai.reasoning.observations import ObservationSet
 from app.ai.reasoning.perspectives import Perspective
 from app.ai.reasoning.solver.backend import Certainty, has_role
 from app.ai.reasoning.solver.queries import RoleSolver
+from app.ai.reasoning.timeline import find_timeline_conflicts
 from app.engine.roles import RoleName
 
 # Default soft weights. Collected here rather than scattered through the
@@ -64,7 +67,16 @@ CONTESTED_CLAIM_WEIGHT = 0.6
 VOTED_FOR_CLEARED_WEIGHT = 0.4
 VOTED_FOR_WOLF_WEIGHT = -0.3
 MAJORITY_PRESSURE_WEIGHT = 0.8
+TIMELINE_CONFLICT_WEIGHT = 0.9
 TRUST_STEP = 0.5
+
+# How far the claimant's standing may move the force of their verdict. A result
+# from someone the seat has caught out before should not land like one from a
+# claimant nobody has faulted -- but the sign never flips, because "I distrust
+# you" is not evidence that the opposite of what you said is true.
+RESULT_TRUST_SCALE = 0.35
+MIN_RESULT_TRUST_FACTOR = 0.25
+MAX_RESULT_TRUST_FACTOR = 1.75
 
 _WOLF_CATEGORIES = frozenset(
     {
@@ -76,8 +88,39 @@ _WOLF_CATEGORIES = frozenset(
         "misremembered_vote",
         "majority_pressure",
         "accusation",
+        "timeline_conflict",
     }
 )
+
+
+def result_fact_id(
+    claimant_id: str, result_type: str, target_id: str, is_werewolf: bool
+) -> str:
+    """Identity of one published verdict, colour included.
+
+    The colour is part of the identity so a correction from black to white is a
+    *different* fact rather than the same fact with a new value -- which is what
+    lets the old reason be retired instead of quietly re-pointed.
+    """
+    colour = "black" if is_werewolf else "white"
+    return f"result:{claimant_id}:{result_type}:{target_id}:{colour}"
+
+
+def contest_fact_id(role: RoleName, claimants: Sequence[str]) -> str:
+    """Identity of one contested role, naming everyone currently in it.
+
+    "Two people claim seer" stops being true the moment one withdraws, so the
+    fact is the whole set. Keyed on the individual claim instead, the surviving
+    claimant would keep a contested-CO mark with nobody left to contest.
+    """
+    return f"contest:{role.value}:{'|'.join(sorted(claimants))}"
+
+
+def _contests(ledger: PublicFactLedger) -> dict[RoleName, list[str]]:
+    by_role: dict[RoleName, list[str]] = {}
+    for claim in ledger.co_declarations():
+        by_role.setdefault(claim.claimed_role, []).append(claim.player_id)
+    return {role: names for role, names in by_role.items() if len(names) > 1}
 
 
 @dataclass(frozen=True)
@@ -166,13 +209,69 @@ class BeliefEngine:
         """
         if observations is not None:
             self._absorb_private_knowledge(observations)
+        # Before deriving anything new: drop what the record no longer contains.
+        # Retractions and corrections happen mid-game, and a reason that outlives
+        # its fact is the same failure as a misremembered vote, only quieter.
+        self.synchronise_public_facts(ledger, observations)
         self._derive_verdict_evidence(ledger)
         self._derive_claim_evidence(ledger)
         self._derive_majority_pressure(ledger)
+        if observations is not None:
+            self._derive_timeline_evidence(observations)
         if solver is not None:
             self._derive_solver_facts(ledger, solver)
             self._derive_vote_evidence(ledger)
         self.recompute(ledger)
+
+    def synchronise_public_facts(
+        self, ledger: PublicFactLedger, observations: ObservationSet | None = None
+    ) -> tuple[str, ...]:
+        """Retract every reason whose public fact has left the record.
+
+        A verdict that was corrected, or a CO that was withdrawn, is gone from
+        the ledger's derivations but the evidence built on it is still sitting in
+        this engine. Without this step an AI keeps citing a black that the
+        claimant has publicly replaced -- which is precisely the "continues to
+        depend on a corrected false fact" failure.
+
+        Only kinds this call can actually re-check are considered. A timeline
+        conflict is verified against `observations`, so with none supplied that
+        kind is left alone rather than retracted on no evidence.
+        """
+        checkable = {OriginKind.PUBLIC_RESULT, OriginKind.PUBLIC_CLAIM}
+        live = self._live_public_fact_ids(ledger)
+        if observations is not None:
+            checkable.add(OriginKind.TIMELINE)
+            live |= {
+                conflict.conflict_id
+                for conflict in find_timeline_conflicts(observations)
+            }
+        retracted: list[str] = []
+        for evidence_id, record in self._evidence.items():
+            origin = record.origin
+            if not record.active or origin is None or origin.kind not in checkable:
+                continue
+            if origin.fact_id in live:
+                continue
+            self._evidence[evidence_id] = record.deactivated("公開記録から消えたため")
+            retracted.append(evidence_id)
+        return tuple(retracted)
+
+    def _live_public_fact_ids(self, ledger: PublicFactLedger) -> set[str]:
+        ids = {
+            result_fact_id(
+                result.claimant_id,
+                result.result_type,
+                result.target_id,
+                result.is_werewolf,
+            )
+            for result in ledger.public_results()
+        }
+        ids |= {
+            contest_fact_id(role, claimants)
+            for role, claimants in _contests(ledger).items()
+        }
+        return ids
 
     def _absorb_private_knowledge(self, observations: ObservationSet) -> None:
         """Read this seat's own cards and ability results, through the perspective.
@@ -198,38 +297,86 @@ class BeliefEngine:
         for result in ledger.public_results():
             ability = "霊媒" if result.result_type == MEDIUM_RESULT else "占い"
             colour = "黒" if result.is_werewolf else "白"
+            base = (
+                PUBLISHED_BLACK_WEIGHT if result.is_werewolf else PUBLISHED_WHITE_WEIGHT
+            )
+            weight = base * self._claimant_weight_factor(result.claimant_id)
+            record = EvidenceRecord(
+                evidence_id=(
+                    f"verdict:{result.claimant_id}:{result.result_type}:"
+                    f"{result.target_id}:{colour}"
+                ),
+                subject_id=result.target_id,
+                category="published_black" if result.is_werewolf else "published_white",
+                source_event_ids=(result.source_message_id or result.target_id,),
+                weight=weight,
+                explanation=(
+                    f"{result.day}日目、{result.claimant_id}の{ability}判定で"
+                    f"{result.target_id}は{colour}と公開された"
+                    f"（対象の夜: {result.source_night}日目）。"
+                ),
+                origin=EvidenceOrigin(
+                    kind=OriginKind.PUBLIC_RESULT,
+                    fact_id=result_fact_id(
+                        result.claimant_id,
+                        result.result_type,
+                        result.target_id,
+                        result.is_werewolf,
+                    ),
+                ),
+            )
+            existing = self.add_evidence(record)
+            # Trust moves during the game, so the same verdict is re-weighed
+            # rather than frozen at whatever the claimant's standing was the
+            # first time it was read.
+            if existing.active and existing.weight != weight:
+                self._evidence[existing.evidence_id] = existing.reweighed(weight)
+
+    def _claimant_weight_factor(self, claimant_id: str) -> float:
+        """How much this seat lets the claimant's standing move their verdict.
+
+        Bounded on both sides and never through zero: distrust reduces the force
+        of a claim, it does not turn a published black into an argument for
+        innocence.
+        """
+        trust = self.state.source_trust.get(claimant_id, 0.0)
+        factor = 1.0 + RESULT_TRUST_SCALE * trust
+        return max(MIN_RESULT_TRUST_FACTOR, min(MAX_RESULT_TRUST_FACTOR, factor))
+
+    def _derive_timeline_evidence(self, observations: ObservationSet) -> None:
+        """A published account that does not fit the public calendar.
+
+        Soft, deliberately: a real seer can misremember which night, and a wolf
+        can invent a schedule that adds up. This raises suspicion of the
+        *claimant*, never of the player they named.
+        """
+        for conflict in find_timeline_conflicts(observations):
             self.add_evidence(
                 EvidenceRecord(
-                    evidence_id=(
-                        f"verdict:{result.claimant_id}:{result.result_type}:"
-                        f"{result.target_id}:{colour}"
-                    ),
-                    subject_id=result.target_id,
-                    category="published_black" if result.is_werewolf else "published_white",
-                    source_event_ids=(result.source_message_id or result.target_id,),
-                    weight=(
-                        PUBLISHED_BLACK_WEIGHT
-                        if result.is_werewolf
-                        else PUBLISHED_WHITE_WEIGHT
-                    ),
-                    explanation=(
-                        f"{result.day}日目、{result.claimant_id}の{ability}判定で"
-                        f"{result.target_id}は{colour}と公開された。"
+                    evidence_id=conflict.conflict_id,
+                    subject_id=conflict.claimant_id,
+                    category="timeline_conflict",
+                    source_event_ids=conflict.source_message_ids
+                    or (conflict.conflict_id,),
+                    weight=TIMELINE_CONFLICT_WEIGHT,
+                    explanation=conflict.explanation,
+                    origin=EvidenceOrigin(
+                        kind=OriginKind.TIMELINE, fact_id=conflict.conflict_id
                     ),
                 )
             )
 
     def _derive_claim_evidence(self, ledger: PublicFactLedger) -> None:
-        by_role: dict[RoleName, list[str]] = {}
-        for claim in ledger.co_declarations():
-            by_role.setdefault(claim.claimed_role, []).append(claim.player_id)
-        for role, claimants in by_role.items():
-            if len(claimants) < 2:
-                continue
+        for role, claimants in _contests(ledger).items():
+            contest = contest_fact_id(role, claimants)
             for player_id in claimants:
                 self.add_evidence(
                     EvidenceRecord(
-                        evidence_id=f"contested:{role.value}:{player_id}",
+                        # The contest is part of the identity, not just the
+                        # claimant: when one of two seer claims is withdrawn the
+                        # other is no longer contested, and the old reason has to
+                        # be a *different* fact so it can be retired.
+                        evidence_id=f"{contest}:{player_id}",
                         subject_id=player_id,
                         category="contested_claim",
                         source_event_ids=(claim_fact_id(player_id, role),),
@@ -237,6 +384,9 @@ class BeliefEngine:
                         explanation=(
                             f"{role.value}COが{len(claimants)}人おり、"
                             f"{player_id}はそのうちの1人。少なくとも1人は偽。"
+                        ),
+                        origin=EvidenceOrigin(
+                            kind=OriginKind.PUBLIC_CLAIM, fact_id=contest
                         ),
                     )
                 )
@@ -272,6 +422,9 @@ class BeliefEngine:
                 explanation=(
                     f"{latest}日目の投票は{leader}へ{counts[leader]}票集まった。"
                 ),
+                origin=EvidenceOrigin(
+                    kind=OriginKind.VOTE, fact_id=f"majority:{latest}:{leader}"
+                ),
             )
         )
 
@@ -295,6 +448,12 @@ class BeliefEngine:
                             f"{vote.day}日目、{vote.voter_id}は人狼ではないと確定した"
                             f"{vote.target_id}へ投票した。"
                         ),
+                        origin=EvidenceOrigin(
+                            kind=OriginKind.VOTE,
+                            fact_id=vote_fact_id(
+                                vote.voter_id, vote.day, vote.round, vote.target_id
+                            ),
+                        ),
                     )
                 )
             elif certainty is Certainty.CERTAIN:
@@ -312,6 +471,12 @@ class BeliefEngine:
                         explanation=(
                             f"{vote.day}日目、{vote.voter_id}は人狼確定の"
                             f"{vote.target_id}へ投票した。"
+                        ),
+                        origin=EvidenceOrigin(
+                            kind=OriginKind.VOTE,
+                            fact_id=vote_fact_id(
+                                vote.voter_id, vote.day, vote.round, vote.target_id
+                            ),
                         ),
                     )
                 )

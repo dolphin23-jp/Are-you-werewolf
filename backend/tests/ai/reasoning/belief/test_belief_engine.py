@@ -106,7 +106,7 @@ def test_contested_claims_raise_suspicion_on_every_claimant():
     # Two seer COs means at least one is lying, so both carry the cost.
     assert engine.state.public_suspicion_scores["p4"] > 0
     assert engine.state.public_suspicion_scores["p8"] > 0
-    assert engine.state.reasons_for("p4") == ("contested:seer:p4",)
+    assert engine.state.reasons_for("p4") == ("contest:seer:p4|p8:p4",)
 
 
 # -- corrections --

@@ -5,7 +5,7 @@ not rules of werewolf -- they are things a player chooses to suppose. Mixing
 them into the hard constraints is how an AI ends up treating a lone claim as
 proof, so they live here and only enter a deduction when a caller asks for them.
 
-Four separate suppositions, because collapsing them loses real distinctions:
+Five separate suppositions, because collapsing them loses real distinctions:
 
 * `GenuineClaim(p, role)`   -- p really holds the role they claimed.
 * `HonestResults(p)`        -- the verdicts p published are factually correct.
@@ -15,6 +15,9 @@ Four separate suppositions, because collapsing them loses real distinctions:
   count has to match the nights the role could have acted.
 * `NoLatentClaim(role)`     -- nobody holds `role` while staying quiet about it.
   This is the toggle between "a lone seer CO is confirmed" and "it isn't".
+* `AccurateTimeline(p)`     -- the nights p says their results came from are the
+  nights they came from. Separate again: a real seer may lie about *when* while
+  telling the truth about *who*, so the timing is its own supposition.
 """
 
 from __future__ import annotations
@@ -29,6 +32,7 @@ from app.ai.reasoning.solver.backend import (
     RoleIsNot,
     Unsatisfiable,
 )
+from app.ai.reasoning.timeline import find_timeline_conflicts
 from app.engine.roles import ROLE_DEFINITIONS, RoleName
 
 MODULE_ID = "assumptions"
@@ -75,7 +79,22 @@ class NoLatentClaim:
         return f"no_latent:{self.role.value}"
 
 
-Assumption = GenuineClaim | HonestResults | CompleteResultDisclosure | NoLatentClaim
+@dataclass(frozen=True)
+class AccurateTimeline:
+    player_id: str
+
+    @property
+    def key(self) -> str:
+        return f"timeline:{self.player_id}"
+
+
+Assumption = (
+    GenuineClaim
+    | HonestResults
+    | CompleteResultDisclosure
+    | NoLatentClaim
+    | AccurateTimeline
+)
 
 
 def expand(
@@ -103,7 +122,44 @@ def _expand_one(
             return _complete_disclosure(assumption, observations)
         case NoLatentClaim():
             return _no_latent_claim(assumption, observations)
+        case AccurateTimeline():
+            return _accurate_timeline(assumption, observations)
     raise TypeError(f"unknown assumption {assumption!r}")
+
+
+def _accurate_timeline(
+    assumption: AccurateTimeline, observations: ObservationSet
+) -> list[LabelledConstraint]:
+    """Take the claimant's account of *when* at face value, then check it.
+
+    Under this supposition a schedule the calendar rules out is not a schedule a
+    holder of the claimed role could have produced, so the claimed role is
+    excluded. Without a claimed role there is nothing to exclude -- an
+    unattributed verdict conflicting with the calendar is odd, but it is the
+    belief layer's business, not the solver's.
+    """
+    conflicts = find_timeline_conflicts(observations)
+    constraints: list[LabelledConstraint] = []
+    for conflict in conflicts:
+        if conflict.claimant_id != assumption.player_id:
+            continue
+        if conflict.claimed_role is None:
+            continue
+        constraints.append(
+            LabelledConstraint(
+                constraint_id=f"{assumption.key}:{conflict.kind}:{conflict.night}",
+                constraint=RoleIsNot(
+                    player_id=conflict.claimant_id, role=conflict.claimed_role
+                ),
+                explanation=(
+                    f"{conflict.explanation}"
+                    f"{conflict.claimant_id}の申告した時系列が正確だと仮定すると、"
+                    f"{ROLE_DEFINITIONS[conflict.claimed_role].label_ja}ではありません。"
+                ),
+                module_id=MODULE_ID,
+            )
+        )
+    return constraints
 
 
 def _genuine_claim(
@@ -226,6 +282,7 @@ def no_latent_constraints(
 
 __all__ = [
     "MODULE_ID",
+    "AccurateTimeline",
     "Assumption",
     "CompleteResultDisclosure",
     "GenuineClaim",

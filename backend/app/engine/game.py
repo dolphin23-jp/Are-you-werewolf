@@ -495,6 +495,7 @@ class GameController:
         is_werewolf: bool,
         source_message_id: str = "",
         confidence: float = 1.0,
+        referenced_day: int | None = None,
     ) -> None:
         self._record_result_event(
             claimant_id,
@@ -503,6 +504,7 @@ class GameController:
             target_id,
             is_werewolf=is_werewolf,
             source_message_id=source_message_id,
+            referenced_day=referenced_day,
             confidence=confidence,
         )
 
@@ -533,6 +535,7 @@ class GameController:
         result_type: str,
         target_id: str,
         source_message_id: str = "",
+        referenced_day: int | None = None,
     ) -> None:
         self._record_result_event(
             claimant_id,
@@ -541,6 +544,7 @@ class GameController:
             target_id,
             is_werewolf=None,
             source_message_id=source_message_id,
+            referenced_day=referenced_day,
         )
 
     def _record_result_event(
