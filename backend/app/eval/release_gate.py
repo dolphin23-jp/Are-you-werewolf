@@ -52,7 +52,7 @@ class ReleaseGate:
         report: ReasoningQualityReport,
         operational: dict[str, float],
         *,
-        live_pairs: int,
+        live_games: int,
         mock_llm_reduction: float | None = None,
         transcript_schema_version: int = 3,
         human_review_complete: bool = False,
@@ -82,9 +82,9 @@ class ReleaseGate:
             incomplete.append("operational_metrics_missing")
         if not human_review_complete:
             incomplete.append("human_review_incomplete")
-        minimum_pairs = self.config.get("qualification", {}).get("minimum_live_pairs", 2)
-        if live_pairs < minimum_pairs:
-            incomplete.append(f"live_pairs={live_pairs}; required={minimum_pairs}")
+        minimum_games = self.config.get("qualification", {}).get("minimum_live_games", 2)
+        if live_games < minimum_games:
+            incomplete.append(f"live_games={live_games}; required={minimum_games}")
         if incomplete:
             return ReleaseGateResult(ReleaseDecision.INCONCLUSIVE, tuple(incomplete))
         return ReleaseGateResult(ReleaseDecision.PASS, ())

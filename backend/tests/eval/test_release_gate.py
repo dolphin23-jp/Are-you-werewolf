@@ -8,7 +8,7 @@ from app.eval.release_gate import HARD_FAILURE_FIELDS, ReleaseDecision, ReleaseG
 CONFIG = Path(__file__).parents[2] / "config" / "reasoning_release_gate.toml"
 
 QUALIFIED_KWARGS = dict(
-    live_pairs=2,
+    live_games=2,
     mock_llm_reduction=0.6,
     human_review_complete=True,
     operational_complete=True,
@@ -20,15 +20,15 @@ def test_release_gate_fails_hard_error():
     result = gate.evaluate(
         ReasoningQualityReport(private_evidence_exposed_count=1),
         {},
-        live_pairs=3,
+        live_games=3,
         mock_llm_reduction=0.6,
     )
     assert result.decision is ReleaseDecision.FAIL
 
 
-def test_release_gate_is_inconclusive_without_live_pairs():
+def test_release_gate_is_inconclusive_without_enough_live_games():
     result = ReleaseGate.from_toml(CONFIG).evaluate(
-        ReasoningQualityReport(), {}, live_pairs=0, mock_llm_reduction=0.6
+        ReasoningQualityReport(), {}, live_games=0, mock_llm_reduction=0.6
     )
     assert result.decision is ReleaseDecision.INCONCLUSIVE
 
@@ -37,7 +37,7 @@ def test_release_gate_passes_only_qualified_live_evaluation():
     result = ReleaseGate.from_toml(CONFIG).evaluate(
         ReasoningQualityReport(),
         {},
-        live_pairs=2,
+        live_games=2,
         mock_llm_reduction=0.6,
         human_review_complete=True,
         operational_complete=True,
@@ -126,17 +126,17 @@ def test_release_gate_respects_custom_config_thresholds():
     gate = ReleaseGate(
         {
             "reliability": {"max_complete_failure_rate": 0.5},
-            "qualification": {"minimum_live_pairs": 5},
+            "qualification": {"minimum_live_games": 5},
         }
     )
     lenient_reliability = gate.evaluate(
         ReasoningQualityReport(),
         {"complete_failure_rate": 0.3},
-        live_pairs=2,
+        live_games=2,
         mock_llm_reduction=None,
         human_review_complete=True,
         operational_complete=True,
     )
     assert lenient_reliability.decision is ReleaseDecision.INCONCLUSIVE
-    assert "live_pairs=2; required=5" in lenient_reliability.reasons
+    assert "live_games=2; required=5" in lenient_reliability.reasons
     assert "complete_failure_rate" not in lenient_reliability.reasons
