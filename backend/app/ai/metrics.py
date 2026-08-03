@@ -42,10 +42,21 @@ class CallRecord:
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
     error: str | None = None
+    # Why the model stopped, and how much of the output budget its private
+    # reasoning consumed. Without these, "response was not parseable as JSON"
+    # cannot distinguish a model that emits prose from a reasoning model whose
+    # thinking exhausted max_completion_tokens and left the content empty or
+    # cut off mid-object -- two failures with opposite fixes.
+    finish_reason: str | None = None
+    reasoning_tokens: int | None = None
 
     @property
     def succeeded(self) -> bool:
         return self.path is not ParsePath.FAILED
+
+    @property
+    def truncated(self) -> bool:
+        return self.finish_reason == "length"
 
 
 @dataclass
@@ -131,6 +142,19 @@ class MetricsCollector:
             ),
             "complete_failures": by_path[ParsePath.FAILED.value],
             "retry_calls": sum(1 for r in records if r.attempt > 0),
+            "finish_reason_counts": _finish_reason_counts(records),
+            # Of the calls that produced nothing usable, how many were cut off
+            # rather than malformed. A high share here is an output-budget
+            # problem, not a prompting one.
+            "truncated_calls": sum(1 for r in records if r.truncated),
+            "truncated_failure_rate": (
+                sum(1 for r in records if r.truncated and not r.succeeded)
+                / max(sum(1 for r in records if not r.succeeded), 1)
+            ),
+            "reasoning_tokens": sum(r.reasoning_tokens or 0 for r in records),
+            "reasoning_token_share": (
+                sum(r.reasoning_tokens or 0 for r in records) / max(completion_tokens, 1)
+            ),
             "latency_seconds": {
                 "mean": round(statistics.fmean(latencies), 3),
                 "p50": round(_percentile(latencies, 0.50), 3),
@@ -182,6 +206,14 @@ def _percentile(sorted_values: list[float], q: float) -> float:
         return sorted_values[0]
     index = min(int(round(q * (len(sorted_values) - 1))), len(sorted_values) - 1)
     return sorted_values[index]
+
+
+def _finish_reason_counts(records: list[CallRecord]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for record in records:
+        if record.finish_reason:
+            counts[record.finish_reason] = counts.get(record.finish_reason, 0) + 1
+    return dict(sorted(counts.items(), key=lambda kv: kv[1], reverse=True))
 
 
 def _top_errors(records: list[CallRecord], limit: int = 5) -> list[dict[str, Any]]:

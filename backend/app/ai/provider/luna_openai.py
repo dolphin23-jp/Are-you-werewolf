@@ -56,6 +56,11 @@ class _Attempt:
     completion_tokens: int = 0
     error: str | None = None
     http_requests: int = 0
+    finish_reason: str | None = None
+    reasoning_tokens: int = 0
+    # The endpoint refused the json_schema contract itself, as opposed to
+    # answering it badly. Permanent for this endpoint, so it is worth caching.
+    strict_unsupported: bool = False
 
 
 # This is the single retry boundary. One logical generation uses strict schema
@@ -89,6 +94,15 @@ class LunaOpenAIProvider:
         # reused for the rest of the process.
         self._dialect = EndpointDialect()
         self._request_budget: EvaluationBudget | None = None
+        # None until the endpoint has told us. False is sticky and only set on
+        # an outright rejection of the json_schema contract, never on a call
+        # that merely came back malformed -- a model having a bad turn must not
+        # cost the whole process its strict-schema path.
+        self._strict_schema_supported: bool | None = None
+
+    @property
+    def strict_schema_supported(self) -> bool | None:
+        return self._strict_schema_supported
 
     def set_request_budget(self, budget: EvaluationBudget) -> None:
         """Attach the manual evaluation budget at the actual HTTP boundary."""
@@ -115,28 +129,43 @@ class LunaOpenAIProvider:
         completion_tokens = 0
         last_error: str | None = None
         http_requests = 0
+        finish_reason: str | None = None
+        reasoning_tokens = 0
         started = asyncio.get_running_loop().time()
+        # One request per logical call is spent probing strict schema, so an
+        # endpoint that has already rejected it outright must not be asked
+        # again -- on the seed-11 live run that was 125 certain-fail 400s out
+        # of 253 requests, doubling both the request count and the latency.
+        modes = 1 if self._strict_schema_supported is False else 2
 
         async with self._semaphore:
-            strict = await self._try_strict_schema(
-                openai_messages, response_schema, max_tokens, temperature
-            )
-            prompt_tokens += strict.prompt_tokens
-            completion_tokens += strict.completion_tokens
-            http_requests += strict.http_requests
-            last_error = strict.error
-            if strict.result is not None:
-                self._record(
-                    response_schema,
-                    strict.path,
-                    started,
-                    max(0, http_requests - 1),
-                    http_requests,
-                    prompt_tokens,
-                    completion_tokens,
-                    None,
+            if self._strict_schema_supported is not False:
+                strict = await self._try_strict_schema(
+                    openai_messages, response_schema, max_tokens, temperature
                 )
-                return strict.result  # type: ignore[no-any-return]
+                prompt_tokens += strict.prompt_tokens
+                completion_tokens += strict.completion_tokens
+                http_requests += strict.http_requests
+                last_error = strict.error
+                finish_reason = strict.finish_reason or finish_reason
+                reasoning_tokens += strict.reasoning_tokens
+                if strict.strict_unsupported:
+                    self._strict_schema_supported = False
+                if strict.result is not None:
+                    self._strict_schema_supported = True
+                    self._record(
+                        response_schema,
+                        strict.path,
+                        started,
+                        max(0, http_requests - 1),
+                        http_requests,
+                        prompt_tokens,
+                        completion_tokens,
+                        None,
+                        strict.finish_reason,
+                        strict.reasoning_tokens,
+                    )
+                    return strict.result  # type: ignore[no-any-return]
 
             fallback = await self._try_json_object_mode(
                 openai_messages, response_schema, max_tokens, temperature
@@ -145,16 +174,20 @@ class LunaOpenAIProvider:
             completion_tokens += fallback.completion_tokens
             http_requests += fallback.http_requests
             last_error = fallback.error or last_error
+            finish_reason = fallback.finish_reason or finish_reason
+            reasoning_tokens += fallback.reasoning_tokens
             if fallback.result is not None:
                 self._record(
                     response_schema,
                     fallback.path,
                     started,
-                    max(0, http_requests - 2),
+                    max(0, http_requests - modes),
                     http_requests,
                     prompt_tokens,
                     completion_tokens,
                     None,
+                    fallback.finish_reason,
+                    fallback.reasoning_tokens,
                 )
                 return fallback.result  # type: ignore[no-any-return]
 
@@ -162,11 +195,13 @@ class LunaOpenAIProvider:
             response_schema,
             ParsePath.FAILED,
             started,
-            max(0, http_requests - 2),
+            max(0, http_requests - modes),
             http_requests,
             prompt_tokens,
             completion_tokens,
             last_error,
+            finish_reason,
+            reasoning_tokens,
         )
         return None
 
@@ -180,6 +215,8 @@ class LunaOpenAIProvider:
         prompt_tokens: int,
         completion_tokens: int,
         error: str | None,
+        finish_reason: str | None = None,
+        reasoning_tokens: int = 0,
     ) -> None:
         if self._metrics is None:
             return
@@ -196,6 +233,8 @@ class LunaOpenAIProvider:
                 prompt_tokens=prompt_tokens or None,
                 completion_tokens=completion_tokens or None,
                 error=error,
+                finish_reason=finish_reason,
+                reasoning_tokens=reasoning_tokens or None,
             )
         )
 
@@ -253,7 +292,12 @@ class LunaOpenAIProvider:
                 openai_messages, response_format, max_tokens, temperature
             )
         except Exception as exc:
-            return _Attempt(error=_describe(_root_error(exc)), http_requests=_request_count(exc))
+            root = _root_error(exc)
+            return _Attempt(
+                error=_describe(root),
+                http_requests=_request_count(exc),
+                strict_unsupported=_rejects_strict_schema(root),
+            )
 
         prompt_tokens, completion_tokens = _usage(response)
         if self._request_budget is not None:
@@ -267,6 +311,8 @@ class LunaOpenAIProvider:
             completion_tokens=completion_tokens,
             error=None if parsed is not None else "strict schema response did not validate",
             http_requests=requests,
+            finish_reason=_finish_reason(response),
+            reasoning_tokens=_reasoning_tokens(response),
         )
 
     async def _try_json_object_mode(
@@ -291,6 +337,9 @@ class LunaOpenAIProvider:
         # Distinguish "the body was already clean JSON" from "we had to dig
         # it out of prose", because only the latter signals a model that
         # ignores the response_format contract.
+        finish_reason = _finish_reason(response)
+        reasoning_tokens = _reasoning_tokens(response)
+
         direct = _parse_strict(content, response_schema)
         if direct is not None:
             return _Attempt(
@@ -299,16 +348,27 @@ class LunaOpenAIProvider:
                 prompt_tokens,
                 completion_tokens,
                 http_requests=requests,
+                finish_reason=finish_reason,
+                reasoning_tokens=reasoning_tokens,
             )
 
         salvaged = _parse_permissive(content, response_schema)
+        # Name the truncation case rather than filing it under bad JSON: it is
+        # fixed by raising max_tokens, not by changing the prompt.
+        failure = (
+            "response was cut off before the JSON closed (finish_reason=length)"
+            if finish_reason == "length"
+            else "response was not parseable as JSON"
+        )
         return _Attempt(
             result=salvaged,
             path=ParsePath.PERMISSIVE if salvaged is not None else ParsePath.FAILED,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
-            error=None if salvaged is not None else "response was not parseable as JSON",
+            error=None if salvaged is not None else failure,
             http_requests=requests,
+            finish_reason=finish_reason,
+            reasoning_tokens=reasoning_tokens,
         )
 
 
@@ -327,6 +387,21 @@ def _root_error(exc: Exception) -> Exception:
     return exc.cause if isinstance(exc, _RequestFailure) else exc
 
 
+def _rejects_strict_schema(exc: Exception) -> bool:
+    """Did the endpoint refuse the json_schema contract as such?
+
+    Deliberately narrow. A 4xx can equally mean the prompt was too long, which
+    would break json_object mode too, so the status alone is not enough -- the
+    message has to name the response format. OpenAI-compatible endpoints fail
+    this either by not implementing `json_schema` at all or, as here, by
+    demanding `additionalProperties: false` on every object in the schema.
+    """
+    if not isinstance(exc, APIStatusError) or exc.status_code not in (400, 404, 422):
+        return False
+    message = str(exc).lower()
+    return "response_format" in message or "json_schema" in message or "schema" in message
+
+
 def _is_retryable(exc: Exception) -> bool:
     if isinstance(exc, (APIConnectionError, APITimeoutError, RateLimitError)):
         return True
@@ -340,6 +415,22 @@ def _usage(response: Any) -> tuple[int, int]:
     return int(getattr(usage, "prompt_tokens", 0) or 0), int(
         getattr(usage, "completion_tokens", 0) or 0
     )
+
+
+def _reasoning_tokens(response: Any) -> int:
+    """Reasoning models bill thinking against the completion budget, so this is
+    the part of `max_tokens` the visible answer never got to use."""
+    usage = getattr(response, "usage", None)
+    details = getattr(usage, "completion_tokens_details", None) if usage else None
+    return int(getattr(details, "reasoning_tokens", 0) or 0) if details else 0
+
+
+def _finish_reason(response: Any) -> str | None:
+    choices = getattr(response, "choices", None)
+    if not choices:
+        return None
+    reason = getattr(choices[0], "finish_reason", None)
+    return str(reason) if reason else None
 
 
 def _describe(exc: Exception) -> str:

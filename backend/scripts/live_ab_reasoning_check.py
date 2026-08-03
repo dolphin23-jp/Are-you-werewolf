@@ -1,5 +1,21 @@
 #!/usr/bin/env python3
-"""Budgeted, resumable paired real-provider qualification (never run by CI)."""
+"""Budgeted, resumable real-provider qualification (never run by CI).
+
+Written as a paired legacy-vs-v2 harness. It no longer runs the pair by
+default: `--engines` is v2 only, because the legacy arm exists to answer a
+comparison question that has been answered, and re-running it costs a full
+game's spend and roughly 25 minutes of wall time per seed for an engine that
+is not being shipped. The legacy path is kept, not deleted -- pass
+`--engines legacy v2` to get the old behaviour back.
+
+One consequence is deliberate and unresolved: `minimum_live_pairs` in
+`config/reasoning_release_gate.toml` counts seeds that ran BOTH arms, so a
+v2-only run reports `live_pairs=0` and the gate can only ever return
+INCONCLUSIVE, never PASS. That is the honest reading of the current gate -- a
+v2-only run genuinely has not produced the paired evidence the gate asks for.
+Deciding whether the gate should instead qualify v2 on its own terms is a
+release-criteria change, not a harness change, so it is left to a human.
+"""
 
 from __future__ import annotations
 
@@ -189,7 +205,13 @@ def _stage_status(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--seeds", nargs="+", type=int, default=[11, 12, 13])
-    parser.add_argument("--engines", nargs="+", choices=("legacy", "v2"), default=["legacy", "v2"])
+    # v2 only by default. The legacy arm was the A side of a comparison that has
+    # served its purpose, and every legacy game is a full game's spend and about
+    # 25 minutes of wall time to re-measure an engine nobody is shipping. Pass
+    # `--engines legacy v2` explicitly if a paired run is ever wanted again --
+    # note that the release gate's `minimum_live_pairs` counts seeds that ran
+    # BOTH arms, so a v2-only run cannot reach PASS on its own (see below).
+    parser.add_argument("--engines", nargs="+", choices=("legacy", "v2"), default=["v2"])
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--max-http-requests", type=int, default=4000)
     parser.add_argument("--max-estimated-cost", type=float, default=20.0)

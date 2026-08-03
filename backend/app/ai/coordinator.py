@@ -78,6 +78,37 @@ def _night_utility(seat: SeatReasoning, action_type: str) -> dict[str, float]:
     return maps.get(action_type, state.execution_utility_scores)
 
 
+def _normalized_result_key(result_id: str) -> tuple[str, str]:
+    """Drop the day from a `type:day:target` id, leaving `(type, target)`.
+
+    The publication audit answers one question -- was the result disclosed at
+    all -- and it has to answer it across two differently-shaped sources: the
+    requirement carries the day from the engine's own record, while the ledger
+    carries whatever day survived the claim it registered. A model that names
+    the right result without pinning a day leaves those two ids disagreeing on
+    a component the question does not turn on, and the set difference then
+    reports an omission for a result that was published in plain sight (seed 11
+    day 5: required `medium:None:p13` against published `medium:4:p13`).
+
+    A claimant holds at most one result per (type, target), so ignoring the day
+    cannot merge two distinct results. Whether the day itself is right is a
+    separate question, and the timeline-conflict check already asks it.
+    """
+    result_type, _, remainder = result_id.partition(":")
+    _, _, target_id = remainder.partition(":")
+    return result_type, target_id
+
+
+def _omitted_result_ids(
+    required_ids: tuple[str, ...], published_ids: tuple[str, ...]
+) -> tuple[str, ...]:
+    """Required results with no matching publication, compared day-agnostically."""
+    published = {_normalized_result_key(item) for item in published_ids}
+    return tuple(
+        sorted(item for item in required_ids if _normalized_result_key(item) not in published)
+    )
+
+
 # How many times the round may re-queue pressured execution candidates that have
 # not rebutted yet. Bounded so the speaker selection always terminates.
 _MAX_MAJOR_TARGET_SWEEPS = 2
@@ -766,6 +797,7 @@ class AICoordinator:
         # never executed is state corruption, not a human-style misread, and it
         # is repaired deterministically here before it reaches the engine.
         self._validate_output(state, player_id, output)
+        enforced_results: tuple[PublicResultClaim, ...] = ()
         if decision is not None:
             # The model rendered the turn; it does not get to revise the
             # conclusion. Two reasoning systems running side by side is what
@@ -813,6 +845,10 @@ class AICoordinator:
                     if r.medium_id == player_id and ("medium", r.target_id, r.day) not in published
                 )
                 output.public_results = required
+                # Only what the engine actually demanded is a requirement. A
+                # result the model volunteers on some later turn is speech, not
+                # an obligation, and must not be audited as one.
+                enforced_results = tuple(required)
             assert self.reasoning is not None
             self.reasoning.record_stated_target(player_id, decision.execution_target)
         pending_relation = next(
@@ -901,7 +937,7 @@ class AICoordinator:
             )
             required_ids = tuple(
                 f"{item.result_type}:{item.referenced_day}:{item.target_id}"
-                for item in output.public_results
+                for item in enforced_results
             )
             self._recorder.record_decision_audit(
                 DecisionAuditRecord(
@@ -1002,7 +1038,7 @@ class AICoordinator:
                     day=state.day,
                     required_result_ids=required_ids,
                     published_result_ids=published_ids,
-                    omitted_result_ids=tuple(sorted(set(required_ids) - set(published_ids))),
+                    omitted_result_ids=_omitted_result_ids(required_ids, published_ids),
                     duplicate_result_ids=tuple(
                         sorted({item for item in published_list if published_list.count(item) > 1})
                     ),
