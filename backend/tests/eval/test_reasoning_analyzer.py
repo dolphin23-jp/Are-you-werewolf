@@ -41,29 +41,15 @@ def test_analyzer_recomputes_visibility_publication_and_change_failures():
 
 def test_justified_change_and_correction_are_counted_at_distinct_levels():
     transcript = GameTranscript(
-        decision_audits=[
-            DecisionAuditRecord(
-                game_id="g",
-                day=2,
-                phase="voting",
-                player_id="p1",
-                decision_target="p2",
-                displayed_target="p2",
-                vote_target="p3",
-                target_change_classification=VoteChangeKind.NEW_PUBLIC_EVIDENCE,
-            )
-        ],
-        correction_audits=[
-            CorrectionAuditRecord(
-                "c1",
-                "m1",
-                "p0",
-                "confirmed",
-                ("p1", "p2"),
-                ("bad-vote",),
-                {"p1": -1.0, "p2": -0.5},
-            )
-        ],
+        decision_audits=[DecisionAuditRecord(
+            game_id="g", day=2, phase="voting", player_id="p1", decision_target="p2",
+            displayed_target="p2", vote_target="p3",
+            target_change_classification=VoteChangeKind.NEW_PUBLIC_EVIDENCE,
+        )],
+        correction_audits=[CorrectionAuditRecord(
+            "c1", "m1", "p0", "confirmed", ("p1", "p2"), ("bad-vote",),
+            {"p1": -1.0, "p2": -0.5},
+        )],
     )
     report = ReasoningTranscriptAnalyzer().analyze(transcript)
     assert report.justified_vote_change_count == 1
