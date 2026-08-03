@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import random
 import time
+import uuid
 from collections import Counter
 from dataclasses import replace
 
@@ -42,7 +43,7 @@ from app.ai.reasoning.claims import (
     ensure_fact_sentences,
     register_claim_drafts,
 )
-from app.ai.reasoning.runtime import ReasoningRuntime, SeatReasoning
+from app.ai.reasoning.runtime import ReasoningRuntime, SeatReasoning, VoteDecisionSnapshot
 from app.ai.schemas import (
     DiscussionOutput,
     MorningIntentOutput,
@@ -901,6 +902,7 @@ class AICoordinator:
             return None
         if self._recorder is not None and decision is not None and self.reasoning is not None:
             belief = self.reasoning.seats[player_id].belief
+            snapshot = self.reasoning.vote_decision_snapshot(state, player_id)
             public_records = belief.public_argument_evidence_for(decision.execution_target)
             required_ids = tuple(
                 f"{item.result_type}:{item.referenced_day}:{item.target_id}"
@@ -908,6 +910,7 @@ class AICoordinator:
             )
             self._recorder.record_decision_audit(
                 DecisionAuditRecord(
+                    decision_id=uuid.uuid4().hex,
                     game_id=state.session_id,
                     day=state.day,
                     phase=state.phase.value,
@@ -923,6 +926,10 @@ class AICoordinator:
                     ),
                     active_evidence_ids=tuple(r.evidence_id for r in belief.active_evidence()),
                     publicly_emitted_evidence_ids=tuple(r.evidence_id for r in public_records),
+                    public_result_fingerprints=snapshot.public_results,
+                    correction_event_ids=snapshot.corrections,
+                    alive_player_ids=snapshot.alive_players,
+                    eligible_vote_targets=snapshot.eligible_targets,
                 )
             )
             if required_ids:
@@ -1280,6 +1287,44 @@ class AICoordinator:
             controller.vote(player_id, output.vote_target)  # type: ignore[attr-defined]
         except Exception:
             return
+        accepted_target = state.pending_votes.get(player_id)
+        if self._recorder is not None:
+            found = self._recorder.latest_open_decision(
+                game_id=state.session_id, day=state.day, player_id=player_id
+            )
+            if found is not None:
+                index, audit = found
+                current = (
+                    self.reasoning.vote_decision_snapshot(state, player_id)
+                    if self.reasoning else None
+                )
+                if current is not None:
+                    at_speech = VoteDecisionSnapshot(
+                        public_results=audit.public_result_fingerprints,
+                        public_black_results=tuple(
+                            item for item in audit.public_result_fingerprints
+                            if item.endswith(":True")
+                        ),
+                        corrections=audit.correction_event_ids,
+                        alive_players=audit.alive_player_ids,
+                        eligible_targets=audit.eligible_vote_targets,
+                    )
+                    classification, reason = self.reasoning.classify_vote_change(
+                        at_speech, current,
+                        decision_target=audit.decision_target,
+                        vote_target=accepted_target,
+                    )
+                else:
+                    classification, reason = None, ""
+                self._recorder.replace_decision_audit(
+                    index,
+                    replace(
+                        audit,
+                        vote_target=accepted_target,
+                        target_change_classification=classification,
+                        target_change_reason=reason,
+                    ),
+                )
         # Voting against your own stated plan is legal play, not corruption, so
         # this is recorded rather than corrected -- but silently losing it means
         # nobody can tell a change of mind from an AI that lost track of itself.

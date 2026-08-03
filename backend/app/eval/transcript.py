@@ -19,6 +19,7 @@ class DecisionAuditRecord:
     day: int
     phase: str
     player_id: str
+    decision_id: str = ""
     decision_target: str | None = None
     displayed_target: str | None = None
     vote_target: str | None = None
@@ -36,6 +37,10 @@ class DecisionAuditRecord:
     target_alive: bool = True
     ally_vote: bool = False
     ally_vote_planned: bool = False
+    public_result_fingerprints: tuple[str, ...] = ()
+    correction_event_ids: tuple[str, ...] = ()
+    alive_player_ids: tuple[str, ...] = ()
+    eligible_vote_targets: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -156,6 +161,25 @@ class TranscriptRecorder:
 
     def record_decision_audit(self, record: DecisionAuditRecord) -> None:
         self.transcript.decision_audits.append(record)
+
+    def latest_open_decision(
+        self, *, game_id: str, day: int, player_id: str
+    ) -> tuple[int, DecisionAuditRecord] | None:
+        """Return the latest same-day decision not yet linked to a ballot."""
+        for index in range(len(self.transcript.decision_audits) - 1, -1, -1):
+            record = self.transcript.decision_audits[index]
+            if (
+                record.game_id == game_id
+                and record.day == day
+                and record.player_id == player_id
+                and record.decision_target is not None
+                and record.vote_target is None
+            ):
+                return index, record
+        return None
+
+    def replace_decision_audit(self, index: int, record: DecisionAuditRecord) -> None:
+        self.transcript.decision_audits[index] = record
 
     def record_correction_audit(self, record: CorrectionAuditRecord) -> None:
         self.transcript.correction_audits.append(record)

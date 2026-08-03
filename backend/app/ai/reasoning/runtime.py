@@ -54,6 +54,7 @@ from app.ai.reasoning.solver import (
     build_solver,
 )
 from app.engine.roles import RoleName
+from app.engine.speech_events import SpeechEventType
 from app.engine.state import GameState
 
 # How many seats open the day. More than this and the morning is a wall of text
@@ -110,6 +111,15 @@ class SpeechCandidate:
     player_id: str
     value: float
     reasons: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class VoteDecisionSnapshot:
+    public_results: tuple[str, ...]
+    public_black_results: tuple[str, ...]
+    corrections: tuple[str, ...]
+    alive_players: tuple[str, ...]
+    eligible_targets: tuple[str, ...]
 
 
 class ReasoningRuntime:
@@ -245,6 +255,57 @@ class ReasoningRuntime:
                 self._minority_survivals += 1
 
     # -- decisions that used to cost a request --
+
+    @staticmethod
+    def vote_decision_snapshot(state: GameState, player_id: str) -> VoteDecisionSnapshot:
+        def result_key(result: object) -> str:
+            return ":".join(str(value) for value in (
+                result.claimant_id, result.result_type, result.referenced_day,
+                result.target_id, result.is_werewolf,
+            ))
+
+        results = state.public_result_claims
+        correction_types = {
+            SpeechEventType.RESULT_CORRECTION,
+            SpeechEventType.RESULT_RETRACTION,
+            SpeechEventType.FACT_CORRECTION,
+        }
+        return VoteDecisionSnapshot(
+            public_results=tuple(sorted(result_key(result) for result in results)),
+            public_black_results=tuple(sorted(
+                result_key(result) for result in results if result.is_werewolf
+            )),
+            corrections=tuple(event.event_id for event in state.speech_events
+                              if event.event_type in correction_types),
+            alive_players=tuple(sorted(state.alive_ids())),
+            eligible_targets=tuple(sorted(state.votable_ids(player_id))),
+        )
+
+    @staticmethod
+    def classify_vote_change(
+        before: VoteDecisionSnapshot,
+        after: VoteDecisionSnapshot,
+        *,
+        decision_target: str | None,
+        vote_target: str | None,
+    ) -> tuple[str | None, str]:
+        """Classify a ballot change from public changes after the speech."""
+        if vote_target == decision_target:
+            return "none", ""
+        if decision_target and decision_target not in after.alive_players:
+            return "target_became_invalid", f"{decision_target}が投票前に死亡した"
+        if decision_target and decision_target not in after.eligible_targets:
+            return "runoff_restriction", f"決選投票で{decision_target}が対象外になった"
+        new_corrections = set(after.corrections) - set(before.corrections)
+        if new_corrections:
+            correction_list = ", ".join(sorted(new_corrections))
+            return "correction_accepted", f"訂正イベントを受理: {correction_list}"
+        new_black = set(after.public_black_results) - set(before.public_black_results)
+        if new_black:
+            return "new_public_evidence", f"新しい公開黒結果: {', '.join(sorted(new_black))}"
+        if set(after.public_results) ^ set(before.public_results):
+            return "public_result_changed", "公開結果が発言後に更新された"
+        return "unexplained", "発言後の公開情報または投票制約に変更がない"
 
     def vote_decision(self, player_id: str, candidates: Sequence[str]) -> tuple[str, str]:
         """Pick a ballot and say why, from evidence already held.
