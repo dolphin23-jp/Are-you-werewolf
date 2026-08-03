@@ -1,0 +1,11 @@
+[reliability]
+max_complete_failure_rate = 0.01
+max_discussion_skip_rate = 0.02
+
+[efficiency]
+min_mock_logical_call_reduction = 0.50
+reference_http_request_reduction = 0.40
+reference_total_token_reduction = 0.30
+
+[qualification]
+minimum_live_pairs = 2

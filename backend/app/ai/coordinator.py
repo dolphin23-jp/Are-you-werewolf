@@ -36,6 +36,7 @@ from app.ai.reasoning import (
     validate_discussion_output,
     validate_public_result_claim,
 )
+from app.ai.reasoning.belief import CorrectionOutcome, EvidenceVisibility
 from app.ai.reasoning.claims import (
     SpeechEventDraft,
     build_claim_drafts,
@@ -47,6 +48,7 @@ from app.ai.schemas import (
     DiscussionOutput,
     MorningIntentOutput,
     NightActionOutput,
+    PublicResultClaim,
     VoteOutput,
 )
 from app.ai.schemas import PublicResultClaim as SchemaPublicResultClaim
@@ -54,7 +56,13 @@ from app.engine.phases import Phase
 from app.engine.roles import RoleName
 from app.engine.speech_events import SpeechEventType
 from app.engine.state import GameState, PendingQuestion
-from app.eval.transcript import TranscriptRecorder, Utterance
+from app.eval.transcript import (
+    CorrectionAuditRecord,
+    DecisionAuditRecord,
+    ResultPublicationAuditRecord,
+    TranscriptRecorder,
+    Utterance,
+)
 from app.sessions.models import DiscussionRoundState
 
 
@@ -144,9 +152,7 @@ class AICoordinator:
         fake_claim_guard = FakeClaimGuard(wolf_team_ids=set(wolf_ids))
         self._wolf_deception = wolf_deception
         self._madman_fake_role_by_player = {
-            player.player_id: madman_fake_role
-            for player in madman
-            if madman_fake_role is not None
+            player.player_id: madman_fake_role for player in madman if madman_fake_role is not None
         }
 
         self._day_summaries = DaySummaryManager()
@@ -165,6 +171,7 @@ class AICoordinator:
 
         self._recorder = recorder
         if recorder is not None:
+            recorder.transcript.game_id = state.session_id
             recorder.set_roster(
                 names={pid: p.name for pid, p in state.players.items()},
                 roles={pid: p.role.value for pid, p in state.players.items()},
@@ -273,9 +280,7 @@ class AICoordinator:
             if round_state is None or round_state.complete:
                 return
 
-    async def advance_discussion(
-        self, session: object, *, allow_human_pause: bool = True
-    ) -> None:
+    async def advance_discussion(self, session: object, *, allow_human_pause: bool = True) -> None:
         """Run at most one discussion segment while holding the session lock."""
         async with session.discussion_lock:  # type: ignore[attr-defined]
             controller = session.controller  # type: ignore[attr-defined]
@@ -400,9 +405,7 @@ class AICoordinator:
             max_total=max(len(alive) + self._max_discussion_followups, int(len(alive) * 2.5)),
         )
 
-    def _coded_discussion_round(
-        self, state: GameState, alive: list[str]
-    ) -> DiscussionRoundState:
+    def _coded_discussion_round(self, state: GameState, alive: list[str]) -> DiscussionRoundState:
         """Open the day with the seats that have something to say.
 
         Everyone forms an opinion -- the belief engine updates all of them -- but
@@ -418,11 +421,16 @@ class AICoordinator:
             if self.reasoning.holds_unpublished_result(state, pid)
             or self._pending_questions.get(pid)
         ]
+        planned_claims: list[str] = []
+        if self._freemason_public_plan is not None:
+            leader = self._freemason_public_plan[0]
+            if leader in alive and PublicFactLedger(state).claimed_role_of(leader) is None:
+                planned_claims.append(leader)
+        duty.extend(planned_claims)
         chosen = self.reasoning.select_opening_speakers(
             state,
-            pending_question_targets=[
-                pid for pid in alive if self._pending_questions.get(pid)
-            ],
+            pending_question_targets=[pid for pid in alive if self._pending_questions.get(pid)],
+            planned_claims=planned_claims,
         )
         order = list(dict.fromkeys(duty + chosen))
         return DiscussionRoundState(
@@ -500,8 +508,7 @@ class AICoordinator:
             owed = [
                 target
                 for target in round_state.major_targets
-                if state.players[target].alive
-                and round_state.speech_counts.get(target, 0) < 2
+                if state.players[target].alive and round_state.speech_counts.get(target, 0) < 2
             ]
             if not owed or len(round_state.outputs) >= round_state.max_total:
                 break
@@ -628,9 +635,7 @@ class AICoordinator:
             leader, partner, full_reveal = self._freemason_public_plan
             leader_alive = state.players[leader].alive
             partner_alive = state.players[partner].alive
-            already_claimed = any(
-                claim.player_id == player_id for claim in state.co_declarations
-            )
+            already_claimed = any(claim.player_id == player_id for claim in state.co_declarations)
             if player_id == leader and not already_claimed:
                 output.timing = "after_results"
                 output.intent = "claim"
@@ -680,9 +685,7 @@ class AICoordinator:
                 public_claim_role=player.role.value,
                 priority_reason="未公開の能力結果を持つ",
             )
-        candidates = {
-            item.player_id: item for item in self.reasoning.speech_candidates(state)
-        }
+        candidates = {item.player_id: item for item in self.reasoning.speech_candidates(state)}
         candidate = candidates.get(player_id)
         if candidate is None or candidate.value <= 0:
             return MorningIntentOutput(timing="hold", intent="normal")
@@ -704,8 +707,7 @@ class AICoordinator:
                 state,
                 player_id,
                 pending_question=bool(self._pending_questions.get(player_id)),
-                under_pressure=stage.startswith("rebuttal")
-                or stage.startswith("minority_review"),
+                under_pressure=stage.startswith("rebuttal") or stage.startswith("minority_review"),
             )
             messages = [
                 *messages[:-1],
@@ -716,8 +718,7 @@ class AICoordinator:
         freemason_must_hide = self._freemason_must_hide(state, player_id)
         if freemason_opening is not None:
             system += (
-                "\n\n【共有公開計画】この発言では指定された共有CO文を最初に"
-                "そのまま述べてください。"
+                "\n\n【共有公開計画】この発言では指定された共有CO文を最初にそのまま述べてください。"
             )
         elif freemason_must_hide:
             system += (
@@ -733,6 +734,7 @@ class AICoordinator:
             self._metrics.record_discussion_result(skipped=output is None)
         if output is None:
             return None
+        model_requested_target = output.reasoning_memo.execution_target
         if freemason_opening is not None:
             output.public_message = freemason_opening
             output.public_claim_role = RoleName.FREEMASON.value
@@ -767,6 +769,47 @@ class AICoordinator:
             # let an AI argue one name all day and then vote for another.
             output.reasoning_memo.execution_target = decision.execution_target
             output.alternative_execution_target = decision.alternative_target
+            if decision.execution_target is not None:
+                target = state.players[decision.execution_target]
+                canonical = (
+                    f"現時点の第一処刑候補は{target.name}({decision.execution_target})です。"
+                )
+                # Candidate declarations are conclusions, not model prose. Remove
+                # every free-text sentence that tries to supply a competing one.
+                rationale = "。".join(
+                    sentence
+                    for sentence in output.public_message.split("。")
+                    if sentence.strip() and "第一候補" not in sentence
+                )
+                output.public_message = canonical + (rationale + "。" if rationale else "")
+            if decision.speech_goal.value == "publish_result":
+                ledger = PublicFactLedger(state)
+                published = {
+                    (r.result_type, r.target_id, r.referenced_day)
+                    for r in ledger.public_results()
+                    if r.claimant_id == player_id
+                }
+                required = [
+                    PublicResultClaim(
+                        result_type="seer",
+                        target_id=r.target_id,
+                        is_werewolf=r.is_werewolf,
+                        referenced_day=r.day,
+                    )
+                    for r in state.divine_records
+                    if r.seer_id == player_id and ("seer", r.target_id, r.day) not in published
+                ]
+                required.extend(
+                    PublicResultClaim(
+                        result_type="medium",
+                        target_id=r.target_id,
+                        is_werewolf=r.is_werewolf,
+                        referenced_day=r.day,
+                    )
+                    for r in state.medium_records
+                    if r.medium_id == player_id and ("medium", r.target_id, r.day) not in published
+                )
+                output.public_results = required
             assert self.reasoning is not None
             self.reasoning.record_stated_target(player_id, decision.execution_target)
         pending_relation = next(
@@ -800,9 +843,7 @@ class AICoordinator:
         if output.agrees_with and not output.key_point.strip():
             # Agreement with no new argument is a reaction, not an analysis. Cut at a
             # sentence boundary so the shortened line still reads as finished Japanese.
-            output.public_message = truncate_at_sentence(
-                output.public_message, _REACTION_MAX_CHARS
-            )
+            output.public_message = truncate_at_sentence(output.public_message, _REACTION_MAX_CHARS)
         self._context.set_reasoning_memo(player_id, output.reasoning_memo.model_dump())
         self._record(
             state,
@@ -841,6 +882,45 @@ class AICoordinator:
             )
         except Exception:
             return None
+        required_ids: tuple[str, ...] = ()
+        if self._recorder is not None and decision is not None and self.reasoning is not None:
+            belief = self.reasoning.seats[player_id].belief
+            public_records = belief.public_argument_evidence_for(decision.execution_target)
+            private_records = tuple(
+                record
+                for record in belief.active_evidence()
+                if record.visibility is EvidenceVisibility.PRIVATE_REASONING
+            )
+            team_records = tuple(
+                record
+                for record in belief.active_evidence()
+                if record.visibility is EvidenceVisibility.TEAM_PRIVATE
+            )
+            required_ids = tuple(
+                f"{item.result_type}:{item.referenced_day}:{item.target_id}"
+                for item in output.public_results
+            )
+            self._recorder.record_decision_audit(
+                DecisionAuditRecord(
+                    game_id=state.session_id,
+                    day=state.day,
+                    phase=state.phase.value,
+                    player_id=player_id,
+                    decision_target=decision.execution_target,
+                    displayed_target=decision.execution_target,
+                    public_evidence_ids=tuple(r.evidence_id for r in public_records),
+                    private_evidence_ids=tuple(r.evidence_id for r in private_records),
+                    team_private_evidence_ids=tuple(r.evidence_id for r in team_records),
+                    required_public_result_ids=required_ids,
+                    published_result_ids=required_ids,
+                    model_requested_target=model_requested_target,
+                    model_target_was_overridden=(
+                        model_requested_target != decision.execution_target
+                    ),
+                    active_evidence_ids=tuple(r.evidence_id for r in belief.active_evidence()),
+                    publicly_emitted_evidence_ids=tuple(r.evidence_id for r in public_records),
+                )
+            )
         if self._pacing_scale:
             base = 0.35 + len(output.public_message) * 0.012
             delay = min(3.0, base) * self._pacing_scale * self._rng.uniform(0.8, 1.2)
@@ -875,15 +955,30 @@ class AICoordinator:
             )
         self._context.record_key_point(state.day, message_id, player_id, output.key_point)
         self._register_claim_drafts(controller, player_id, drafts, message_id)
-        if self.reasoning is not None:
-            self.reasoning.record_public_speech(
-                state, player_id, output.public_message, message_id
+        if self._recorder is not None and required_ids:
+            published_list = [
+                f"{result.result_type}:{result.referenced_day}:{result.target_id}"
+                for result in PublicFactLedger(state).public_results()
+                if result.claimant_id == player_id and result.source_message_id == message_id
+            ]
+            published_ids = tuple(dict.fromkeys(published_list))
+            self._recorder.record_result_publication_audit(
+                ResultPublicationAuditRecord(
+                    player_id=player_id,
+                    day=state.day,
+                    required_result_ids=required_ids,
+                    published_result_ids=published_ids,
+                    omitted_result_ids=tuple(sorted(set(required_ids) - set(published_ids))),
+                    duplicate_result_ids=tuple(
+                        sorted({item for item in published_list if published_list.count(item) > 1})
+                    ),
+                )
             )
+        if self.reasoning is not None:
+            self.reasoning.record_public_speech(state, player_id, output.public_message, message_id)
         return output
 
-    def _validate_output(
-        self, state: GameState, player_id: str, output: DiscussionOutput
-    ) -> None:
+    def _validate_output(self, state: GameState, player_id: str, output: DiscussionOutput) -> None:
         """Reconcile one discussion turn with the public fact ledger."""
         previous = self._context.get_reasoning_memo(player_id) or {}
         previous_target = previous.get("execution_target")
@@ -969,9 +1064,7 @@ class AICoordinator:
             claim.target_id == player_id and claim.is_werewolf
             for claim in state.public_result_claims
         )
-        if player_id == partner and (
-            not state.players[leader].alive or partner_under_black
-        ):
+        if player_id == partner and (not state.players[leader].alive or partner_under_black):
             leader_player = state.players[leader]
             status = "死亡した" if not state.players[leader].alive else ""
             return f"共有者CO。相方は{status}{leader_player.name}({leader})です。"
@@ -997,10 +1090,48 @@ class AICoordinator:
         if self.reasoning is None:
             return []
         self.reasoning.refresh(state)
-        outcomes = self.reasoning.apply_human_message(
-            state, speaker_id, text, source_message_id
-        )
+        before_evidence = {
+            pid: {record.evidence_id for record in seat.belief.active_evidence()}
+            for pid, seat in self.reasoning.seats.items()
+        }
+        before_scores = {
+            pid: sum(seat.belief.state.public_suspicion_scores.values())
+            for pid, seat in self.reasoning.seats.items()
+        }
+        outcomes = self.reasoning.apply_human_message(state, speaker_id, text, source_message_id)
         moved = self.reasoning.seats_that_moved(outcomes)
+        if self._recorder is not None and outcomes:
+            by_correction: dict[str, list[CorrectionOutcome]] = {}
+            for outcome in outcomes:
+                by_correction.setdefault(outcome.verdict.correction.correction_id, []).append(
+                    outcome
+                )
+            for correction_id, grouped in by_correction.items():
+                retracted_by_seat = {
+                    pid: before_evidence[pid]
+                    - {record.evidence_id for record in seat.belief.active_evidence()}
+                    for pid, seat in self.reasoning.seats.items()
+                }
+                affected = tuple(sorted(pid for pid, ids in retracted_by_seat.items() if ids))
+                first = grouped[0]
+                self._recorder.record_correction_audit(
+                    CorrectionAuditRecord(
+                        correction_id=correction_id,
+                        source_message_id=source_message_id,
+                        speaker_id=speaker_id,
+                        verdict=first.verdict.status.value,
+                        affected_seat_ids=affected,
+                        retracted_evidence_ids=tuple(
+                            sorted({item for ids in retracted_by_seat.values() for item in ids})
+                        ),
+                        belief_delta_by_seat={
+                            pid: sum(seat.belief.state.public_suspicion_scores.values())
+                            - before_scores[pid]
+                            for pid, seat in self.reasoning.seats.items()
+                            if pid in affected
+                        },
+                    )
+                )
         # A seat whose reason was withdrawn owes the table an explanation, so it
         # is queued to speak. Dropping this list was why a correction landed and
         # nobody said anything about it.
@@ -1020,17 +1151,13 @@ class AICoordinator:
         message; `_speak` splits the two halves so it can fix the prose first.
         """
         state = controller.state  # type: ignore[attr-defined]
-        drafts = build_claim_drafts(
-            output, PublicFactLedger(state), speaker_id=player_id
-        )
+        drafts = build_claim_drafts(output, PublicFactLedger(state), speaker_id=player_id)
         self._register_claim_drafts(controller, player_id, drafts, message_id)
         if self.reasoning is not None:
             # What this message said about other people's ballots. A quote the
             # record contradicts becomes a reason the listeners hold -- and the
             # thing a later correction is able to take away from them.
-            self.reasoning.record_public_speech(
-                state, player_id, output.public_message, message_id
-            )
+            self.reasoning.record_public_speech(state, player_id, output.public_message, message_id)
 
     def _register_claim_drafts(
         self,
@@ -1062,15 +1189,11 @@ class AICoordinator:
                 ),
                 PublicFactLedger(state),
                 claimant_id=player_id,
-                is_correction=(
-                    draft.event_type is SpeechEventType.RESULT_CORRECTION
-                ),
+                is_correction=(draft.event_type is SpeechEventType.RESULT_CORRECTION),
             )
             self.validation.extend(validation.issues)
             if validation.claim is not None:
-                checked.append(
-                    replace(draft, result_is_werewolf=validation.claim.is_werewolf)
-                )
+                checked.append(replace(draft, result_is_werewolf=validation.claim.is_werewolf))
         register_claim_drafts(controller, player_id, checked, message_id)
         for draft in checked:
             if draft.event_type is SpeechEventType.PARTNER_CLAIM and draft.target_id:
@@ -1148,9 +1271,7 @@ class AICoordinator:
         candidates = [pid for pid in candidates if pid not in self._observer_player_ids]
         if not candidates:
             return
-        stated_target = (self._context.get_reasoning_memo(player_id) or {}).get(
-            "execution_target"
-        )
+        stated_target = (self._context.get_reasoning_memo(player_id) or {}).get("execution_target")
         if self.reasoning is not None:
             # A vote is an argmax over evidence the engine already holds, so it
             # costs no request and the reason is the evidence itself.
@@ -1164,9 +1285,7 @@ class AICoordinator:
                 vote_target=target,
                 reason=reason,
                 decisive_evidence=reason,
-                alternative_target=self.reasoning.seats[
-                    player_id
-                ].belief.state.alternative_target,
+                alternative_target=self.reasoning.seats[player_id].belief.state.alternative_target,
             )
         else:
             system, messages = self._context.build_vote_context(state, player_id, candidates)
@@ -1187,6 +1306,37 @@ class AICoordinator:
             controller.vote(player_id, output.vote_target)  # type: ignore[attr-defined]
         except Exception:
             return
+        actual_target = state.pending_votes.get(player_id)
+        if self._recorder is not None:
+            change_kind = "none"
+            change_reason = ""
+            if isinstance(stated_target, str) and actual_target != stated_target:
+                if state.phase is Phase.RUNOFF and stated_target not in candidates:
+                    change_kind = "runoff_restriction"
+                    change_reason = "決選投票の対象制限"
+                elif stated_target not in state.alive_ids():
+                    change_kind = "target_became_invalid"
+                    change_reason = "発言後に対象が無効化"
+                else:
+                    change_kind = "unexplained"
+                    change_reason = output.reason
+            player = state.players[player_id]
+            ally_vote = bool(
+                actual_target
+                and state.players[actual_target].role is RoleName.WEREWOLF
+                and player.role is RoleName.WEREWOLF
+            )
+            self._recorder.update_latest_decision(
+                player_id,
+                state.day,
+                vote_target=actual_target,
+                target_change_classification=change_kind,
+                target_change_reason=change_reason,
+                ally_vote=ally_vote,
+                # A strategic team decision must be explicitly recorded; no
+                # such plan exists in the current strategy state.
+                ally_vote_planned=False,
+            )
         # Voting against your own stated plan is legal play, not corruption, so
         # this is recorded rather than corrected -- but silently losing it means
         # nobody can tell a change of mind from an AI that lost track of itself.
@@ -1294,9 +1444,7 @@ class AICoordinator:
 
     async def _cast_divine(self, controller: object, state: GameState, seer_id: str) -> None:
         candidates = [
-            pid
-            for pid in state.alive_ids()
-            if pid != seer_id and pid != state.first_victim_id
+            pid for pid in state.alive_ids() if pid != seer_id and pid != state.first_victim_id
         ]
         candidates = [pid for pid in candidates if pid not in self._observer_player_ids]
         if not candidates:
@@ -1350,8 +1498,7 @@ class AICoordinator:
         candidates = [
             pid
             for pid in state.alive_ids()
-            if state.players[pid].role != RoleName.WEREWOLF
-            and pid not in self._observer_player_ids
+            if state.players[pid].role != RoleName.WEREWOLF and pid not in self._observer_player_ids
         ]
         if not candidates:
             return
