@@ -1,0 +1,213 @@
+{
+  "games": [
+    {
+      "seed": 11,
+      "engine": "v2",
+      "game_id": "live-11-v2",
+      "provider": "luna",
+      "model": "gpt-5.6-luna",
+      "days": 5,
+      "llm_requests": 112,
+      "http_requests": 114,
+      "tokens": {
+        "prompt": 598082,
+        "completion": 131936,
+        "total": 730018
+      },
+      "operational_metrics": {
+        "total_calls": 112,
+        "http_requests": 114,
+        "success_rate": 0.49107142857142855,
+        "parse_path_counts": {
+          "strict_schema": 0,
+          "json_object": 55,
+          "permissive": 0,
+          "failed": 57
+        },
+        "strict_schema_rate": 0.0,
+        "strict_schema_failures": 112,
+        "json_object_successes": 55,
+        "complete_failures": 57,
+        "retry_calls": 1,
+        "finish_reason_counts": {
+          "length": 57,
+          "stop": 55
+        },
+        "truncated_calls": 57,
+        "truncated_failure_rate": 1.0,
+        "reasoning_tokens": 91721,
+        "reasoning_token_share": 0.6951931239388794,
+        "latency_seconds": {
+          "mean": 12.436,
+          "p50": 12.676,
+          "p95": 17.157,
+          "max": 27.985
+        },
+        "by_schema": {
+          "BriefDiscussionOutput": {
+            "calls": 33,
+            "success_rate": 0.2727272727272727,
+            "mean_latency_seconds": 12.124
+          },
+          "DiscussionOutput": {
+            "calls": 74,
+            "success_rate": 0.5540540540540541,
+            "mean_latency_seconds": 13.144
+          },
+          "WolfChatOutput": {
+            "calls": 5,
+            "success_rate": 1.0,
+            "mean_latency_seconds": 4.013
+          }
+        },
+        "errors": [
+          {
+            "error": "response was cut off before the JSON closed (finish_reason=length)",
+            "count": 57
+          }
+        ],
+        "discussion_generation_attempts": 0,
+        "discussion_skips": 0,
+        "discussion_skip_rate": 0.0,
+        "total_game_wall_time": 1404.5605633310001,
+        "time_per_game_day": 280.9121126662,
+        "time_per_public_utterance": 28.091211266620004,
+        "time_waiting_for_llm": 1392.8340490780001,
+        "time_spent_in_solver": 9.278918762991907,
+        "solver_query_count": 12587,
+        "solver_cache_hit_rate": 0.0,
+        "tokens": {
+          "prompt": 598082,
+          "completion": 131936,
+          "total": 730018
+        },
+        "estimated_cost": 0.0,
+        "pricing_supplied": false
+      },
+      "dead_target_selections": 0,
+      "public_fact_flips": 0,
+      "vote_history_misreads": 0,
+      "vote_plan_mismatches": 5,
+      "timeline_conflicts": [
+        "2日目に処刑されたのはp3であり、p14が霊媒結果を主張しているp12ではありません。"
+      ],
+      "solver_query_count": 12587,
+      "solver_cache_hit_rate": 0.0,
+      "time_spent_in_solver": 9.278919,
+      "human_messages_considered": 0,
+      "seats_considering_each_human_message": 0.0,
+      "corrections_heard": 0,
+      "corrections_applied": 0,
+      "mean_belief_delta_after_correction": 0.0,
+      "stale_premise_turns": 0,
+      "vote_citations_heard": 3,
+      "inaccurate_vote_citations": 1,
+      "minority_opinion_persistence": 0.656,
+      "opinion_spread": 0.312,
+      "target_distribution_by_profile": {
+        "impulsive": {
+          "p0": 1,
+          "p6": 1,
+          "p8": 1
+        },
+        "stubborn": {
+          "p0": 2
+        },
+        "cautious": {
+          "p0": 2,
+          "p8": 1
+        },
+        "conformist": {
+          "p0": 2,
+          "p8": 1
+        },
+        "sceptic": {
+          "p0": 2
+        },
+        "evidence_driven": {
+          "p6": 1,
+          "p0": 2
+        }
+      },
+      "transcript": "artifacts/live-ab-postfix/11-v2-transcript.json",
+      "reasoning_quality": {
+        "decision_count": 50,
+        "vote_count": 31,
+        "dead_target_selection_count": 0,
+        "invalid_action_target_count": 0,
+        "public_fact_flip_count": 0,
+        "vote_history_fabrication_count": 1,
+        "private_evidence_exposed_count": 0,
+        "team_private_evidence_exposed_count": 0,
+        "displayed_target_mismatch_count": 0,
+        "missing_required_result_count": 0,
+        "duplicate_required_result_count": 0,
+        "stale_evidence_used_in_brief_count": 0,
+        "stale_evidence_cited_publicly_count": 0,
+        "stale_evidence_attempt_count": 0,
+        "stale_evidence_blocked_count": 0,
+        "stale_evidence_publicly_emitted_count": 0,
+        "justified_vote_change_count": 1,
+        "unexplained_vote_change_count": 1,
+        "wolf_ally_vote_count": 0,
+        "planned_wolf_ally_vote_count": 0,
+        "unplanned_wolf_ally_vote_count": 0,
+        "illegal_timeline_claim_count": 0,
+        "duplicate_night_action_count": 0,
+        "correction_messages_heard": 0,
+        "corrections_confirmed": 0,
+        "corrections_refuted": 0,
+        "corrections_unverifiable": 0,
+        "confirmed_corrections_with_effect": 0,
+        "seat_evidence_retractions": 0,
+        "affected_seat_count": 0,
+        "mean_belief_delta_per_affected_seat": 0.0,
+        "median_belief_delta_per_affected_seat": 0.0,
+        "vote_change_rate": 0.06451612903225806,
+        "unexplained_vote_change_rate": 0.03225806451612903
+      }
+    }
+  ],
+  "stages": {
+    "stage_a_v2_smoke": {
+      "status": "passed",
+      "game_ids": [
+        "live-11-v2"
+      ],
+      "stop_reason": "",
+      "updated_at": "2026-08-03T16:08:35.943987+00:00"
+    },
+    "stage_b_paired_smoke": {
+      "status": "pending",
+      "game_ids": [
+        "live-11-v2"
+      ],
+      "stop_reason": "",
+      "updated_at": "2026-08-03T16:08:35.944014+00:00"
+    },
+    "stage_c_small_evaluation": {
+      "status": "pending",
+      "game_ids": [],
+      "stop_reason": "",
+      "updated_at": "2026-08-03T16:08:35.944017+00:00"
+    }
+  },
+  "http_requests": 114,
+  "estimated_cost": 0.27793959999999995,
+  "budget": {
+    "max_requests": 4000,
+    "used_requests": 114,
+    "max_estimated_cost": 5.0,
+    "input_price_per_million": 0.2,
+    "output_price_per_million": 1.2,
+    "prompt_tokens": 598082,
+    "completion_tokens": 131936,
+    "estimated_cost": 0.27793959999999995,
+    "pricing_supplied": true
+  },
+  "release_decision": "fail",
+  "release_reasons": [
+    "unexplained_vote_change_count",
+    "complete_failure_rate"
+  ]
+}
