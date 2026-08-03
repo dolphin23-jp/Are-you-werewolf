@@ -193,6 +193,7 @@ def test_compact_human_seer_co_registers_target_and_result():
         "is_werewolf": False,
         "day": 0,
         "source_message_id": message_id,
+        "referenced_day": None,
     } in view["public_result_claims"]
 
 

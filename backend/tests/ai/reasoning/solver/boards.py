@@ -115,6 +115,7 @@ def verdict(
     target_id: str,
     is_werewolf: bool,
     day: int = 1,
+    referenced_day: int | None = None,
 ) -> None:
     _event(
         state,
@@ -124,7 +125,50 @@ def verdict(
         role=result_role(result_type),
         target_id=target_id,
         result_is_werewolf=is_werewolf,
+        referenced_day=referenced_day,
     )
+
+
+def retract_verdict(
+    state: GameState,
+    claimant_id: str,
+    result_type: str,
+    target_id: str,
+    day: int = 1,
+) -> None:
+    _event(
+        state,
+        day,
+        claimant_id,
+        SpeechEventType.RESULT_RETRACTION,
+        role=result_role(result_type),
+        target_id=target_id,
+    )
+
+
+def correct_verdict(
+    state: GameState,
+    claimant_id: str,
+    result_type: str,
+    target_id: str,
+    is_werewolf: bool,
+    day: int = 1,
+    referenced_day: int | None = None,
+) -> None:
+    _event(
+        state,
+        day,
+        claimant_id,
+        SpeechEventType.RESULT_CORRECTION,
+        role=result_role(result_type),
+        target_id=target_id,
+        result_is_werewolf=is_werewolf,
+        referenced_day=referenced_day,
+    )
+
+
+def retract_claim(state: GameState, player_id: str, day: int = 1) -> None:
+    _event(state, day, player_id, SpeechEventType.ROLE_RETRACTION)
 
 
 def _event(

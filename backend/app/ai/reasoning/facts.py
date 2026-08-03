@@ -85,6 +85,18 @@ class PublicResultFact:
     is_werewolf: bool
     day: int
     source_message_id: str = ""
+    referenced_day: int | None = None
+
+    @property
+    def source_night(self) -> int:
+        """The night this result is about.
+
+        A seer who sits on a night-1 black until day 3 is publishing an old
+        result, not a fresh one. Reading the night off the publication day was
+        wrong for exactly that case -- and holding a result back is a normal
+        play, not an edge case.
+        """
+        return self.referenced_day if self.referenced_day is not None else self.day - 1
 
 
 @dataclass(frozen=True)
@@ -295,6 +307,7 @@ class PublicFactLedger:
                 is_werewolf=claim.is_werewolf,
                 day=claim.day,
                 source_message_id=claim.source_message_id,
+                referenced_day=claim.referenced_day,
             )
             for claim in self._state.public_result_claims
         )

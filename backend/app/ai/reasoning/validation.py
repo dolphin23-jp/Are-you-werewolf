@@ -215,12 +215,17 @@ def validate_public_result_claim(
     ledger: PublicFactLedger,
     *,
     claimant_id: str,
+    is_correction: bool = False,
 ) -> ResultValidation:
     """Check one published verdict against the board.
 
     Seer and medium are validated separately on purpose: they answer different
     questions and are only available about different people. Treating them as
     one "result" is how a medium ends up reporting on a living player.
+
+    `is_correction` marks a verdict the claimant has explicitly said replaces an
+    earlier one. Everything else is checked identically -- the only difference is
+    that changing the colour is the declared intent rather than a silent flip.
     """
     issues: list[ValidationIssue] = []
 
@@ -279,7 +284,7 @@ def validate_public_result_claim(
 
     checked = claim.model_copy(deep=True)
     existing = ledger.find_result(claimant_id, claim.result_type, claim.target_id)
-    if existing is not None and existing.is_werewolf != claim.is_werewolf:
+    if existing is not None and existing.is_werewolf != claim.is_werewolf and not is_correction:
         note(
             "result_polarity_conflict",
             (

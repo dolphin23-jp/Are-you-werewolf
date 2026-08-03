@@ -159,7 +159,7 @@ class ClaimedStoryPerspective(Perspective):
             return EMPTY_NIGHT_KNOWLEDGE
         return NightKnowledge(
             divines={
-                verdict.day - 1: verdict.target_id
+                verdict.source_night: verdict.target_id
                 for verdict in observations.verdicts_by(self.viewer_id)
                 if verdict.result_type == "seer"
             }

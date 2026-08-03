@@ -62,6 +62,20 @@ class PublicVerdict:
     is_werewolf: bool
     day: int
     source_message_id: str = ""
+    referenced_day: int | None = None
+
+    @property
+    def source_night(self) -> int:
+        """The night the claimant says this came from, not the day they said it."""
+        return self.referenced_day if self.referenced_day is not None else self.day - 1
+
+
+@dataclass(frozen=True)
+class Execution:
+    """Announced to the whole table, so the day is public knowledge."""
+
+    player_id: str
+    day: int
 
 
 @dataclass(frozen=True)
@@ -129,7 +143,11 @@ class ObservationSet:
     claims: tuple[PublicClaim, ...] = ()
     verdicts: tuple[PublicVerdict, ...] = ()
     executed_ids: tuple[str, ...] = ()
+    executions: tuple[Execution, ...] = ()
     night_deaths: tuple[NightDeath, ...] = ()
+    # When each dead player died. Announced, so this is public calendar, not
+    # inference -- and it is what makes "you looked at a corpse" checkable.
+    death_days: Mapping[str, int] = field(default_factory=dict)
     # True night actions. Reachable only through a perspective, exactly like
     # `true_roles` -- never read directly by a rule module.
     divine_actions: tuple[NightAction, ...] = ()
@@ -167,10 +185,21 @@ class ObservationSet:
                     target_id=result.target_id,
                     is_werewolf=result.is_werewolf,
                     day=result.day,
+                    source_message_id=result.source_message_id,
+                    referenced_day=result.referenced_day,
                 )
                 for result in ledger.public_results()
             ),
             executed_ids=ledger.executed_ids(),
+            executions=tuple(
+                Execution(player_id=execution.player_id, day=execution.day)
+                for execution in ledger.executions()
+            ),
+            death_days={
+                player.player_id: player.death_day
+                for player in ledger.players()
+                if not player.alive and player.death_day is not None
+            },
             night_deaths=tuple(
                 NightDeath(player_id=record.player_id, night=record.day)
                 for record in state.death_records
@@ -209,6 +238,12 @@ class ObservationSet:
         )
 
     # -- night lookups --
+
+    def executions_on(self, day: int) -> tuple[str, ...]:
+        return tuple(e.player_id for e in self.executions if e.day == day)
+
+    def death_day_of(self, player_id: str) -> int | None:
+        return self.death_days.get(player_id)
 
     def deaths_on(self, night: int) -> tuple[NightDeath, ...]:
         return tuple(death for death in self.night_deaths if death.night == night)
@@ -300,8 +335,20 @@ def board_version(state: GameState) -> str:
         str(state.phase),
         str(state.first_victim_id),
         ",".join(f"{pid}:{int(player.alive)}" for pid, player in state.players.items()),
-        f"deaths={len(state.death_records)}",
-        f"events={len(state.speech_events)}",
-        f"votes={len(state.vote_records)}",
+        ",".join(
+            f"{record.player_id}:{record.cause}:{record.day}"
+            for record in state.death_records
+        ),
+        # Content, not a count. Two boards with the same number of events can
+        # say entirely different things -- and a digest that cannot tell them
+        # apart hands one board's cached deduction to the other.
+        ",".join(
+            f"{e.event_id}:{e.actor_id}:{e.event_type}:{e.target_id}:{e.role}"
+            f":{e.result_is_werewolf}:{e.referenced_day}:{e.day}:{e.confidence}"
+            for e in state.speech_events
+        ),
+        ",".join(
+            f"{v.voter_id}:{v.target_id}:{v.day}:{v.round}" for v in state.vote_records
+        ),
     ]
     return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()[:16]

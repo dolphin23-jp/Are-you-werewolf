@@ -11,6 +11,34 @@ class PublicResultClaim(BaseModel):
     result_type: str  # seer | medium
     target_id: str
     is_werewolf: bool
+    # Which night this result came from. Omitted means "last night", which is
+    # the common case; naming it is what lets a held-back result be published
+    # later without the table reading it as a fresh look.
+    referenced_day: int | None = None
+
+
+class ClaimAction(BaseModel):
+    """Changing a standing CO, as a declaration rather than a turn of phrase.
+
+    Sliding from seer to medium is a real move with real consequences, and
+    inferring it from prose means the ledger and the table can disagree about
+    whether it happened.
+    """
+
+    action: str  # retract | switch
+    role: str | None = None  # required for switch: the role being moved to
+    reason: str = ""
+
+
+class ResultAction(BaseModel):
+    """Withdrawing or correcting a verdict already published."""
+
+    action: str  # retract | correct
+    result_type: str  # seer | medium
+    target_id: str
+    is_werewolf: bool | None = None  # required for correct: the new colour
+    referenced_day: int | None = None
+    reason: str = ""
 
 
 class DirectedQuestion(BaseModel):
@@ -52,6 +80,8 @@ class DiscussionOutput(BaseModel):
     contains_co_claim: bool = False
     public_claim_role: str | None = None
     public_results: list[PublicResultClaim] = Field(default_factory=list)
+    claim_action: ClaimAction | None = None
+    result_actions: list[ResultAction] = Field(default_factory=list)
     directed_questions: list[DirectedQuestion] = Field(default_factory=list)
     ready_to_vote: bool = False
     needs_another_statement: bool = False

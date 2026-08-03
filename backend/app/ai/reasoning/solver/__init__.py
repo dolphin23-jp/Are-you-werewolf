@@ -13,6 +13,7 @@ reasons behind an impossibility.
 """
 
 from app.ai.reasoning.solver.assumptions import (
+    AccurateTimeline,
     Assumption,
     CompleteResultDisclosure,
     GenuineClaim,
@@ -53,6 +54,7 @@ __all__ = [
     "DEFAULT_MODEL_LIMIT",
     "MAX_MODEL_LIMIT",
     "ROLE_ORDER",
+    "AccurateTimeline",
     "Assumption",
     "Certainty",
     "CompleteResultDisclosure",

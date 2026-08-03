@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass, field, replace
+from enum import StrEnum
 
 from app.ai.reasoning.belief.utility import RoleCertainty
 from app.ai.reasoning.solver.backend import Certainty
@@ -48,6 +49,45 @@ def tiebreak(salt: str, player_id: str) -> float:
     return int.from_bytes(digest[:4], "big") / 0xFFFFFFFF
 
 
+class OriginKind(StrEnum):
+    """Where a reason came from, and therefore what can invalidate it.
+
+    `PUBLIC_RESULT` and `PUBLIC_CLAIM` are the two that can *stop existing*: a
+    verdict is retracted or corrected, a CO is withdrawn or slid. Evidence built
+    on them has to go with them, or a seat keeps arguing from a sentence the
+    table can no longer find in the record.
+    """
+
+    PUBLIC_RESULT = "public_result"
+    PUBLIC_CLAIM = "public_claim"
+    TIMELINE = "timeline"
+    VOTE = "vote"
+    ARGUMENT = "argument"
+    DERIVED = "derived"
+
+
+@dataclass(frozen=True)
+class EvidenceOrigin:
+    """The public fact a reason is standing on, in a form that can be re-checked.
+
+    `fact_id` is compared against the facts that are live *now*. Nothing here
+    stores a snapshot -- a copy of the record is a second record, and the two
+    diverge exactly when it matters.
+    """
+
+    kind: OriginKind
+    fact_id: str
+
+    @property
+    def is_public(self) -> bool:
+        """Whether disappearing from the public record should retract this."""
+        return self.kind in (
+            OriginKind.PUBLIC_RESULT,
+            OriginKind.PUBLIC_CLAIM,
+            OriginKind.TIMELINE,
+        )
+
+
 @dataclass(frozen=True)
 class EvidenceRecord:
     """One reason someone believes something, with what it rests on.
@@ -56,6 +96,11 @@ class EvidenceRecord:
     wrong, everything built on it is found through these and deactivated. A
     record is never deleted -- an inactive one is the audit trail showing which
     argument was withdrawn.
+
+    `origin` is the other half: `source_event_ids` answers "which message did
+    this come from", `origin` answers "which public fact is this still standing
+    on". A retracted verdict keeps its message id forever, so only the second
+    question can notice it is gone.
     """
 
     evidence_id: str
@@ -65,10 +110,15 @@ class EvidenceRecord:
     weight: float
     explanation: str
     active: bool = True
+    origin: EvidenceOrigin | None = None
 
     def deactivated(self, reason: str = "") -> EvidenceRecord:
         detail = f"{self.explanation}（撤回: {reason}）" if reason else self.explanation
         return replace(self, active=False, explanation=detail)
+
+    def reweighed(self, weight: float) -> EvidenceRecord:
+        """Same reason, different force. Used when the claimant's standing moves."""
+        return replace(self, weight=weight)
 
 
 @dataclass(frozen=True)

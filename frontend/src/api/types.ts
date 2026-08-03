@@ -87,8 +87,12 @@ export interface PublicResultClaimRecord {
   result_type: "seer" | "medium";
   target_id: string;
   is_werewolf: boolean;
+  /** When it was published. */
   day: number;
   source_message_id?: string;
+  /** Which night/day the result is *about*. Null when the claimant never said,
+   * in which case readers fall back to the night before publication. */
+  referenced_day?: number | null;
 }
 
 export type SpeechEventType =

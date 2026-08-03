@@ -1030,7 +1030,13 @@ class AICoordinator:
         state = controller.state  # type: ignore[attr-defined]
         checked: list[SpeechEventDraft] = []
         for draft in drafts:
-            if draft.event_type is not SpeechEventType.ABILITY_RESULT:
+            if draft.event_type not in (
+                SpeechEventType.ABILITY_RESULT,
+                # A correction states a verdict too, so it clears the same bar.
+                # Letting it through unchecked would make "correcting" a result
+                # the way to publish one the validator would have rejected.
+                SpeechEventType.RESULT_CORRECTION,
+            ):
                 checked.append(draft)
                 continue
             # Published verdicts clear the same consistency bar however they were
@@ -1044,6 +1050,9 @@ class AICoordinator:
                 ),
                 PublicFactLedger(state),
                 claimant_id=player_id,
+                is_correction=(
+                    draft.event_type is SpeechEventType.RESULT_CORRECTION
+                ),
             )
             self.validation.extend(validation.issues)
             if validation.claim is not None:

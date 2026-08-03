@@ -46,7 +46,12 @@ from app.ai.reasoning.dialogue import (
 from app.ai.reasoning.facts import PublicFactLedger
 from app.ai.reasoning.observations import ObservationSet
 from app.ai.reasoning.perspectives import Perspective, PlayerPrivatePerspective
-from app.ai.reasoning.solver import RoleSolver, SolverCache, build_solver
+from app.ai.reasoning.solver import (
+    AccurateTimeline,
+    RoleSolver,
+    SolverCache,
+    build_solver,
+)
 from app.engine.roles import RoleName
 from app.engine.state import GameState
 
@@ -157,12 +162,15 @@ class ReasoningRuntime:
             return
         self.observations = observations
         ledger = PublicFactLedger(state)
+        bluffs = self._bluffed_roles(ledger, observations)
         for seat in self.seats.values():
             seat.last_scores = dict(seat.belief.state.public_suspicion_scores)
             seat.last_target = seat.belief.state.current_execution_target
             seat.solver = build_solver(observations, seat.perspective, cache=self._cache)
             seat.belief.observe(ledger, seat.solver, observations)
-            claimed = (claimed_roles or {}).get(seat.player_id)
+            claimed = (claimed_roles or {}).get(seat.player_id) or bluffs.get(
+                seat.player_id
+            )
             if claimed is not None or seat.deception is not None:
                 seat.deception = refresh_story(
                     deception_state_for(
@@ -172,10 +180,38 @@ class ReasoningRuntime:
                         or (seat.deception.claimed_role if seat.deception else None),
                     ),
                     observations,
+                    # The bluffer's own account, taken at its stated timing. A
+                    # story with a night that cannot have happened is a story
+                    # that will not survive the table noticing, and the bluffer
+                    # wants to know that before they are asked.
+                    assumptions=(AccurateTimeline(seat.player_id),),
                     cache=self._cache,
                 )
         self._board_version = observations.board_version
         self._score_minority_persistence()
+
+    def _bluffed_roles(
+        self, ledger: PublicFactLedger, observations: ObservationSet
+    ) -> dict[str, RoleName]:
+        """Seats whose standing CO is not the card they are holding.
+
+        This is what finally connects `ClaimedStoryPerspective` to a real game:
+        before, a public story existed only when a caller passed `claimed_roles`
+        by hand, and nothing in production ever did, so wolves fake-claiming seer
+        reasoned about their bluff with their real card in view.
+
+        No leak: each seat is compared against *its own* knowledge -- the card it
+        was dealt and the CO it made. Nobody learns anything about anybody else.
+        """
+        bluffs: dict[str, RoleName] = {}
+        for player_id in self.seats:
+            claimed = ledger.claimed_role_of(player_id)
+            if claimed is None:
+                continue
+            own = observations.seat_knowledge(player_id).self_role
+            if claimed != own:
+                bluffs[player_id] = claimed
+        return bluffs
 
     def _score_minority_persistence(self) -> None:
         """Did the seats holding an unpopular line still hold it after the update?
