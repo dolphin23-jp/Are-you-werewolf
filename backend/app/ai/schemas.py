@@ -4,7 +4,7 @@ not just documentation."""
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class PublicResultClaim(BaseModel):
@@ -88,6 +88,16 @@ class DiscussionOutput(BaseModel):
     reassessments: list[Reassessment] = Field(default_factory=list)
     alternative_execution_target: str | None = None
     strongest_case_against_execution: str = ""
+
+    @model_validator(mode="after")
+    def reject_conflicting_actions(self) -> DiscussionOutput:
+        if self.claim_action and self.public_claim_role:
+            raise ValueError("claim_action cannot be combined with public_claim_role")
+        changed = {(a.result_type, a.target_id) for a in self.result_actions}
+        duplicated = changed & {(r.result_type, r.target_id) for r in self.public_results}
+        if duplicated:
+            raise ValueError("a corrected or retracted result cannot also be republished")
+        return self
 
 
 class BriefDiscussionOutput(BaseModel):

@@ -66,6 +66,12 @@ class OriginKind(StrEnum):
     DERIVED = "derived"
 
 
+class EvidenceVisibility(StrEnum):
+    PUBLIC_ARGUMENT = "public_argument"
+    PRIVATE_REASONING = "private_reasoning"
+    TEAM_PRIVATE = "team_private"
+
+
 @dataclass(frozen=True)
 class EvidenceOrigin:
     """The public fact a reason is standing on, in a form that can be re-checked.
@@ -111,6 +117,7 @@ class EvidenceRecord:
     explanation: str
     active: bool = True
     origin: EvidenceOrigin | None = None
+    visibility: EvidenceVisibility = EvidenceVisibility.PUBLIC_ARGUMENT
 
     def deactivated(self, reason: str = "") -> EvidenceRecord:
         detail = f"{self.explanation}（撤回: {reason}）" if reason else self.explanation
