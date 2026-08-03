@@ -1,0 +1,156 @@
+{
+  "seed": 11,
+  "engine": "v2",
+  "game_id": "live-11-v2",
+  "provider": "luna",
+  "model": "gpt-5.6-luna",
+  "days": 6,
+  "llm_requests": 125,
+  "http_requests": 253,
+  "tokens": {
+    "prompt": 687303,
+    "completion": 147410,
+    "total": 834713
+  },
+  "operational_metrics": {
+    "total_calls": 125,
+    "http_requests": 253,
+    "success_rate": 0.536,
+    "parse_path_counts": {
+      "strict_schema": 0,
+      "json_object": 67,
+      "permissive": 0,
+      "failed": 58
+    },
+    "strict_schema_rate": 0.0,
+    "strict_schema_failures": 125,
+    "json_object_successes": 67,
+    "complete_failures": 58,
+    "retry_calls": 3,
+    "latency_seconds": {
+      "mean": 11.78,
+      "p50": 11.829,
+      "p95": 17.12,
+      "max": 26.526
+    },
+    "by_schema": {
+      "BriefDiscussionOutput": {
+        "calls": 39,
+        "success_rate": 0.5128205128205128,
+        "mean_latency_seconds": 10.035
+      },
+      "DiscussionOutput": {
+        "calls": 81,
+        "success_rate": 0.5185185185185185,
+        "mean_latency_seconds": 13.063
+      },
+      "WolfChatOutput": {
+        "calls": 5,
+        "success_rate": 1.0,
+        "mean_latency_seconds": 4.597
+      }
+    },
+    "errors": [
+      {
+        "error": "response was not parseable as JSON",
+        "count": 58
+      }
+    ],
+    "discussion_generation_attempts": 0,
+    "discussion_skips": 0,
+    "discussion_skip_rate": 0.0,
+    "total_game_wall_time": 1492.033176137,
+    "time_per_game_day": 248.67219602283333,
+    "time_per_public_utterance": 24.06505122801613,
+    "time_waiting_for_llm": 1472.4789691010003,
+    "time_spent_in_solver": 14.081248905001445,
+    "solver_query_count": 16912,
+    "solver_cache_hit_rate": 0.0,
+    "tokens": {
+      "prompt": 687303,
+      "completion": 147410,
+      "total": 834713
+    },
+    "estimated_cost": 0.0,
+    "pricing_supplied": false
+  },
+  "dead_target_selections": 0,
+  "public_fact_flips": 0,
+  "vote_history_misreads": 0,
+  "vote_plan_mismatches": 11,
+  "timeline_conflicts": [],
+  "solver_query_count": 16912,
+  "solver_cache_hit_rate": 0.0,
+  "time_spent_in_solver": 14.081249,
+  "human_messages_considered": 0,
+  "seats_considering_each_human_message": 0.0,
+  "corrections_heard": 0,
+  "corrections_applied": 0,
+  "mean_belief_delta_after_correction": 0.0,
+  "stale_premise_turns": 0,
+  "vote_citations_heard": 2,
+  "inaccurate_vote_citations": 1,
+  "minority_opinion_persistence": 0.736,
+  "opinion_spread": 0.312,
+  "target_distribution_by_profile": {
+    "impulsive": {
+      "p0": 3
+    },
+    "stubborn": {
+      "p0": 2
+    },
+    "cautious": {
+      "p0": 2,
+      "p7": 1
+    },
+    "conformist": {
+      "p0": 2,
+      "p7": 1
+    },
+    "sceptic": {
+      "p1": 1,
+      "p7": 1
+    },
+    "evidence_driven": {
+      "p2": 1,
+      "p0": 2
+    }
+  },
+  "transcript": "artifacts/live-ab/11-v2-transcript.json",
+  "reasoning_quality": {
+    "decision_count": 62,
+    "vote_count": 40,
+    "dead_target_selection_count": 0,
+    "invalid_action_target_count": 0,
+    "public_fact_flip_count": 0,
+    "vote_history_fabrication_count": 1,
+    "private_evidence_exposed_count": 0,
+    "team_private_evidence_exposed_count": 0,
+    "displayed_target_mismatch_count": 0,
+    "missing_required_result_count": 1,
+    "duplicate_required_result_count": 0,
+    "stale_evidence_used_in_brief_count": 0,
+    "stale_evidence_cited_publicly_count": 0,
+    "stale_evidence_attempt_count": 0,
+    "stale_evidence_blocked_count": 0,
+    "stale_evidence_publicly_emitted_count": 0,
+    "justified_vote_change_count": 4,
+    "unexplained_vote_change_count": 0,
+    "wolf_ally_vote_count": 0,
+    "planned_wolf_ally_vote_count": 0,
+    "unplanned_wolf_ally_vote_count": 0,
+    "illegal_timeline_claim_count": 0,
+    "duplicate_night_action_count": 0,
+    "correction_messages_heard": 0,
+    "corrections_confirmed": 0,
+    "corrections_refuted": 0,
+    "corrections_unverifiable": 0,
+    "confirmed_corrections_with_effect": 0,
+    "seat_evidence_retractions": 0,
+    "affected_seat_count": 0,
+    "mean_belief_delta_per_affected_seat": 0.0,
+    "median_belief_delta_per_affected_seat": 0.0,
+    "vote_change_rate": 0.1,
+    "unexplained_vote_change_rate": 0.0
+  }
+}
