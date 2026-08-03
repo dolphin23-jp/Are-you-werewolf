@@ -18,6 +18,7 @@ from app.ai.reasoning.solver.rules.night import (
     FoxCurseRuleModule,
     GuardRuleModule,
 )
+from app.ai.reasoning.solver.rules.own_results import OwnAbilityResultRuleModule
 from app.ai.reasoning.solver.rules.role_counts import RoleCountRuleModule
 from app.ai.reasoning.solver.rules.self_knowledge import SelfKnowledgeRuleModule
 
@@ -33,6 +34,7 @@ def default_rule_modules() -> Sequence[RuleModule]:
         AttackRuleModule(),
         GuardRuleModule(),
         FoxCurseRuleModule(),
+        OwnAbilityResultRuleModule(),
     )
 
 
@@ -44,6 +46,7 @@ __all__ = [
     "FirstVictimRuleModule",
     "FoxCurseRuleModule",
     "GuardRuleModule",
+    "OwnAbilityResultRuleModule",
     "RoleCountRuleModule",
     "RuleModule",
     "SelfKnowledgeRuleModule",

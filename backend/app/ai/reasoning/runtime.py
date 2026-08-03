@@ -137,10 +137,10 @@ class ReasoningRuntime:
         self.observations = observations
         ledger = PublicFactLedger(state)
         for seat in self.seats.values():
-            seat.last_scores = dict(seat.belief.state.wolf_scores)
+            seat.last_scores = dict(seat.belief.state.public_suspicion_scores)
             seat.last_target = seat.belief.state.current_execution_target
             seat.solver = build_solver(observations, seat.perspective, cache=self._cache)
-            seat.belief.observe(ledger, seat.solver)
+            seat.belief.observe(ledger, seat.solver, observations)
             claimed = (claimed_roles or {}).get(seat.player_id)
             if claimed is not None or seat.deception is not None:
                 seat.deception = refresh_story(
@@ -197,9 +197,14 @@ class ReasoningRuntime:
         return target, self._vote_reason(seat, target)
 
     def _vote_utility(self, seat: SeatReasoning, target_id: str) -> float:
-        score = seat.belief.state.wolf_scores.get(target_id, 0.0)
+        """Faction-aware execution utility, not raw suspicion.
+
+        A werewolf knows its partners are wolves and wants them alive; a
+        villager knows nothing and wants the suspicious one gone. Reading both
+        off one number is what made wolves vote for their own team.
+        """
+        score = float(seat.belief.state.execution_utility_scores.get(target_id, 0.0))
         if seat.deception is not None:
-            # Betrayal stays available, just expensive.
             score -= seat.deception.betrayal_cost(target_id)
         return score
 
@@ -224,17 +229,23 @@ class ReasoningRuntime:
             return None
         if seat is None:
             return eligible[0]
-        scores = seat.belief.state.wolf_scores
+        # One utility per action. Reusing suspicion for all three is what made
+        # the seer re-divine the same seat and the wolves bite their own cover.
+        scores = {
+            "divine": seat.belief.state.divine_utility_scores,
+            "guard": seat.belief.state.guard_utility_scores,
+            "attack": seat.belief.state.attack_utility_scores,
+        }.get(action_type, seat.belief.state.execution_utility_scores)
         salt = f"{seat.player_id}:{action_type}"
-        if action_type == "guard":
-            ranked = sorted(
-                eligible, key=lambda pid: (scores.get(pid, 0.0), tiebreak(salt, pid), pid)
+        ranked = [
+            pid
+            for pid in sorted(
+                eligible,
+                key=lambda pid: (-scores.get(pid, 0.0), tiebreak(salt, pid), pid),
             )
-        else:
-            ranked = sorted(
-                eligible, key=lambda pid: (-scores.get(pid, 0.0), tiebreak(salt, pid), pid)
-            )
-        return ranked[0]
+            if scores.get(pid, 0.0) != float("-inf")
+        ]
+        return ranked[0] if ranked else None
 
     # -- the speech scheduler --
 
@@ -339,7 +350,7 @@ class ReasoningRuntime:
         return bool(held - published)
 
     def _belief_moved(self, seat: SeatReasoning) -> bool:
-        current = seat.belief.state.wolf_scores
+        current = seat.belief.state.public_suspicion_scores
         return any(
             abs(current.get(pid, 0.0) - score) > 0.5 for pid, score in seat.last_scores.items()
         ) or seat.belief.state.current_execution_target != seat.last_target
@@ -365,9 +376,9 @@ class ReasoningRuntime:
         outcomes: list[CorrectionOutcome] = []
         for correction in corrections:
             for seat in self.seats.values():
-                before = dict(seat.belief.state.wolf_scores)
+                before = dict(seat.belief.state.public_suspicion_scores)
                 outcome = seat.belief.apply_correction(correction, ledger)
-                after = seat.belief.state.wolf_scores
+                after = seat.belief.state.public_suspicion_scores
                 delta = sum(
                     abs(after.get(pid, 0.0) - score)
                     for pid, score in before.items()

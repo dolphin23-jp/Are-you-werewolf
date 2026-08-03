@@ -16,11 +16,13 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass, field, replace
 
+from app.ai.reasoning.belief.utility import RoleCertainty
 from app.ai.reasoning.solver.backend import Certainty
 
-# Hard solver conclusions sit outside the soft scale on purpose. Personality
-# scales soft weights (PR8), and no amount of scaling may reorder a seat the
-# rules have already settled.
+# Hard solver conclusions are kept out of the soft scale entirely. They live in
+# `private_role_certainties`; the utilities in `utility.py` decide what each
+# faction wants done about them. Folding them into a score was how a werewolf
+# ended up nominating the partners it correctly knew were wolves.
 HARD_CONFIRMED_SCORE = 1e9
 HARD_EXCLUDED_SCORE = -1e9
 
@@ -86,11 +88,30 @@ class RankedHypothesis:
 
 @dataclass
 class PlayerBeliefState:
-    """One seat's private picture of the board. Never shared between seats."""
+    """One seat's private picture of the board. Never shared between seats.
+
+    Four things are deliberately separate:
+
+    * `private_role_certainties` -- what this seat *knows*, from its own cards,
+      its own ability results and the solver.
+    * `public_suspicion_scores` -- what could be argued at the table. Soft
+      evidence only, and the only place traits apply.
+    * the per-action utility maps -- what this seat *wants*, which depends on
+      its faction and differs from both of the above.
+
+    A werewolf knows its partners are wolves (certainty), the table may not
+    suspect them at all (suspicion), and it wants them alive (utility). One
+    number cannot carry all three.
+    """
 
     player_id: str
     perspective_id: str
-    wolf_scores: dict[str, float] = field(default_factory=dict)
+    private_role_certainties: dict[str, RoleCertainty] = field(default_factory=dict)
+    public_suspicion_scores: dict[str, float] = field(default_factory=dict)
+    execution_utility_scores: dict[str, float] = field(default_factory=dict)
+    attack_utility_scores: dict[str, float] = field(default_factory=dict)
+    guard_utility_scores: dict[str, float] = field(default_factory=dict)
+    divine_utility_scores: dict[str, float] = field(default_factory=dict)
     fox_scores: dict[str, float] = field(default_factory=dict)
     claim_trust: dict[str, float] = field(default_factory=dict)
     source_trust: dict[str, float] = field(default_factory=dict)
@@ -105,12 +126,25 @@ class PlayerBeliefState:
         return tuple(self.evidence_links.get(subject_id, ()))
 
     def ranked_suspects(self) -> tuple[tuple[str, float], ...]:
-        """Most suspicious first. Ties break per-seat rather than by seat number
-        -- see `tiebreak` for why that matters."""
+        """Most *publicly suspicious* first -- what this seat would argue, not
+        what it wants done. Ties break per-seat; see `tiebreak` for why."""
         salt = f"{self.player_id}:{self.perspective_id}"
         return tuple(
             sorted(
-                self.wolf_scores.items(),
+                self.public_suspicion_scores.items(),
                 key=lambda item: (-item[1], tiebreak(salt, item[0]), item[0]),
             )
         )
+
+    def ranked_targets(self) -> tuple[tuple[str, float], ...]:
+        """Most *wanted executed* first. This is the one a vote follows."""
+        salt = f"{self.player_id}:execution"
+        return tuple(
+            sorted(
+                self.execution_utility_scores.items(),
+                key=lambda item: (-item[1], tiebreak(salt, item[0]), item[0]),
+            )
+        )
+
+    def certainty_of(self, player_id: str) -> RoleCertainty:
+        return self.private_role_certainties.get(player_id, RoleCertainty.UNKNOWN)

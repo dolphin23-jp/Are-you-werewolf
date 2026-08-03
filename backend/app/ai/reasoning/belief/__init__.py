@@ -62,6 +62,14 @@ from app.ai.reasoning.belief.traits import (
     assign_traits,
     profile_name,
 )
+from app.ai.reasoning.belief.utility import (
+    RoleCertainty,
+    UtilityInputs,
+    attack_utility,
+    divine_utility,
+    execution_utility,
+    guard_utility,
+)
 
 __all__ = [
     "BETRAYAL_COST",
@@ -86,10 +94,16 @@ __all__ = [
     "RANK_LABELS_JA",
     "RankedHypothesis",
     "RankedView",
+    "RoleCertainty",
+    "UtilityInputs",
     "StoryStatus",
     "TRAIT_PROFILES",
     "TRUST_STEP",
     "assign_traits",
+    "attack_utility",
+    "divine_utility",
+    "execution_utility",
+    "guard_utility",
     "claim_fact_id",
     "deception_state_for",
     "execution_fact_id",

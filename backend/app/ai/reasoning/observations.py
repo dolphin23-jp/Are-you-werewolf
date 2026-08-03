@@ -81,6 +81,24 @@ class NightAction:
 
 
 @dataclass(frozen=True)
+class PrivateDivineResult:
+    """A verdict only its owner holds until they choose to publish it."""
+
+    actor_id: str
+    target_id: str
+    night: int
+    is_werewolf: bool
+
+
+@dataclass(frozen=True)
+class PrivateMediumResult:
+    actor_id: str
+    target_id: str
+    day: int
+    is_werewolf: bool
+
+
+@dataclass(frozen=True)
 class NightKnowledge:
     """Night actions a viewpoint legitimately knows, keyed by night.
 
@@ -117,6 +135,11 @@ class ObservationSet:
     divine_actions: tuple[NightAction, ...] = ()
     guard_actions: tuple[NightAction, ...] = ()
     attack_actions: tuple[NightAction, ...] = ()
+    # Ability verdicts. Like `true_roles`, these are held here and released
+    # only through a perspective -- a seer's unpublished black is the single
+    # most valuable thing a village-side deduction could accidentally reach.
+    divine_results: tuple[PrivateDivineResult, ...] = ()
+    medium_results: tuple[PrivateMediumResult, ...] = ()
 
     @classmethod
     def from_state(cls, state: GameState) -> ObservationSet:
@@ -165,6 +188,24 @@ class ObservationSet:
                 NightAction(actor_id=r.wolf_id, target_id=r.target_id, night=r.day)
                 for r in state.attack_records
             ),
+            divine_results=tuple(
+                PrivateDivineResult(
+                    actor_id=r.seer_id,
+                    target_id=r.target_id,
+                    night=r.day,
+                    is_werewolf=r.is_werewolf,
+                )
+                for r in state.divine_records
+            ),
+            medium_results=tuple(
+                PrivateMediumResult(
+                    actor_id=r.medium_id,
+                    target_id=r.target_id,
+                    day=r.day,
+                    is_werewolf=r.is_werewolf,
+                )
+                for r in state.medium_records
+            ),
         )
 
     # -- night lookups --
@@ -199,6 +240,12 @@ class ObservationSet:
                 if role is RoleName.WEREWOLF and action.actor_id in wolf_ids
             },
         )
+
+    def divine_results_of(self, player_id: str) -> tuple[PrivateDivineResult, ...]:
+        return tuple(r for r in self.divine_results if r.actor_id == player_id)
+
+    def medium_results_of(self, player_id: str) -> tuple[PrivateMediumResult, ...]:
+        return tuple(r for r in self.medium_results if r.actor_id == player_id)
 
     def all_night_knowledge(self) -> NightKnowledge:
         """Everything. Debug and evaluation only, via `TrueWorldPerspective`."""

@@ -8,7 +8,6 @@ point -- then has to actually stop using it.
 from __future__ import annotations
 
 from app.ai.reasoning.belief import (
-    HARD_EXCLUDED_SCORE,
     PUBLISHED_BLACK_WEIGHT,
     TRUST_STEP,
     BeliefEngine,
@@ -16,6 +15,7 @@ from app.ai.reasoning.belief import (
     CorrectionStatus,
     EvidenceRecord,
     FactCorrection,
+    RoleCertainty,
     parse_fact_corrections,
     verify,
     vote_fact_id,
@@ -75,7 +75,7 @@ def test_every_point_of_a_suspicion_traces_to_named_evidence():
 
     engine.observe(ledger)
 
-    assert engine.state.wolf_scores["p9"] == PUBLISHED_BLACK_WEIGHT
+    assert engine.state.public_suspicion_scores["p9"] == PUBLISHED_BLACK_WEIGHT
     reasons = engine.state.reasons_for("p9")
     assert reasons == ("verdict:p4:seer:p9:黒",)
     record = next(r for r in engine.evidence if r.evidence_id == reasons[0])
@@ -92,7 +92,7 @@ def test_re_observing_the_same_fact_does_not_double_count_it():
     engine.observe(ledger)
     engine.observe(ledger)
 
-    assert engine.state.wolf_scores["p9"] == PUBLISHED_BLACK_WEIGHT
+    assert engine.state.public_suspicion_scores["p9"] == PUBLISHED_BLACK_WEIGHT
 
 
 def test_contested_claims_raise_suspicion_on_every_claimant():
@@ -104,8 +104,8 @@ def test_contested_claims_raise_suspicion_on_every_claimant():
     engine.observe(PublicFactLedger(state))
 
     # Two seer COs means at least one is lying, so both carry the cost.
-    assert engine.state.wolf_scores["p4"] > 0
-    assert engine.state.wolf_scores["p8"] > 0
+    assert engine.state.public_suspicion_scores["p4"] > 0
+    assert engine.state.public_suspicion_scores["p8"] > 0
     assert engine.state.reasons_for("p4") == ("contested:seer:p4",)
 
 
@@ -119,7 +119,7 @@ def test_a_confirmed_correction_retracts_the_evidence_that_rested_on_it():
     engine = _engine()
     engine.add_evidence(_misremembered_vote_evidence("p0", "p12"))
     engine.recompute(ledger)
-    assert engine.state.wolf_scores["p0"] == 1.5
+    assert engine.state.public_suspicion_scores["p0"] == 1.5
 
     outcome = engine.apply_correction(
         FactCorrection(
@@ -135,7 +135,7 @@ def test_a_confirmed_correction_retracts_the_evidence_that_rested_on_it():
 
     assert outcome.verdict.status is CorrectionStatus.CONFIRMED
     assert outcome.invalidated_evidence_ids == ("recalled_vote:p0:1",)
-    assert engine.state.wolf_scores["p0"] == 0.0
+    assert engine.state.public_suspicion_scores["p0"] == 0.0
     assert engine.state.reasons_for("p0") == ()
 
 
@@ -164,7 +164,7 @@ def test_a_conclusion_may_survive_a_correction_only_on_its_other_evidence():
 
     # The suspicion survives, but only on the published black -- the withdrawn
     # reading contributes nothing to the score and nothing to the reasons.
-    assert engine.state.wolf_scores["p0"] == PUBLISHED_BLACK_WEIGHT
+    assert engine.state.public_suspicion_scores["p0"] == PUBLISHED_BLACK_WEIGHT
     assert engine.state.reasons_for("p0") == ("verdict:p4:seer:p0:黒",)
 
 
@@ -218,7 +218,7 @@ def test_a_false_correction_is_refuted_and_costs_its_source_credibility():
 
     # The record says otherwise, so nothing is retracted and the claim costs.
     assert outcome.verdict.status is CorrectionStatus.REFUTED
-    assert engine.state.wolf_scores["p0"] == 1.5
+    assert engine.state.public_suspicion_scores["p0"] == 1.5
     assert engine.state.source_trust["p0"] == -TRUST_STEP
 
 
@@ -293,7 +293,7 @@ def test_a_correction_reaches_only_the_seats_that_used_the_wrong_fact():
         )
     )
     unaffected.recompute(ledger)
-    before = dict(unaffected.state.wolf_scores)
+    before = dict(unaffected.state.public_suspicion_scores)
 
     outcomes = [engine.apply_correction(correction, ledger) for engine in (misled_a, misled_b)]
     untouched = unaffected.apply_correction(correction, ledger)
@@ -301,9 +301,10 @@ def test_a_correction_reaches_only_the_seats_that_used_the_wrong_fact():
     # Both misled seats update independently; the one that had it right is not
     # disturbed, and each seat's state is its own.
     assert all(outcome.changed_anything for outcome in outcomes)
-    assert misled_a.state.wolf_scores["p0"] == misled_b.state.wolf_scores["p0"] == 0.0
+    assert misled_a.state.public_suspicion_scores["p0"] == 0.0
+    assert misled_b.state.public_suspicion_scores["p0"] == 0.0
     assert untouched.changed_anything is False
-    assert unaffected.state.wolf_scores == before
+    assert unaffected.state.public_suspicion_scores == before
 
 
 def test_belief_states_are_never_shared_between_seats():
@@ -319,8 +320,8 @@ def test_belief_states_are_never_shared_between_seats():
     second.observe(ledger)
 
     assert first.state is not second.state
-    assert first.state.wolf_scores["p3"] == 1.5
-    assert second.state.wolf_scores["p3"] == 0.0
+    assert first.state.public_suspicion_scores["p3"] == 1.5
+    assert second.state.public_suspicion_scores["p3"] == 0.0
     assert second.state.player_id == "p5"
 
 
@@ -345,26 +346,33 @@ def test_a_seat_the_rules_exclude_is_never_the_execution_target():
         )
     )
 
-    engine.observe(ledger, solver)
+    engine.observe(ledger, solver, ObservationSet.from_state(state))
 
-    assert engine.state.wolf_scores["p3"] == HARD_EXCLUDED_SCORE
+    # The exclusion lives in the certainty map, not in the suspicion scale --
+    # and it is the execution utility, not the score, that keeps the rope away.
+    assert engine.state.certainty_of("p3") is RoleCertainty.EXCLUDED
+    assert engine.state.execution_utility_scores["p3"] < 99.0
     assert engine.state.current_execution_target != "p3"
 
 
-def test_a_solver_certainty_pins_the_target_regardless_of_soft_weight():
-    state = _board()
-    ledger = PublicFactLedger(state)
-    solver = build_solver(
-        ObservationSet.from_state(state), PlayerPrivatePerspective("p1")
+def test_a_wolf_knows_its_team_and_therefore_protects_it():
+    state = boards.deal(
+        {"p1": RoleName.WEREWOLF, "p2": RoleName.WEREWOLF, "p3": RoleName.WEREWOLF},
+        day=1,
     )
-    engine = BeliefEngine("p1", PlayerPrivatePerspective("p1"))
+    observations = ObservationSet.from_state(state)
+    ledger = PublicFactLedger(state)
+    perspective = PlayerPrivatePerspective("p1")
+    engine = BeliefEngine("p1", perspective)
 
-    engine.observe(ledger, solver)
+    engine.observe(ledger, build_solver(observations, perspective), observations)
 
-    # p1 is a wolf and knows their team, so those seats are settled and lead.
-    assert engine.state.confidence == 1.0
-    assert engine.state.current_execution_target in solver.observations.player_ids
-    assert engine.state.wolf_scores[engine.state.current_execution_target] > 0
+    # Certainty and desire point opposite ways here, which is exactly the case
+    # one shared "suspicion" number could not express.
+    assert engine.state.certainty_of("p2") is RoleCertainty.CONFIRMED
+    assert engine.state.certainty_of("p3") is RoleCertainty.CONFIRMED
+    assert engine.state.current_execution_target not in ("p2", "p3")
+    assert engine.state.execution_utility_scores["p2"] < 0
 
 
 def test_the_dead_drop_out_of_the_current_candidates():
@@ -391,7 +399,7 @@ def test_a_player_never_nominates_themselves():
 
     engine.observe(PublicFactLedger(state))
 
-    assert engine.state.wolf_scores["p2"] > 0
+    assert engine.state.public_suspicion_scores["p2"] > 0
     assert engine.state.current_execution_target != "p2"
 
 
@@ -412,7 +420,7 @@ def test_the_same_inputs_produce_the_same_beliefs():
     first.observe(ledger, solver)
     second.observe(ledger, solver)
 
-    assert first.state.wolf_scores == second.state.wolf_scores
+    assert first.state.public_suspicion_scores == second.state.public_suspicion_scores
     assert first.state.current_execution_target == second.state.current_execution_target
     assert first.state.active_hypotheses == second.state.active_hypotheses
 

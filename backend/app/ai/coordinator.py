@@ -42,7 +42,7 @@ from app.ai.reasoning.claims import (
     ensure_fact_sentences,
     register_claim_drafts,
 )
-from app.ai.reasoning.runtime import ReasoningRuntime
+from app.ai.reasoning.runtime import ReasoningRuntime, SeatReasoning
 from app.ai.schemas import (
     DiscussionOutput,
     MorningIntentOutput,
@@ -56,6 +56,18 @@ from app.engine.speech_events import SpeechEventType
 from app.engine.state import GameState, PendingQuestion
 from app.eval.transcript import TranscriptRecorder, Utterance
 from app.sessions.models import DiscussionRoundState
+
+
+def _night_utility(seat: SeatReasoning, action_type: str) -> dict[str, float]:
+    """The utility map that decided this night action, for the recorded reason."""
+    state = seat.belief.state
+    maps: dict[str, dict[str, float]] = {
+        "divine": state.divine_utility_scores,
+        "guard": state.guard_utility_scores,
+        "attack": state.attack_utility_scores,
+    }
+    return maps.get(action_type, state.execution_utility_scores)
+
 
 # How many times the round may re-queue pressured execution candidates that have
 # not rebutted yet. Bounded so the speaker selection always terminates.
@@ -837,11 +849,8 @@ class AICoordinator:
         seat = self.reasoning.seats.get(player_id)
         reason = ""
         if seat is not None:
-            score = seat.belief.state.wolf_scores.get(target, 0.0)
-            reason = (
-                f"{target}への疑い度は{score:+.1f}で、"
-                f"{'最も高い' if action_type != 'guard' else '最も低い'}。"
-            )
+            score = _night_utility(seat, action_type).get(target, 0.0)
+            reason = f"{action_type}の評価値が最も高い対象は{target}({score:+.1f})。"
         return NightActionOutput(target=target, reason=reason)
 
     def _belief_targets(self, player_id: str) -> list[str]:

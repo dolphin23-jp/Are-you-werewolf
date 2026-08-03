@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -29,7 +31,7 @@ class Settings(BaseSettings):
     # v2: the reasoning layer decides votes, night actions and the speaking
     # order in code, and the model is left with wording. Defaults to legacy so
     # the switch is a deliberate act, not a side effect of upgrading.
-    werewolf_reasoning_engine: str = "legacy"
+    werewolf_reasoning_engine: Literal["legacy", "v2"] = "legacy"
 
     luna_api_key: str = ""
     luna_base_url: str = "https://api.example.com/v1"
@@ -54,6 +56,12 @@ class Settings(BaseSettings):
     @field_validator("werewolf_reasoning_engine", mode="before")
     @classmethod
     def _normalize_reasoning_engine(cls, value: object) -> object:
+        """Normalize the spelling, then let the Literal reject anything else.
+
+        A typo used to fall through to legacy in silence, so a deployment that
+        meant to run v2 would run the old engine and look like the new one had
+        changed nothing. Failing at startup is the only honest option.
+        """
         if not isinstance(value, str):
             return value
         normalized = value.strip().strip('"\'').lower()

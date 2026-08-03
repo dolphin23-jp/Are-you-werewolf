@@ -8,7 +8,6 @@ while never letting it reach a conclusion the rules have already settled.
 from __future__ import annotations
 
 from app.ai.reasoning.belief import (
-    HARD_EXCLUDED_SCORE,
     TRAIT_PROFILES,
     BeliefEngine,
     CognitiveTraits,
@@ -16,6 +15,7 @@ from app.ai.reasoning.belief import (
     EvidenceRecord,
     FactCorrection,
     HypothesisRank,
+    RoleCertainty,
     StoryStatus,
     assign_traits,
     deception_state_for,
@@ -91,8 +91,11 @@ def test_a_sceptic_is_barely_moved_by_the_majority_but_never_opposes_it():
     sceptic.observe(ledger)
 
     # Contrarianism damps the crowd; it does not invert it into negative weight.
-    assert conformist.state.wolf_scores["p11"] > sceptic.state.wolf_scores["p11"]
-    assert sceptic.state.wolf_scores["p11"] >= 0.0
+    assert (
+        conformist.state.public_suspicion_scores["p11"]
+        > sceptic.state.public_suspicion_scores["p11"]
+    )
+    assert sceptic.state.public_suspicion_scores["p11"] >= 0.0
 
 
 def test_a_stubborn_player_needs_a_bigger_reason_to_switch():
@@ -147,9 +150,9 @@ def test_evidence_driven_players_swing_further_on_a_correction():
         engine.observe(ledger)
         engine.add_evidence(misreading)
         engine.recompute(ledger)
-        before = engine.state.wolf_scores["p0"]
+        before = engine.state.public_suspicion_scores["p0"]
         engine.apply_correction(correction, ledger)
-        swings[name] = before - engine.state.wolf_scores["p0"]
+        swings[name] = before - engine.state.public_suspicion_scores["p0"]
 
     assert swings["evidence_driven"] > swings["conformist"] > 0
 
@@ -171,8 +174,10 @@ def test_traits_cannot_reorder_what_the_rules_have_settled():
     for traits in TRAIT_PROFILES.values():
         engine = BeliefEngine("p13", CommonPublicPerspective(), traits)
         engine.add_evidence(hunch)
-        engine.observe(ledger, solver)
-        assert engine.state.wolf_scores["p3"] == HARD_EXCLUDED_SCORE
+        engine.observe(ledger, solver, ObservationSet.from_state(state))
+        # Traits scale the soft hunch all they like; the rules already settled
+        # that p3 is not a wolf, and no profile can put them on the block.
+        assert engine.state.certainty_of("p3") is RoleCertainty.EXCLUDED
         assert engine.state.current_execution_target != "p3"
 
 
