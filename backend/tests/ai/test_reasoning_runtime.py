@@ -68,7 +68,7 @@ def test_night_targets_chase_suspicion_and_guard_protects_trust():
     divined = runtime.night_target("p4", "divine", candidates)
     guarded = runtime.night_target("p4", "guard", candidates)
 
-    scores = runtime.seats["p4"].belief.state.wolf_scores
+    scores = runtime.seats["p4"].belief.state.public_suspicion_scores
     assert scores.get(divined, 0.0) >= scores.get(guarded, 0.0)
 
 
@@ -84,11 +84,11 @@ def test_the_same_board_and_seed_decide_identically():
 def test_a_repeat_refresh_on_an_unchanged_board_does_no_work():
     state = _played_board()
     runtime = _runtime(state)
-    before = runtime.seats["p2"].belief.state.wolf_scores.copy()
+    before = runtime.seats["p2"].belief.state.public_suspicion_scores.copy()
 
     runtime.refresh(state)
 
-    assert runtime.seats["p2"].belief.state.wolf_scores == before
+    assert runtime.seats["p2"].belief.state.public_suspicion_scores == before
 
 
 # -- the speech scheduler --
@@ -327,14 +327,14 @@ def test_a_human_correction_splits_the_table_rather_than_resetting_it():
     )
 
     # Conceded and dropped.
-    assert runtime.seats["p2"].belief.state.wolf_scores["p0"] == 0.0
-    assert runtime.seats["p7"].belief.state.wolf_scores["p0"] == 0.0
+    assert runtime.seats["p2"].belief.state.public_suspicion_scores["p0"] == 0.0
+    assert runtime.seats["p7"].belief.state.public_suspicion_scores["p0"] == 0.0
     # Conceded but not cleared -- the other reason is still standing, and is the
     # only one now cited.
-    assert runtime.seats["p5"].belief.state.wolf_scores["p0"] > 0.0
+    assert runtime.seats["p5"].belief.state.public_suspicion_scores["p0"] > 0.0
     assert runtime.seats["p5"].belief.state.reasons_for("p0") == ("independent:p0",)
     # A seat that never used the wrong fact is untouched.
-    assert runtime.seats["p8"].belief.state.wolf_scores["p0"] == 0.0
+    assert runtime.seats["p8"].belief.state.public_suspicion_scores["p0"] == 0.0
     assert runtime.seats["p8"].belief.state.reasons_for("p0") == ()
     # And the table still disagrees about who to execute.
     assert runtime.opinion_spread() > 0.0

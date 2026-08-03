@@ -34,7 +34,6 @@ from app.ai.reasoning.belief.corrections import (
 from app.ai.reasoning.belief.ranking import RankedView, rank_hypotheses
 from app.ai.reasoning.belief.state import (
     CONFIDENCE_SPREAD,
-    HARD_CONFIRMED_SCORE,
     HARD_EXCLUDED_SCORE,
     EvidenceRecord,
     PlayerBeliefState,
@@ -42,7 +41,16 @@ from app.ai.reasoning.belief.state import (
     is_hard,
 )
 from app.ai.reasoning.belief.traits import CognitiveTraits
+from app.ai.reasoning.belief.utility import (
+    RoleCertainty,
+    UtilityInputs,
+    attack_utility,
+    divine_utility,
+    execution_utility,
+    guard_utility,
+)
 from app.ai.reasoning.facts import MEDIUM_RESULT, PublicFactLedger
+from app.ai.reasoning.observations import ObservationSet
 from app.ai.reasoning.perspectives import Perspective
 from app.ai.reasoning.solver.backend import Certainty, has_role
 from app.ai.reasoning.solver.queries import RoleSolver
@@ -103,6 +111,12 @@ class BeliefEngine:
         self._evidence: dict[str, EvidenceRecord] = {}
         self._hard: dict[str, Certainty] = {}
         self._ranked: tuple[RankedView, ...] = ()
+        # Filled from the perspective, never from the observations directly.
+        self._self_role: RoleName | None = None
+        self._ally_ids: frozenset[str] = frozenset()
+        self._already_divined: frozenset[str] = frozenset()
+        self._claimed_roles: dict[str, RoleName] = {}
+        self._alive_ids: frozenset[str] = frozenset()
 
     @property
     def ranked_views(self) -> tuple[RankedView, ...]:
@@ -138,13 +152,20 @@ class BeliefEngine:
 
     # -- observation --
 
-    def observe(self, ledger: PublicFactLedger, solver: RoleSolver | None = None) -> None:
+    def observe(
+        self,
+        ledger: PublicFactLedger,
+        solver: RoleSolver | None = None,
+        observations: ObservationSet | None = None,
+    ) -> None:
         """Derive evidence from the public record and recompute.
 
-        Only public facts and solver verdicts are read. Free-text memos are not
-        re-parsed on every update -- they are opinion, and opinion is not a
-        source of evidence.
+        Only public facts, this seat's own private knowledge and solver verdicts
+        are read. Free-text memos are not re-parsed on every update -- they are
+        opinion, and opinion is not a source of evidence.
         """
+        if observations is not None:
+            self._absorb_private_knowledge(observations)
         self._derive_verdict_evidence(ledger)
         self._derive_claim_evidence(ledger)
         self._derive_majority_pressure(ledger)
@@ -152,6 +173,26 @@ class BeliefEngine:
             self._derive_solver_facts(ledger, solver)
             self._derive_vote_evidence(ledger)
         self.recompute(ledger)
+
+    def _absorb_private_knowledge(self, observations: ObservationSet) -> None:
+        """Read this seat's own cards and ability results, through the perspective.
+
+        The perspective is the gate: asking it rather than the observations is
+        what stops a villager's engine from quietly picking up the seer's
+        unpublished black.
+        """
+        known = self._perspective.known_roles(observations)
+        self._self_role = known.get(self.state.player_id)
+        self._ally_ids = frozenset(
+            pid for pid in known if pid != self.state.player_id
+        )
+        self._already_divined = frozenset(
+            result.target_id
+            for result in self._perspective.known_divine_results(observations)
+        )
+        self._alive_ids = frozenset(
+            pid for pid, alive in observations.alive.items() if alive
+        )
 
     def _derive_verdict_evidence(self, ledger: PublicFactLedger) -> None:
         for result in ledger.public_results():
@@ -357,20 +398,63 @@ class BeliefEngine:
                 )
             links.setdefault(record.subject_id, []).append(record.evidence_id)
 
+        # Hard verdicts stay out of the public suspicion scale entirely. They
+        # are knowledge, not an argument, and each faction wants a different
+        # thing done about them.
+        certainties: dict[str, RoleCertainty] = {}
         for player_id in ledger.known_player_ids():
             wolf_scores.setdefault(player_id, 0.0)
             certainty = self._hard.get(player_id)
             if certainty is Certainty.CERTAIN:
-                wolf_scores[player_id] = HARD_CONFIRMED_SCORE
+                certainties[player_id] = RoleCertainty.CONFIRMED
             elif certainty is Certainty.IMPOSSIBLE:
-                wolf_scores[player_id] = HARD_EXCLUDED_SCORE
+                certainties[player_id] = RoleCertainty.EXCLUDED
+            else:
+                certainties[player_id] = RoleCertainty.UNKNOWN
 
-        self.state.wolf_scores = wolf_scores
+        self.state.public_suspicion_scores = wolf_scores
+        self.state.private_role_certainties = certainties
         self.state.fox_scores = fox_scores
         self.state.evidence_links = links
         self.state.claim_trust = self._claim_trust(ledger)
+        self._claimed_roles = {
+            claim.player_id: claim.claimed_role for claim in ledger.co_declarations()
+        }
+        if not self._alive_ids:
+            self._alive_ids = frozenset(ledger.alive_ids())
+        self._recompute_utilities(ledger)
         self._rank_hypotheses(ledger)
         self._choose_targets(ledger)
+
+    def _utility_inputs(self, ledger: PublicFactLedger) -> UtilityInputs:
+        return UtilityInputs(
+            actor_id=self.state.player_id,
+            actor_role=self._self_role,
+            ally_ids=self._ally_ids,
+            wolf_certainty=self.state.private_role_certainties,
+            public_suspicion=self.state.public_suspicion_scores,
+            fox_suspicion=self.state.fox_scores,
+            claim_trust=self.state.claim_trust,
+            claimed_roles=self._claimed_roles,
+            alive_ids=self._alive_ids,
+            already_divined=self._already_divined,
+        )
+
+    def _recompute_utilities(self, ledger: PublicFactLedger) -> None:
+        inputs = self._utility_inputs(ledger)
+        players = ledger.known_player_ids()
+        self.state.execution_utility_scores = {
+            pid: execution_utility(inputs, pid) for pid in players
+        }
+        self.state.divine_utility_scores = {
+            pid: divine_utility(inputs, pid) for pid in players
+        }
+        self.state.guard_utility_scores = {
+            pid: guard_utility(inputs, pid) for pid in players
+        }
+        self.state.attack_utility_scores = {
+            pid: attack_utility(inputs, pid) for pid in players
+        }
 
     def _claim_trust(self, ledger: PublicFactLedger) -> dict[str, float]:
         """How much each standing role claim is worth believing, from hard facts
@@ -387,6 +471,7 @@ class BeliefEngine:
         return trust
 
     def _rank_hypotheses(self, ledger: PublicFactLedger) -> None:
+        """Ranked by what could be argued, not by what this seat wants done."""
         ranked: list[RankedHypothesis] = []
         for player_id, score in self.state.ranked_suspects():
             certainty = self._hard.get(player_id, Certainty.POSSIBLE)
@@ -409,7 +494,7 @@ class BeliefEngine:
         they are simply not in the eligible set any more."""
         eligible = [
             (player_id, score)
-            for player_id, score in self.state.ranked_suspects()
+            for player_id, score in self.state.ranked_targets()
             if ledger.is_alive(player_id)
             and player_id != self.state.player_id
             and score > HARD_EXCLUDED_SCORE

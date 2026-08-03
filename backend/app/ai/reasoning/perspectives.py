@@ -19,6 +19,8 @@ from app.ai.reasoning.observations import (
     EMPTY_NIGHT_KNOWLEDGE,
     NightKnowledge,
     ObservationSet,
+    PrivateDivineResult,
+    PrivateMediumResult,
 )
 from app.engine.roles import RoleName
 
@@ -42,6 +44,21 @@ class Perspective:
         able to reach around and pick up.
         """
         return EMPTY_NIGHT_KNOWLEDGE
+
+    def known_divine_results(
+        self, observations: ObservationSet
+    ) -> tuple[PrivateDivineResult, ...]:
+        """Ability verdicts this viewpoint holds. None, by default.
+
+        An unpublished seer result is the strongest fact in the game, and the
+        one a village-side deduction must never be able to reach for.
+        """
+        return ()
+
+    def known_medium_results(
+        self, observations: ObservationSet
+    ) -> tuple[PrivateMediumResult, ...]:
+        return ()
 
 
 @dataclass(frozen=True)
@@ -90,6 +107,18 @@ class PlayerPrivatePerspective(Perspective):
     def known_night_actions(self, observations: ObservationSet) -> NightKnowledge:
         assert self.viewer_id is not None
         return observations.night_knowledge_for(self.viewer_id)
+
+    def known_divine_results(
+        self, observations: ObservationSet
+    ) -> tuple[PrivateDivineResult, ...]:
+        assert self.viewer_id is not None
+        return observations.divine_results_of(self.viewer_id)
+
+    def known_medium_results(
+        self, observations: ObservationSet
+    ) -> tuple[PrivateMediumResult, ...]:
+        assert self.viewer_id is not None
+        return observations.medium_results_of(self.viewer_id)
 
 
 @dataclass(frozen=True)
@@ -149,6 +178,16 @@ class TrueWorldPerspective(Perspective):
 
     def known_night_actions(self, observations: ObservationSet) -> NightKnowledge:
         return observations.all_night_knowledge()
+
+    def known_divine_results(
+        self, observations: ObservationSet
+    ) -> tuple[PrivateDivineResult, ...]:
+        return observations.divine_results
+
+    def known_medium_results(
+        self, observations: ObservationSet
+    ) -> tuple[PrivateMediumResult, ...]:
+        return observations.medium_results
 
 
 class PerspectiveLeakError(RuntimeError):
