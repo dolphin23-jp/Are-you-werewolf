@@ -47,6 +47,7 @@ from app.ai.schemas import (
     DiscussionOutput,
     MorningIntentOutput,
     NightActionOutput,
+    PublicResultClaim,
     VoteOutput,
 )
 from app.ai.schemas import PublicResultClaim as SchemaPublicResultClaim
@@ -54,7 +55,12 @@ from app.engine.phases import Phase
 from app.engine.roles import RoleName
 from app.engine.speech_events import SpeechEventType
 from app.engine.state import GameState, PendingQuestion
-from app.eval.transcript import TranscriptRecorder, Utterance
+from app.eval.transcript import (
+    DecisionAuditRecord,
+    ResultPublicationAuditRecord,
+    TranscriptRecorder,
+    Utterance,
+)
 from app.sessions.models import DiscussionRoundState
 
 
@@ -418,11 +424,18 @@ class AICoordinator:
             if self.reasoning.holds_unpublished_result(state, pid)
             or self._pending_questions.get(pid)
         ]
+        planned_claims: list[str] = []
+        if self._freemason_public_plan is not None:
+            leader = self._freemason_public_plan[0]
+            if leader in alive and PublicFactLedger(state).claimed_role_of(leader) is None:
+                planned_claims.append(leader)
+        duty.extend(planned_claims)
         chosen = self.reasoning.select_opening_speakers(
             state,
             pending_question_targets=[
                 pid for pid in alive if self._pending_questions.get(pid)
             ],
+            planned_claims=planned_claims,
         )
         order = list(dict.fromkeys(duty + chosen))
         return DiscussionRoundState(
@@ -733,6 +746,7 @@ class AICoordinator:
             self._metrics.record_discussion_result(skipped=output is None)
         if output is None:
             return None
+        model_requested_target = output.reasoning_memo.execution_target
         if freemason_opening is not None:
             output.public_message = freemason_opening
             output.public_claim_role = RoleName.FREEMASON.value
@@ -767,6 +781,50 @@ class AICoordinator:
             # let an AI argue one name all day and then vote for another.
             output.reasoning_memo.execution_target = decision.execution_target
             output.alternative_execution_target = decision.alternative_target
+            if decision.execution_target is not None:
+                target = state.players[decision.execution_target]
+                canonical = (
+                    f"現時点の第一処刑候補は{target.name}"
+                    f"({decision.execution_target})です。"
+                )
+                # Candidate declarations are conclusions, not model prose. Remove
+                # every free-text sentence that tries to supply a competing one.
+                rationale = "。".join(
+                    sentence
+                    for sentence in output.public_message.split("。")
+                    if sentence.strip() and "第一候補" not in sentence
+                )
+                output.public_message = canonical + (rationale + "。" if rationale else "")
+            if decision.speech_goal.value == "publish_result":
+                ledger = PublicFactLedger(state)
+                published = {
+                    (r.result_type, r.target_id, r.referenced_day)
+                    for r in ledger.public_results()
+                    if r.claimant_id == player_id
+                }
+                required = [
+                    PublicResultClaim(
+                        result_type="seer",
+                        target_id=r.target_id,
+                        is_werewolf=r.is_werewolf,
+                        referenced_day=r.day,
+                    )
+                    for r in state.divine_records
+                    if r.seer_id == player_id
+                    and ("seer", r.target_id, r.day) not in published
+                ]
+                required.extend(
+                    PublicResultClaim(
+                        result_type="medium",
+                        target_id=r.target_id,
+                        is_werewolf=r.is_werewolf,
+                        referenced_day=r.day,
+                    )
+                    for r in state.medium_records
+                    if r.medium_id == player_id
+                    and ("medium", r.target_id, r.day) not in published
+                )
+                output.public_results = required
             assert self.reasoning is not None
             self.reasoning.record_stated_target(player_id, decision.execution_target)
         pending_relation = next(
@@ -841,6 +899,41 @@ class AICoordinator:
             )
         except Exception:
             return None
+        if self._recorder is not None and decision is not None and self.reasoning is not None:
+            belief = self.reasoning.seats[player_id].belief
+            public_records = belief.public_argument_evidence_for(decision.execution_target)
+            required_ids = tuple(
+                f"{item.result_type}:{item.referenced_day}:{item.target_id}"
+                for item in output.public_results
+            )
+            self._recorder.record_decision_audit(
+                DecisionAuditRecord(
+                    game_id=state.session_id,
+                    day=state.day,
+                    phase=state.phase.value,
+                    player_id=player_id,
+                    decision_target=decision.execution_target,
+                    displayed_target=decision.execution_target,
+                    public_evidence_ids=tuple(r.evidence_id for r in public_records),
+                    required_public_result_ids=required_ids,
+                    published_result_ids=required_ids,
+                    model_requested_target=model_requested_target,
+                    model_target_was_overridden=(
+                        model_requested_target != decision.execution_target
+                    ),
+                    active_evidence_ids=tuple(r.evidence_id for r in belief.active_evidence()),
+                    publicly_emitted_evidence_ids=tuple(r.evidence_id for r in public_records),
+                )
+            )
+            if required_ids:
+                self._recorder.record_result_publication_audit(
+                    ResultPublicationAuditRecord(
+                        player_id=player_id,
+                        day=state.day,
+                        required_result_ids=required_ids,
+                        published_result_ids=required_ids,
+                    )
+                )
         if self._pacing_scale:
             base = 0.35 + len(output.public_message) * 0.012
             delay = min(3.0, base) * self._pacing_scale * self._rng.uniform(0.8, 1.2)

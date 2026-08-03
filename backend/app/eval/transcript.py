@@ -13,6 +13,52 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 
+@dataclass(frozen=True)
+class DecisionAuditRecord:
+    game_id: str
+    day: int
+    phase: str
+    player_id: str
+    decision_target: str | None = None
+    displayed_target: str | None = None
+    vote_target: str | None = None
+    public_evidence_ids: tuple[str, ...] = ()
+    private_evidence_ids: tuple[str, ...] = ()
+    team_private_evidence_ids: tuple[str, ...] = ()
+    required_public_result_ids: tuple[str, ...] = ()
+    published_result_ids: tuple[str, ...] = ()
+    model_requested_target: str | None = None
+    model_target_was_overridden: bool = False
+    target_change_classification: str | None = None
+    target_change_reason: str = ""
+    active_evidence_ids: tuple[str, ...] = ()
+    publicly_emitted_evidence_ids: tuple[str, ...] = ()
+    target_alive: bool = True
+    ally_vote: bool = False
+    ally_vote_planned: bool = False
+
+
+@dataclass(frozen=True)
+class CorrectionAuditRecord:
+    correction_id: str
+    source_message_id: str
+    speaker_id: str
+    verdict: str
+    affected_seat_ids: tuple[str, ...] = ()
+    retracted_evidence_ids: tuple[str, ...] = ()
+    belief_delta_by_seat: dict[str, float] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class ResultPublicationAuditRecord:
+    player_id: str
+    day: int
+    required_result_ids: tuple[str, ...] = ()
+    published_result_ids: tuple[str, ...] = ()
+    omitted_result_ids: tuple[str, ...] = ()
+    duplicate_result_ids: tuple[str, ...] = ()
+
+
 @dataclass
 class Utterance:
     day: int
@@ -42,6 +88,7 @@ class Utterance:
 
 @dataclass
 class GameTranscript:
+    game_id: str = ""
     seed: int | None = None
     provider: str = "unknown"
     names: dict[str, str] = field(default_factory=dict)
@@ -51,6 +98,10 @@ class GameTranscript:
     deception: dict[str, Any] = field(default_factory=dict)
     utterances: list[Utterance] = field(default_factory=list)
     final_state: dict[str, Any] = field(default_factory=dict)
+    decision_audits: list[DecisionAuditRecord] = field(default_factory=list)
+    correction_audits: list[CorrectionAuditRecord] = field(default_factory=list)
+    result_publication_audits: list[ResultPublicationAuditRecord] = field(default_factory=list)
+    metrics: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -63,6 +114,12 @@ class GameTranscript:
             "deception": self.deception,
             "utterances": [asdict(u) for u in self.utterances],
             "final_state": self.final_state,
+            "decision_audits": [asdict(record) for record in self.decision_audits],
+            "correction_audits": [asdict(record) for record in self.correction_audits],
+            "result_publication_audits": [
+                asdict(record) for record in self.result_publication_audits
+            ],
+            "metrics": self.metrics,
         }
 
     def by_kind(self, kind: str) -> list[Utterance]:
@@ -96,6 +153,15 @@ class TranscriptRecorder:
 
     def record(self, utterance: Utterance) -> None:
         self.transcript.utterances.append(utterance)
+
+    def record_decision_audit(self, record: DecisionAuditRecord) -> None:
+        self.transcript.decision_audits.append(record)
+
+    def record_correction_audit(self, record: CorrectionAuditRecord) -> None:
+        self.transcript.correction_audits.append(record)
+
+    def record_result_publication_audit(self, record: ResultPublicationAuditRecord) -> None:
+        self.transcript.result_publication_audits.append(record)
 
     def finalize(self, final_state: dict[str, Any]) -> GameTranscript:
         self.transcript.final_state = final_state

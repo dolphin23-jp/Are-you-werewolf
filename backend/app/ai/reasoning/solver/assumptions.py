@@ -32,7 +32,7 @@ from app.ai.reasoning.solver.backend import (
     RoleIsNot,
     Unsatisfiable,
 )
-from app.ai.reasoning.timeline import find_timeline_conflicts
+from app.ai.reasoning.timeline import disclosable_result_nights, find_timeline_conflicts
 from app.engine.roles import ROLE_DEFINITIONS, RoleName
 
 MODULE_ID = "assumptions"
@@ -221,16 +221,22 @@ def _complete_disclosure(
     claimed = observations.claimed_role_of(assumption.player_id)
     if claimed not in _NIGHTLY_RESULT_ROLES:
         return []
-    expected = _expected_result_count(assumption.player_id, observations)
-    published = len(observations.verdicts_by(assumption.player_id))
-    if published >= expected:
+    expected_nights = disclosable_result_nights(
+        observations, assumption.player_id, observations.day
+    )
+    published_list = [v.source_night for v in observations.verdicts_by(assumption.player_id)]
+    published_nights = frozenset(published_list)
+    if published_nights == expected_nights and len(published_list) == len(published_nights):
         return []
+    expected = len(expected_nights)
+    published = len(published_list)
     label = ROLE_DEFINITIONS[claimed].label_ja
     return [
         LabelledConstraint(
             constraint_id=f"{assumption.key}:count",
             constraint=Unsatisfiable(
-                reason=f"{assumption.player_id} published {published} of {expected} results"
+                reason=(f"{assumption.player_id} published nights {published_list}; "
+                        f"expected {sorted(expected_nights)}")
             ),
             explanation=(
                 f"{assumption.player_id}が真の{label}なら{expected}件の結果を持つはずですが、"

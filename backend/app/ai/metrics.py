@@ -56,6 +56,12 @@ class MetricsCollector:
     records: list[CallRecord] = field(default_factory=list)
     discussion_attempts: int = 0
     discussion_skips: int = 0
+    total_game_wall_time: float = 0.0
+    public_utterances: int = 0
+    game_days: int = 0
+    time_spent_in_solver: float = 0.0
+    solver_query_count: int = 0
+    solver_cache_hits: int = 0
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def record(self, record: CallRecord) -> None:
@@ -136,6 +142,15 @@ class MetricsCollector:
             "discussion_generation_attempts": discussion_attempts,
             "discussion_skips": discussion_skips,
             "discussion_skip_rate": discussion_skips / max(discussion_attempts, 1),
+            "total_game_wall_time": self.total_game_wall_time,
+            "time_per_game_day": self.total_game_wall_time / max(self.game_days, 1),
+            "time_per_public_utterance": self.total_game_wall_time
+            / max(self.public_utterances, 1),
+            "time_waiting_for_llm": sum(latencies),
+            "time_spent_in_solver": self.time_spent_in_solver,
+            "solver_query_count": self.solver_query_count,
+            "solver_cache_hit_rate": self.solver_cache_hits
+            / max(self.solver_query_count, 1),
         }
 
         if tokens_reported:

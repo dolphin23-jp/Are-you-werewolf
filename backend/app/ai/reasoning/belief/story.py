@@ -26,6 +26,7 @@ from app.ai.reasoning.perspectives import (
     PlayerPrivatePerspective,
 )
 from app.ai.reasoning.solver import (
+    AccurateTimeline,
     Assumption,
     HonestResults,
     Hypothesis,
@@ -146,7 +147,11 @@ def story_solver(
     what the story asserts. It never gets the private perspective.
     """
     assert state.public_story is not None
-    combined: tuple[Assumption, ...] = assumptions or (HonestResults(state.player_id),)
+    combined = tuple(
+        {item.key: item for item in (
+            HonestResults(state.player_id), AccurateTimeline(state.player_id), *assumptions
+        )}.values()
+    )
     return build_solver(
         observations, state.public_story, cache=cache, assumptions=combined
     )
