@@ -14,6 +14,7 @@ import pytest
 
 from app.ai.coordinator import AICoordinator
 from app.ai.provider.mock import MockProvider
+from app.ai.reasoning.runtime import ReasoningRuntime
 from app.engine.game import GameController, PlayerSpec
 from app.engine.phases import Phase
 from app.engine.roles import RoleName
@@ -22,13 +23,14 @@ MAX_LOOPS = 150
 HUMAN_ID = "p0"
 
 
-def _make_session(seed: int) -> SimpleNamespace:
+def _make_session(seed: int, engine: str = "legacy") -> SimpleNamespace:
     specs = [PlayerSpec(player_id=f"p{i}", name=f"P{i}", is_human=(i == 0)) for i in range(17)]
     controller = GameController(session_id=f"s{seed}", player_specs=specs, seed=seed)
     ai_ids = [s.player_id for s in specs if not s.is_human]
     provider = MockProvider(seed=seed)
+    reasoning = ReasoningRuntime(controller.state, ai_ids, seed=seed) if engine == "v2" else None
     coordinator = AICoordinator(
-        controller.state, ai_ids, provider, seed=seed, pacing_scale=0.0
+        controller.state, ai_ids, provider, seed=seed, reasoning=reasoning, pacing_scale=0.0
     )
     return SimpleNamespace(
         controller=controller,
@@ -38,8 +40,8 @@ def _make_session(seed: int) -> SimpleNamespace:
     )
 
 
-async def _play(seed: int):
-    session = _make_session(seed)
+async def _play(seed: int, engine: str = "legacy"):
+    session = _make_session(seed, engine)
     controller = session.controller
     coordinator = session.coordinator
     rng = random.Random(seed)
@@ -122,3 +124,21 @@ async def test_co_detection_fires_at_least_sometimes_across_seeds():
             any_co = True
             break
     assert any_co
+
+
+@pytest.mark.asyncio
+async def test_full_mock_ai_games_terminate_under_v2_too():
+    """v2 is now the default engine (app/config.py), so the free "no API key,
+    play against mock AI" path this file otherwise only proves for legacy is
+    exactly what changes underneath a real player. Fewer seeds than the
+    legacy check above -- this exists to catch a v2+mock integration break,
+    not to re-run the full seed sweep."""
+    for seed in range(4):
+        controller = await _play(seed, engine="v2")
+        assert controller.state.phase == Phase.GAME_OVER
+        if controller.state.is_draw:
+            assert controller.state.winner is None
+        else:
+            assert controller.state.winner is not None
+        assert len(controller.state.chat_log) > 0
+        assert len(controller.state.vote_records) > 0

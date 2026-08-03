@@ -248,8 +248,16 @@ SMTソルバーは「可能・確定・含意」を厳密に答える。手書�
 
 ## 推理基盤の実ゲーム統合(PR9)
 
-`WEREWOLF_REASONING_ENGINE=legacy|v2` で切り替える。**既定は legacy** — 切り替えは
-意図的な行為であるべきで、アップグレードの副作用であってはならない。
+`WEREWOLF_REASONING_ENGINE=legacy|v2` で切り替える。**既定は v2**。
+
+当初の既定は legacy だった — 切り替えは意図的な行為であるべきで、
+アップグレードの副作用であってはならないという理由から。既定を v2 に変えたのは、
+直近のライブA/B検証（`backend/artifacts/live-ab-adaptive/` 等）を経て、
+実プレイでの手動検証フェーズへ移す判断をしたため。**これは
+リリースゲート(`config/reasoning_release_gate.toml`)が PASS になったという
+意味ではない** — 直近の判定は `INCONCLUSIVE`(ライブゲーム2件、人間による
+トランスクリプト精査は未完了)のまま。legacy との比較検証がしたい場合は
+`WEREWOLF_REASONING_ENGINE=legacy` を明示的に設定する。
 
 ### LLMを使わずコード化したもの
 

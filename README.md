@@ -70,6 +70,20 @@ APIキーを設定しなくても、**モックAI相手にそのまま遊べま�
 キーを入れずに `WEREWOLF_LLM_PROVIDER=luna` だけ設定した場合は、
 誤って課金APIを叩く前に起動時の警告とエラーで止まります。
 
+## 推論エンジン(v2 / legacy)
+
+AIの投票・夜行動・発言順は既定で **v2** エンジンが決めます。コードが
+決定論的にその場の結論(誰を疑うか・誰に投票するか)を決め、モデルに残るのは
+その結論をどう言葉にするかだけです。モデルが一日中Aを疑う発言をしておいて
+最後にBへ投票する、といったことが起きなくなります。仕組みの詳細は
+`docs/architecture.md` を参照してください。
+
+以前の **legacy** エンジン(投票・夜行動・発言内容のすべてをモデルに任せる方式)
+と比較したい場合は、`WEREWOLF_LLM_PROVIDER` と同じ要領で
+`WEREWOLF_REASONING_ENGINE=legacy` を Codespaces secrets・`backend/.env`・
+Docker の環境変数のいずれかに設定してください。反映確認は `/api/health` の
+`"reasoning_engine"` で行えます(`v2` が既定)。
+
 ### ローカルで動かす場合(任意)
 
 ```bash

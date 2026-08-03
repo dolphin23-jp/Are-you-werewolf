@@ -44,6 +44,7 @@ def create_app() -> FastAPI:
         return {
             "status": "ok",
             "llm_provider": settings.werewolf_llm_provider,
+            "reasoning_engine": settings.werewolf_reasoning_engine,
             "frontend_bundled": FRONTEND_DIST.is_dir(),
         }
 
