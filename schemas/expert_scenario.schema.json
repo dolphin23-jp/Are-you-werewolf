@@ -1,0 +1,224 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/dolphin23-jp/Are-you-werewolf/schemas/expert_scenario.schema.json",
+  "title": "Expert-guided werewolf reasoning scenario",
+  "description": "One cutoff-local reasoning problem. Facts, hard logic, soft weighting, action utility, and expert correction remain separate.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "scenario_id",
+    "log_id",
+    "cutoff_event_id",
+    "perspective",
+    "public_facts",
+    "private_facts",
+    "possible_worlds",
+    "impossible_worlds",
+    "conditional_deductions",
+    "expert_assessment",
+    "weighting_factors",
+    "recommended_action",
+    "common_mistakes",
+    "counterexamples",
+    "review"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "scenario_id": {"type": "string", "minLength": 1},
+    "log_id": {"type": "string", "minLength": 1},
+    "cutoff_event_id": {"type": "string", "minLength": 1},
+    "perspective": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "actor_id"],
+      "properties": {
+        "kind": {"enum": ["public", "player", "true_world_evaluation"]},
+        "actor_id": {"type": ["string", "null"]},
+        "notes": {"type": "string"}
+      }
+    },
+    "public_facts": {"type": "array", "items": {"$ref": "#/$defs/fact"}},
+    "private_facts": {"type": "array", "items": {"$ref": "#/$defs/fact"}},
+    "possible_worlds": {"type": "array", "items": {"$ref": "#/$defs/possibleWorld"}},
+    "impossible_worlds": {"type": "array", "items": {"$ref": "#/$defs/impossibleWorld"}},
+    "conditional_deductions": {"type": "array", "items": {"$ref": "#/$defs/conditionalDeduction"}},
+    "expert_assessment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["main_world_ids", "alternative_world_ids", "confidence", "disagreement_expected", "reason"],
+      "properties": {
+        "main_world_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string"}},
+        "alternative_world_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+        "confidence": {"enum": ["low", "medium", "high"]},
+        "disagreement_expected": {"type": "boolean"},
+        "reason": {"type": "string", "minLength": 1}
+      }
+    },
+    "weighting_factors": {"type": "array", "items": {"$ref": "#/$defs/weightingFactor"}},
+    "recommended_action": {"$ref": "#/$defs/actionAssessment"},
+    "common_mistakes": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "counterexamples": {"type": "array", "items": {"$ref": "#/$defs/counterexample"}},
+    "ai_correction": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": [
+        "initial_assessment",
+        "expert_correction",
+        "error_categories",
+        "why_the_ai_failed",
+        "generalized_prevention_rule",
+        "rule_counterexamples"
+      ],
+      "properties": {
+        "initial_assessment": {"type": "string", "minLength": 1},
+        "expert_correction": {"type": "string", "minLength": 1},
+        "error_categories": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "fact_extraction",
+              "timeline",
+              "perspective_leakage",
+              "logical_constraint",
+              "missed_possible_world",
+              "retained_impossible_world",
+              "weight_direction",
+              "weight_too_strong",
+              "weight_too_weak",
+              "double_counting",
+              "vote_vs_suspicion",
+              "faction_objective",
+              "noise_overweighting",
+              "advanced_tactic_overgeneralization",
+              "other"
+            ]
+          }
+        },
+        "why_the_ai_failed": {"type": "string", "minLength": 1},
+        "generalized_prevention_rule": {"type": "string", "minLength": 1},
+        "rule_counterexamples": {"type": "array", "items": {"type": "string", "minLength": 1}}
+      }
+    },
+    "review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "reviewer", "reviewed_at", "training_ready"],
+      "properties": {
+        "status": {"enum": ["draft", "expert_reviewed", "adjudicated", "rejected"]},
+        "reviewer": {"type": "string"},
+        "reviewed_at": {"type": ["string", "null"], "format": "date-time"},
+        "training_ready": {"type": "boolean"},
+        "blocking_issues": {"type": "array", "items": {"type": "string", "minLength": 1}}
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "parser_version": {"type": "string"},
+        "annotation_model": {"type": "string"},
+        "prompt_version": {"type": "string"},
+        "source_event_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string"}}
+      }
+    }
+  },
+  "$defs": {
+    "fact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fact_id", "statement", "source_event_ids", "confidence"],
+      "properties": {
+        "fact_id": {"type": "string", "minLength": 1},
+        "statement": {"type": "string", "minLength": 1},
+        "source_event_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string"}},
+        "confidence": {"enum": ["deterministic", "reviewed_extraction", "ambiguous_extraction"]},
+        "alternatives": {"type": "array", "items": {"type": "string", "minLength": 1}}
+      }
+    },
+    "possibleWorld": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["world_id", "summary", "required_assumptions"],
+      "properties": {
+        "world_id": {"type": "string", "minLength": 1},
+        "summary": {"type": "string", "minLength": 1},
+        "required_assumptions": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "role_assignments": {"type": "object", "additionalProperties": {"type": "string"}},
+        "notes": {"type": "string"}
+      }
+    },
+    "impossibleWorld": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["world_id", "summary", "contradiction", "unsat_core"],
+      "properties": {
+        "world_id": {"type": "string", "minLength": 1},
+        "summary": {"type": "string", "minLength": 1},
+        "contradiction": {"type": "string", "minLength": 1},
+        "unsat_core": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+      }
+    },
+    "conditionalDeduction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["if_assumptions", "then_statement"],
+      "properties": {
+        "if_assumptions": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "then_statement": {"type": "string", "minLength": 1},
+        "supporting_event_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string"}}
+      }
+    },
+    "weightingFactor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["factor_id", "description", "direction", "strength", "target_world_ids", "source_event_ids", "causal_group_id", "explanation"],
+      "properties": {
+        "factor_id": {"type": "string", "minLength": 1},
+        "description": {"type": "string", "minLength": 1},
+        "direction": {"enum": ["supports", "opposes", "neutral"]},
+        "strength": {"enum": ["weak", "medium", "strong"]},
+        "target_world_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string"}},
+        "source_event_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string"}},
+        "causal_group_id": {"type": "string", "minLength": 1},
+        "derived_from_factor_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+        "explanation": {"type": "string", "minLength": 1}
+      }
+    },
+    "actionAssessment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action_type", "target_id", "reason", "alternatives"],
+      "properties": {
+        "action_type": {"enum": ["execute", "vote", "divine", "guard", "attack", "co", "withhold", "other"]},
+        "target_id": {"type": ["string", "null"]},
+        "reason": {"type": "string", "minLength": 1},
+        "alternatives": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["action_type", "target_id", "reason"],
+            "properties": {
+              "action_type": {"type": "string", "minLength": 1},
+              "target_id": {"type": ["string", "null"]},
+              "reason": {"type": "string", "minLength": 1}
+            }
+          }
+        }
+      }
+    },
+    "counterexample": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["description", "changed_condition", "expected_effect"],
+      "properties": {
+        "description": {"type": "string", "minLength": 1},
+        "changed_condition": {"type": "string", "minLength": 1},
+        "expected_effect": {"type": "string", "minLength": 1},
+        "related_factor_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string"}}
+      }
+    }
+  }
+}
