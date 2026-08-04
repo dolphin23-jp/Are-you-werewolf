@@ -10,3 +10,9 @@
 - Run frontend tests: `cd frontend && pnpm test`. Lint/types: `pnpm exec eslint . && pnpm exec tsc -b --noEmit`.
 - See `docs/architecture.md` for the design philosophy carried over from the
   prior implementation and what was deliberately changed.
+- Before changing external-log ingestion, possible-world reasoning, evidence
+  weighting, vote evaluation, or expert-scenario data, read
+  `docs/real_game_log_reasoning_plan.md`. It is the design contract for keeping
+  facts, hard logical possibility, soft world weighting, and faction utility
+  separate. Do not scale a log dataset until one complete game passes its
+  `training-ready` gate.
