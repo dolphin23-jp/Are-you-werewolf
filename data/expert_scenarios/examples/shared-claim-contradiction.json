@@ -1,0 +1,197 @@
+{
+  "schema_version": "1.0",
+  "scenario_id": "example-shared-claim-contradiction-d2",
+  "log_id": "example-log-001",
+  "cutoff_event_id": "ev-042",
+  "perspective": {
+    "kind": "public",
+    "actor_id": null,
+    "notes": "Illustrative data only; not a real parsed game and never training-ready."
+  },
+  "public_facts": [
+    {
+      "fact_id": "f1",
+      "statement": "There are three public seer claims.",
+      "source_event_ids": ["ev-010", "ev-012", "ev-015"],
+      "confidence": "deterministic",
+      "alternatives": []
+    },
+    {
+      "fact_id": "f2",
+      "statement": "A published a black seer result on B.",
+      "source_event_ids": ["ev-020"],
+      "confidence": "deterministic",
+      "alternatives": []
+    },
+    {
+      "fact_id": "f3",
+      "statement": "B publicly claimed freemason and named C as partner.",
+      "source_event_ids": ["ev-025", "ev-026"],
+      "confidence": "deterministic",
+      "alternatives": []
+    },
+    {
+      "fact_id": "f4",
+      "statement": "C reciprocally named B as freemason partner.",
+      "source_event_ids": ["ev-030"],
+      "confidence": "deterministic",
+      "alternatives": []
+    },
+    {
+      "fact_id": "f5",
+      "statement": "A did not retract or correct the black result after the reciprocal partner claim.",
+      "source_event_ids": ["ev-020", "ev-030", "ev-042"],
+      "confidence": "reviewed_extraction",
+      "alternatives": []
+    }
+  ],
+  "private_facts": [],
+  "possible_worlds": [
+    {
+      "world_id": "w-a-wolf-fake-black",
+      "summary": "A is a werewolf who intentionally published a false black result; B and C are genuine freemasons.",
+      "required_assumptions": ["B-C partner claims are genuine", "A's result is fabricated"],
+      "role_assignments": {
+        "A": "werewolf",
+        "B": "freemason",
+        "C": "freemason"
+      },
+      "notes": "Representative world, not a complete assignment of every seat."
+    },
+    {
+      "world_id": "w-a-madman-fake-black",
+      "summary": "A is the madman who published a false black result; B and C are genuine freemasons.",
+      "required_assumptions": ["B-C partner claims are genuine", "A's result is fabricated"],
+      "role_assignments": {
+        "A": "madman",
+        "B": "freemason",
+        "C": "freemason"
+      },
+      "notes": "The public board does not yet distinguish A-wolf from A-madman strongly."
+    },
+    {
+      "world_id": "w-bc-wolf-pair",
+      "summary": "B and C are two werewolves executing a reciprocal freemason claim; A may be the genuine seer.",
+      "required_assumptions": ["B-C reciprocal partner claim is a coordinated fake"],
+      "role_assignments": {
+        "A": "seer",
+        "B": "werewolf",
+        "C": "werewolf"
+      },
+      "notes": "Logically possible but expected to receive low soft weight in an ordinary board."
+    }
+  ],
+  "impossible_worlds": [
+    {
+      "world_id": "w-a-true-seer-with-genuine-bc",
+      "summary": "A is a truthful genuine seer, B is a werewolf, and B-C are both genuine freemasons.",
+      "contradiction": "Under the explicit assumption that B and C are genuine freemason partners, B cannot simultaneously be a werewolf.",
+      "unsat_core": ["f2", "f3", "f4", "assumption:B-C-genuine"]
+    }
+  ],
+  "conditional_deductions": [
+    {
+      "if_assumptions": ["B-C reciprocal partner claim is genuine"],
+      "then_statement": "A's published black result on B cannot be an honest seer result.",
+      "supporting_event_ids": ["ev-020", "ev-025", "ev-026", "ev-030"]
+    }
+  ],
+  "expert_assessment": {
+    "main_world_ids": ["w-a-wolf-fake-black"],
+    "alternative_world_ids": ["w-a-madman-fake-black", "w-bc-wolf-pair"],
+    "confidence": "medium",
+    "disagreement_expected": true,
+    "reason": "A is strongly likely to be false if the reciprocal freemason relation is accepted, but the current public facts distinguish A-wolf from A-madman only weakly. The B-C wolf-pair world remains logically possible and should not be deleted."
+  },
+  "weighting_factors": [
+    {
+      "factor_id": "wf1",
+      "description": "Reciprocal freemason confirmation conflicts with A's black result if the relation is genuine.",
+      "direction": "supports",
+      "strength": "strong",
+      "target_world_ids": ["w-a-wolf-fake-black", "w-a-madman-fake-black"],
+      "source_event_ids": ["ev-020", "ev-025", "ev-026", "ev-030"],
+      "causal_group_id": "cg-a-black-vs-bc-confirmation",
+      "derived_from_factor_ids": [],
+      "explanation": "This is one connected contradiction pattern. The black result and reciprocal confirmation must not be counted again as multiple independent strong factors."
+    },
+    {
+      "factor_id": "wf2",
+      "description": "A maintained the black result after the reciprocal claim became public.",
+      "direction": "supports",
+      "strength": "medium",
+      "target_world_ids": ["w-a-wolf-fake-black", "w-a-madman-fake-black"],
+      "source_event_ids": ["ev-030", "ev-042"],
+      "causal_group_id": "cg-a-post-confirmation-behavior",
+      "derived_from_factor_ids": [],
+      "explanation": "This is more consistent with intentional deception than with a simple misunderstanding, but it does not by itself identify the hostile role."
+    },
+    {
+      "factor_id": "wf3",
+      "description": "A coordinated two-werewolf reciprocal freemason claim is strategically possible but costly.",
+      "direction": "opposes",
+      "strength": "medium",
+      "target_world_ids": ["w-bc-wolf-pair"],
+      "source_event_ids": ["ev-025", "ev-026", "ev-030"],
+      "causal_group_id": "cg-bc-reciprocal-claim",
+      "derived_from_factor_ids": [],
+      "explanation": "This lowers the world's soft rank without making it logically impossible."
+    }
+  ],
+  "recommended_action": {
+    "action_type": "execute",
+    "target_id": "A",
+    "reason": "A is highly likely to be false under the main and strongest alternative worlds. Whether execution is optimal still depends on remaining executions, expected role composition, and other candidates; this example assumes those strategic checks favor removing A.",
+    "alternatives": [
+      {
+        "action_type": "execute",
+        "target_id": "B",
+        "reason": "Only preferred if independent evidence raises the coordinated B-C fake world enough to outweigh the cost of executing a genuine freemason candidate."
+      }
+    ]
+  },
+  "common_mistakes": [
+    "Treating the reciprocal partner claim as automatically true rather than an explicit assumption or weighted hypothesis.",
+    "Declaring the B-C wolf-pair world impossible merely because it is unusual.",
+    "Concluding A is specifically a werewolf when the current evidence mainly establishes that A is likely false.",
+    "Counting A's black result, B's partner claim, and C's confirmation as three independent strong pieces of evidence."
+  ],
+  "counterexamples": [
+    {
+      "description": "Only B names C and C never confirms.",
+      "changed_condition": "Remove event ev-030.",
+      "expected_effect": "The world where A is the genuine seer should gain substantial weight; the hard conditional deduction no longer applies.",
+      "related_factor_ids": ["wf1", "wf3"]
+    },
+    {
+      "description": "A immediately retracts the black result and explains a transcription mistake.",
+      "changed_condition": "Replace f5 with an explicit correction event.",
+      "expected_effect": "The post-confirmation deception factor weakens, while the original extraction and correction history must be reviewed separately.",
+      "related_factor_ids": ["wf2"]
+    }
+  ],
+  "ai_correction": {
+    "initial_assessment": "A must be a werewolf because confirmed freemasons cannot be wolves.",
+    "expert_correction": "The board strongly suggests A is false if B-C are genuine, but A-wolf versus A-madman remains unresolved, and B-C coordinated deception is still logically possible.",
+    "error_categories": ["retained_impossible_world", "missed_possible_world", "weight_too_strong", "advanced_tactic_overgeneralization"],
+    "why_the_ai_failed": "It converted a highly weighted public relationship into unconditional truth, then jumped from 'false claimant' to one specific hostile role.",
+    "generalized_prevention_rule": "Keep public relationship claims as hypotheses unless hard-confirmed by the game system; after proving a claim false, separately enumerate every role capable of making that false claim.",
+    "rule_counterexamples": [
+      "A system-generated role reveal can make a relationship hard fact rather than a weighted claim.",
+      "Role-count constraints may later eliminate either A-wolf or A-madman."
+    ]
+  },
+  "review": {
+    "status": "draft",
+    "reviewer": "",
+    "reviewed_at": null,
+    "training_ready": false,
+    "blocking_issues": ["Illustrative synthetic events; not linked to a training-ready real log."]
+  },
+  "provenance": {
+    "parser_version": "example-only",
+    "annotation_model": "example-only",
+    "prompt_version": "1",
+    "source_event_ids": ["ev-010", "ev-012", "ev-015", "ev-020", "ev-025", "ev-026", "ev-030", "ev-042"]
+  }
+}
