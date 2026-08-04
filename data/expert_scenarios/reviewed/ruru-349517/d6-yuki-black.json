@@ -1,0 +1,42 @@
+{
+  "schema_version": "1.0",
+  "scenario_id": "ruru-349517-d6-yuki-black",
+  "log_id": "ruru-349517",
+  "cutoff_event_id": "ruru349517.provisional.d6.yuki-no-co",
+  "perspective": {"kind": "public", "actor_id": null, "notes": "6日目、マデュライトがユキ黒を公開し、ユキがCOなしを宣言した時点。"},
+  "public_facts": [
+    {"fact_id": "f1", "statement": "8人生存で残り処刑回数は3回である。", "source_event_ids": ["ruru349517.provisional.d6.morning"], "confidence": "deterministic", "alternatives": []},
+    {"fact_id": "f2", "statement": "マデュライトがユキ黒を公開した。", "source_event_ids": ["ruru349517.provisional.d6.madulite-black-yuki"], "confidence": "reviewed_extraction", "alternatives": []},
+    {"fact_id": "f3", "statement": "ユキはcoronaの白ではなく、corona真世界でもグレーである。", "source_event_ids": ["ruru349517.provisional.d2.corona-white-pink"], "confidence": "deterministic", "alternatives": []},
+    {"fact_id": "f4", "statement": "マデュライトの共有以外の過去白は全員夜死体となった。", "source_event_ids": ["ruru349517.provisional.d3.death-gravestone", "ruru349517.provisional.d5.death-kocchi", "ruru349517.provisional.d6.death-2am"], "confidence": "reviewed_extraction", "alternatives": []},
+    {"fact_id": "f5", "statement": "ユキはCOなしを宣言した。", "source_event_ids": ["ruru349517.provisional.d6.yuki-no-co"], "confidence": "reviewed_extraction", "alternatives": []}
+  ],
+  "private_facts": [],
+  "possible_worlds": [
+    {"world_id": "w-madulite-true-yuki-wolf", "summary": "マデュライト真でユキ黒は真結果。", "required_assumptions": ["マデュライト真"], "role_assignments": {"マデュライト": "seer", "ユキ": "werewolf"}, "notes": "連続白噛みは真のボルコン。"},
+    {"world_id": "w-madulite-madman-yuki-open", "summary": "corona真、マデュライト狂で、ユキ黒は偽黒または誤爆。", "required_assumptions": ["corona真", "マデュライト狂人"], "role_assignments": {"マデュライト": "madman"}, "notes": "白噛みは狐囲い確認とグレー維持で説明可能。"},
+    {"world_id": "w-madulite-wolf-black-strategy", "summary": "corona真、マデュライト狼で、ユキ黒は身内切りまたは村への偽黒。", "required_assumptions": ["corona真", "マデュライト狼"], "role_assignments": {"マデュライト": "werewolf"}, "notes": "無囲い・自作ボルコン戦術。"}
+  ],
+  "impossible_worlds": [
+    {"world_id": "w-prior-white-wolf", "summary": "マデュライトの共有以外の過去白の誰かが狼で夜襲撃死した。", "contradiction": "人狼は仲間の通常襲撃で死亡しない。", "unsat_core": ["f4", "rule:wolf-immune-to-attack"]}
+  ],
+  "conditional_deductions": [
+    {"if_assumptions": ["マデュライト真"], "then_statement": "ユキは人狼である。", "supporting_event_ids": ["ruru349517.provisional.d6.madulite-black-yuki"]},
+    {"if_assumptions": ["マデュライト偽"], "then_statement": "ユキがcoronaのグレーであることだけでは処刑の安全性を保証しない。", "supporting_event_ids": ["ruru349517.provisional.d2.corona-white-pink"]}
+  ],
+  "expert_assessment": {"main_world_ids": ["w-madulite-true-yuki-wolf"], "alternative_world_ids": ["w-madulite-madman-yuki-open", "w-madulite-wolf-black-strategy"], "confidence": "medium", "disagreement_expected": true, "reason": "無囲いと連続白噛みは真ボルコンとよく整合するが、狂人の狐囲い確認と狼の自作ボルコンでも説明できる。"},
+  "weighting_factors": [
+    {"factor_id": "wf1", "description": "マデュライトの過去白に狼囲いがなく全員噛まれている。", "direction": "supports", "strength": "medium", "target_world_ids": ["w-madulite-true-yuki-wolf"], "source_event_ids": ["ruru349517.provisional.d3.death-gravestone", "ruru349517.provisional.d5.death-kocchi", "ruru349517.provisional.d6.death-2am"], "causal_group_id": "cg-madulite-white-chain", "derived_from_factor_ids": [], "explanation": "真ボルコンと自然だが、三死体を独立した三つの強い真要素として数えない。"},
+    {"factor_id": "wf2", "description": "同じ白噛みは狂人の狐囲い確認または狼の自作ボルコンでも成立する。", "direction": "supports", "strength": "medium", "target_world_ids": ["w-madulite-madman-yuki-open", "w-madulite-wolf-black-strategy"], "source_event_ids": ["ruru349517.provisional.d3.death-gravestone", "ruru349517.provisional.d5.death-kocchi", "ruru349517.provisional.d6.death-2am"], "causal_group_id": "cg-madulite-white-chain", "derived_from_factor_ids": ["wf1"], "explanation": "重要だが単独の識別力は限定的。"},
+    {"factor_id": "wf3", "description": "ユキはCOなしで狩人露出を伴わず処刑可能。", "direction": "supports", "strength": "medium", "target_world_ids": ["w-madulite-true-yuki-wolf"], "source_event_ids": ["ruru349517.provisional.d6.yuki-no-co"], "causal_group_id": "cg-yuki-action-utility", "derived_from_factor_ids": [], "explanation": "狼確率より処刑コストを下げる行動要素。"}
+  ],
+  "recommended_action": {"action_type": "execute", "target_id": "ユキ", "reason": "マデュライト真の黒を処理しつつ、corona視点の保護白ではなくCOなしで狩人を露出させない。ただし偽黒とLW・狐事故を認識したリスク選択である。", "alternatives": [{"action_type": "execute", "target_id": "マデュライト", "reason": "残存占いを強く偽視する期限処刑案。"}, {"action_type": "execute", "target_id": "other_grey", "reason": "ユキをLW候補として飼う案だが、狐と狼数が不明で安全ではない。"}]},
+  "common_mistakes": ["coronaのグレーだからマデュライト偽でもユキ吊りが安全とする。", "真狂なら残ったマデュライトが真と断定する。", "連続白噛みを独立した複数の強い真要素として加算する。", "処刑がほぼ確定した後のソラナックスのユキ攻撃を強い非仲間要素とする。"],
+  "counterexamples": [
+    {"description": "ユキが高信用の単独狩人COをした場合。", "changed_condition": "COなしではなく平和と整合する狩人CO。", "expected_effect": "即処刑コストが上がり、対抗募集と護衛指示を優先する。", "related_factor_ids": ["wf3"]},
+    {"description": "LWと狐生存が公開確定した場合。", "changed_condition": "ユキがLW候補かつ狐が別に生存確定。", "expected_effect": "ユキ即処刑は狐勝利を招くため飼いが必要。", "related_factor_ids": []}
+  ],
+  "ai_correction": {"initial_assessment": "ユキはcoronaのグレーなので真でも偽でも黒吊りで問題ない。", "expert_correction": "coronaのグレーは保護されないだけで、マデュライト偽ならユキ村もある。吊りは妥当なリスク選択だが安全証明ではない。", "error_categories": ["logical_constraint", "faction_objective", "weight_too_strong"], "why_the_ai_failed": "両視点で狼になりうることを両視点で吊ってよいことへ変換した。", "generalized_prevention_rule": "役職可能性と行動安全性を分離し、誤った世界での損失を列挙する。", "rule_counterexamples": ["偽黒が村なら処刑は村の縄を失う。", "LWかつ狐生存なら真黒でも即処刑が敗着になる。"]},
+  "review": {"status": "expert_reviewed", "reviewer": "human-expert-joint-review", "reviewed_at": "2026-08-05T07:24:00+09:00", "training_ready": false, "blocking_issues": ["Canonical event IDs are not parsed.", "Public and full logs are not automatically aligned.", "Independent adjudication is pending."]},
+  "provenance": {"parser_version": "unparsed-provisional-source-ids", "annotation_model": "GPT-5.6 Thinking with human expert correction", "prompt_version": "joint-log-review-v1", "source_event_ids": ["ruru349517.provisional.d6.morning", "ruru349517.provisional.d6.death-2am", "ruru349517.provisional.d6.madulite-black-yuki", "ruru349517.provisional.d6.yuki-no-co"]}
+}

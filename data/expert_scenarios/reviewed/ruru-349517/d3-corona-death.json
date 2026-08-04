@@ -1,0 +1,38 @@
+{
+  "schema_version": "1.0",
+  "scenario_id": "ruru-349517-d3-corona-death",
+  "log_id": "ruru-349517",
+  "cutoff_event_id": "ruru349517.provisional.d3.shared-fo-complete",
+  "perspective": {"kind": "public", "actor_id": null, "notes": "3日目、corona単独死体、マデュライトの墓石白、共有FO後。"},
+  "public_facts": [
+    {"fact_id": "f1", "statement": "占い候補coronaが夜の単独死体となった。", "source_event_ids": ["ruru349517.provisional.d3.death-corona"], "confidence": "reviewed_extraction", "alternatives": []},
+    {"fact_id": "f2", "statement": "残った占い候補マデュライトが墓石白を公開した。", "source_event_ids": ["ruru349517.provisional.d3.madulite-white-gravestone"], "confidence": "reviewed_extraction", "alternatives": []},
+    {"fact_id": "f3", "statement": "昇り龍とマルカントニオが共有相方を相互確認した。", "source_event_ids": ["ruru349517.provisional.d3.shared-fo"], "confidence": "reviewed_extraction", "alternatives": []},
+    {"fact_id": "f4", "statement": "マデュライトの初手白は共有であり初手狼囲いではない。", "source_event_ids": ["ruru349517.provisional.d3.shared-fo"], "confidence": "deterministic", "alternatives": []}
+  ],
+  "private_facts": [],
+  "possible_worlds": [
+    {"world_id": "w-madulite-true-corona-madman", "summary": "corona狂、マデュライト真。", "required_assumptions": ["初日真狂", "corona狂人"], "role_assignments": {"マデュライト": "seer", "corona": "madman"}, "notes": "ピンク狼なら漂白、非狼ならベグ。"},
+    {"world_id": "w-corona-true-madulite-madman", "summary": "corona真、マデュライト狂。", "required_assumptions": ["初日真狂", "corona真"], "role_assignments": {"マデュライト": "madman", "corona": "seer"}, "notes": "単純ベグで成立。"},
+    {"world_id": "w-corona-true-madulite-wolf", "summary": "corona真、マデュライト狼が対抗を即噛みした。", "required_assumptions": ["初日真狼", "corona真"], "role_assignments": {"マデュライト": "werewolf", "corona": "seer"}, "notes": "信用勝負を捨てて真だけを消す戦術。"}
+  ],
+  "impossible_worlds": [
+    {"world_id": "w-corona-wolf-night-death", "summary": "coronaが狼で仲間の襲撃により死亡した。", "contradiction": "人狼は仲間の通常襲撃で死亡しない。", "unsat_core": ["f1", "rule:wolf-immune-to-attack"]}
+  ],
+  "conditional_deductions": [
+    {"if_assumptions": ["corona真"], "then_statement": "coronaの初手白ピンクの少女は狼でも狐でもない。", "supporting_event_ids": ["ruru349517.provisional.d2.corona-white-pink", "ruru349517.provisional.d3.death-corona"]}
+  ],
+  "expert_assessment": {"main_world_ids": ["w-madulite-true-corona-madman", "w-corona-true-madulite-madman"], "alternative_world_ids": ["w-corona-true-madulite-wolf"], "confidence": "medium", "disagreement_expected": true, "reason": "噛みだけでは残存占いの真狂を判別しない。真狼即噛みも一段低く保持する。"},
+  "weighting_factors": [
+    {"factor_id": "wf1", "description": "占い候補の単独死体。", "direction": "neutral", "strength": "strong", "target_world_ids": ["w-madulite-true-corona-madman", "w-corona-true-madulite-madman", "w-corona-true-madulite-wolf"], "source_event_ids": ["ruru349517.provisional.d3.death-corona"], "causal_group_id": "cg-d3-seer-death", "derived_from_factor_ids": [], "explanation": "重要だが主要三世界すべてで説明でき、単独の識別力は低い。"},
+    {"factor_id": "wf2", "description": "共有FOによりマデュライト初手狼囲いが消えた。", "direction": "supports", "strength": "weak", "target_world_ids": ["w-madulite-true-corona-madman"], "source_event_ids": ["ruru349517.provisional.d3.shared-fo"], "causal_group_id": "cg-d3-no-initial-enclosure", "derived_from_factor_ids": [], "explanation": "偽でも共有へ白を出せるため弱い真要素。"}
+  ],
+  "recommended_action": {"action_type": "execute", "target_id": "薬師寺天膳", "reason": "マデュライトを即処刑せず真証明機会を残し、判断開示が増えずCOなしの天膳を指定処理する。", "alternatives": [{"action_type": "execute", "target_id": "マデュライト", "reason": "残存占いを強く偽決め打つ案だが、この時点では真を失う損失が大きい。"}]},
+  "common_mistakes": ["噛まれた占い候補を自動的に真とする。", "真狼なら必ず信用勝負するため対抗即噛みは不可能とする。", "噛まれた占い候補の票先を狼と確定する。"],
+  "counterexamples": [
+    {"description": "ピンクが狼でcoronaが狂人だった場合。", "changed_condition": "狂人coronaが初手で狼を囲う。", "expected_effect": "corona噛みは真偽判別済みの漂白となる。", "related_factor_ids": ["wf1"]}
+  ],
+  "ai_correction": {"initial_assessment": "対抗即噛みなので真狼はほぼない。", "expert_correction": "真狼でも真を即噛みし騙り狼を使い捨てる戦術は成立する。", "error_categories": ["missed_possible_world", "weight_too_strong", "advanced_tactic_overgeneralization"], "why_the_ai_failed": "典型的な信用勝負を狼騙りの必須行動として扱った。", "generalized_prevention_rule": "各候補世界で合理的な勝ち筋を一つ構成してから世界を削る。", "rule_counterexamples": ["潜伏狼が強ければ騙り狼を犠牲にして真だけ噛める。"]},
+  "review": {"status": "expert_reviewed", "reviewer": "human-expert-joint-review", "reviewed_at": "2026-08-05T07:24:00+09:00", "training_ready": false, "blocking_issues": ["Canonical event IDs are not parsed.", "Public and full logs are not automatically aligned.", "Independent adjudication is pending."]},
+  "provenance": {"parser_version": "unparsed-provisional-source-ids", "annotation_model": "GPT-5.6 Thinking with human expert correction", "prompt_version": "joint-log-review-v1", "source_event_ids": ["ruru349517.provisional.d3.death-corona", "ruru349517.provisional.d3.madulite-white-gravestone", "ruru349517.provisional.d3.shared-fo"]}
+}
