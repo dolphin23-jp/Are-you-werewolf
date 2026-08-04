@@ -1,0 +1,38 @@
+{
+  "schema_version": "1.0",
+  "scenario_id": "ruru-349517-d2-2-0-public-board",
+  "log_id": "ruru-349517",
+  "cutoff_event_id": "ruru349517.provisional.d2.shared-co-complete",
+  "perspective": {"kind": "public", "actor_id": null, "notes": "2日目、2-0と共有1COが成立し、グレラン方針が共有された時点。"},
+  "public_facts": [
+    {"fact_id": "f1", "statement": "16人生存で占い候補が2人COし、どちらも白判定を公開した。", "source_event_ids": ["ruru349517.provisional.d2.two-seer-claims"], "confidence": "reviewed_extraction", "alternatives": []},
+    {"fact_id": "f2", "statement": "霊能COはなく、公開盤面は2-0である。", "source_event_ids": ["ruru349517.provisional.d2.reino-deadline"], "confidence": "reviewed_extraction", "alternatives": ["霊能潜伏は論理上残る。"]},
+    {"fact_id": "f3", "statement": "マルカントニオが共有COし、相方は伏せられている。", "source_event_ids": ["ruru349517.provisional.d2.shared-co-marcantonio"], "confidence": "reviewed_extraction", "alternatives": []},
+    {"fact_id": "f4", "statement": "公開グレーは11人、残り処刑回数は7回である。", "source_event_ids": ["ruru349517.provisional.d2.board-count"], "confidence": "deterministic", "alternatives": []}
+  ],
+  "private_facts": [],
+  "possible_worlds": [
+    {"world_id": "w-true-madman", "summary": "占い内訳は真狂、霊能初日、狼3人と狐は占いCOしていない。", "required_assumptions": ["霊能初日", "潜伏真占いなし"], "notes": "実戦上の本命。"},
+    {"world_id": "w-true-wolf", "summary": "占い内訳は真狼で、狂人は潜伏している。", "required_assumptions": ["霊能初日", "狂人潜伏"], "notes": "通常範囲の有力対抗。"},
+    {"world_id": "w-madman-wolf-latent-seer", "summary": "公開占いは狂狼で真占いが潜伏している。", "required_assumptions": ["霊能初日", "真占い潜伏"], "notes": "論理上のみ。今日の進行を曲げない。"}
+  ],
+  "impossible_worlds": [
+    {"world_id": "w-reino-and-seer-both-first", "summary": "霊能と真占いがともに第一犠牲者である。", "contradiction": "第一犠牲者は一つの役職しか持てない。", "unsat_core": ["f2", "rule:first-victim-one-role"]}
+  ],
+  "conditional_deductions": [
+    {"if_assumptions": ["占い内訳が真狂"], "then_statement": "グレー11人には3狼1狐のうち最低3人がいるが、狼2+狐に固定されない。", "supporting_event_ids": ["ruru349517.provisional.d2.board-count"]}
+  ],
+  "expert_assessment": {"main_world_ids": ["w-true-madman"], "alternative_world_ids": ["w-true-wolf", "w-madman-wolf-latent-seer"], "confidence": "medium", "disagreement_expected": true, "reason": "霊能初日と真狂を本命に置くが、真狼は残す。極薄世界は記録してもグレラン方針を変更させない。"},
+  "weighting_factors": [
+    {"factor_id": "wf1", "description": "締切まで霊能COがない。", "direction": "supports", "strength": "strong", "target_world_ids": ["w-true-madman", "w-true-wolf"], "source_event_ids": ["ruru349517.provisional.d2.reino-deadline"], "causal_group_id": "cg-d2-reino-absence", "derived_from_factor_ids": [], "explanation": "霊能初日を強く支持するが潜伏を不可能にはしない。"},
+    {"factor_id": "wf2", "description": "狂人の占い騙りと狼3人全潜伏は標準的である。", "direction": "supports", "strength": "medium", "target_world_ids": ["w-true-madman"], "source_event_ids": ["ruru349517.provisional.d2.two-seer-claims"], "causal_group_id": "cg-d2-role-prior", "derived_from_factor_ids": [], "explanation": "定石による事前重みでありハード制約ではない。"}
+  ],
+  "recommended_action": {"action_type": "vote", "target_id": null, "reason": "占い候補を処刑せず、公開グレー11人からグレランする。", "alternatives": [{"action_type": "co", "target_id": "hidden_freemason", "reason": "相方の処刑・占いリスクが高い場合はFOする。"}]},
+  "common_mistakes": ["霊能初日を実戦上ほぼ確実と置くことと論理確定を混同する。", "真狂仮定でグレーの最低人外を狼2+狐に固定する。", "公開済み役職への占いがないことを潜伏役職占いもないと誤解する。"],
+  "counterexamples": [
+    {"description": "狂人の初手白が狐だった場合。", "changed_condition": "狂人が狐を偶然囲う。", "expected_effect": "グレーの最低3人外は狼3人となる。", "related_factor_ids": ["wf2"]}
+  ],
+  "ai_correction": {"initial_assessment": "真狂なら最低でも狼2人と狐がグレーにいる。", "expert_correction": "最低3人の狼・狐陣営がいるが構成は固定されない。", "error_categories": ["logical_constraint", "weight_too_strong"], "why_the_ai_failed": "人数下限を具体的な役職構成へ過剰変換した。", "generalized_prevention_rule": "人数下限と役職内訳を別に表現する。", "rule_counterexamples": ["狂人が狐を囲えばグレーは狼3人となる。"]},
+  "review": {"status": "expert_reviewed", "reviewer": "human-expert-joint-review", "reviewed_at": "2026-08-05T07:24:00+09:00", "training_ready": false, "blocking_issues": ["Canonical event IDs are not parsed.", "Public and full logs are not automatically aligned.", "Independent adjudication is pending."]},
+  "provenance": {"parser_version": "unparsed-provisional-source-ids", "annotation_model": "GPT-5.6 Thinking with human expert correction", "prompt_version": "joint-log-review-v1", "source_event_ids": ["ruru349517.provisional.d2.two-seer-claims", "ruru349517.provisional.d2.reino-deadline", "ruru349517.provisional.d2.shared-co-marcantonio", "ruru349517.provisional.d2.board-count"]}
+}

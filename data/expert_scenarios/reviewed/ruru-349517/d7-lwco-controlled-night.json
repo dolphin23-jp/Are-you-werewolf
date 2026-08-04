@@ -1,0 +1,41 @@
+{
+  "schema_version": "1.0",
+  "scenario_id": "ruru-349517-d7-lwco-controlled-night",
+  "log_id": "ruru-349517",
+  "cutoff_event_id": "ruru349517.provisional.d7.solanax-lwco",
+  "perspective": {"kind": "public", "actor_id": null, "notes": "7日目、共有GJ後にデマーシアが単独狩人COし、指定されたソラナックスがLWCOした時点。"},
+  "public_facts": [
+    {"fact_id": "f1", "statement": "7人生存で平和が発生し、残り処刑回数は3回へ増えた。", "source_event_ids": ["ruru349517.provisional.d7.peace"], "confidence": "deterministic", "alternatives": []},
+    {"fact_id": "f2", "statement": "マデュライトがデマーシア白を公開した。", "source_event_ids": ["ruru349517.provisional.d7.madulite-white-demacia"], "confidence": "reviewed_extraction", "alternatives": []},
+    {"fact_id": "f3", "statement": "デマーシアが狩人COし、護衛先を昇り龍と申告した。対抗COはない。", "source_event_ids": ["ruru349517.provisional.d7.demacia-guard-co", "ruru349517.provisional.d7.no-counter-guard"], "confidence": "reviewed_extraction", "alternatives": []},
+    {"fact_id": "f4", "statement": "指定されたソラナックスがLWCOした。", "source_event_ids": ["ruru349517.provisional.d7.solanax-lwco"], "confidence": "reviewed_extraction", "alternatives": []},
+    {"fact_id": "f5", "statement": "別位置を処刑すれば占いと護衛を一晩利用できる。", "source_event_ids": ["ruru349517.provisional.d7.solanax-lwco"], "confidence": "deterministic", "alternatives": []}
+  ],
+  "private_facts": [],
+  "possible_worlds": [
+    {"world_id": "w-solanax-real-lw", "summary": "ソラナックスは本当に最後の人狼。", "required_assumptions": ["LWCOが真"], "role_assignments": {"ソラナックス": "werewolf"}, "notes": "狐生存なら即処刑は危険。"},
+    {"world_id": "w-solanax-fox", "summary": "ソラナックスは狐でLWCOにより吊り逃れ。", "required_assumptions": ["LWCOが偽", "ソラナックス狐"], "role_assignments": {"ソラナックス": "fox"}, "notes": "マデュライト真なら占いで検査できる。"},
+    {"world_id": "w-solanax-wolf-not-lw", "summary": "ソラナックスは狼だが仲間が残る偽LWCO。", "required_assumptions": ["LWCOが偽", "別狼生存"], "role_assignments": {"ソラナックス": "werewolf"}, "notes": "一夜検証で詰められる可能性が高い。"},
+    {"world_id": "w-demacia-fake-guard", "summary": "デマーシアが偽狩人で平和原因は別にある。", "required_assumptions": ["真狩人死亡または潜伏", "デマーシア偽CO"], "role_assignments": {"デマーシア": "not_guard"}, "notes": "論理上残るが実戦上は低い。"}
+  ],
+  "impossible_worlds": [],
+  "conditional_deductions": [
+    {"if_assumptions": ["マデュライト真", "マデュライトがソラナックスを占う", "ソラナックス狐"], "then_statement": "マデュライトが襲撃死しても能力は実行済みなので翌朝ソラナックスも呪殺死する。", "supporting_event_ids": ["ruru349517.provisional.d7.solanax-lwco"]},
+    {"if_assumptions": ["デマーシア真狩人", "デマーシアがソラナックスを護衛"], "then_statement": "他位置への護衛GJを消し、翌朝の死体をLWCO者の正体と結びつけやすくする。", "supporting_event_ids": ["ruru349517.provisional.d7.demacia-guard-co"]}
+  ],
+  "expert_assessment": {"main_world_ids": ["w-solanax-real-lw"], "alternative_world_ids": ["w-solanax-fox", "w-solanax-wolf-not-lw", "w-demacia-fake-guard"], "confidence": "medium", "disagreement_expected": true, "reason": "LWCO単体を信じず、平和で増えた一縄を使って占い・護衛を固定し複数世界を同時に検査する。"},
+  "weighting_factors": [
+    {"factor_id": "wf1", "description": "デマーシアの単独狩人COと履歴が噛み筋・平和と整合する。", "direction": "supports", "strength": "strong", "target_world_ids": ["w-solanax-real-lw", "w-solanax-fox", "w-solanax-wolf-not-lw"], "source_event_ids": ["ruru349517.provisional.d7.peace", "ruru349517.provisional.d7.demacia-guard-co", "ruru349517.provisional.d7.no-counter-guard"], "causal_group_id": "cg-d7-guard-credibility", "derived_from_factor_ids": [], "explanation": "LWCO者の中身は決めないが夜を制御できる前提を強くする。"},
+    {"factor_id": "wf2", "description": "指定後のLWCOは狼・狐の双方で合理的。", "direction": "neutral", "strength": "strong", "target_world_ids": ["w-solanax-real-lw", "w-solanax-fox", "w-solanax-wolf-not-lw"], "source_event_ids": ["ruru349517.provisional.d7.solanax-lwco"], "causal_group_id": "cg-d7-lwco", "derived_from_factor_ids": [], "explanation": "CO単体の識別力が低いため能力指示で検証する。"},
+    {"factor_id": "wf3", "description": "平和で処刑回数が増え、一夜検証の情報価値が高い。", "direction": "supports", "strength": "strong", "target_world_ids": ["w-solanax-real-lw", "w-solanax-fox", "w-solanax-wolf-not-lw"], "source_event_ids": ["ruru349517.provisional.d7.peace"], "causal_group_id": "cg-d7-action-utility", "derived_from_factor_ids": [], "explanation": "役職確率ではなく行動価値を変える。"}
+  ],
+  "recommended_action": {"action_type": "execute", "target_id": "パワポ", "reason": "ソラナックスを即処刑せず一晩を購入し、マデュライトにソラナックスを占わせ、デマーシアにソラナックスを護衛させて翌朝の死体で検査する。", "alternatives": [{"action_type": "execute", "target_id": "ソラナックス", "reason": "真LWかつ狐生存なら即敗北するため、一夜検証できる状況では優先しない。"}, {"action_type": "execute", "target_id": "マデュライト", "reason": "占い能力によるLWCO検査を失う。"}]},
+  "common_mistakes": ["LWCOを真または偽と即断する。", "LWCO者護衛なら狼でも狐でも平和が絶対に出ないとする。", "平和の価値を共有一人の生存だけで評価し処刑回数増加を落とす。", "中盤の人物村視を終盤のハード情報より優先する。"],
+  "counterexamples": [
+    {"description": "平和がなく6人生存2吊りだった場合。", "changed_condition": "処刑回数が増えていない。", "expected_effect": "別位置を吊って一夜検証する余裕がなくなる。", "related_factor_ids": ["wf3"]},
+    {"description": "対抗狩人が出た場合。", "changed_condition": "デマーシア単独狩人前提が崩れる。", "expected_effect": "護衛指示を分け平和位置の可能世界を追加する。", "related_factor_ids": ["wf1"]}
+  ],
+  "ai_correction": {"initial_assessment": "ソラナックスを護衛すれば狼でも狐でも平和を出させない。", "expert_correction": "他位置への護衛GJは消せるが、ソラナックスが狐で別狼が噛めば平和は起こる。目的は夜原因の制御である。", "error_categories": ["logical_constraint", "faction_objective"], "why_the_ai_failed": "護衛成功と狐噛み平和の条件を一つに潰した。", "generalized_prevention_rule": "襲撃対象、護衛対象、対象役職を独立変数として場合分けする。", "rule_counterexamples": ["狐を護衛していても狼がその狐を噛めば平和になる。", "真LWは自分を噛めないためLW本人護衛でGJは起きない。"]},
+  "review": {"status": "expert_reviewed", "reviewer": "human-expert-joint-review", "reviewed_at": "2026-08-05T07:24:00+09:00", "training_ready": false, "blocking_issues": ["Canonical event IDs are not parsed.", "Public and full logs are not automatically aligned.", "Independent adjudication is pending."]},
+  "provenance": {"parser_version": "unparsed-provisional-source-ids", "annotation_model": "GPT-5.6 Thinking with human expert correction", "prompt_version": "joint-log-review-v1", "source_event_ids": ["ruru349517.provisional.d7.peace", "ruru349517.provisional.d7.madulite-white-demacia", "ruru349517.provisional.d7.demacia-guard-co", "ruru349517.provisional.d7.no-counter-guard", "ruru349517.provisional.d7.solanax-lwco"]}
+}
