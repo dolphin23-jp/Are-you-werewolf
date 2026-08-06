@@ -58,9 +58,9 @@ module = "app.engine.*"
 strict = true
 
 [[tool.mypy.overrides]]
-# The v2 evaluator deliberately reuses short local names while normalizing
-# heterogeneous Pydantic answer sections. Each container remains explicitly
-# typed; this permits only those local rebindings rather than suppressing errors.
+# The v2 evaluator normalizes several heterogeneous Pydantic sections in one
+# scoring function. Their containers stay explicitly typed; permit only local
+# loop-variable rebinding in this module, without disabling any error codes.
 module = "app.eval.expert_scenarios_v2"
 allow_redefinition = true
 
