@@ -1,4 +1,4 @@
-.PHONY: serve build frontend-build backend-dev frontend-dev backend-test frontend-test test lint dry-run
+.PHONY: serve build frontend-build backend-dev frontend-dev backend-test frontend-test test lint dry-run expert-eval
 
 # Build the UI and serve everything (API + UI + WebSocket) on one port.
 serve:
@@ -30,3 +30,6 @@ lint:
 
 dry-run:
 	cd backend && . .venv/bin/activate && python scripts/dry_run.py --seed 1 --provider mock
+
+expert-eval:
+	cd backend && . .venv/bin/activate && python scripts/evaluate_expert_scenarios.py --provider baseline
