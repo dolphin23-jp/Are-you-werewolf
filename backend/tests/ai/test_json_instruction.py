@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-from typing import Any
-
 import pytest
 from pydantic import BaseModel
 
-from app.ai.provider.base import Message
+from app.ai.provider.base import Message, SchemaT
 from app.ai.provider.json_instruction import JsonInstructionProvider
 
 
@@ -23,13 +21,13 @@ class _RecordingProvider:
         *,
         system: str,
         messages: list[Message],
-        response_schema: type[_Response],
+        response_schema: type[SchemaT],
         max_tokens: int = 800,
         temperature: float = 0.9,
-    ) -> _Response | None:
+    ) -> SchemaT | None:
         self.system = system
         self.messages = messages
-        return response_schema(value="ok")
+        return response_schema.model_validate({"value": "ok"})
 
 
 @pytest.mark.asyncio
