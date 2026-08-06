@@ -1,0 +1,118 @@
+{
+  "schema_version": "2.0",
+  "rules": [
+    {"rule_id": "rule:first-victim-one-role", "statement": "The first victim can hold only one role."},
+    {"rule_id": "rule:wolf-immune-to-wolf-attack", "statement": "A werewolf does not die from the werewolves' ordinary night attack."},
+    {"rule_id": "rule:one-target-one-wolf-status", "statement": "The same living player cannot simultaneously be werewolf and non-werewolf."},
+    {"rule_id": "rule:true-seer-black-is-wolf", "statement": "If a claimant is the true seer, that claimant's black result target is a werewolf."},
+    {"rule_id": "rule:no-cat-in-17a", "statement": "This 17A setup has no cat role, so an ordinary two-death morning needs attack plus curse unless another explicit death source exists."},
+    {"rule_id": "rule:true-seer-white-survivor-not-fox", "statement": "If a true seer divined a player white and that player survived the resolution of that divination night, that player was not the fox on that night."}
+  ],
+  "scenarios": {
+    "ruru-349517-d2-2-0-public-board": {
+      "world_contradictions": {
+        "w-reino-and-seer-both-first": {"fact_ids": [], "rule_ids": ["rule:first-victim-one-role"]}
+      },
+      "actions": [
+        {"phase": "day", "actor_id": null, "action_type": "vote", "target_id": null, "rating": "optimal", "loss_condition": null},
+        {"phase": "day", "actor_id": null, "action_type": "co", "target_id": "hidden_freemason", "rating": "acceptable", "loss_condition": null}
+      ],
+      "optimal_plan": [
+        {"phase": "day", "actor_id": null, "action_type": "vote", "target_id": null}
+      ]
+    },
+    "ruru-349517-d3-corona-death": {
+      "world_contradictions": {
+        "w-corona-wolf-night-death": {"fact_ids": ["f1"], "rule_ids": ["rule:wolf-immune-to-wolf-attack"]}
+      },
+      "actions": [
+        {"phase": "day", "actor_id": null, "action_type": "execute", "target_id": "薬師寺天膳", "rating": "optimal", "loss_condition": null},
+        {"phase": "day", "actor_id": null, "action_type": "execute", "target_id": "マデュライト", "rating": "dominated", "loss_condition": null}
+      ],
+      "optimal_plan": [
+        {"phase": "day", "actor_id": null, "action_type": "execute", "target_id": "薬師寺天膳"}
+      ]
+    },
+    "ruru-349517-d6-yuki-black": {
+      "world_contradictions": {
+        "w-prior-white-wolf": {"fact_ids": ["f4"], "rule_ids": ["rule:wolf-immune-to-wolf-attack"]}
+      },
+      "actions": [
+        {"phase": "day", "actor_id": null, "action_type": "execute", "target_id": "ユキ", "rating": "optimal", "loss_condition": null},
+        {"phase": "day", "actor_id": null, "action_type": "execute", "target_id": "マデュライト", "rating": "acceptable", "loss_condition": null},
+        {"phase": "day", "actor_id": null, "action_type": "execute", "target_id": "other_grey", "rating": "dominated", "loss_condition": null}
+      ],
+      "optimal_plan": [
+        {"phase": "day", "actor_id": null, "action_type": "execute", "target_id": "ユキ"}
+      ]
+    },
+    "ruru-349517-d7-lwco-controlled-night": {
+      "world_contradictions": {},
+      "actions": [
+        {"phase": "day", "actor_id": null, "action_type": "execute", "target_id": "パワポ", "rating": "optimal", "loss_condition": null},
+        {"phase": "day", "actor_id": null, "action_type": "execute", "target_id": "ソラナックス", "rating": "catastrophic", "loss_condition": "If Solanax is the true LW and the fox survives, execution immediately gives the fox victory."},
+        {"phase": "day", "actor_id": null, "action_type": "execute", "target_id": "マデュライト", "rating": "dominated", "loss_condition": null},
+        {"phase": "night_divination", "actor_id": "マデュライト", "action_type": "divine", "target_id": "ソラナックス", "rating": "optimal", "loss_condition": null},
+        {"phase": "night_guard", "actor_id": "デマーシア", "action_type": "guard", "target_id": "ソラナックス", "rating": "optimal", "loss_condition": null}
+      ],
+      "optimal_plan": [
+        {"phase": "day", "actor_id": null, "action_type": "execute", "target_id": "パワポ"},
+        {"phase": "night_divination", "actor_id": "マデュライト", "action_type": "divine", "target_id": "ソラナックス"},
+        {"phase": "night_guard", "actor_id": "デマーシア", "action_type": "guard", "target_id": "ソラナックス"}
+      ]
+    },
+    "ruru-352698-d2-panda-guard-allocation": {
+      "world_contradictions": {
+        "w-both-panda-results-true": {"fact_ids": ["f2"], "rule_ids": ["rule:one-target-one-wolf-status"]}
+      },
+      "actions": [
+        {"phase": "day", "actor_id": null, "action_type": "vote", "target_id": "はめたろう", "rating": "optimal", "loss_condition": null},
+        {"phase": "day", "actor_id": null, "action_type": "execute", "target_id": "参加できるよ", "rating": "acceptable", "loss_condition": null},
+        {"phase": "day", "actor_id": null, "action_type": "vote", "target_id": "みすりる", "rating": "acceptable", "loss_condition": null}
+      ],
+      "optimal_plan": [
+        {"phase": "day", "actor_id": null, "action_type": "vote", "target_id": "はめたろう"}
+      ]
+    },
+    "ruru-352698-d4-low-credit-seer-before-panda": {
+      "world_contradictions": {},
+      "actions": [
+        {"phase": "day", "actor_id": null, "action_type": "execute", "target_id": "ぴゅりくれあ", "rating": "optimal", "loss_condition": null},
+        {"phase": "day", "actor_id": null, "action_type": "execute", "target_id": "参加できるよ", "rating": "acceptable", "loss_condition": null},
+        {"phase": "day", "actor_id": null, "action_type": "execute", "target_id": "ケロイド林田", "rating": "dominated", "loss_condition": null}
+      ],
+      "optimal_plan": [
+        {"phase": "day", "actor_id": null, "action_type": "execute", "target_id": "ぴゅりくれあ"}
+      ]
+    },
+    "ruru-352698-d6-lw-hold-cross-divination": {
+      "world_contradictions": {
+        "w-lucky-not-lw-zubunure-true": {"fact_ids": ["f4"], "rule_ids": ["rule:true-seer-black-is-wolf"]}
+      },
+      "actions": [
+        {"phase": "day", "actor_id": null, "action_type": "execute", "target_id": "涙の数だけ", "rating": "optimal", "loss_condition": null},
+        {"phase": "day", "actor_id": null, "action_type": "execute", "target_id": "ラッキーダガー", "rating": "catastrophic", "loss_condition": "If Lucky Dagger is the LW and the fox survives, execution immediately gives the fox victory."},
+        {"phase": "day", "actor_id": null, "action_type": "execute", "target_id": "ケロイド林田", "rating": "acceptable", "loss_condition": null},
+        {"phase": "night_divination", "actor_id": "ずぶぬれお化け", "action_type": "divine", "target_id": "バリアントナイフ", "rating": "optimal", "loss_condition": null},
+        {"phase": "night_divination", "actor_id": "バリアントナイフ", "action_type": "divine", "target_id": "ラッキーダガー", "rating": "optimal", "loss_condition": null}
+      ],
+      "optimal_plan": [
+        {"phase": "day", "actor_id": null, "action_type": "execute", "target_id": "涙の数だけ"},
+        {"phase": "night_divination", "actor_id": "ずぶぬれお化け", "action_type": "divine", "target_id": "バリアントナイフ"},
+        {"phase": "night_divination", "actor_id": "バリアントナイフ", "action_type": "divine", "target_id": "ラッキーダガー"}
+      ]
+    },
+    "ruru-352698-d7-double-death-convergence": {
+      "world_contradictions": {
+        "w-variant-true-standard": {"fact_ids": ["f1", "f2"], "rule_ids": ["rule:no-cat-in-17a", "rule:true-seer-white-survivor-not-fox"]}
+      },
+      "actions": [
+        {"phase": "day", "actor_id": null, "action_type": "execute", "target_id": "ラッキーダガー", "rating": "optimal", "loss_condition": null},
+        {"phase": "day", "actor_id": null, "action_type": "execute", "target_id": "ずぶぬれお化け", "rating": "catastrophic", "loss_condition": "Under the converged main world this leaves the LW alive and permits a forced wolf-side endgame."}
+      ],
+      "optimal_plan": [
+        {"phase": "day", "actor_id": null, "action_type": "execute", "target_id": "ラッキーダガー"}
+      ]
+    }
+  }
+}
