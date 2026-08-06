@@ -1,0 +1,91 @@
+name: Expert cutoff評価
+
+# Manual only. Luna mode spends API credit; baseline mode is free.
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: "評価対象"
+        type: choice
+        options:
+          - baseline
+          - luna
+        default: baseline
+      seed:
+        description: "候補順シード(前後比較では同じ値を使用)"
+        required: true
+        default: "1"
+      scenario_id:
+        description: "1件だけ実行するscenario_id。空欄なら全件"
+        required: false
+        default: ""
+      price_in:
+        description: "入力100万トークンあたり単価"
+        required: false
+        default: "0"
+      price_out:
+        description: "出力100万トークンあたり単価"
+        required: false
+        default: "0"
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 依存関係のインストール
+        run: pip install -e "./backend[dev]"
+
+      - name: 接続確認
+        if: inputs.provider == 'luna'
+        working-directory: backend
+        env:
+          WEREWOLF_LLM_PROVIDER: luna
+          LUNA_API_KEY: ${{ secrets.LUNA_API_KEY }}
+          LUNA_BASE_URL: ${{ secrets.LUNA_BASE_URL }}
+          LUNA_MODEL: ${{ vars.LUNA_MODEL || 'gpt-5.6-luna' }}
+        run: python scripts/check_llm.py
+
+      - name: Cutoff評価を実行
+        working-directory: backend
+        env:
+          WEREWOLF_LLM_PROVIDER: ${{ inputs.provider == 'luna' && 'luna' || 'mock' }}
+          LUNA_API_KEY: ${{ secrets.LUNA_API_KEY }}
+          LUNA_BASE_URL: ${{ secrets.LUNA_BASE_URL }}
+          LUNA_MODEL: ${{ vars.LUNA_MODEL || 'gpt-5.6-luna' }}
+        run: |
+          extra=()
+          if [ -n "${{ inputs.scenario_id }}" ]; then
+            extra+=(--scenario-id "${{ inputs.scenario_id }}")
+          fi
+          python scripts/evaluate_expert_scenarios.py \
+            --provider "${{ inputs.provider }}" \
+            --seed "${{ inputs.seed }}" \
+            --price-in "${{ inputs.price_in }}" \
+            --price-out "${{ inputs.price_out }}" \
+            --out expert-eval-out \
+            "${extra[@]}"
+
+      - name: レポートを画面に表示
+        if: always()
+        working-directory: backend
+        run: |
+          if [ -f expert-eval-out/report.md ]; then
+            cat expert-eval-out/report.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "レポートが生成されませんでした。上のログを確認してください。" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: 全出力をダウンロード可能にする
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: expert-eval-out
+          path: backend/expert-eval-out/
+          retention-days: 30
