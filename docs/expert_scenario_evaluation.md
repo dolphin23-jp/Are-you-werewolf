@@ -1,107 +1,154 @@
 # Expert cutoff benchmark
 
-`backend/scripts/evaluate_expert_scenarios.py` evaluates a model on the reviewed real-game cutoff scenarios under `data/expert_scenarios/reviewed/`.
+The repository keeps two deterministic closed-set benchmarks over the reviewed real-game cutoffs under `data/expert_scenarios/reviewed/`.
 
-This is the first measurable bridge between the expert case studies and model improvement. It does not play a full game. Each scenario is one frozen decision point, so the current eight scenarios require eight model calls rather than hundreds.
+- **v1** preserves the original single-action baseline and historical scores.
+- **v2** measures hard-rule application, graded action quality, and a multi-phase day/night plan.
 
-## What v1 measures
+Neither benchmark plays a full game. Each scenario is one frozen decision point, so the current eight scenarios need roughly eight model calls rather than hundreds.
 
-The model receives only:
+## v1: stable historical baseline
 
-- the scenario perspective;
-- curated observed facts available at the cutoff;
-- shuffled, unlabeled candidate worlds;
-- shuffled candidate actions with opaque IDs.
+Run with:
 
-It does **not** receive the expert weighting, recommended action, AI correction, review status, provenance, later role table, or full-log postmortem.
+```bash
+cd backend
+python scripts/evaluate_expert_scenarios.py --provider baseline
+python scripts/evaluate_expert_scenarios.py --provider luna
+```
 
-The deterministic scorer measures:
+v1 presents curated facts, shuffled candidate worlds, and one mixed list of opaque candidate actions. It measures possible/impossible classification, belief ordering, exact agreement with one recommended action, catastrophic-action avoidance, and structured reference validity.
 
-- possible-world precision, recall, and F1;
-- impossible-world precision, recall, and F1;
-- whether every candidate was classified exactly once;
-- main/alternative-world overlap with the expert assessment;
-- exact action agreement;
-- avoidance and identification of explicitly catastrophic actions;
-- confidence distance from the expert assessment;
-- invalid references to unknown world/action/fact IDs.
+Keep v1 results for regression comparison. Its known limitation is that a day execution and a night ability can appear as if they were mutually exclusive, and a reasonable second-best action receives the same action score as a dominated move.
 
-The free-text rationale and “next observation” are preserved in the artifact but are not semantically scored yet.
+## v2: phase-aware plan benchmark
 
-## Run locally
+Run with:
 
 ```bash
 cd backend
 
-# Free, deterministic harness smoke test
-python scripts/evaluate_expert_scenarios.py \
+# Free harness smoke test
+python scripts/evaluate_expert_scenarios_v2.py \
   --provider baseline \
-  --out expert-eval-out
+  --out expert-eval-v2-out
 
 # Current OpenAI-compatible endpoint
 WEREWOLF_LLM_PROVIDER=luna \
 LUNA_API_KEY=... \
 LUNA_BASE_URL=... \
 LUNA_MODEL=gpt-5.6-luna \
-python scripts/evaluate_expert_scenarios.py \
+python scripts/evaluate_expert_scenarios_v2.py \
   --provider luna \
-  --out expert-eval-out
+  --out expert-eval-v2-out
 ```
 
-Use the same `--seed` for before/after comparisons. The seed changes only candidate order; it does not change the expert gold answer.
+The reviewed v2 overlay is `data/expert_scenarios/v2_annotations.json`. It does not modify the original scenario files. For each cutoff it adds:
 
-To run one cutoff:
+- generic 17A rule IDs used for hard contradiction checks;
+- a phase and optional actor for every candidate action;
+- expert action ratings: `optimal`, `acceptable`, `dominated`, or `catastrophic`;
+- an optimal plan containing complementary day and night actions;
+- exact fact/rule IDs supporting every impossible world.
+
+The model receives only the perspective, observed facts, generic rules, unlabeled worlds, and opaque action candidates. It does **not** receive expert weighting, action ratings, loss conditions, the gold plan, later truth, post-game corrections, review status, or provenance.
+
+### v2 answer structure
+
+The model must:
+
+1. judge every candidate world exactly once;
+2. cite fact and rule IDs for each impossible judgment;
+3. rank possible worlds into main and alternative sets;
+4. assess every action as optimal, acceptable, dominated, or catastrophic;
+5. choose one action for every `(phase, actor_id)` slot;
+6. keep its selected plan consistent with its own action ratings.
+
+This represents plans such as:
+
+```text
+Day: execute a cross-world non-LW target
+Night: seer A divines the opposing claimant
+Night: seer B divines the retained LW candidate
+```
+
+rather than forcing those three decisions into one mutually exclusive list.
+
+### v2 scoring
+
+The deterministic scorer reports:
+
+- world-status accuracy and impossible-world recall;
+- exact contradiction fact/rule support;
+- main/alternative-world overlap;
+- action-rating accuracy and ordinal distance;
+- exact phase-plan agreement and plan utility;
+- catastrophic-action identification and avoidance;
+- internal consistency violations;
+- unknown world/action/fact/rule references.
+
+A selected `acceptable` action receives partial plan utility. A `dominated` action receives little utility. A `catastrophic` action receives none. This preserves the distinction between “not the expert optimum” and “immediate or forced faction loss.”
+
+## Run one cutoff
+
+Use the same seed for before/after comparison:
 
 ```bash
-python scripts/evaluate_expert_scenarios.py \
+python scripts/evaluate_expert_scenarios_v2.py \
   --provider luna \
+  --seed 1 \
   --scenario-id ruru-352698-d6-lw-hold-cross-divination
 ```
 
-## Evaluate any external model
+The seed changes candidate order only. It never changes the expert gold answer.
 
-The harness always writes spoiler-safe prompt payloads to:
+## GitHub Actions
+
+Open **Actions → Expert cutoff評価 → Run workflow** and choose:
+
+- `benchmark_version`: `v1` or `v2`;
+- `provider`: `baseline` or `luna`;
+- `seed`: normally `1`;
+- optional `scenario_id` for one cutoff.
+
+The report appears in the workflow summary and the complete output is uploaded as an artifact.
+
+## Evaluate an external model
+
+Both scripts write spoiler-safe prompts under:
 
 ```text
-expert-eval-out/prompts/<scenario_id>.json
+<output>/prompts/<scenario_id>.json
 ```
 
-Give those files to any model and save each structured answer as:
-
-```text
-external-answers/<scenario_id>.json
-```
-
-Then score without another API call:
+Save external answers using the same scenario filenames, then score without another API call:
 
 ```bash
-python scripts/evaluate_expert_scenarios.py \
+python scripts/evaluate_expert_scenarios_v2.py \
   --answers-dir external-answers \
-  --out external-score
+  --out external-v2-score
 ```
 
-The answer schema is `app.eval.expert_scenarios.ExpertScenarioAnswer`.
+The v2 answer schema is `app.eval.expert_scenarios_v2.ExpertScenarioV2Answer`.
 
 ## Output
 
-- `report.md`: phone-readable aggregate and per-scenario table;
-- `summary.json`: machine-readable results for regression comparison;
-- `prompts/`: the exact spoiler-safe inputs;
-- `answers/`: validated model answers;
-- `scores/`: per-scenario deterministic scoring details.
+- `report.md`: aggregate and per-scenario results;
+- `summary.json`: machine-readable regression data;
+- `prompts/`: exact spoiler-safe inputs;
+- `answers/`: validated structured model answers;
+- `scores/`: detailed deterministic scores and consistency diagnostics.
 
-`--fail-under 0.70` makes the command exit with status 1 when the mean score is below a chosen regression threshold. Do not set a release threshold until a stable baseline has been measured across several runs.
+`--fail-under` can turn either benchmark into a regression gate after repeated runs establish a stable baseline.
 
-## Important limits
+## Remaining limits
 
-This is a **closed-set, curated-fact benchmark**. It is intentionally smaller than the final target.
+Both versions remain curated closed-set benchmarks. They do not yet measure:
 
-It does not yet measure:
+- fact extraction from raw chronological chat/events;
+- open-ended discovery of missing possible worlds or actions;
+- full semantic correctness of free-text rationale;
+- semantic perspective leakage outside structured references;
+- action regret over a complete game tree.
 
-- extraction from raw chronological chat/events;
-- open-ended possible-world recall;
-- semantic quality of the rationale;
-- semantic perspective leakage in free text;
-- calibrated action regret over a full search tree.
-
-Those require canonical append-only events, aligned public/full streams, and additional expert annotations. Until then, this harness provides a repeatable measurement of hard-world classification, belief ordering, and action selection without pretending to solve the missing layers.
+Those require canonical append-only events, aligned public/full streams, and further independent expert review. v2 improves the integration of hard logic and temporal planning without claiming those missing layers are solved.
