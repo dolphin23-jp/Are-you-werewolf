@@ -4,6 +4,13 @@ name: Expert cutoff評価
 on:
   workflow_dispatch:
     inputs:
+      benchmark_version:
+        description: "評価器バージョン"
+        type: choice
+        options:
+          - v1
+          - v2
+        default: v2
       provider:
         description: "評価対象"
         type: choice
@@ -53,6 +60,7 @@ jobs:
         run: python scripts/check_llm.py
 
       - name: Cutoff評価を実行
+        id: benchmark
         working-directory: backend
         env:
           WEREWOLF_LLM_PROVIDER: ${{ inputs.provider == 'luna' && 'luna' || 'mock' }}
@@ -64,20 +72,32 @@ jobs:
           if [ -n "${{ inputs.scenario_id }}" ]; then
             extra+=(--scenario-id "${{ inputs.scenario_id }}")
           fi
-          python scripts/evaluate_expert_scenarios.py \
+          if [ "${{ inputs.benchmark_version }}" = "v2" ]; then
+            script="scripts/evaluate_expert_scenarios_v2.py"
+            output_dir="expert-eval-v2-out"
+          else
+            script="scripts/evaluate_expert_scenarios.py"
+            output_dir="expert-eval-out"
+          fi
+          python "$script" \
             --provider "${{ inputs.provider }}" \
             --seed "${{ inputs.seed }}" \
             --price-in "${{ inputs.price_in }}" \
             --price-out "${{ inputs.price_out }}" \
-            --out expert-eval-out \
+            --out "$output_dir" \
             "${extra[@]}"
+          echo "output_dir=$output_dir" >> "$GITHUB_OUTPUT"
 
       - name: レポートを画面に表示
         if: always()
         working-directory: backend
         run: |
-          if [ -f expert-eval-out/report.md ]; then
-            cat expert-eval-out/report.md >> "$GITHUB_STEP_SUMMARY"
+          output_dir="${{ steps.benchmark.outputs.output_dir }}"
+          if [ -z "$output_dir" ]; then
+            output_dir="${{ inputs.benchmark_version == 'v2' && 'expert-eval-v2-out' || 'expert-eval-out' }}"
+          fi
+          if [ -f "$output_dir/report.md" ]; then
+            cat "$output_dir/report.md" >> "$GITHUB_STEP_SUMMARY"
           else
             echo "レポートが生成されませんでした。上のログを確認してください。" >> "$GITHUB_STEP_SUMMARY"
           fi
@@ -86,6 +106,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: expert-eval-out
-          path: backend/expert-eval-out/
+          name: expert-eval-${{ inputs.benchmark_version }}-out
+          path: backend/${{ steps.benchmark.outputs.output_dir }}/
           retention-days: 30
