@@ -58,6 +58,13 @@ module = "app.engine.*"
 strict = true
 
 [[tool.mypy.overrides]]
+# The v2 evaluator normalizes several heterogeneous Pydantic sections in one
+# scoring function. Their containers stay explicitly typed; permit only local
+# loop-variable rebinding in this module, without disabling any error codes.
+module = "app.eval.expert_scenarios_v2"
+allow_redefinition = true
+
+[[tool.mypy.overrides]]
 # z3-solver ships no type information; the encoding is isolated in
 # app/ai/reasoning/solver/z3_backend.py, which converts at its own boundary.
 module = "z3.*"
