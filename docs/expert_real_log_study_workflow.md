@@ -136,6 +136,37 @@ Use `review.status = expert_reviewed` only after a human expert has checked the 
 
 Provisional source IDs must use a visibly provisional namespace and must not be silently treated as parser output.
 
+## Stage-dependent treatment of unusual compositions
+
+A composition can be true without deserving early operational weight.
+
+For every unusual world — fox mixing, two wolf claimants, latent true roles, or a latent madman — record two separate labels:
+
+- **logical status**: possible, impossible, or conditional;
+- **operational status**: whether believing the world would change the current action.
+
+Do not increase the early prior merely because the postmortem later reveals the unusual world. In an ordinary 3-1 start, fox mixing can remain logical-only when the same grey vote, guard allocation, and claimant deadline are optimal under true–wolf–madman. Escalate the world only when a concrete condition changes action, for example:
+
+- four seer claims;
+- claimant survival or results that create a composition-specific contradiction;
+- two wolves publicly dead and the opposing claimant's fox status controls LW execution order;
+- an inexpensive mutual or opponent divination can directly resolve the loss condition.
+
+The training label should reward the timing of escalation, not simply whether the final composition was named.
+
+## Attack interpretation: fit, intent, and quality
+
+For each attack, store separately:
+
+1. public strategic explanations that fit the attack;
+2. the actual private intent, if available in the full log;
+3. whether that intent was coherent and faction-optimal;
+4. accidental outcomes such as removing a guard without targeting a guard.
+
+Do not infer that wolves executed a sophisticated plan merely because the attack is consistent with one. Guard fear, safe-corpse preference, weak coordination, improvisation, and mistakes can produce the same public sequence.
+
+Likewise, an explicitly deceptive or abnormal attack is not automatically good. Grade the intent and expected value separately from the fact that the wolves wanted to confuse the village.
+
 ## Curriculum after the first case
 
 Do not select the next game by similarity alone. Build contrast.
