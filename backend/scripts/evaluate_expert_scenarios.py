@@ -30,6 +30,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.ai.metrics import MetricsCollector  # noqa: E402
 from app.ai.provider.factory import build_llm_provider  # noqa: E402
+from app.ai.provider.json_instruction import JsonInstructionProvider  # noqa: E402
 from app.config import Settings  # noqa: E402
 from app.eval.expert_scenarios import (  # noqa: E402
     BaselineAnswerProvider,
@@ -60,7 +61,10 @@ async def _generate_answers(
         provider = BaselineAnswerProvider()
     else:
         settings = Settings(werewolf_llm_provider="luna")
-        provider = LLMAnswerProvider(build_llm_provider(settings, metrics=metrics))
+        llm_provider = JsonInstructionProvider(
+            build_llm_provider(settings, metrics=metrics)
+        )
+        provider = LLMAnswerProvider(llm_provider)
 
     semaphore = asyncio.Semaphore(max(1, concurrency))
 
@@ -189,6 +193,20 @@ async def main() -> int:
     print()
     print(report)
     print(f"==> 出力先: {args.out}/")
+
+    if summary.valid_answer_rate == 0.0:
+        print(
+            "FAIL: valid model answers were not obtained; this run did not measure reasoning.",
+            file=sys.stderr,
+        )
+        if metrics_summary is not None:
+            for item in metrics_summary.get("errors", []):
+                print(
+                    f"  {item.get('count', 0)}x {item.get('error', 'unknown error')}",
+                    file=sys.stderr,
+                )
+        return 2
+
     if args.fail_under is not None and summary.mean_overall_score < args.fail_under:
         print(
             f"FAIL: overall {summary.mean_overall_score:.3f} < {args.fail_under:.3f}",
