@@ -8,6 +8,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+from app.engine.roles import Team
 from app.training.numpy_policy import NumpyMLPPolicy
 
 _MANIFEST_VERSION = 1
@@ -19,6 +20,7 @@ class PolicyPoolEntry:
     generation: int
     checkpoint: str
     parent_id: str | None = None
+    specialized_team: Team | None = None
 
 
 class NumpyPolicyPool:
@@ -44,12 +46,41 @@ class NumpyPolicyPool:
             return None
         return max(self._entries, key=lambda entry: entry.generation)
 
+    def entries_for_team(
+        self,
+        team: Team,
+        *,
+        include_general: bool = True,
+    ) -> tuple[PolicyPoolEntry, ...]:
+        """Return generations eligible for one faction's strategy population."""
+        return tuple(
+            entry
+            for entry in self._entries
+            if entry.specialized_team is team
+            or (include_general and entry.specialized_team is None)
+        )
+
+    def policy_ids_for_team(
+        self,
+        team: Team,
+        *,
+        last: int | None = None,
+        include_general: bool = True,
+    ) -> tuple[str, ...]:
+        entries = self.entries_for_team(team, include_general=include_general)
+        if last is not None:
+            if last <= 0:
+                raise ValueError("last must be positive")
+            entries = entries[-last:]
+        return tuple(entry.policy_id for entry in entries)
+
     def add(
         self,
         model: NumpyMLPPolicy,
         *,
         generation: int | None = None,
         parent_id: str | None = None,
+        specialized_team: Team | None = None,
     ) -> PolicyPoolEntry:
         generation = self.next_generation if generation is None else generation
         if generation < 0:
@@ -70,6 +101,7 @@ class NumpyPolicyPool:
             generation=generation,
             checkpoint=checkpoint,
             parent_id=parent_id,
+            specialized_team=specialized_team,
         )
         self._entries.append(entry)
         self._write_manifest()
@@ -125,6 +157,7 @@ def _entry_from_json(item: dict[str, Any]) -> PolicyPoolEntry:
     generation = item.get("generation")
     checkpoint = item.get("checkpoint")
     parent_id = item.get("parent_id")
+    raw_specialized_team = item.get("specialized_team")
     if not isinstance(policy_id, str):
         raise ValueError("policy_id must be a string")
     if not isinstance(generation, int):
@@ -133,4 +166,19 @@ def _entry_from_json(item: dict[str, Any]) -> PolicyPoolEntry:
         raise ValueError("checkpoint must be a string")
     if parent_id is not None and not isinstance(parent_id, str):
         raise ValueError("parent_id must be a string or null")
-    return PolicyPoolEntry(policy_id, generation, checkpoint, parent_id)
+    if raw_specialized_team is None:
+        specialized_team = None
+    elif isinstance(raw_specialized_team, str):
+        try:
+            specialized_team = Team(raw_specialized_team)
+        except ValueError as exc:
+            raise ValueError("invalid specialized_team") from exc
+    else:
+        raise ValueError("specialized_team must be a string or null")
+    return PolicyPoolEntry(
+        policy_id,
+        generation,
+        checkpoint,
+        parent_id,
+        specialized_team,
+    )
