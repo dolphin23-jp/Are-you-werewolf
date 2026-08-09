@@ -10,10 +10,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, replace
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import torch
 
@@ -52,7 +53,7 @@ from app.training.torch_trainer import TorchPPOConfig
 _RUN_STATE_VERSION = 1
 
 
-class TorchPopulationRunPhase(str, Enum):
+class TorchPopulationRunPhase(StrEnum):
     IDLE = "idle"
     MEASURE = "measure"
     ORACLE = "oracle"
