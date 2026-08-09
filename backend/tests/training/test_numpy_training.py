@@ -2,6 +2,7 @@ import numpy as np
 
 from app.engine.game import PlayerSpec
 from app.engine.roles import RoleName
+from app.training.actions import ActionType
 from app.training.encoding import ObservationEncoder
 from app.training.env import WerewolfTrainingEnv
 from app.training.legal import LegalActionMask
@@ -9,7 +10,6 @@ from app.training.numpy_policy import NumpyMLPPolicy, flatten_observation
 from app.training.numpy_trainer import NumpyPPOTrainer, PPOConfig
 from app.training.policy_sampling import MaskedPolicySampler
 from app.training.trajectory import DecisionKind, EpisodeTrajectory, RecordedDecision
-from app.training.actions import ActionType
 
 
 def _env() -> WerewolfTrainingEnv:
