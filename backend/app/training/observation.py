@@ -1,9 +1,8 @@
 """Information-safe observations for self-play policies.
 
 The policy receives only public facts plus information the viewing seat is
-legitimately entitled to know. In particular, attack success and the reason
-for a no-death night are deliberately absent: hunter, wolves, and fox all see
-the same public no-death event and must reason from their own private history.
+legitimately entitled to know. Attack success and the reason for a no-death
+night are deliberately absent.
 """
 
 from __future__ import annotations
@@ -14,7 +13,7 @@ from dataclasses import dataclass
 from app.engine.game import GameController
 from app.engine.roles import RoleName
 from app.engine.state import DeathCause
-from app.training.actions import TimedSemanticEvent
+from app.training.actions import Channel, TimedSemanticEvent
 
 
 @dataclass(frozen=True)
@@ -40,17 +39,19 @@ class PublicClaimEventObservation:
 
 
 @dataclass(frozen=True)
-class PublicSemanticEventObservation:
+class SemanticEventObservation:
     event_id: str
     actor_id: str
     day: int
     discussion_tick: int
+    channel: str
     action_type: str
     topic: str | None
     target_id: str | None
     secondary_target_id: str | None
     role: RoleName | None
     result: str | None
+    quantity: int | None
     referenced_day: int | None
     scope: str | None
     stance: str | None
@@ -93,6 +94,7 @@ class PrivateObservation:
     medium_results: tuple[PrivateResultObservation, ...]
     guard_history: tuple[PrivateTargetObservation, ...]
     attack_history: tuple[PrivateTargetObservation, ...]
+    semantic_events: tuple[SemanticEventObservation, ...]
 
 
 @dataclass(frozen=True)
@@ -105,7 +107,7 @@ class PolicyObservation:
     first_victim_id: str | None
     players: tuple[PublicPlayerObservation, ...]
     claim_events: tuple[PublicClaimEventObservation, ...]
-    semantic_events: tuple[PublicSemanticEventObservation, ...]
+    semantic_events: tuple[SemanticEventObservation, ...]
     votes: tuple[VoteObservation, ...]
     dawns: tuple[DawnObservation, ...]
     private: PrivateObservation
@@ -122,7 +124,10 @@ class ObservationBuilder:
     ) -> PolicyObservation:
         state = controller.state
         viewer = state.players[viewer_id]
-        current_claims = {claim.player_id: claim.claimed_role for claim in state.co_declarations}
+        current_claims = {
+            claim.player_id: claim.claimed_role for claim in state.co_declarations
+        }
+        all_semantic_events = tuple(semantic_events)
 
         players = tuple(
             PublicPlayerObservation(
@@ -150,24 +155,15 @@ class ObservationBuilder:
             for index, event in enumerate(state.speech_events)
         )
 
-        normalized_semantic_events = tuple(
-            PublicSemanticEventObservation(
-                event_id=event.event_id,
-                actor_id=event.actor_id,
-                day=event.day,
-                discussion_tick=event.discussion_tick,
-                action_type=event.action.action_type.value,
-                topic=event.action.topic.value if event.action.topic is not None else None,
-                target_id=event.action.target_id,
-                secondary_target_id=event.action.secondary_target_id,
-                role=event.action.role,
-                result=event.action.result.value if event.action.result is not None else None,
-                referenced_day=event.action.referenced_day,
-                scope=event.action.scope.value if event.action.scope is not None else None,
-                stance=event.action.stance.value if event.action.stance is not None else None,
-            )
-            for event in semantic_events
-            if event.action.channel.value == "public"
+        public_semantic_events = tuple(
+            _semantic_observation(event)
+            for event in all_semantic_events
+            if event.action.channel is Channel.PUBLIC
+        )
+        private_semantic_events = tuple(
+            _semantic_observation(event)
+            for event in all_semantic_events
+            if _private_event_visible(viewer.role, event.action.channel)
         )
 
         votes = tuple(
@@ -184,7 +180,8 @@ class ObservationBuilder:
             role=viewer.role,
             allies=_allies(controller, viewer_id),
             is_alpha_wolf=(
-                viewer.role is RoleName.WEREWOLF and viewer_id == controller.alpha_wolf_id
+                viewer.role is RoleName.WEREWOLF
+                and viewer_id == controller.alpha_wolf_id
             ),
             divine_results=tuple(
                 PrivateResultObservation(r.target_id, r.day, r.is_werewolf)
@@ -206,6 +203,7 @@ class ObservationBuilder:
                 for r in state.attack_records
                 if viewer.role is RoleName.WEREWOLF
             ),
+            semantic_events=private_semantic_events,
         )
 
         return PolicyObservation(
@@ -217,11 +215,40 @@ class ObservationBuilder:
             first_victim_id=state.first_victim_id,
             players=players,
             claim_events=claim_events,
-            semantic_events=normalized_semantic_events,
+            semantic_events=public_semantic_events,
             votes=votes,
             dawns=_dawn_history(controller),
             private=private,
         )
+
+
+def _semantic_observation(event: TimedSemanticEvent) -> SemanticEventObservation:
+    action = event.action
+    return SemanticEventObservation(
+        event_id=event.event_id,
+        actor_id=event.actor_id,
+        day=event.day,
+        discussion_tick=event.discussion_tick,
+        channel=action.channel.value,
+        action_type=action.action_type.value,
+        topic=action.topic.value if action.topic is not None else None,
+        target_id=action.target_id,
+        secondary_target_id=action.secondary_target_id,
+        role=action.role,
+        result=action.result.value if action.result is not None else None,
+        quantity=action.quantity,
+        referenced_day=action.referenced_day,
+        scope=action.scope.value if action.scope is not None else None,
+        stance=action.stance.value if action.stance is not None else None,
+    )
+
+
+def _private_event_visible(role: RoleName, channel: Channel) -> bool:
+    if channel is Channel.WOLF:
+        return role is RoleName.WEREWOLF
+    if channel is Channel.FREEMASON:
+        return role is RoleName.FREEMASON
+    return False
 
 
 def _allies(controller: GameController, viewer_id: str) -> tuple[str, ...]:
@@ -261,7 +288,8 @@ def _dawn_history(controller: GameController) -> tuple[DawnObservation, ...]:
         dead = tuple(
             record.player_id
             for record in state.death_records
-            if record.day == night_day and record.cause in (DeathCause.ATTACKED, DeathCause.CURSED)
+            if record.day == night_day
+            and record.cause in (DeathCause.ATTACKED, DeathCause.CURSED)
         )
         dawns.append(
             DawnObservation(
