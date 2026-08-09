@@ -16,7 +16,7 @@ import torch
 from torch import Tensor
 
 from app.training.policy_contract import PolicyHeadSizes
-from app.training.torch_policy import TransformerPolicyConfig, TorchTransformerPolicy
+from app.training.torch_policy import TorchTransformerPolicy, TransformerPolicyConfig
 
 _CHECKPOINT_VERSION = 1
 _METADATA_KEY = "__metadata__"
@@ -40,7 +40,9 @@ def save_torch_policy(model: TorchTransformerPolicy, path: str | Path) -> None:
 
     temporary = destination.with_suffix(destination.suffix + ".tmp")
     with temporary.open("wb") as handle:
-        np.savez_compressed(handle, **arrays)
+        # NumPy 2.5's stub models arbitrary named arrays as the `allow_pickle`
+        # keyword, while runtime `savez_compressed` accepts these tensor names.
+        np.savez_compressed(handle, **arrays)  # type: ignore[arg-type]
     temporary.replace(destination)
 
 
