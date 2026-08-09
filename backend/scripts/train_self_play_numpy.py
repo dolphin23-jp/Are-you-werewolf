@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 from app.engine.game import PlayerSpec
+from app.training.numpy_policy import NumpyMLPPolicy
 from app.training.numpy_trainer import PPOConfig
 from app.training.self_play_train import NumpySelfPlayTrainingLoop
 
@@ -25,6 +27,8 @@ def main() -> None:
     parser.add_argument("--discussion-ticks", type=int, default=8)
     parser.add_argument("--learning-rate", type=float, default=3e-4)
     parser.add_argument("--ppo-epochs", type=int, default=2)
+    parser.add_argument("--load", type=Path)
+    parser.add_argument("--output", type=Path, default=Path("self-play-policy.npz"))
     args = parser.parse_args()
 
     if args.episodes <= 0:
@@ -32,8 +36,10 @@ def main() -> None:
     if args.batch_size <= 0:
         parser.error("--batch-size must be positive")
 
+    restored = NumpyMLPPolicy.load(args.load) if args.load is not None else None
     loop = NumpySelfPlayTrainingLoop(
         _player_specs(),
+        model=restored,
         hidden_size=args.hidden_size,
         model_seed=args.seed,
         max_discussion_ticks=args.discussion_ticks,
@@ -53,6 +59,7 @@ def main() -> None:
         )
         completed += count
         batch_number += 1
+        loop.model.save(args.output)
         update = stats.update
         print(
             f"batch={batch_number} episodes={completed}/{args.episodes} "
@@ -62,7 +69,7 @@ def main() -> None:
             f"policy_loss={update.mean_policy_loss:.4f} "
             f"value_loss={update.mean_value_loss:.4f} "
             f"ratio={update.mean_ratio:.4f} clip={update.clip_fraction:.3f} "
-            f"grad_norm={update.gradient_norm:.4f}"
+            f"grad_norm={update.gradient_norm:.4f} checkpoint={args.output}"
         )
 
 
