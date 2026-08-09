@@ -10,7 +10,11 @@ from app.engine.roles import Team
 from app.training.learned_runner import LearnedEpisodeResult
 from app.training.self_play_train import SelfPlayBatchStats
 from app.training.torch_policy import TorchTransformerPolicy, TransformerPolicyConfig
-from app.training.torch_trainer import TorchPPOConfig, TorchPPOTrainer
+from app.training.torch_trainer import (
+    TorchPPOConfig,
+    TorchPPOTrainer,
+    TorchPPOUpdateStats,
+)
 from app.training.torch_vectorized import TorchVectorizedEpisodeCollector
 
 
@@ -18,6 +22,7 @@ from app.training.torch_vectorized import TorchVectorizedEpisodeCollector
 class TorchSelfPlayBatchStats(SelfPlayBatchStats):
     """Self-play outcomes plus runtime metrics kept outside policy observations."""
 
+    update: TorchPPOUpdateStats
     rollout_seconds: float
     learner_seconds: float
     inference_calls: int
