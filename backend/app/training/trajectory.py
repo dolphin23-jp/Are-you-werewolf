@@ -86,6 +86,23 @@ class EpisodeTrajectory:
         ]
         self.finalized = True
 
+    def for_players(self, player_ids: set[str]) -> EpisodeTrajectory:
+        """Return a finalized view containing only decisions from selected seats."""
+        if not self.finalized:
+            raise RuntimeError("cannot filter an unfinished trajectory")
+        return EpisodeTrajectory(
+            episode_id=f"{self.episode_id}:filtered",
+            decisions=[
+                decision for decision in self.decisions if decision.player_id in player_ids
+            ],
+            terminal_rewards={
+                player_id: reward
+                for player_id, reward in self.terminal_rewards.items()
+                if player_id in player_ids
+            },
+            finalized=True,
+        )
+
     def decisions_for(self, player_id: str) -> tuple[RecordedDecision, ...]:
         return tuple(
             decision for decision in self.decisions if decision.player_id == player_id
