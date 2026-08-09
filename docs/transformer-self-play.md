@@ -121,6 +121,13 @@ At each logical phase it gathers every currently eligible seat observation
 across those games. The environments never share state; only neural inference is
 shared.
 
+The collector can also receive a separate faction-to-model mapping for each game.
+This is used by historical/population training. Requests are grouped only when
+the seats use the exact same Transformer instance; the resulting logits are then
+placed back into the original request order before per-seat sampling and game
+actions are applied. Model batching therefore cannot merge private observations,
+environment state, or sampler RNG streams between games.
+
 `TorchSelfPlayTrainingLoop` uses this collector directly. Two independent knobs
 control rollout concurrency:
 
@@ -140,10 +147,10 @@ observations at a phase boundary. A configuration such as:
 --parallel-games 32 --inference-batch-size 64
 ```
 
-still advances 32 games together but limits each Transformer forward to at most
-64 observations. The correct value is hardware/model dependent and should be
-chosen from measured utilization and memory use rather than treated as a game
-hyperparameter.
+still advances 32 games together but limits each exact-model Transformer forward
+to at most 64 observations. The correct value is hardware/model dependent and
+should be chosen from measured utilization and memory use rather than treated as
+a game hyperparameter.
 
 Rollout output conversion is also batched: each Tensor policy head is transferred
 from the accelerator to the framework-agnostic CPU `PolicyLogits` representation
@@ -164,8 +171,8 @@ loading is not required.
 
 ### Run-state snapshots
 
-Long self-play runs additionally keep a self-contained run-state NPZ at every
-completed batch boundary. The file stores:
+Long initial self-play runs additionally keep a self-contained run-state NPZ at
+every completed batch boundary. The file stores:
 
 - model tensors
 - Adam optimizer tensors and parameter-group metadata
@@ -300,7 +307,9 @@ python scripts/train_historical_torch.py \
   --pool-dir ./training-runs/torch-pool \
   --output ./training-runs/current-transformer.npz \
   --batches 6 \
-  --episodes-per-batch 2 \
+  --episodes-per-batch 32 \
+  --parallel-games 16 \
+  --inference-batch-size 64 \
   --team all
 ```
 
@@ -308,11 +317,29 @@ The learner faction rotates village -> werewolf -> fox when `--team all` is
 used. Only that faction's decisions are sent to Torch PPO. Saved outputs are
 tagged as faction specialists.
 
+For each historical learner batch, all opponent profiles are sampled first using
+the dedicated opponent RNG. Each unique immutable opponent policy ID is then
+loaded once for the batch, even if it was sampled for many games or for more than
+one opponent faction. Independent games are advanced by the same cross-game
+collector as initial self-play, while inference is grouped only by exact model
+identity. The learner faction can therefore batch across games, and repeated
+historical opponents can batch across games, without sharing game state or
+private observations.
+
+`--parallel-games` and `--inference-batch-size` have the same meaning as in
+initial self-play. The CLI also reports unique opponent checkpoint loads and the
+same rollout/inference/learner diagnostics, making it possible to distinguish
+checkpoint-I/O, rollout, and PPO bottlenecks during population training.
+
 A solved opponent mixture can be supplied with:
 
 ```bash
 --meta-strategy ./training-runs/torch-meta.json
 ```
+
+The PSRO-style Transformer oracle uses `TorchHistoricalTrainingLoop`, so it also
+benefits from cross-game historical rollout and unique-opponent caching without
+changing the oracle's payoff or learner-faction filtering semantics.
 
 ## Measure the empirical three-faction game
 
@@ -366,7 +393,10 @@ vectorized Transformer self-play
   -> policy/value health diagnostics (observational only)
   -> atomic policy + resumable run-state snapshots
   -> save general generations
-  -> historical self-play / faction specialists
+  -> vectorized historical self-play / faction specialists
+       -> sample opponent profiles
+       -> cache unique immutable opponent checkpoints
+       -> group cross-game inference by exact model identity
   -> measure 3-faction payoff profiles
   -> allocate extra evaluation to uncertain profiles
   -> solve empirical meta-strategy
@@ -383,8 +413,9 @@ vectorized Transformer self-play
 1. Benchmark CPU/GPU saturation across larger independent-game batches and tune observation-to-tensor staging.
 2. Reduce Python-side rollout/sampling overhead after profiling identifies the dominant path.
 3. Improve PPO learner data staging and minibatch execution for very large batches.
-4. Improve long semantic-history representation and learned memory/compression.
-5. Replace the heuristic meta-solver with a stronger multiplayer PSRO/JPSRO-style solver.
-6. Add learned private wolf/freemason planning turns.
-7. Build post-training strategy analysis over structured logs without feeding those concepts into reward.
-8. Integrate semantic parsing and LLM surface realization only after strategic training is validated.
+4. Add exact long-run recovery for historical/oracle population training, matching the initial self-play run-state guarantees.
+5. Improve long semantic-history representation and learned memory/compression.
+6. Replace the heuristic meta-solver with a stronger multiplayer PSRO/JPSRO-style solver.
+7. Add learned private wolf/freemason planning turns.
+8. Build post-training strategy analysis over structured logs without feeding those concepts into reward.
+9. Integrate semantic parsing and LLM surface realization only after strategic training is validated.
