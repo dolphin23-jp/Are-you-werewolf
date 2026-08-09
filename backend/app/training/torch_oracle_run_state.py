@@ -51,6 +51,11 @@ def save_torch_oracle_run_state(
             "next_pool_generation": progress.next_pool_generation,
             "active_parent_policy_id": progress.active_parent_policy_id,
             "completed_policy_ids": list(progress.completed_policy_ids),
+            "active_wins": progress.active_wins,
+            "active_losses": progress.active_losses,
+            "active_draws": progress.active_draws,
+            "active_days_sum": progress.active_days_sum,
+            "active_decisions_sum": progress.active_decisions_sum,
         },
     }
     encoded_metadata = json.dumps(metadata, sort_keys=True).encode("utf-8")
@@ -260,6 +265,11 @@ def _progress(metadata: dict[str, Any]) -> TorchOracleRunProgress:
         next_pool_generation=_required_int(raw, "next_pool_generation"),
         active_parent_policy_id=parent,
         completed_policy_ids=tuple(raw_completed_ids),
+        active_wins=_required_int(raw, "active_wins"),
+        active_losses=_required_int(raw, "active_losses"),
+        active_draws=_required_int(raw, "active_draws"),
+        active_days_sum=_required_float(raw, "active_days_sum"),
+        active_decisions_sum=_required_float(raw, "active_decisions_sum"),
     )
 
 
@@ -268,3 +278,10 @@ def _required_int(mapping: dict[str, Any], key: str) -> int:
     if not isinstance(value, int):
         raise ValueError(f"oracle run-state {key} must be an integer")
     return value
+
+
+def _required_float(mapping: dict[str, Any], key: str) -> float:
+    value = mapping.get(key)
+    if not isinstance(value, (int, float)):
+        raise ValueError(f"oracle run-state {key} must be numeric")
+    return float(value)
