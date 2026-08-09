@@ -128,3 +128,18 @@ def test_torch_ppo_rejects_unfinalized_trajectory():
 
     with pytest.raises(ValueError, match="requires finalized"):
         TorchPPOTrainer(model).update([trajectory])
+
+
+def test_torch_ppo_rejects_dropout_until_trace_probability_tracks_it():
+    model = TorchTransformerPolicy(
+        TransformerPolicyConfig(
+            d_model=32,
+            nhead=4,
+            num_layers=1,
+            dim_feedforward=64,
+            dropout=0.1,
+        )
+    )
+
+    with pytest.raises(ValueError, match="requires dropout=0"):
+        TorchPPOTrainer(model)
