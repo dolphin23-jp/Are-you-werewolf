@@ -174,14 +174,18 @@ def semantic_parameter_mask(
         )
 
     if action_type is ActionType.CORRECT:
+        correction_topics = (Topic.SEER_RESULT, Topic.MEDIUM_RESULT)
+        if topic not in correction_topics:
+            return SemanticParameterMask(topics=correction_topics)
         own_reports = tuple(
             event
             for event in observation.semantic_events
             if event.actor_id == observation.viewer_id
             and event.action_type == ActionType.REPORT.value
+            and event.topic == topic.value
         )
         return SemanticParameterMask(
-            topics=(Topic.SEER_RESULT, Topic.MEDIUM_RESULT),
+            topics=correction_topics,
             target_ids=all_players,
             results=(ResultValue.WHITE, ResultValue.BLACK),
             referenced_days=past_days,
