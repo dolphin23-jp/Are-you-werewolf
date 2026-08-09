@@ -81,7 +81,11 @@ def main() -> None:
             episodes=args.episodes_per_batch,
         )
         model.save(args.output)
-        entry = pool.add(model, parent_id=parent_id)
+        entry = pool.add(
+            model,
+            parent_id=parent_id,
+            specialized_team=learner_team,
+        )
         parent_id = entry.policy_id
         update = stats.update
         opponents = ",".join(sorted(set(stats.opponent_policy_ids)))
