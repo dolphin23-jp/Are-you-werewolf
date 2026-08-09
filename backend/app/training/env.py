@@ -12,6 +12,7 @@ from collections.abc import Mapping, Sequence
 from app.engine.game import GameController, GameError, NightActionType, PlayerSpec
 from app.engine.phases import Phase
 from app.engine.roles import RoleName
+from app.engine.state import PlayerState
 from app.training.actions import (
     ActionType,
     Channel,
@@ -161,7 +162,7 @@ class WerewolfTrainingEnv:
             for player_id, player in state.players.items()
         }
 
-    def _require_alive(self, player_id: str):
+    def _require_alive(self, player_id: str) -> PlayerState:
         player = self.controller.state.players.get(player_id)
         if player is None or not player.alive:
             raise GameError(f"player {player_id} is not alive")
