@@ -10,6 +10,7 @@ from app.training.meta_strategy import (
     diagnose_meta_strategy,
     solve_logit_response_mixture,
 )
+from app.training.policy_pool import NumpyPolicyPool
 from app.training.population_payoff import PopulationPayoffTable
 
 
@@ -26,6 +27,8 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--table", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--pool-dir", type=Path)
+    parser.add_argument("--last", type=int)
     parser.add_argument("--village")
     parser.add_argument("--werewolf")
     parser.add_argument("--fox")
@@ -34,12 +37,25 @@ def main() -> None:
     parser.add_argument("--damping", type=float, default=0.5)
     args = parser.parse_args()
 
+    if args.last is not None and args.last <= 0:
+        parser.error("--last must be positive")
+    if args.last is not None and args.pool_dir is None:
+        parser.error("--last requires --pool-dir")
+
     try:
         village = _parse_ids(args.village)
         werewolf = _parse_ids(args.werewolf)
         fox = _parse_ids(args.fox)
     except ValueError as exc:
         parser.error(str(exc))
+
+    if args.pool_dir is not None:
+        pool = NumpyPolicyPool(args.pool_dir)
+        village = village or pool.policy_ids_for_team(Team.VILLAGE, last=args.last)
+        werewolf = werewolf or pool.policy_ids_for_team(Team.WEREWOLF, last=args.last)
+        fox = fox or pool.policy_ids_for_team(Team.FOX, last=args.last)
+        if not village or not werewolf or not fox:
+            parser.error("each faction must have at least one eligible pool policy")
 
     table = PopulationPayoffTable(args.table)
     strategy = solve_logit_response_mixture(
