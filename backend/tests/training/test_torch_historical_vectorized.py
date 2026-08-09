@@ -106,10 +106,10 @@ def test_historical_batch_vectorizes_games_and_loads_unique_opponent_once(
     assert load_calls == [general.policy_id]
     assert stats.opponent_checkpoint_loads == 1
     assert learner.batch_sizes
-    assert max(learner.batch_sizes) > 17
     assert stats.inference_calls > 0
     assert stats.inference_observations > 0
-    assert stats.max_inference_batch >= max(learner.batch_sizes)
+    assert stats.max_pending_inference_requests > 17
+    assert stats.max_inference_batch > 17
     assert stats.rollout_seconds > 0.0
     assert stats.learner_seconds > 0.0
 
