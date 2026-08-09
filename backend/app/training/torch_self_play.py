@@ -6,12 +6,12 @@ from app.engine.game import PlayerSpec
 from app.engine.roles import Team
 from app.training.self_play_train import SelfPlayBatchStats
 from app.training.torch_policy import TorchTransformerPolicy, TransformerPolicyConfig
-from app.training.torch_runner import TorchBatchedEpisodeRunner
 from app.training.torch_trainer import TorchPPOConfig, TorchPPOTrainer
+from app.training.torch_vectorized import TorchVectorizedEpisodeCollector
 
 
 class TorchSelfPlayTrainingLoop:
-    """Generate 17-seat on-policy episodes, then PPO-update one shared model."""
+    """Generate batched 17-seat episodes, then PPO-update one shared model."""
 
     def __init__(
         self,
@@ -43,18 +43,14 @@ class TorchSelfPlayTrainingLoop:
     def train_batch(self, *, start_seed: int, episodes: int) -> SelfPlayBatchStats:
         if episodes <= 0:
             raise ValueError("episodes must be positive")
-        results = []
-        trajectories = []
-        self.model.eval()
-        for offset in range(episodes):
-            result = TorchBatchedEpisodeRunner(
-                self.player_specs,
-                self.model,
-                max_discussion_ticks=self.max_discussion_ticks,
-                temperature=self.temperature,
-            ).run(start_seed + offset)
-            results.append(result)
-            trajectories.append(result.trajectory)
+        seeds = tuple(start_seed + offset for offset in range(episodes))
+        results = TorchVectorizedEpisodeCollector(
+            self.player_specs,
+            self.model,
+            max_discussion_ticks=self.max_discussion_ticks,
+            temperature=self.temperature,
+        ).collect(seeds)
+        trajectories = [result.trajectory for result in results]
 
         update = self.optimizer.update(trajectories)
         return SelfPlayBatchStats(
