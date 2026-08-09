@@ -25,6 +25,11 @@ dev = [
     "ruff>=0.6.0",
     "mypy>=1.11.0",
 ]
+rl = [
+    # Lightweight Phase-1 learning baseline. The final large policy can replace
+    # this implementation without changing the environment/action protocol.
+    "numpy>=2.5,<3",
+]
 
 [build-system]
 requires = ["hatchling"]
