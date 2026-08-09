@@ -40,6 +40,8 @@ def main() -> None:
     parser.add_argument("--meta-strategy", type=Path)
     parser.add_argument("--batches", type=int, default=3)
     parser.add_argument("--episodes-per-batch", type=int, default=2)
+    parser.add_argument("--parallel-games", type=int, default=8)
+    parser.add_argument("--inference-batch-size", type=int)
     parser.add_argument("--seed", type=int, default=20000)
     parser.add_argument("--opponent-seed", type=int, default=1)
     parser.add_argument("--discussion-ticks", type=int, default=8)
@@ -58,6 +60,10 @@ def main() -> None:
         parser.error("--batches must be positive")
     if args.episodes_per_batch <= 0:
         parser.error("--episodes-per-batch must be positive")
+    if args.parallel_games <= 0:
+        parser.error("--parallel-games must be positive")
+    if args.inference_batch_size is not None and args.inference_batch_size <= 0:
+        parser.error("--inference-batch-size must be positive")
     try:
         device = _resolve_device(args.device)
     except (RuntimeError, ValueError) as exc:
@@ -79,6 +85,8 @@ def main() -> None:
         opponent_strategy=opponent_strategy,
         opponent_seed=args.opponent_seed,
         max_discussion_ticks=args.discussion_ticks,
+        max_parallel_games=args.parallel_games,
+        max_inference_batch_size=args.inference_batch_size,
         trainer_seed=args.seed,
         ppo_config=TorchPPOConfig(
             learning_rate=args.learning_rate,
@@ -107,12 +115,27 @@ def main() -> None:
         parent_id = entry.policy_id
         update = stats.update
         opponents = ",".join(sorted(set(stats.opponent_policy_ids)))
+        inference_limit = loop.max_inference_batch_size or "unbounded"
         print(
             f"batch={batch_index + 1}/{args.batches} team={learner_team.value} "
             f"record={stats.wins}-{stats.losses}-{stats.draws} "
             f"mean_days={stats.mean_days:.2f} mean_decisions={stats.mean_decisions:.1f} "
+            f"parallel_games={loop.max_parallel_games} "
+            f"rollout_s={stats.rollout_seconds:.3f} "
+            f"rollout_eps_s={stats.rollout_episodes_per_second:.2f} "
+            f"rollout_decisions_s={stats.rollout_decisions_per_second:.1f} "
+            f"inference_limit={inference_limit} "
+            f"inference_mean_batch={stats.mean_inference_batch:.1f} "
+            f"inference_max_batch={stats.max_inference_batch} "
+            f"inference_max_pending={stats.max_pending_inference_requests} "
+            f"opponent_loads={stats.opponent_checkpoint_loads} "
+            f"learner_s={stats.learner_seconds:.3f} "
+            f"learner_decisions_s={stats.learner_decisions_per_second:.1f} "
             f"policy_loss={update.mean_policy_loss:.4f} "
             f"value_loss={update.mean_value_loss:.4f} "
+            f"kl={update.mean_approx_kl:.6f} "
+            f"entropy={update.mean_path_entropy:.4f} "
+            f"value_ev={update.rollout_value_explained_variance:.4f} "
             f"grad_norm={update.gradient_norm:.4f} "
             f"opponents={opponents} saved={entry.policy_id} device={device}"
         )
