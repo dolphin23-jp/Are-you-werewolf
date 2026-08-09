@@ -42,6 +42,7 @@ def _loop() -> TorchSelfPlayTrainingLoop:
         ),
         max_discussion_ticks=0,
         max_parallel_games=1,
+        max_inference_batch_size=5,
         trainer_seed=1703,
     )
 
@@ -70,6 +71,7 @@ def test_run_state_restores_exact_next_batch_training(tmp_path: Path):
     assert restored.optimizer.config == original.optimizer.config
     assert restored.max_discussion_ticks == original.max_discussion_ticks
     assert restored.max_parallel_games == original.max_parallel_games
+    assert restored.max_inference_batch_size == original.max_inference_batch_size
     assert all(
         torch.equal(left, right)
         for left, right in zip(_parameters(original), _parameters(restored), strict=True)
@@ -79,6 +81,8 @@ def test_run_state_restores_exact_next_batch_training(tmp_path: Path):
     restored_stats = restored.train_batch(start_seed=1706, episodes=1)
 
     assert original_stats.update == restored_stats.update
+    assert original_stats.inference_calls == restored_stats.inference_calls
+    assert original_stats.max_inference_batch == restored_stats.max_inference_batch
     assert all(
         torch.equal(left, right)
         for left, right in zip(_parameters(original), _parameters(restored), strict=True)

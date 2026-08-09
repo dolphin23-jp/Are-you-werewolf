@@ -2,8 +2,8 @@
 
 Several independent ``WerewolfTrainingEnv`` instances advance together. At each
 logical decision point, observations from all currently eligible seats across
-all games are concatenated into one Transformer batch. Games remain fully
-independent; only neural inference is shared.
+all games are concatenated into Transformer inference batches. Games remain
+fully independent; only neural inference is shared.
 """
 
 from __future__ import annotations
@@ -24,6 +24,42 @@ from app.training.policy_contract import PolicyLogits
 from app.training.policy_sampling import MaskedPolicySampler, PolicySampleTrace
 from app.training.torch_policy import TorchTransformerPolicy
 from app.training.trajectory import DecisionKind, EpisodeTrajectory, RecordedDecision
+
+
+@dataclass
+class TorchRolloutInferenceStats:
+    """Batch-shape metrics that never enter a policy observation."""
+
+    logical_batches: int = 0
+    inference_calls: int = 0
+    inference_observations: int = 0
+    max_pending_requests: int = 0
+    max_inference_batch: int = 0
+
+    def record_pending(self, count: int) -> None:
+        if count <= 0:
+            return
+        self.logical_batches += 1
+        self.max_pending_requests = max(self.max_pending_requests, count)
+
+    def record_inference(self, count: int) -> None:
+        if count <= 0:
+            raise ValueError("inference batch must contain observations")
+        self.inference_calls += 1
+        self.inference_observations += count
+        self.max_inference_batch = max(self.max_inference_batch, count)
+
+    @property
+    def mean_inference_batch(self) -> float:
+        if self.inference_calls == 0:
+            return 0.0
+        return self.inference_observations / self.inference_calls
+
+    @property
+    def microbatch_expansion(self) -> float:
+        if self.logical_batches == 0:
+            return 0.0
+        return self.inference_calls / self.logical_batches
 
 
 @dataclass
@@ -61,14 +97,19 @@ class TorchVectorizedEpisodeCollector:
         *,
         max_global_steps: int = 2000,
         max_discussion_ticks: int = 12,
+        max_inference_batch_size: int | None = None,
         temperature: float = 1.0,
     ) -> None:
+        if max_inference_batch_size is not None and max_inference_batch_size <= 0:
+            raise ValueError("max_inference_batch_size must be positive")
         self._player_specs = player_specs
         self._model = model
         self._max_global_steps = max_global_steps
         self._max_discussion_ticks = max_discussion_ticks
+        self.max_inference_batch_size = max_inference_batch_size
         self._temperature = temperature
         self._encoder = ObservationEncoder()
+        self.inference_stats = TorchRolloutInferenceStats()
 
     def collect(self, seeds: tuple[int, ...]) -> tuple[LearnedEpisodeResult, ...]:
         if not seeds:
@@ -296,15 +337,22 @@ class TorchVectorizedEpisodeCollector:
     ) -> tuple[_PreparedRequest, ...]:
         if not requests:
             return ()
-        with torch.no_grad():
-            output = self._model.forward_batch(
-                tuple(request.encoded for request in requests)
+        self.inference_stats.record_pending(len(requests))
+        limit = self.max_inference_batch_size or len(requests)
+        prepared: list[_PreparedRequest] = []
+        for start in range(0, len(requests), limit):
+            batch = requests[start : start + limit]
+            self.inference_stats.record_inference(len(batch))
+            with torch.no_grad():
+                output = self._model.forward_batch(
+                    tuple(request.encoded for request in batch)
+                )
+            logits_batch = self._model.policy_logits_batch(output)
+            prepared.extend(
+                _PreparedRequest(request=request, logits=logits)
+                for request, logits in zip(batch, logits_batch, strict=True)
             )
-        logits_batch = self._model.policy_logits_batch(output)
-        return tuple(
-            _PreparedRequest(request=request, logits=logits)
-            for request, logits in zip(requests, logits_batch, strict=True)
-        )
+        return tuple(prepared)
 
 
 def _slot_by_index(slots: list[_EpisodeSlot], index: int) -> _EpisodeSlot:
