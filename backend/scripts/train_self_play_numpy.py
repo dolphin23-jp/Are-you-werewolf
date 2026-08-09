@@ -8,6 +8,7 @@ from pathlib import Path
 from app.engine.game import PlayerSpec
 from app.training.numpy_policy import NumpyMLPPolicy
 from app.training.numpy_trainer import PPOConfig
+from app.training.policy_pool import NumpyPolicyPool
 from app.training.self_play_train import NumpySelfPlayTrainingLoop
 
 
@@ -29,6 +30,7 @@ def main() -> None:
     parser.add_argument("--ppo-epochs", type=int, default=2)
     parser.add_argument("--load", type=Path)
     parser.add_argument("--output", type=Path, default=Path("self-play-policy.npz"))
+    parser.add_argument("--pool-dir", type=Path)
     args = parser.parse_args()
 
     if args.episodes <= 0:
@@ -48,6 +50,9 @@ def main() -> None:
             epochs=args.ppo_epochs,
         ),
     )
+    pool = NumpyPolicyPool(args.pool_dir) if args.pool_dir is not None else None
+    latest = pool.latest() if pool is not None else None
+    parent_id = latest.policy_id if latest is not None else None
 
     completed = 0
     batch_number = 0
@@ -60,6 +65,11 @@ def main() -> None:
         completed += count
         batch_number += 1
         loop.model.save(args.output)
+        policy_id = "-"
+        if pool is not None:
+            entry = pool.add(loop.model, parent_id=parent_id)
+            parent_id = entry.policy_id
+            policy_id = entry.policy_id
         update = stats.update
         print(
             f"batch={batch_number} episodes={completed}/{args.episodes} "
@@ -69,7 +79,8 @@ def main() -> None:
             f"policy_loss={update.mean_policy_loss:.4f} "
             f"value_loss={update.mean_value_loss:.4f} "
             f"ratio={update.mean_ratio:.4f} clip={update.clip_fraction:.3f} "
-            f"grad_norm={update.gradient_norm:.4f} checkpoint={args.output}"
+            f"grad_norm={update.gradient_norm:.4f} checkpoint={args.output} "
+            f"policy_id={policy_id}"
         )
 
 
