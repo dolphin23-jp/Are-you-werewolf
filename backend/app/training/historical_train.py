@@ -115,14 +115,23 @@ class HistoricalNumpyTrainingLoop:
     def _sample_opponent(self, team: Team) -> str:
         if self.opponent_strategy is not None:
             return self.opponent_strategy.sample(team, self._rng)
-        return self.pool.sample(self._rng).policy_id
+        eligible = self.pool.entries_for_team(team)
+        if not eligible:
+            raise ValueError(f"policy pool has no opponent policy for {team}")
+        return self._rng.choice(eligible).policy_id
 
     def _validate_strategy_membership(self, strategy: PopulationMetaStrategy) -> None:
-        known = {entry.policy_id for entry in self.pool.entries}
         for team in Team:
+            eligible = {
+                entry.policy_id for entry in self.pool.entries_for_team(team)
+            }
             missing = {
-                item.policy_id for item in strategy.weights(team) if item.policy_id not in known
+                item.policy_id
+                for item in strategy.weights(team)
+                if item.policy_id not in eligible
             }
             if missing:
                 joined = ", ".join(sorted(missing))
-                raise ValueError(f"meta-strategy references unknown pool policies: {joined}")
+                raise ValueError(
+                    f"meta-strategy references policies not eligible for {team}: {joined}"
+                )
