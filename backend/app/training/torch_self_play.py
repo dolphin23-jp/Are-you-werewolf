@@ -6,7 +6,7 @@ from app.engine.game import PlayerSpec
 from app.engine.roles import Team
 from app.training.learned_runner import LearnedEpisodeRunner
 from app.training.self_play_train import SelfPlayBatchStats
-from app.training.torch_policy import TransformerPolicyConfig, TorchTransformerPolicy
+from app.training.torch_policy import TorchTransformerPolicy, TransformerPolicyConfig
 from app.training.torch_trainer import TorchPPOConfig, TorchPPOTrainer
 
 
