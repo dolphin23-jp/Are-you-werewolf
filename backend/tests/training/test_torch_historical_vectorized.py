@@ -114,6 +114,46 @@ def test_historical_batch_vectorizes_games_and_loads_unique_opponent_once(
     assert stats.learner_seconds > 0.0
 
 
+def test_historical_opponent_cache_is_bounded_to_parallel_chunk(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    pool = TorchPolicyPool(tmp_path / "bounded-pool")
+    general = pool.add(_model(1411))
+    original_load = pool.load
+    load_calls: list[str] = []
+
+    def counting_load(policy_id: str):
+        load_calls.append(policy_id)
+        return original_load(policy_id)
+
+    monkeypatch.setattr(pool, "load", counting_load)
+    loop = TorchHistoricalTrainingLoop(
+        _specs(),
+        _model(1413),
+        pool,
+        opponent_seed=1415,
+        max_discussion_ticks=0,
+        max_parallel_games=1,
+        trainer_seed=1417,
+        ppo_config=TorchPPOConfig(
+            learning_rate=1e-3,
+            epochs=1,
+            minibatch_size=64,
+        ),
+    )
+
+    stats = loop.train_batch(
+        learner_team=Team.VILLAGE,
+        start_seed=1419,
+        episodes=2,
+    )
+
+    assert load_calls == [general.policy_id, general.policy_id]
+    assert stats.opponent_checkpoint_loads == 2
+    assert stats.episodes == 2
+
+
 def test_historical_vectorized_limits_validate_before_training(tmp_path: Path):
     pool = TorchPolicyPool(tmp_path / "limits-pool")
     pool.add(_model(1421))
