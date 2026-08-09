@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 
-from app.training.actions import SemanticAction, Topic
+from app.training.actions import SpeechBundle, Topic
 from app.training.encoding import EncodedPolicyObservation
 
 
@@ -25,20 +25,32 @@ class RecordedDecision:
     player_id: str
     kind: DecisionKind
     observation: EncodedPolicyObservation
-    semantic_action: SemanticAction | None = None
+    speech_bundle: SpeechBundle | None = None
     target_id: str | None = None
     night_topic: Topic | None = None
     reward: float = 0.0
 
     def __post_init__(self) -> None:
         if self.kind is DecisionKind.SPEECH:
-            if self.semantic_action is None or self.target_id is not None or self.night_topic is not None:
-                raise ValueError("speech decision requires only semantic_action")
+            if (
+                self.speech_bundle is None
+                or self.target_id is not None
+                or self.night_topic is not None
+            ):
+                raise ValueError("speech decision requires only speech_bundle")
         elif self.kind is DecisionKind.VOTE:
-            if self.target_id is None or self.semantic_action is not None or self.night_topic is not None:
+            if (
+                self.target_id is None
+                or self.speech_bundle is not None
+                or self.night_topic is not None
+            ):
                 raise ValueError("vote decision requires only target_id")
         elif self.kind is DecisionKind.NIGHT:
-            if self.target_id is None or self.night_topic is None or self.semantic_action is not None:
+            if (
+                self.target_id is None
+                or self.night_topic is None
+                or self.speech_bundle is not None
+            ):
                 raise ValueError("night decision requires topic and target_id")
 
 
