@@ -460,7 +460,8 @@ def _available_speech_actions(observation: PolicyObservation) -> tuple[ActionTyp
     return tuple(
         action_type
         for action_type in candidates
-        if action_type is ActionType.PASS or _speech_action_is_materializable(observation, action_type)
+        if action_type is ActionType.PASS
+        or _speech_action_is_materializable(observation, action_type)
     )
 
 
