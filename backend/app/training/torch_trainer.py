@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, replace
+from typing import Any
 
 import torch
 from torch import Tensor
@@ -77,6 +78,23 @@ class TorchPPOTrainer:
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.config.learning_rate)
         self._generator = torch.Generator(device="cpu")
         self._generator.manual_seed(seed)
+
+    def checkpoint_state(self) -> tuple[dict[str, Any], Tensor]:
+        """Return in-memory optimizer and minibatch RNG state for safe encoding."""
+
+        return self.optimizer.state_dict(), self._generator.get_state().clone()
+
+    def restore_checkpoint_state(
+        self,
+        optimizer_state: dict[str, Any],
+        generator_state: Tensor,
+    ) -> None:
+        """Restore optimizer moments and the deterministic minibatch RNG stream."""
+
+        if generator_state.dtype is not torch.uint8 or generator_state.ndim != 1:
+            raise ValueError("trainer generator state must be a 1D uint8 tensor")
+        self.optimizer.load_state_dict(optimizer_state)
+        self._generator.set_state(generator_state.detach().cpu())
 
     def update(self, trajectories: list[EpisodeTrajectory]) -> PPOUpdateStats:
         if any(not trajectory.finalized for trajectory in trajectories):
