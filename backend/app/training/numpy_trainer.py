@@ -13,7 +13,7 @@ import numpy as np
 
 from app.training.numpy_policy import FloatArray, NumpyMLPPolicy
 from app.training.policy_sampling import HeadChoice, PolicySampleTrace
-from app.training.trajectory import EpisodeTrajectory, RecordedDecision
+from app.training.trajectory import EpisodeTrajectory
 
 
 @dataclass(frozen=True)
