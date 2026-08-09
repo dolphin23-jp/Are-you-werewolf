@@ -9,6 +9,7 @@ from time import perf_counter
 from app.engine.game import PlayerSpec
 from app.engine.roles import Team
 from app.training.historical_train import HistoricalBatchStats
+from app.training.learned_runner import LearnedEpisodeResult
 from app.training.meta_strategy import PopulationMetaStrategy
 from app.training.torch_policy import TorchTransformerPolicy
 from app.training.torch_pool import TorchPolicyPool
@@ -151,7 +152,7 @@ class TorchHistoricalTrainingLoop:
             temperature=self.temperature,
         )
 
-        results = []
+        results: list[LearnedEpisodeResult] = []
         rollout_started = perf_counter()
         for start in range(0, episodes, self.max_parallel_games):
             stop = start + self.max_parallel_games
