@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import numpy as np
 
 from app.engine.game import PlayerSpec
@@ -33,6 +35,21 @@ def test_numpy_policy_has_deterministic_valid_output_shape():
     second_logits.validate()
     assert np.allclose(first.parameter_vector(), second.parameter_vector())
     assert np.isfinite(flatten_observation(observation)).all()
+
+
+def test_numpy_policy_checkpoint_round_trip(tmp_path: Path):
+    observation = ObservationEncoder().encode(_env().observe("p0"))
+    model = NumpyMLPPolicy(seed=9, hidden_size=16)
+    before_logits = model.forward(observation)
+    path = tmp_path / "policy.npz"
+
+    model.save(path)
+    restored = NumpyMLPPolicy.load(path)
+    after_logits = restored.forward(observation)
+
+    assert restored.hidden_size == model.hidden_size
+    assert np.array_equal(restored.parameter_vector(), model.parameter_vector())
+    assert after_logits == before_logits
 
 
 def test_ppo_update_changes_parameters_from_sparse_terminal_reward():
