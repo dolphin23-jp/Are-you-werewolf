@@ -10,6 +10,7 @@ import torch
 from app.engine.game import PlayerSpec
 from app.training.torch_checkpoint import load_torch_policy, save_torch_policy
 from app.training.torch_policy import TorchTransformerPolicy, TransformerPolicyConfig
+from app.training.torch_pool import TorchPolicyPool
 from app.training.torch_self_play import TorchSelfPlayTrainingLoop
 from app.training.torch_trainer import TorchPPOConfig
 
@@ -43,10 +44,10 @@ def main() -> None:
     parser.add_argument("--nhead", type=int, default=4)
     parser.add_argument("--layers", type=int, default=3)
     parser.add_argument("--feedforward", type=int, default=384)
-    parser.add_argument("--dropout", type=float, default=0.0)
     parser.add_argument("--device", default="auto")
     parser.add_argument("--load", type=Path)
     parser.add_argument("--output", type=Path, default=Path("self-play-transformer.npz"))
+    parser.add_argument("--pool-dir", type=Path)
     args = parser.parse_args()
 
     if args.episodes <= 0:
@@ -72,7 +73,7 @@ def main() -> None:
                 nhead=args.nhead,
                 num_layers=args.layers,
                 dim_feedforward=args.feedforward,
-                dropout=args.dropout,
+                dropout=0.0,
             )
         ).to(device)
 
@@ -87,6 +88,13 @@ def main() -> None:
             minibatch_size=args.minibatch_size,
         ),
     )
+    pool = (
+        TorchPolicyPool(args.pool_dir, device=device)
+        if args.pool_dir is not None
+        else None
+    )
+    latest = pool.latest() if pool is not None else None
+    parent_id = latest.policy_id if latest is not None else None
 
     completed = 0
     batch_number = 0
@@ -99,6 +107,11 @@ def main() -> None:
         completed += count
         batch_number += 1
         save_torch_policy(loop.model, args.output)
+        policy_id = "-"
+        if pool is not None:
+            entry = pool.add(loop.model, parent_id=parent_id)
+            parent_id = entry.policy_id
+            policy_id = entry.policy_id
         update = stats.update
         print(
             f"batch={batch_number} episodes={completed}/{args.episodes} "
@@ -109,7 +122,8 @@ def main() -> None:
             f"policy_loss={update.mean_policy_loss:.4f} "
             f"value_loss={update.mean_value_loss:.4f} "
             f"ratio={update.mean_ratio:.4f} clip={update.clip_fraction:.3f} "
-            f"grad_norm={update.gradient_norm:.4f} checkpoint={args.output}"
+            f"grad_norm={update.gradient_norm:.4f} checkpoint={args.output} "
+            f"policy_id={policy_id}"
         )
 
 
