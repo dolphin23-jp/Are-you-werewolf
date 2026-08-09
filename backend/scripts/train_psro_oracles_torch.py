@@ -8,7 +8,6 @@ from pathlib import Path
 import torch
 
 from app.engine.game import PlayerSpec
-from app.engine.roles import Team
 from app.training.meta_strategy import PopulationMetaStrategy
 from app.training.torch_oracle_cycle import (
     finalize_torch_oracle,
