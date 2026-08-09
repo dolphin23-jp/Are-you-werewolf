@@ -70,27 +70,33 @@ def semantic_parameter_mask(
         return SemanticParameterMask(topics=claim_topics)
 
     if action_type is ActionType.REPORT:
-        report_topics = (
-            Topic.SEER_RESULT,
-            Topic.MEDIUM_RESULT,
-            Topic.GUARD,
-            Topic.ATTACK,
+        seer_targets = _seer_claim_targets(observation, past_days)
+        medium_targets = _executed_player_ids(observation)
+        report_topics = tuple(
+            candidate
+            for candidate, available in (
+                (Topic.SEER_RESULT, bool(seer_targets and past_days)),
+                (Topic.MEDIUM_RESULT, bool(medium_targets and past_days)),
+                (Topic.GUARD, bool(all_players and past_days)),
+                (Topic.ATTACK, bool(all_players and past_days)),
+            )
+            if available
         )
-        if topic is Topic.SEER_RESULT:
+        if topic is Topic.SEER_RESULT and topic in report_topics:
             return SemanticParameterMask(
                 topics=report_topics,
-                target_ids=_seer_claim_targets(observation, past_days),
+                target_ids=seer_targets,
                 results=(ResultValue.WHITE, ResultValue.BLACK),
                 referenced_days=past_days,
             )
-        if topic is Topic.MEDIUM_RESULT:
+        if topic is Topic.MEDIUM_RESULT and topic in report_topics:
             return SemanticParameterMask(
                 topics=report_topics,
-                target_ids=_executed_player_ids(observation),
+                target_ids=medium_targets,
                 results=(ResultValue.WHITE, ResultValue.BLACK),
                 referenced_days=past_days,
             )
-        if topic in (Topic.GUARD, Topic.ATTACK):
+        if topic in (Topic.GUARD, Topic.ATTACK) and topic in report_topics:
             return SemanticParameterMask(
                 topics=report_topics,
                 target_ids=all_players,
@@ -174,16 +180,14 @@ def semantic_parameter_mask(
         )
 
     if action_type is ActionType.CORRECT:
-        correction_topics = (Topic.SEER_RESULT, Topic.MEDIUM_RESULT)
+        correction_topics = tuple(
+            candidate
+            for candidate in (Topic.SEER_RESULT, Topic.MEDIUM_RESULT)
+            if past_days and _own_reports_for_topic(observation, candidate)
+        )
         if topic not in correction_topics:
             return SemanticParameterMask(topics=correction_topics)
-        own_reports = tuple(
-            event
-            for event in observation.semantic_events
-            if event.actor_id == observation.viewer_id
-            and event.action_type == ActionType.REPORT.value
-            and event.topic == topic.value
-        )
+        own_reports = _own_reports_for_topic(observation, topic)
         return SemanticParameterMask(
             topics=correction_topics,
             target_ids=all_players,
@@ -217,6 +221,19 @@ def _seer_claim_targets(
         if player.player_id != observation.viewer_id
         and player.player_id != observation.first_victim_id
         and (player.death_day is None or player.death_day > 0)
+    )
+
+
+def _own_reports_for_topic(
+    observation: PolicyObservation,
+    topic: Topic,
+) -> tuple[SemanticEventObservation, ...]:
+    return tuple(
+        event
+        for event in observation.semantic_events
+        if event.actor_id == observation.viewer_id
+        and event.action_type == ActionType.REPORT.value
+        and event.topic == topic.value
     )
 
 
