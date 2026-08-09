@@ -21,7 +21,6 @@ from app.training.actions import (
     ResultValue,
     Scope,
     Stance,
-    TimingBucket,
     Topic,
 )
 from app.training.encoding import (
@@ -146,7 +145,8 @@ class _FeatureTokenEncoder(nn.Module):
             result = embedded if result is None else result + embedded
         if result is None:
             raise RuntimeError("feature token encoder has no fields")
-        return self.norm(result)
+        normalized: Tensor = self.norm(result)
+        return normalized
 
 
 class _PointerHead(nn.Module):
