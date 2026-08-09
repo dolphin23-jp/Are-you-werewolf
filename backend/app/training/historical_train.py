@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from app.engine.game import PlayerSpec
 from app.engine.roles import Team
 from app.training.learned_runner import LearnedEpisodeRunner
+from app.training.meta_strategy import PopulationMetaStrategy
 from app.training.numpy_policy import NumpyMLPPolicy
 from app.training.numpy_trainer import NumpyPPOTrainer, PPOConfig, PPOUpdateStats
 from app.training.policy_contract import LearnedPolicyModel
@@ -36,6 +37,7 @@ class HistoricalNumpyTrainingLoop:
         model: NumpyMLPPolicy,
         pool: NumpyPolicyPool,
         *,
+        opponent_strategy: PopulationMetaStrategy | None = None,
         opponent_seed: int = 0,
         ppo_config: PPOConfig | None = None,
         max_discussion_ticks: int = 8,
@@ -44,10 +46,13 @@ class HistoricalNumpyTrainingLoop:
         self.player_specs = player_specs
         self.model = model
         self.pool = pool
+        self.opponent_strategy = opponent_strategy
         self.optimizer = NumpyPPOTrainer(model, ppo_config)
         self.max_discussion_ticks = max_discussion_ticks
         self.temperature = temperature
         self._rng = random.Random(opponent_seed)
+        if opponent_strategy is not None:
+            self._validate_strategy_membership(opponent_strategy)
 
     def train_batch(
         self,
@@ -72,9 +77,9 @@ class HistoricalNumpyTrainingLoop:
             for team in Team:
                 if team is learner_team:
                     continue
-                entry = self.pool.sample(self._rng)
-                team_models[team] = self.pool.load(entry.policy_id)
-                opponent_ids.append(f"{team.value}:{entry.policy_id}")
+                policy_id = self._sample_opponent(team)
+                team_models[team] = self.pool.load(policy_id)
+                opponent_ids.append(f"{team.value}:{policy_id}")
 
             result = LearnedEpisodeRunner(
                 self.player_specs,
@@ -106,3 +111,18 @@ class HistoricalNumpyTrainingLoop:
             opponent_policy_ids=tuple(opponent_ids),
             update=update,
         )
+
+    def _sample_opponent(self, team: Team) -> str:
+        if self.opponent_strategy is not None:
+            return self.opponent_strategy.sample(team, self._rng)
+        return self.pool.sample(self._rng).policy_id
+
+    def _validate_strategy_membership(self, strategy: PopulationMetaStrategy) -> None:
+        known = {entry.policy_id for entry in self.pool.entries}
+        for team in Team:
+            missing = {
+                item.policy_id for item in strategy.weights(team) if item.policy_id not in known
+            }
+            if missing:
+                joined = ", ".join(sorted(missing))
+                raise ValueError(f"meta-strategy references unknown pool policies: {joined}")
