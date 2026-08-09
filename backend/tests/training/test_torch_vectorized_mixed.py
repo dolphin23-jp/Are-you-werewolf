@@ -5,11 +5,9 @@ from app.engine.roles import Team
 
 torch = pytest.importorskip("torch")
 torch_policy = pytest.importorskip("app.training.torch_policy")
-torch_runner = pytest.importorskip("app.training.torch_runner")
 torch_vectorized = pytest.importorskip("app.training.torch_vectorized")
 TorchTransformerPolicy = torch_policy.TorchTransformerPolicy
 TransformerPolicyConfig = torch_policy.TransformerPolicyConfig
-TorchBatchedEpisodeRunner = torch_runner.TorchBatchedEpisodeRunner
 TorchVectorizedEpisodeCollector = torch_vectorized.TorchVectorizedEpisodeCollector
 
 
@@ -51,7 +49,7 @@ def _trajectory_signature(result):
     )
 
 
-def test_mixed_model_vectorized_rollout_matches_single_game_grouped_runner():
+def test_mixed_model_cross_game_batching_preserves_independent_game_semantics():
     torch.manual_seed(1331)
     village = BatchCountingTransformer().eval()
     wolf = BatchCountingTransformer().eval()
@@ -62,30 +60,33 @@ def test_mixed_model_vectorized_rollout_matches_single_game_grouped_runner():
         Team.FOX: fox,
     }
 
-    sequential = TorchBatchedEpisodeRunner(
+    isolated = TorchVectorizedEpisodeCollector(
         _specs(),
         village,
-        team_models=team_models,
-        max_discussion_ticks=0,
-    ).run(1333)
+        max_discussion_ticks=1,
+    ).collect((1333,), team_models=(team_models,))[0]
 
     village.batch_sizes.clear()
     wolf.batch_sizes.clear()
     fox.batch_sizes.clear()
-    vectorized = TorchVectorizedEpisodeCollector(
+    batched = TorchVectorizedEpisodeCollector(
         _specs(),
         village,
-        max_discussion_ticks=0,
-    ).collect((1333,), team_models=(team_models,))[0]
+        max_discussion_ticks=1,
+    ).collect(
+        (1333, 1335),
+        team_models=(team_models, team_models),
+    )[0]
 
-    assert vectorized.winner == sequential.winner
-    assert vectorized.is_draw == sequential.is_draw
-    assert vectorized.days == sequential.days
-    assert vectorized.semantic_event_count == sequential.semantic_event_count
-    assert _trajectory_signature(vectorized) == _trajectory_signature(sequential)
+    assert batched.winner == isolated.winner
+    assert batched.is_draw == isolated.is_draw
+    assert batched.days == isolated.days
+    assert batched.semantic_event_count == isolated.semantic_event_count
+    assert _trajectory_signature(batched) == _trajectory_signature(isolated)
     assert village.batch_sizes
     assert wolf.batch_sizes
     assert fox.batch_sizes
+    assert max(village.batch_sizes) > 17
 
 
 def test_vectorized_collector_rejects_misaligned_team_models():
