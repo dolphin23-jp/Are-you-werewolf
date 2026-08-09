@@ -1,7 +1,14 @@
 from app.engine.game import PlayerSpec
 from app.engine.roles import RoleName
 from app.engine.state import DeathCause, DeathRecord
-from app.training.actions import ActionType, Scope, Topic
+from app.training.actions import (
+    ActionType,
+    ResultValue,
+    Scope,
+    SemanticAction,
+    SpeechBundle,
+    Topic,
+)
 from app.training.env import WerewolfTrainingEnv
 from app.training.parameters import semantic_parameter_mask
 
@@ -64,6 +71,53 @@ def test_medium_report_targets_are_derived_from_public_execution_only():
 
     assert "p7" in mask.target_ids
     assert "p8" not in mask.target_ids
+
+
+def test_correction_references_only_own_report_of_matching_type():
+    env = _env()
+    env.controller.resolve_night()
+    env.controller.start_discussion()
+    target_id = next(
+        player_id
+        for player_id in env.controller.state.alive_ids()
+        if player_id != "p0" and player_id != env.controller.state.first_victim_id
+    )
+    seer_event = env.emit_speech(
+        "p0",
+        SpeechBundle(
+            (
+                SemanticAction(
+                    ActionType.REPORT,
+                    topic=Topic.SEER_RESULT,
+                    target_id=target_id,
+                    result=ResultValue.WHITE,
+                    referenced_day=0,
+                ),
+            )
+        ),
+    )[0]
+    guard_event = env.emit_speech(
+        "p0",
+        SpeechBundle(
+            (
+                SemanticAction(
+                    ActionType.REPORT,
+                    topic=Topic.GUARD,
+                    target_id=target_id,
+                    referenced_day=0,
+                ),
+            )
+        ),
+    )[0]
+
+    mask = semantic_parameter_mask(
+        env.observe("p0"),
+        ActionType.CORRECT,
+        topic=Topic.SEER_RESULT,
+    )
+
+    assert seer_event.event_id in mask.reference_event_ids
+    assert guard_event.event_id not in mask.reference_event_ids
 
 
 def test_public_claim_mask_does_not_depend_on_viewers_true_role():
