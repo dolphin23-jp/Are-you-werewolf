@@ -26,7 +26,7 @@ def _initialized_model(seed: int) -> NumpyMLPPolicy:
     return model
 
 
-def test_population_iteration_measures_trains_and_saves_next_generation(tmp_path: Path):
+def test_population_iteration_measures_solves_and_adds_three_oracles(tmp_path: Path):
     pool = NumpyPolicyPool(tmp_path / "pool")
     first = pool.add(_initialized_model(301))
     table = PopulationPayoffTable(tmp_path / "payoffs.json")
@@ -37,10 +37,11 @@ def test_population_iteration_measures_trains_and_saves_next_generation(tmp_path
         table,
         recent_policies=1,
         games_per_profile=1,
+        extra_games=1,
         evaluation_seed=302,
-        training_seed=303,
+        oracle_seed=303,
         opponent_seed=304,
-        episodes_per_team=1,
+        oracle_episodes=1,
         max_discussion_ticks=1,
         meta_iterations=2,
         ppo_config=PPOConfig(learning_rate=1e-3, epochs=1),
@@ -49,18 +50,24 @@ def test_population_iteration_measures_trains_and_saves_next_generation(tmp_path
     profile = PolicyProfile(first.policy_id, first.policy_id, first.policy_id)
     record = table.get(profile)
     assert record is not None
-    assert record.games == 1
-    assert stats.measured_policy_ids == (first.policy_id,)
+    assert record.games == 2
+    assert stats.village_policy_ids == (first.policy_id,)
+    assert stats.werewolf_policy_ids == (first.policy_id,)
+    assert stats.fox_policy_ids == (first.policy_id,)
     assert stats.measured_profiles == 1
     assert stats.new_profile_games == 1
-    assert len(stats.training) == 3
-    assert tuple(item.learner_team for item in stats.training) == tuple(Team)
-    assert stats.training[0].update.decisions > 0
+    assert stats.adaptive_games == 1
     for team in Team:
         weights = stats.meta_strategy.weights(team)
         assert len(weights) == 1
         assert weights[0].policy_id == first.policy_id
         assert weights[0].probability == 1.0
-    assert stats.saved_entry.policy_id == "g000001"
-    assert stats.saved_entry.parent_id == first.policy_id
-    assert pool.latest() == stats.saved_entry
+
+    assert len(stats.oracles) == 3
+    assert tuple(oracle.team for oracle in stats.oracles) == tuple(Team)
+    assert stats.oracles[0].update.decisions > 0
+    assert len(pool.entries) == 4
+    for oracle in stats.oracles:
+        assert oracle.parent_policy_id == first.policy_id
+        assert oracle.oracle_entry.parent_id == first.policy_id
+        assert oracle.oracle_entry.specialized_team is oracle.team
