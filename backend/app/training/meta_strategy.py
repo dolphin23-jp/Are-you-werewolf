@@ -81,6 +81,39 @@ class PopulationMetaStrategy:
         )
 
 
+@dataclass(frozen=True)
+class TeamDeviationDiagnostic:
+    team: Team
+    mixture_payoff: float
+    best_policy_id: str
+    best_policy_payoff: float
+    deviation_gain: float
+
+
+@dataclass(frozen=True)
+class PopulationMetaDiagnostics:
+    village: TeamDeviationDiagnostic
+    werewolf: TeamDeviationDiagnostic
+    fox: TeamDeviationDiagnostic
+
+    def for_team(self, team: Team) -> TeamDeviationDiagnostic:
+        if team is Team.VILLAGE:
+            return self.village
+        if team is Team.WEREWOLF:
+            return self.werewolf
+        if team is Team.FOX:
+            return self.fox
+        raise ValueError(f"unsupported team {team}")
+
+    @property
+    def max_deviation_gain(self) -> float:
+        return max(
+            self.village.deviation_gain,
+            self.werewolf.deviation_gain,
+            self.fox.deviation_gain,
+        )
+
+
 def solve_logit_response_mixture(
     table: PopulationPayoffTable,
     *,
@@ -150,6 +183,62 @@ def solve_logit_response_mixture(
     )
 
 
+def diagnose_meta_strategy(
+    table: PopulationPayoffTable,
+    strategy: PopulationMetaStrategy,
+) -> PopulationMetaDiagnostics:
+    """Measure unilateral deviation gains inside the currently measured pool.
+
+    This is a restricted-population diagnostic, not full-game exploitability:
+    the best deviation is chosen only from policies already present in the
+    supplied strategy and measured payoff cube.
+    """
+    mixtures = {
+        team: _normalize(
+            {item.policy_id: item.probability for item in strategy.weights(team)}
+        )
+        for team in Team
+    }
+    policies = {
+        team: tuple(mixtures[team])
+        for team in Team
+    }
+    if not table.has_complete_cube(
+        policies[Team.VILLAGE],
+        policies[Team.WEREWOLF],
+        policies[Team.FOX],
+    ):
+        raise ValueError("diagnostics require a complete measured payoff cube")
+
+    diagnostics: dict[Team, TeamDeviationDiagnostic] = {}
+    for team in Team:
+        policy_payoffs = {
+            policy_id: _expected_payoff(table, team, policy_id, mixtures, policies)
+            for policy_id in policies[team]
+        }
+        mixture_payoff = sum(
+            mixtures[team][policy_id] * payoff
+            for policy_id, payoff in policy_payoffs.items()
+        )
+        best_policy_id, best_policy_payoff = max(
+            policy_payoffs.items(),
+            key=lambda item: (item[1], item[0]),
+        )
+        diagnostics[team] = TeamDeviationDiagnostic(
+            team=team,
+            mixture_payoff=mixture_payoff,
+            best_policy_id=best_policy_id,
+            best_policy_payoff=best_policy_payoff,
+            deviation_gain=max(0.0, best_policy_payoff - mixture_payoff),
+        )
+
+    return PopulationMetaDiagnostics(
+        village=diagnostics[Team.VILLAGE],
+        werewolf=diagnostics[Team.WEREWOLF],
+        fox=diagnostics[Team.FOX],
+    )
+
+
 def _expected_payoff(
     table: PopulationPayoffTable,
     team: Team,
@@ -213,6 +302,8 @@ def _normalize(weights: dict[str, float]) -> dict[str, float]:
     total = sum(weights.values())
     if total <= 0 or not math.isfinite(total):
         raise ValueError("meta-strategy weights must have finite positive mass")
+    if any(weight < 0 or not math.isfinite(weight) for weight in weights.values()):
+        raise ValueError("meta-strategy weights must be finite and non-negative")
     return {policy_id: weight / total for policy_id, weight in weights.items()}
 
 
