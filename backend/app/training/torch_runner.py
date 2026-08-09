@@ -7,7 +7,7 @@ that use the exact same Transformer instance.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 
 import torch
@@ -250,10 +250,10 @@ class TorchBatchedEpisodeRunner:
 
 
 def _unique_models(
-    models: object,
+    models: Iterable[TorchTransformerPolicy],
 ) -> tuple[TorchTransformerPolicy, ...]:
     unique: dict[int, TorchTransformerPolicy] = {}
-    for model in models:  # type: ignore[union-attr]
+    for model in models:
         unique[id(model)] = model
     return tuple(unique.values())
 
