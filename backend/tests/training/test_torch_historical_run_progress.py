@@ -32,3 +32,20 @@ def test_historical_run_progress_rejects_invalid_boundaries():
             episodes_per_batch=1,
             requested_teams=(),
         )
+
+    with pytest.raises(ValueError, match="requested_teams cannot contain duplicates"):
+        TorchHistoricalRunProgress(
+            completed_batches=0,
+            base_seed=1,
+            episodes_per_batch=1,
+            requested_teams=(Team.VILLAGE, Team.VILLAGE),
+        )
+
+    with pytest.raises(ValueError, match="next_pool_generation cannot be negative"):
+        TorchHistoricalRunProgress(
+            completed_batches=0,
+            base_seed=1,
+            episodes_per_batch=1,
+            requested_teams=(Team.VILLAGE,),
+            next_pool_generation=-1,
+        )
