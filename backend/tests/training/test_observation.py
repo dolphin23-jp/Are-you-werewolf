@@ -67,7 +67,7 @@ def test_policy_observation_does_not_expose_is_human_or_other_true_roles():
     assert observation.private.role is RoleName.FOX
 
 
-def test_only_public_semantic_events_enter_public_observation():
+def test_public_and_role_private_semantic_events_are_separated():
     controller = _controller()
     events = (
         TimedSemanticEvent(
@@ -86,7 +86,7 @@ def test_only_public_semantic_events_enter_public_observation():
             event_id="t2",
             actor_id="p1",
             day=1,
-            discussion_tick=0,
+            discussion_tick=-1,
             action=SemanticAction(
                 ActionType.PRIVATE_PLAN,
                 topic=Topic.ATTACK,
@@ -94,8 +94,32 @@ def test_only_public_semantic_events_enter_public_observation():
                 channel=Channel.WOLF,
             ),
         ),
+        TimedSemanticEvent(
+            event_id="t3",
+            actor_id="p1",
+            day=4,
+            discussion_tick=8,
+            action=SemanticAction(
+                ActionType.CLAIM,
+                topic=Topic.WOLF_COUNT,
+                quantity=1,
+                channel=Channel.PUBLIC,
+            ),
+        ),
     )
 
-    observation = ObservationBuilder().build(controller, "p2", semantic_events=events)
-    assert [event.event_id for event in observation.semantic_events] == ["t1"]
-    assert observation.semantic_events[0].discussion_tick == 0
+    builder = ObservationBuilder()
+    fox = builder.build(controller, "p2", semantic_events=events)
+    wolf = builder.build(controller, "p1", semantic_events=events)
+    madman_id = next(
+        player.player_id
+        for player in controller.state.players.values()
+        if player.role is RoleName.MADMAN
+    )
+    madman = builder.build(controller, madman_id, semantic_events=events)
+
+    assert [event.event_id for event in fox.semantic_events] == ["t1", "t3"]
+    assert fox.private.semantic_events == ()
+    assert [event.event_id for event in wolf.private.semantic_events] == ["t2"]
+    assert madman.private.semantic_events == ()
+    assert wolf.semantic_events[-1].quantity == 1
