@@ -10,8 +10,8 @@ information before speaking.
 from __future__ import annotations
 
 import random
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Mapping
 
 from app.training.actions import SpeechBundle, TimingBucket
 
