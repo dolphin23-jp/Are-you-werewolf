@@ -111,6 +111,11 @@ It currently provides:
 - full 17-seat LLM-free self-play
 - faction-isolated evaluation
 - immutable policy generations for historical self-play
+- faction-specialized population entries
+- empirical three-faction payoff tables
+- payoff-driven population mixtures
+- restricted-population deviation diagnostics
+- PSRO-style faction-specific oracle expansion
 
 ## Install RL development dependencies
 
@@ -138,8 +143,8 @@ python scripts/train_self_play_numpy.py \
   --output ./training-runs/current.npz
 ```
 
-Each completed batch can be saved as an immutable pool generation (`g000000`,
-`g000001`, ...). Training can be resumed with `--load`.
+Each completed batch can be saved as a general immutable pool generation
+(`g000000`, `g000001`, ...). Training can be resumed with `--load`.
 
 ## Faction-isolated evaluation
 
@@ -177,9 +182,99 @@ other factions are controlled by immutable generations sampled from the pool.
 Only decisions made by the current model's faction are passed to PPO. With
 `--team all`, learner factions rotate village -> werewolf -> fox.
 
-This is the first defense against latest-vs-latest strategy cycling. Uniform
-pool sampling is only a baseline; a later population/meta-strategy stage should
-replace it with measured matchup payoffs and PSRO/JPSRO-style opponent mixtures.
+Historical outputs are tagged with `specialized_team`. A village-specialized
+checkpoint remains eligible for the village population but is not sampled as a
+wolf or fox specialist. General initial self-play checkpoints remain eligible
+for all three populations.
+
+## Empirical three-faction meta-game
+
+Measure the Cartesian product of the most recent eligible village, wolf and fox
+strategies:
+
+```bash
+python scripts/measure_population_payoffs.py \
+  --pool-dir ./training-runs/pool \
+  --table ./training-runs/payoffs.json \
+  --last 3 \
+  --games-per-profile 10
+```
+
+A profile is `(village_policy, werewolf_policy, fox_policy)`. The table stores
+only completed-game terminal outcomes, so the meta-game does not receive shaped
+strategic scores either.
+
+Solve a payoff-driven mixture:
+
+```bash
+python scripts/solve_population_meta.py \
+  --table ./training-runs/payoffs.json \
+  --output ./training-runs/meta.json
+```
+
+The current solver is an iterated damped logit-response mixture. It is an
+intermediate empirical meta-strategy, not a Nash/JPSRO guarantee.
+
+The solver also prints, for each faction:
+
+- expected payoff of the current mixture
+- best already-measured policy against the other two mixtures
+- restricted-population unilateral deviation gain
+
+`max_restricted_deviation_gain` is useful as a stability signal. It is **not**
+full-game exploitability because the deviation search is restricted to policies
+already present in the measured population.
+
+Use the solved mixture for historical opponent sampling:
+
+```bash
+python scripts/train_historical_numpy.py \
+  --load ./training-runs/current.npz \
+  --pool-dir ./training-runs/pool \
+  --meta-strategy ./training-runs/meta.json \
+  --output ./training-runs/current.npz \
+  --batches 6 \
+  --episodes-per-batch 2 \
+  --team all
+```
+
+## PSRO-style oracle expansion
+
+Train one new approximate response for each meta-game player:
+
+```bash
+python scripts/train_psro_oracles_numpy.py \
+  --pool-dir ./training-runs/pool \
+  --meta-strategy ./training-runs/meta.json \
+  --episodes-per-oracle 20
+```
+
+For each faction independently, the oracle:
+
+1. clones that faction's highest-probability current meta policy,
+2. plays only that faction against the other two factions' meta mixtures,
+3. PPO-updates only the learner faction's decisions,
+4. stores a new immutable checkpoint tagged for that faction.
+
+This is an approximate best-response oracle, not an exact best response.
+After oracle creation, re-run payoff measurement and meta solving. The practical
+population loop is therefore:
+
+```text
+initial self-play
+  -> measure faction-profile payoffs
+  -> solve empirical meta-strategy
+  -> inspect restricted deviation gains
+  -> train village/wolf/fox response oracles
+  -> add faction-specialized policies to pool
+  -> measure new profiles
+  -> solve again
+  -> repeat
+```
+
+This is intentionally a PSRO-style scaffold. A later stage can replace the
+logit-response solver with a better general-sum multiplayer meta-solver without
+changing the game/observation/action interfaces.
 
 ## Human compatibility
 
@@ -196,9 +291,9 @@ sequence. Self-play uses all AI seats only for speed.
 
 ## Next stages
 
-1. Add reproducible matchup matrices for policy-pool generations.
-2. Derive opponent mixtures from measured payoff data rather than uniform pool sampling.
-3. Replace the smoke MLP with a player/event Transformer while preserving the same protocol.
+1. Replace the smoke MLP with a player/event Transformer while preserving the same protocol.
+2. Replace the heuristic logit-response meta-solver with a stronger multiplayer PSRO/JPSRO-style solver.
+3. Add confidence intervals / adaptive sampling to the empirical payoff table.
 4. Add private wolf/freemason planning decisions to learned rollouts.
 5. Add human-text semantic parsing and final natural-language rendering.
 6. Only after the learned path is validated, integrate it as an optional production AI mode.
