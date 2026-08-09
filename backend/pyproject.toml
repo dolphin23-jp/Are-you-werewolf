@@ -30,6 +30,11 @@ rl = [
     # this implementation without changing the environment/action protocol.
     "numpy>=2.5,<3",
 ]
+transformer = [
+    # Kept separate from the lightweight RL extra so normal backend CI and
+    # environments do not download the large PyTorch distribution.
+    "torch>=2.13,<2.14",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -73,4 +78,11 @@ allow_redefinition = true
 # z3-solver ships no type information; the encoding is isolated in
 # app/ai/reasoning/solver/z3_backend.py, which converts at its own boundary.
 module = "z3.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# PyTorch is an optional heavyweight dependency. The dedicated transformer CI
+# job installs it and type-checks the transformer modules with the real package;
+# lightweight backend environments may omit it entirely.
+module = ["torch", "torch.*"]
 ignore_missing_imports = true
