@@ -318,18 +318,23 @@ used. Only that faction's decisions are sent to Torch PPO. Saved outputs are
 tagged as faction specialists.
 
 For each historical learner batch, all opponent profiles are sampled first using
-the dedicated opponent RNG. Each unique immutable opponent policy ID is then
-loaded once for the batch, even if it was sampled for many games or for more than
-one opponent faction. Independent games are advanced by the same cross-game
-collector as initial self-play, while inference is grouped only by exact model
-identity. The learner faction can therefore batch across games, and repeated
-historical opponents can batch across games, without sharing game state or
-private observations.
+the dedicated opponent RNG. Rollout then proceeds in `--parallel-games` chunks.
+Within each active chunk, each unique immutable opponent policy ID is loaded once,
+even if it is used by several games or by more than one opponent faction. The
+chunk-local cache is released before later chunks load their opponents, so model
+residency is bounded by active rollout concurrency rather than by the total number
+of distinct policies sampled for the whole learner batch.
+
+Independent games are advanced by the same cross-game collector as initial
+self-play, while inference is grouped only by exact model identity. The learner
+faction can therefore batch across games, and repeated historical opponents can
+batch across games, without sharing game state or private observations.
 
 `--parallel-games` and `--inference-batch-size` have the same meaning as in
-initial self-play. The CLI also reports unique opponent checkpoint loads and the
-same rollout/inference/learner diagnostics, making it possible to distinguish
-checkpoint-I/O, rollout, and PPO bottlenecks during population training.
+initial self-play. The CLI reports actual opponent checkpoint loads across all
+chunks and the same rollout/inference/learner diagnostics, making it possible to
+distinguish checkpoint-I/O, model-residency, rollout, and PPO bottlenecks during
+population training.
 
 A solved opponent mixture can be supplied with:
 
@@ -338,8 +343,9 @@ A solved opponent mixture can be supplied with:
 ```
 
 The PSRO-style Transformer oracle uses `TorchHistoricalTrainingLoop`, so it also
-benefits from cross-game historical rollout and unique-opponent caching without
-changing the oracle's payoff or learner-faction filtering semantics.
+benefits from cross-game historical rollout and bounded chunk-local opponent
+caching without changing the oracle's payoff or learner-faction filtering
+semantics.
 
 ## Measure the empirical three-faction game
 
@@ -395,7 +401,8 @@ vectorized Transformer self-play
   -> save general generations
   -> vectorized historical self-play / faction specialists
        -> sample opponent profiles
-       -> cache unique immutable opponent checkpoints
+       -> split rollout into bounded parallel-game chunks
+       -> cache unique immutable opponent checkpoints within each active chunk
        -> group cross-game inference by exact model identity
   -> measure 3-faction payoff profiles
   -> allocate extra evaluation to uncertain profiles
