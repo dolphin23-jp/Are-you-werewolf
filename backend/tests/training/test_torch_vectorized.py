@@ -54,8 +54,45 @@ def test_vectorized_collector_finishes_multiple_independent_games():
     assert max(model.batch_sizes) <= 51
 
 
+def test_vectorized_collector_caps_inference_microbatches_and_reports_shape():
+    torch.manual_seed(1311)
+    model = BatchCountingTransformer().eval()
+    collector = TorchVectorizedEpisodeCollector(
+        _specs(),
+        model,
+        max_discussion_ticks=0,
+        max_inference_batch_size=7,
+    )
+
+    results = collector.collect((1313, 1315, 1317))
+    stats = collector.inference_stats
+
+    assert len(results) == 3
+    assert model.batch_sizes
+    assert max(model.batch_sizes) <= 7
+    assert stats.max_inference_batch <= 7
+    assert stats.max_pending_requests > 7
+    assert stats.inference_calls == len(model.batch_sizes)
+    assert stats.inference_observations == sum(model.batch_sizes)
+    assert stats.mean_inference_batch == pytest.approx(
+        sum(model.batch_sizes) / len(model.batch_sizes)
+    )
+    assert stats.microbatch_expansion > 1.0
+
+
 def test_vectorized_collector_rejects_duplicate_seeds():
     model = BatchCountingTransformer().eval()
 
     with pytest.raises(ValueError, match="seeds must be unique"):
-        TorchVectorizedEpisodeCollector(_specs(), model).collect((1311, 1311))
+        TorchVectorizedEpisodeCollector(_specs(), model).collect((1321, 1321))
+
+
+def test_vectorized_collector_rejects_invalid_inference_batch_limit():
+    model = BatchCountingTransformer().eval()
+
+    with pytest.raises(ValueError, match="max_inference_batch_size must be positive"):
+        TorchVectorizedEpisodeCollector(
+            _specs(),
+            model,
+            max_inference_batch_size=0,
+        )
