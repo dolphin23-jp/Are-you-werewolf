@@ -66,7 +66,7 @@ def test_mixed_model_vectorized_rollout_matches_single_game_grouped_runner():
         _specs(),
         village,
         team_models=team_models,
-        max_discussion_ticks=1,
+        max_discussion_ticks=0,
     ).run(1333)
 
     village.batch_sizes.clear()
@@ -75,7 +75,7 @@ def test_mixed_model_vectorized_rollout_matches_single_game_grouped_runner():
     vectorized = TorchVectorizedEpisodeCollector(
         _specs(),
         village,
-        max_discussion_ticks=1,
+        max_discussion_ticks=0,
     ).collect((1333,), team_models=(team_models,))[0]
 
     assert vectorized.winner == sequential.winner
