@@ -44,7 +44,11 @@ class EventDrivenDiscussionScheduler:
         self.discussion_tick = 0
 
     def select_next(self, intents: Mapping[str, SpeakIntent]) -> ScheduledSpeaker | None:
-        eligible = [(player_id, intent) for player_id, intent in intents.items() if intent.will_speak]
+        eligible = [
+            (player_id, intent)
+            for player_id, intent in intents.items()
+            if intent.will_speak
+        ]
         if not eligible:
             return None
 
