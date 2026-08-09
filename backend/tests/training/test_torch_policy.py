@@ -59,6 +59,20 @@ def test_transformer_matches_framework_agnostic_policy_contract():
     )
 
 
+def test_batch_policy_logits_match_scalar_adapter_exactly():
+    torch.manual_seed(9)
+    model = _model().eval()
+    observation = _observation()
+
+    with torch.no_grad():
+        output = model.forward_batch((observation, observation, observation))
+
+    scalar = tuple(model.policy_logits_at(output, index) for index in range(3))
+    batched = model.policy_logits_batch(output)
+
+    assert batched == scalar
+
+
 def test_transformer_batch_forward_is_differentiable():
     torch.manual_seed(11)
     model = _model().train()
