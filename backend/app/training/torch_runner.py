@@ -238,13 +238,14 @@ class TorchBatchedEpisodeRunner:
                 output = model.forward_batch(
                     tuple(source[player_id][1] for player_id in group_ids)
                 )
-                for index, player_id in enumerate(group_ids):
+                logits_batch = model.policy_logits_batch(output)
+                for player_id, logits in zip(group_ids, logits_batch, strict=True):
                     observation, encoded = source[player_id]
                     prepared[player_id] = _PreparedSeat(
                         player_id=player_id,
                         observation=observation,
                         encoded=encoded,
-                        logits=model.policy_logits_at(output, index),
+                        logits=logits,
                     )
         return prepared
 
