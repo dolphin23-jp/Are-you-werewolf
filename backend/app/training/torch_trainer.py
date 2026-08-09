@@ -53,6 +53,10 @@ class TorchPPOTrainer:
         *,
         seed: int = 0,
     ) -> None:
+        if model.config.dropout != 0.0:
+            raise ValueError(
+                "Torch PPO currently requires dropout=0 so rollout/update log-probs match"
+            )
         self.model = model
         self.config = config or TorchPPOConfig()
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.config.learning_rate)
