@@ -209,8 +209,29 @@ class WerewolfTrainingEnv:
                 )
             return
 
-        if action.action_type is ActionType.RETRACT and action.topic is Topic.ROLE:
-            self.controller.retract_co(actor_id, source_message_id=source_event_id)
+        if action.action_type is ActionType.RETRACT:
+            referenced = self._semantic_event(action.reference_event_id)
+            if referenced is None or referenced.actor_id != actor_id:
+                return
+            previous = referenced.action
+            if previous.action_type is ActionType.CLAIM and previous.role is not None:
+                self.controller.retract_co(actor_id, source_message_id=source_event_id)
+                return
+            if (
+                previous.action_type is ActionType.REPORT
+                and previous.topic in (Topic.SEER_RESULT, Topic.MEDIUM_RESULT)
+                and previous.target_id is not None
+            ):
+                result_type = (
+                    "seer" if previous.topic is Topic.SEER_RESULT else "medium"
+                )
+                self.controller.retract_public_result(
+                    actor_id,
+                    result_type,
+                    previous.target_id,
+                    source_message_id=source_event_id,
+                    referenced_day=previous.referenced_day,
+                )
             return
 
         if action.action_type not in (ActionType.REPORT, ActionType.CORRECT):
@@ -244,3 +265,11 @@ class WerewolfTrainingEnv:
                 source_message_id=source_event_id,
                 referenced_day=action.referenced_day,
             )
+
+    def _semantic_event(self, event_id: str | None) -> TimedSemanticEvent | None:
+        if event_id is None:
+            return None
+        return next(
+            (event for event in reversed(self.semantic_events) if event.event_id == event_id),
+            None,
+        )
