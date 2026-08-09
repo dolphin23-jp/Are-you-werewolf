@@ -44,6 +44,7 @@ def _append_metrics(
     completed: int,
     start_seed: int,
     parallel_games: int,
+    max_inference_batch_size: int | None,
     stats: TorchSelfPlayBatchStats,
 ) -> None:
     update = stats.update
@@ -66,6 +67,14 @@ def _append_metrics(
         "rollout_episodes_per_second": stats.rollout_episodes_per_second,
         "rollout_decisions_per_second": stats.rollout_decisions_per_second,
         "learner_decisions_per_second": stats.learner_decisions_per_second,
+        "inference": {
+            "max_batch_size_config": max_inference_batch_size,
+            "calls": stats.inference_calls,
+            "observations": stats.inference_observations,
+            "mean_batch_size": stats.mean_inference_batch,
+            "max_batch_size": stats.max_inference_batch,
+            "max_pending_requests": stats.max_pending_inference_requests,
+        },
         "ppo": {
             "decisions": update.decisions,
             "epochs": update.epochs,
@@ -150,6 +159,7 @@ def main() -> None:
     parser.add_argument("--episodes", type=int, default=20)
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--parallel-games", type=int, default=8)
+    parser.add_argument("--inference-batch-size", type=int)
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--discussion-ticks", type=int, default=8)
     parser.add_argument("--learning-rate", type=float, default=3e-4)
@@ -177,6 +187,8 @@ def main() -> None:
         parser.error("--batch-size must be positive")
     if args.parallel_games <= 0:
         parser.error("--parallel-games must be positive")
+    if args.inference_batch_size is not None and args.inference_batch_size <= 0:
+        parser.error("--inference-batch-size must be positive")
     if args.resume and args.load is not None:
         parser.error("--resume and --load are mutually exclusive")
 
@@ -211,6 +223,14 @@ def main() -> None:
         if progress.completed_episodes > args.episodes:
             parser.error(
                 "--episodes is a total target and cannot be below resumed progress"
+            )
+        if (
+            args.inference_batch_size is not None
+            and args.inference_batch_size != loop.max_inference_batch_size
+        ):
+            parser.error(
+                "--inference-batch-size cannot change across exact resume; "
+                "the run-state value is authoritative"
             )
     else:
         if run_state_path.exists():
@@ -251,6 +271,7 @@ def main() -> None:
             model=model,
             max_discussion_ticks=args.discussion_ticks,
             max_parallel_games=args.parallel_games,
+            max_inference_batch_size=args.inference_batch_size,
             trainer_seed=args.seed,
             ppo_config=ppo_config,
         )
@@ -305,9 +326,11 @@ def main() -> None:
                 completed=completed,
                 start_seed=batch_start_seed,
                 parallel_games=loop.max_parallel_games,
+                max_inference_batch_size=loop.max_inference_batch_size,
                 stats=stats,
             )
         update = stats.update
+        inference_limit = loop.max_inference_batch_size or "unbounded"
         print(
             f"batch={batch_number} episodes={completed}/{args.episodes} "
             f"parallel_games={loop.max_parallel_games} device={device} "
@@ -317,6 +340,10 @@ def main() -> None:
             f"rollout_s={stats.rollout_seconds:.3f} "
             f"rollout_eps_s={stats.rollout_episodes_per_second:.2f} "
             f"rollout_decisions_s={stats.rollout_decisions_per_second:.1f} "
+            f"inference_limit={inference_limit} "
+            f"inference_mean_batch={stats.mean_inference_batch:.1f} "
+            f"inference_max_batch={stats.max_inference_batch} "
+            f"inference_max_pending={stats.max_pending_inference_requests} "
             f"learner_s={stats.learner_seconds:.3f} "
             f"learner_decisions_s={stats.learner_decisions_per_second:.1f} "
             f"policy_loss={update.mean_policy_loss:.4f} "
