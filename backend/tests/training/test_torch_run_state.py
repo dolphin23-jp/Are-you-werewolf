@@ -61,6 +61,7 @@ def test_run_state_restores_exact_next_batch_training(tmp_path: Path):
         base_seed=1705,
         parent_policy_id="g000003",
         next_pool_generation=4,
+        batch_size=32,
     )
     path = tmp_path / "run-state.npz"
     save_torch_run_state(original, progress, path)
@@ -68,6 +69,7 @@ def test_run_state_restores_exact_next_batch_training(tmp_path: Path):
     restored, restored_progress = load_torch_run_state(path, _specs())
 
     assert restored_progress == progress
+    assert restored_progress.batch_size == 32
     assert restored.optimizer.config == original.optimizer.config
     assert restored.max_discussion_ticks == original.max_discussion_ticks
     assert restored.max_parallel_games == original.max_parallel_games
@@ -89,13 +91,28 @@ def test_run_state_restores_exact_next_batch_training(tmp_path: Path):
     )
 
 
+def test_run_progress_rejects_invalid_batch_size():
+    with pytest.raises(ValueError, match="batch_size"):
+        TorchRunProgress(
+            completed_episodes=0,
+            batch_number=0,
+            base_seed=1710,
+            batch_size=0,
+        )
+
+
 def test_run_state_archive_is_pickle_free(tmp_path: Path):
     torch.manual_seed(1707)
     loop = _loop()
     path = tmp_path / "safe-run-state.npz"
     save_torch_run_state(
         loop,
-        TorchRunProgress(completed_episodes=0, batch_number=0, base_seed=1711),
+        TorchRunProgress(
+            completed_episodes=0,
+            batch_number=0,
+            base_seed=1711,
+            batch_size=8,
+        ),
         path,
     )
 
