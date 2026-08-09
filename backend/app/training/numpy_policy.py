@@ -8,6 +8,7 @@ loop works before a heavier Transformer implementation is introduced.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 from numpy.typing import NDArray
@@ -16,6 +17,7 @@ from app.training.encoding import EncodedPolicyObservation
 from app.training.policy_contract import PolicyHeadSizes, PolicyLogits
 
 FloatArray = NDArray[np.float64]
+_CHECKPOINT_VERSION = 1
 
 
 @dataclass(frozen=True)
@@ -189,6 +191,62 @@ class NumpyMLPPolicy:
         return np.concatenate(
             (self.w1.ravel(), self.b1, self.w2.ravel(), self.b2)
         ).copy()
+
+    def save(self, path: str | Path) -> None:
+        """Persist an initialized policy without Python pickle objects."""
+        if not self._initialized:
+            raise RuntimeError("cannot save an uninitialized policy")
+        destination = Path(path)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        np.savez_compressed(
+            destination,
+            format_version=np.asarray([_CHECKPOINT_VERSION], dtype=np.int64),
+            hidden_size=np.asarray([self.hidden_size], dtype=np.int64),
+            input_size=np.asarray([self.w1.shape[0]], dtype=np.int64),
+            output_size=np.asarray([self.layout.output_size], dtype=np.int64),
+            w1=self.w1,
+            b1=self.b1,
+            w2=self.w2,
+            b2=self.b2,
+        )
+
+    @classmethod
+    def load(cls, path: str | Path) -> NumpyMLPPolicy:
+        """Load and validate a checkpoint against the current policy contract."""
+        with np.load(Path(path), allow_pickle=False) as checkpoint:
+            version = int(checkpoint["format_version"][0])
+            if version != _CHECKPOINT_VERSION:
+                raise ValueError(f"unsupported checkpoint version {version}")
+            hidden_size = int(checkpoint["hidden_size"][0])
+            input_size = int(checkpoint["input_size"][0])
+            output_size = int(checkpoint["output_size"][0])
+            model = cls(hidden_size=hidden_size)
+            if output_size != model.layout.output_size:
+                raise ValueError("checkpoint policy-head layout is incompatible")
+
+            w1 = np.asarray(checkpoint["w1"], dtype=np.float64)
+            b1 = np.asarray(checkpoint["b1"], dtype=np.float64)
+            w2 = np.asarray(checkpoint["w2"], dtype=np.float64)
+            b2 = np.asarray(checkpoint["b2"], dtype=np.float64)
+
+        expected_shapes = (
+            (w1.shape, (input_size, hidden_size), "w1"),
+            (b1.shape, (hidden_size,), "b1"),
+            (w2.shape, (hidden_size, output_size), "w2"),
+            (b2.shape, (output_size,), "b2"),
+        )
+        for actual, expected, name in expected_shapes:
+            if actual != expected:
+                raise ValueError(
+                    f"checkpoint {name} shape {actual} does not match expected {expected}"
+                )
+
+        model.w1 = w1.copy()
+        model.b1 = b1.copy()
+        model.w2 = w2.copy()
+        model.b2 = b2.copy()
+        model._initialized = True
+        return model
 
     def _ensure_initialized(self, input_size: int) -> None:
         if self._initialized:
