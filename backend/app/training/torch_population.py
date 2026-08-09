@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from app.engine.game import PlayerSpec
 from app.engine.roles import Team
-from app.training.learned_runner import LearnedEpisodeRunner
 from app.training.population_payoff import PolicyProfile, PopulationPayoffTable, ProfilePayoff
 from app.training.torch_pool import TorchPolicyPool
+from app.training.torch_runner import TorchBatchedEpisodeRunner
 
 
 def evaluate_torch_policy_profile(
@@ -32,7 +32,7 @@ def evaluate_torch_policy_profile(
     }
 
     for seed in seeds:
-        result = LearnedEpisodeRunner(
+        result = TorchBatchedEpisodeRunner(
             player_specs,
             village_model,
             team_models=team_models,
