@@ -64,26 +64,27 @@ class PolicyLogits:
     value: float
 
     def validate(self, sizes: PolicyHeadSizes = PolicyHeadSizes()) -> None:
-        expected = {
-            "timing": sizes.timing,
-            "action_type": sizes.action_type,
-            "topic": sizes.topic,
-            "target": sizes.target,
-            "secondary_target": sizes.secondary_target,
-            "role": sizes.role,
-            "result": sizes.result,
-            "quantity": sizes.quantity,
-            "referenced_day": sizes.referenced_day,
-            "scope": sizes.scope,
-            "stance": sizes.stance,
-            "vote_target": sizes.vote_target,
-            "night_topic": sizes.night_topic,
-            "night_target": sizes.night_target,
-        }
-        for name, width in expected.items():
-            actual = len(getattr(self, name))
-            if actual != width:
-                raise ValueError(f"{name} head has width {actual}; expected {width}")
+        actual = (
+            ("timing", len(self.timing), sizes.timing),
+            ("action_type", len(self.action_type), sizes.action_type),
+            ("topic", len(self.topic), sizes.topic),
+            ("target", len(self.target), sizes.target),
+            ("secondary_target", len(self.secondary_target), sizes.secondary_target),
+            ("role", len(self.role), sizes.role),
+            ("result", len(self.result), sizes.result),
+            ("quantity", len(self.quantity), sizes.quantity),
+            ("referenced_day", len(self.referenced_day), sizes.referenced_day),
+            ("scope", len(self.scope), sizes.scope),
+            ("stance", len(self.stance), sizes.stance),
+            ("vote_target", len(self.vote_target), sizes.vote_target),
+            ("night_topic", len(self.night_topic), sizes.night_topic),
+            ("night_target", len(self.night_target), sizes.night_target),
+        )
+        for name, width, expected_width in actual:
+            if width != expected_width:
+                raise ValueError(
+                    f"{name} head has width {width}; expected {expected_width}"
+                )
 
 
 class LearnedPolicyModel(Protocol):
