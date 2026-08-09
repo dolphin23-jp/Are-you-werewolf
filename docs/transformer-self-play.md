@@ -117,18 +117,38 @@ therefore a neural-compute optimization, not an information-sharing mechanism.
 ### Cross-game vectorized collection
 
 `TorchVectorizedEpisodeCollector` advances multiple independent games together.
-At each logical phase it concatenates every currently eligible seat observation
-across those games into one Transformer inference batch. The environments never
-share state; only neural inference is shared.
+At each logical phase it gathers every currently eligible seat observation
+across those games. The environments never share state; only neural inference is
+shared.
 
-`TorchSelfPlayTrainingLoop` uses this collector directly. `--parallel-games`
-controls how many independent games are collected together before moving to the
-next group.
+`TorchSelfPlayTrainingLoop` uses this collector directly. Two independent knobs
+control rollout concurrency:
+
+- `--parallel-games` controls how many independent game environments advance together.
+- `--inference-batch-size` optionally caps how many seat observations enter one Transformer forward.
+
+Without `--inference-batch-size`, the collector keeps the previous unbounded
+behavior for backward compatibility. With a limit, one logical decision point
+may be split into several inference microbatches while preserving request order,
+seat-specific observations, sampler RNG streams, masks, and structured actions.
+This is a memory/throughput control only; it does not become a policy input.
+
+For example, 32 simultaneous games can produce far more than 32 eligible seat
+observations at a phase boundary. A configuration such as:
+
+```bash
+--parallel-games 32 --inference-batch-size 64
+```
+
+still advances 32 games together but limits each Transformer forward to at most
+64 observations. The correct value is hardware/model dependent and should be
+chosen from measured utilization and memory use rather than treated as a game
+hyperparameter.
 
 Rollout output conversion is also batched: each Tensor policy head is transferred
 from the accelerator to the framework-agnostic CPU `PolicyLogits` representation
-once per inference batch instead of once per seat. Scalar and batched adapters
-are regression-tested for exact equality.
+once per inference microbatch instead of once per seat. Scalar and batched
+adapters are regression-tested for exact equality.
 
 ## Checkpoints and long-run recovery
 
@@ -151,7 +171,7 @@ completed batch boundary. The file stores:
 - Adam optimizer tensors and parameter-group metadata
 - PPO minibatch RNG state
 - PPO configuration
-- logical runtime settings such as discussion ticks and parallel-game count
+- logical runtime settings such as discussion ticks, parallel-game count, and inference microbatch limit
 - completed episode count and base seed
 - immutable population lineage / next generation when a policy pool is enabled
 
@@ -180,8 +200,11 @@ python scripts/train_self_play_torch.py \
 ```
 
 On resume, the run-state's training hyperparameters, base seed, optimizer state,
-and parallelism settings are authoritative. `--episodes` remains the total target,
-so it may be increased to extend a run.
+parallel-game count, and inference microbatch limit are authoritative.
+`--episodes` remains the total target, so it may be increased to extend a run.
+If `--inference-batch-size` is explicitly supplied on resume, it must match the
+saved value; changing batching in the middle of an exact reproducibility run is
+rejected.
 
 When a policy pool is enabled, the run state also records the intended next
 immutable generation. If a crash happens after that generation was added but
@@ -197,14 +220,19 @@ second generation.
 - rollout seconds
 - rollout episodes / second
 - rollout decisions / second
+- inference forward-call count
+- inference observation count
+- mean and maximum actual inference batch size
+- maximum pending observations before microbatch splitting
 - learner seconds
 - learner decisions / second
 - faction wins and draws
 - mean game days and decisions
 - PPO policy/value loss, ratio, clipping fraction, and gradient norm
 
-These are runtime/research measurements only. Wall-clock timing is never placed
-inside `PolicyObservation` and therefore cannot become a strategic input.
+These are runtime/research measurements only. Wall-clock timing and batching
+statistics are never placed inside `PolicyObservation` and therefore cannot
+become strategic inputs.
 
 ## Initial self-play
 
@@ -213,6 +241,7 @@ python scripts/train_self_play_torch.py \
   --episodes 20000 \
   --batch-size 256 \
   --parallel-games 32 \
+  --inference-batch-size 64 \
   --discussion-ticks 8 \
   --pool-dir ./training-runs/torch-pool \
   --metrics-jsonl ./training-runs/train.jsonl \
@@ -233,8 +262,9 @@ dropout=0
 `--device auto` uses CUDA when available, otherwise CPU.
 
 The example sizes above are starting points for throughput measurement, not
-recommended final hyperparameters. Tune `--parallel-games`, `--batch-size`, and
-PPO minibatch size from observed GPU/CPU utilization and memory use.
+recommended final hyperparameters. Tune `--parallel-games`,
+`--inference-batch-size`, `--batch-size`, and PPO minibatch size from observed
+GPU/CPU utilization, inference batch metrics, and memory use.
 
 Each completed learner batch can also be stored as a general immutable population
 generation.
@@ -320,6 +350,7 @@ and repeat.
 
 ```text
 vectorized Transformer self-play
+  -> bounded inference microbatches if configured
   -> PPO / optional GAE learner update
   -> atomic policy + resumable run-state snapshots
   -> save general generations
