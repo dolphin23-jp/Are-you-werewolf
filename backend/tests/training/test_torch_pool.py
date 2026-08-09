@@ -62,3 +62,45 @@ def test_torch_pool_persists_faction_specialists(tmp_path: Path):
         strict=True,
     ):
         assert torch.equal(original, reloaded)
+
+
+def test_torch_pool_ensure_generation_reuses_exact_crash_replay(tmp_path: Path):
+    pool = TorchPolicyPool(tmp_path / "replay-pool")
+    base = pool.add(_model(911))
+    replayed_model = _model(912)
+
+    created = pool.ensure_generation(
+        replayed_model,
+        generation=pool.next_generation,
+        parent_id=base.policy_id,
+        specialized_team=Team.FOX,
+    )
+    reused = pool.ensure_generation(
+        replayed_model,
+        generation=created.generation,
+        parent_id=base.policy_id,
+        specialized_team=Team.FOX,
+    )
+
+    assert reused == created
+    assert pool.next_generation == created.generation + 1
+
+
+def test_torch_pool_ensure_generation_rejects_mismatched_replay(tmp_path: Path):
+    pool = TorchPolicyPool(tmp_path / "mismatch-pool")
+    base = pool.add(_model(921))
+    generation = pool.next_generation
+    pool.ensure_generation(
+        _model(922),
+        generation=generation,
+        parent_id=base.policy_id,
+        specialized_team=Team.VILLAGE,
+    )
+
+    with pytest.raises(ValueError, match="does not match replayed model tensors"):
+        pool.ensure_generation(
+            _model(923),
+            generation=generation,
+            parent_id=base.policy_id,
+            specialized_team=Team.VILLAGE,
+        )
