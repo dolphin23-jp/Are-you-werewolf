@@ -7,6 +7,7 @@ Village, one Werewolf, and one Fox. Payoffs come only from completed games.
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -61,6 +62,41 @@ class ProfilePayoff:
         if team is Team.FOX:
             return self.fox_wins
         raise ValueError(f"unsupported team {team}")
+
+    def posterior_payoff_mean(self, team: Team, *, prior: float = 0.5) -> float:
+        """Dirichlet-smoothed posterior mean of the terminal reward expectation."""
+        win, _draw, loss, total = self._posterior_counts(team, prior=prior)
+        return (win - loss) / total
+
+    def posterior_payoff_std(self, team: Team, *, prior: float = 0.5) -> float:
+        """Posterior uncertainty of E[terminal reward] under a symmetric prior.
+
+        Outcomes are treated as win/draw/loss with rewards +1/0/-1 and a
+        symmetric Dirichlet prior. This is a sampling diagnostic only; it is not
+        a strategic reward or policy input.
+        """
+        win, _draw, loss, total = self._posterior_counts(team, prior=prior)
+        numerator = total * (win + loss) - (win - loss) ** 2
+        denominator = total * total * (total + 1.0)
+        return math.sqrt(max(0.0, numerator / denominator))
+
+    def max_posterior_payoff_std(self, *, prior: float = 0.5) -> float:
+        return max(self.posterior_payoff_std(team, prior=prior) for team in Team)
+
+    def _posterior_counts(
+        self,
+        team: Team,
+        *,
+        prior: float,
+    ) -> tuple[float, float, float, float]:
+        if prior <= 0 or not math.isfinite(prior):
+            raise ValueError("prior must be finite and positive")
+        wins = self.wins(team)
+        losses = self.games - wins - self.draws
+        win = wins + prior
+        draw = self.draws + prior
+        loss = losses + prior
+        return win, draw, loss, win + draw + loss
 
     @property
     def mean_days(self) -> float:
