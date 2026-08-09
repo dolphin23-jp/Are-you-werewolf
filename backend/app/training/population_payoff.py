@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import math
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -105,6 +106,24 @@ class ProfilePayoff:
         return self.total_days / self.games
 
 
+@dataclass(frozen=True)
+class PopulationPayoffResult:
+    """One completed empirical profile outcome awaiting table aggregation."""
+
+    profile: PolicyProfile
+    winner: Team | None
+    is_draw: bool
+    days: int
+
+    def validate(self) -> None:
+        if self.days < 0:
+            raise ValueError("days cannot be negative")
+        if self.is_draw and self.winner is not None:
+            raise ValueError("a draw cannot also have a winner")
+        if not self.is_draw and self.winner is None:
+            raise ValueError("a non-draw result requires a winner")
+
+
 class PopulationPayoffTable:
     """JSON-backed aggregate results for empirical normal-form profiles."""
 
@@ -127,29 +146,60 @@ class PopulationPayoffTable:
         is_draw: bool,
         days: int,
     ) -> ProfilePayoff:
-        if days < 0:
-            raise ValueError("days cannot be negative")
-        if is_draw and winner is not None:
-            raise ValueError("a draw cannot also have a winner")
-        if not is_draw and winner is None:
-            raise ValueError("a non-draw result requires a winner")
+        """Record one terminal outcome and persist it atomically."""
 
-        current = self._records.get(
-            profile,
-            ProfilePayoff(profile, 0, 0, 0, 0, 0, 0),
-        )
-        updated = ProfilePayoff(
-            profile=profile,
-            games=current.games + 1,
-            village_wins=current.village_wins + int(winner is Team.VILLAGE),
-            werewolf_wins=current.werewolf_wins + int(winner is Team.WEREWOLF),
-            fox_wins=current.fox_wins + int(winner is Team.FOX),
-            draws=current.draws + int(is_draw),
-            total_days=current.total_days + days,
-        )
-        self._records[profile] = updated
+        return self.record_results(
+            (
+                PopulationPayoffResult(
+                    profile=profile,
+                    winner=winner,
+                    is_draw=is_draw,
+                    days=days,
+                ),
+            )
+        )[0]
+
+    def record_results(
+        self,
+        results: Iterable[PopulationPayoffResult],
+    ) -> tuple[ProfilePayoff, ...]:
+        """Aggregate completed outcomes and rewrite the table once.
+
+        Every item is validated before mutating the in-memory table, so a bad
+        result cannot leave a partially applied batch. The returned records are
+        aligned one-to-one with the supplied outcomes and reflect cumulative
+        state after each outcome in the batch.
+        """
+
+        batch = tuple(results)
+        if not batch:
+            raise ValueError("payoff result batch cannot be empty")
+        for result in batch:
+            result.validate()
+
+        updated_records: list[ProfilePayoff] = []
+        for result in batch:
+            current = self._records.get(
+                result.profile,
+                ProfilePayoff(result.profile, 0, 0, 0, 0, 0, 0),
+            )
+            updated = ProfilePayoff(
+                profile=result.profile,
+                games=current.games + 1,
+                village_wins=(
+                    current.village_wins + int(result.winner is Team.VILLAGE)
+                ),
+                werewolf_wins=(
+                    current.werewolf_wins + int(result.winner is Team.WEREWOLF)
+                ),
+                fox_wins=current.fox_wins + int(result.winner is Team.FOX),
+                draws=current.draws + int(result.is_draw),
+                total_days=current.total_days + result.days,
+            )
+            self._records[result.profile] = updated
+            updated_records.append(updated)
         self._write()
-        return updated
+        return tuple(updated_records)
 
     def policies(self, team: Team) -> tuple[str, ...]:
         values = {record.profile.policy_id(team) for record in self._records.values()}
