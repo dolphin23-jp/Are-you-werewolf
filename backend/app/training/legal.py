@@ -4,8 +4,6 @@ This module encodes game rules only. It deliberately does not encode advice
 such as when to CO, who is suspicious, or which role should be protected.
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 
 from app.engine.game import GameController
