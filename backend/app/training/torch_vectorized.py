@@ -9,7 +9,7 @@ inference is shared.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 
 import torch
@@ -422,12 +422,10 @@ class TorchVectorizedEpisodeCollector:
 
 
 def _unique_models(
-    models: object,
+    models: Iterable[TorchTransformerPolicy],
 ) -> tuple[TorchTransformerPolicy, ...]:
     unique: dict[int, TorchTransformerPolicy] = {}
-    for model in models:  # type: ignore[union-attr]
-        if not isinstance(model, TorchTransformerPolicy):
-            raise TypeError("rollout model collection contains a non-Transformer")
+    for model in models:
         unique[id(model)] = model
     return tuple(unique.values())
 
