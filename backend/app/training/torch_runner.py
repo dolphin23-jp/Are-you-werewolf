@@ -1,40 +1,56 @@
-"""Batched full-episode runner for one shared PyTorch Transformer policy.
+"""Batched full-episode runner for shared or faction-specific Transformers.
 
-All seats still own independent samplers/RNG streams. Only neural inference is
-batched: every seat sees exactly the same information-safe observation it would
-receive through :class:`LearnedEpisodeRunner`.
+Every seat still receives its own information-safe observation and owns an
+independent sampler/RNG stream. Neural inference is grouped only between seats
+that use the exact same Transformer instance.
 """
 
 from __future__ import annotations
+
+from collections.abc import Mapping
+from dataclasses import dataclass
 
 import torch
 
 from app.engine.game import PlayerSpec
 from app.engine.phases import Phase
-from app.training.encoding import ObservationEncoder
+from app.engine.roles import Team
+from app.training.encoding import EncodedPolicyObservation, ObservationEncoder
 from app.training.env import WerewolfTrainingEnv
 from app.training.learned_policy import SpeechPolicyStep
 from app.training.learned_runner import LearnedEpisodeResult
-from app.training.legal import legal_action_mask
+from app.training.legal import LegalActionMask, legal_action_mask
+from app.training.observation import PolicyObservation
+from app.training.policy_contract import PolicyLogits
 from app.training.policy_sampling import MaskedPolicySampler, PolicySampleTrace
 from app.training.torch_policy import TorchTransformerPolicy
 from app.training.trajectory import DecisionKind, EpisodeTrajectory, RecordedDecision
 
 
+@dataclass(frozen=True)
+class _PreparedSeat:
+    player_id: str
+    observation: PolicyObservation
+    encoded: EncodedPolicyObservation
+    logits: PolicyLogits
+
+
 class TorchBatchedEpisodeRunner:
-    """Drive all 17 seats while batching shared-model inference by game step."""
+    """Drive all 17 seats while batching inference by shared model instance."""
 
     def __init__(
         self,
         player_specs: list[PlayerSpec],
         model: TorchTransformerPolicy,
         *,
+        team_models: Mapping[Team, TorchTransformerPolicy] | None = None,
         max_loops: int = 200,
         max_discussion_ticks: int = 12,
         temperature: float = 1.0,
     ) -> None:
         self._player_specs = player_specs
         self._model = model
+        self._team_models = dict(team_models or {})
         self._max_loops = max_loops
         self._max_discussion_ticks = max_discussion_ticks
         self._temperature = temperature
@@ -46,6 +62,12 @@ class TorchBatchedEpisodeRunner:
             player_id: player.team
             for player_id, player in env.controller.state.players.items()
         }
+        player_models = {
+            player_id: self._team_models.get(player.team, self._model)
+            for player_id, player in env.controller.state.players.items()
+        }
+        for model in _unique_models(player_models.values()):
+            model.eval()
         samplers = {
             player_id: MaskedPolicySampler(
                 seed=seed * 1000 + index,
@@ -54,7 +76,6 @@ class TorchBatchedEpisodeRunner:
             for index, player_id in enumerate(env.controller.state.players)
         }
         trajectory = EpisodeTrajectory(f"torch-batched-{seed}")
-        self._model.eval()
 
         for _ in range(self._max_loops):
             state = env.controller.state
@@ -72,16 +93,16 @@ class TorchBatchedEpisodeRunner:
                 )
 
             if state.phase is Phase.NIGHT:
-                self._run_night(env, samplers, trajectory)
+                self._run_night(env, player_models, samplers, trajectory)
                 env.controller.resolve_night()
             elif state.phase is Phase.DAWN:
                 env.controller.start_discussion()
                 env.scheduler.reset()
             elif state.phase is Phase.DISCUSSION:
-                self._run_discussion(env, samplers, trajectory)
+                self._run_discussion(env, player_models, samplers, trajectory)
                 env.controller.end_discussion()
             elif state.phase in (Phase.VOTING, Phase.RUNOFF):
-                self._run_voting(env, samplers, trajectory)
+                self._run_voting(env, player_models, samplers, trajectory)
                 env.controller.resolve_votes()
             elif state.phase is Phase.VOTE_RESULT:
                 env.controller.start_night()
@@ -93,20 +114,21 @@ class TorchBatchedEpisodeRunner:
     def _run_discussion(
         self,
         env: WerewolfTrainingEnv,
+        player_models: dict[str, TorchTransformerPolicy],
         samplers: dict[str, MaskedPolicySampler],
         trajectory: EpisodeTrajectory,
     ) -> None:
         for _ in range(self._max_discussion_ticks):
             player_ids = tuple(env.controller.state.alive_ids())
-            observations = tuple(env.observe(player_id) for player_id in player_ids)
-            encoded = tuple(self._encoder.encode(observation) for observation in observations)
-            with torch.no_grad():
-                output = self._model.forward_batch(encoded)
+            prepared = self._prepare(env, player_ids, player_models)
             steps: dict[str, SpeechPolicyStep] = {}
-            for index, player_id in enumerate(player_ids):
-                logits = self._model.policy_logits_at(output, index)
-                sampled = samplers[player_id].sample_speech(observations[index], logits)
-                steps[player_id] = SpeechPolicyStep(encoded[index], sampled)
+            for player_id in player_ids:
+                seat = prepared[player_id]
+                sampled = samplers[player_id].sample_speech(
+                    seat.observation,
+                    seat.logits,
+                )
+                steps[player_id] = SpeechPolicyStep(seat.encoded, sampled)
 
             intents = {
                 player_id: step.sampled.intent for player_id, step in steps.items()
@@ -124,31 +146,32 @@ class TorchBatchedEpisodeRunner:
     def _run_voting(
         self,
         env: WerewolfTrainingEnv,
+        player_models: dict[str, TorchTransformerPolicy],
         samplers: dict[str, MaskedPolicySampler],
         trajectory: EpisodeTrajectory,
     ) -> None:
-        candidates = []
+        masks: dict[str, LegalActionMask] = {}
         for player_id in env.controller.state.alive_ids():
             mask = legal_action_mask(env.controller, player_id)
-            if not mask.vote_target_ids:
-                continue
-            observation = env.observe(player_id)
-            candidates.append(
-                (player_id, observation, self._encoder.encode(observation), mask)
-            )
-        if not candidates:
+            if mask.vote_target_ids:
+                masks[player_id] = mask
+        if not masks:
             return
-        with torch.no_grad():
-            output = self._model.forward_batch(tuple(item[2] for item in candidates))
-        for index, (player_id, observation, encoded, mask) in enumerate(candidates):
-            logits = self._model.policy_logits_at(output, index)
-            sampled = samplers[player_id].sample_vote(observation, mask, logits)
+        player_ids = tuple(masks)
+        prepared = self._prepare(env, player_ids, player_models)
+        for player_id in player_ids:
+            seat = prepared[player_id]
+            sampled = samplers[player_id].sample_vote(
+                seat.observation,
+                masks[player_id],
+                seat.logits,
+            )
             env.vote(player_id, sampled.target_id)
             trajectory.append(
                 RecordedDecision(
                     player_id=player_id,
                     kind=DecisionKind.VOTE,
-                    observation=encoded,
+                    observation=seat.encoded,
                     target_id=sampled.target_id,
                     policy_trace=sampled.trace,
                 )
@@ -157,36 +180,82 @@ class TorchBatchedEpisodeRunner:
     def _run_night(
         self,
         env: WerewolfTrainingEnv,
+        player_models: dict[str, TorchTransformerPolicy],
         samplers: dict[str, MaskedPolicySampler],
         trajectory: EpisodeTrajectory,
     ) -> None:
-        candidates = []
+        masks: dict[str, LegalActionMask] = {}
         for player_id in env.controller.state.alive_ids():
             mask = legal_action_mask(env.controller, player_id)
-            if not mask.night_choices:
-                continue
-            observation = env.observe(player_id)
-            candidates.append(
-                (player_id, observation, self._encoder.encode(observation), mask)
-            )
-        if not candidates:
+            if mask.night_choices:
+                masks[player_id] = mask
+        if not masks:
             return
-        with torch.no_grad():
-            output = self._model.forward_batch(tuple(item[2] for item in candidates))
-        for index, (player_id, observation, encoded, mask) in enumerate(candidates):
-            logits = self._model.policy_logits_at(output, index)
-            sampled = samplers[player_id].sample_night_action(observation, mask, logits)
+        player_ids = tuple(masks)
+        prepared = self._prepare(env, player_ids, player_models)
+        for player_id in player_ids:
+            seat = prepared[player_id]
+            sampled = samplers[player_id].sample_night_action(
+                seat.observation,
+                masks[player_id],
+                seat.logits,
+            )
             env.night_action(player_id, sampled.topic, sampled.target_id)
             trajectory.append(
                 RecordedDecision(
                     player_id=player_id,
                     kind=DecisionKind.NIGHT,
-                    observation=encoded,
+                    observation=seat.encoded,
                     target_id=sampled.target_id,
                     night_topic=sampled.topic,
                     policy_trace=sampled.trace,
                 )
             )
+
+    def _prepare(
+        self,
+        env: WerewolfTrainingEnv,
+        player_ids: tuple[str, ...],
+        player_models: dict[str, TorchTransformerPolicy],
+    ) -> dict[str, _PreparedSeat]:
+        source: dict[str, tuple[PolicyObservation, EncodedPolicyObservation]] = {}
+        grouped: dict[int, tuple[TorchTransformerPolicy, list[str]]] = {}
+        for player_id in player_ids:
+            observation = env.observe(player_id)
+            encoded = self._encoder.encode(observation)
+            source[player_id] = (observation, encoded)
+            model = player_models[player_id]
+            key = id(model)
+            existing = grouped.get(key)
+            if existing is None:
+                grouped[key] = (model, [player_id])
+            else:
+                existing[1].append(player_id)
+
+        prepared: dict[str, _PreparedSeat] = {}
+        with torch.no_grad():
+            for model, group_ids in grouped.values():
+                output = model.forward_batch(
+                    tuple(source[player_id][1] for player_id in group_ids)
+                )
+                for index, player_id in enumerate(group_ids):
+                    observation, encoded = source[player_id]
+                    prepared[player_id] = _PreparedSeat(
+                        player_id=player_id,
+                        observation=observation,
+                        encoded=encoded,
+                        logits=model.policy_logits_at(output, index),
+                    )
+        return prepared
+
+
+def _unique_models(
+    models: object,
+) -> tuple[TorchTransformerPolicy, ...]:
+    unique: dict[int, TorchTransformerPolicy] = {}
+    for model in models:  # type: ignore[union-attr]
+        unique[id(model)] = model
+    return tuple(unique.values())
 
 
 def _record_discussion_cycle(
