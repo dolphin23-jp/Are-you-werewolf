@@ -88,36 +88,49 @@ class WerewolfTrainingEnv:
     ) -> ScheduledSpeaker | None:
         return self.scheduler.select_next(intents)
 
-    def emit_speech(self, actor_id: str, bundle: SpeechBundle) -> tuple[TimedSemanticEvent, ...]:
+    def emit_speech(
+        self, actor_id: str, bundle: SpeechBundle
+    ) -> tuple[TimedSemanticEvent, ...]:
         """Commit one public turn; callers must replan everyone afterwards."""
         state = self.controller.state
         if state.phase is not Phase.DISCUSSION:
             raise GameError(f"cannot speak during phase {state.phase}")
-        player = state.players.get(actor_id)
-        if player is None or not player.alive:
-            raise GameError(f"player {actor_id} is not alive")
+        self._require_alive(actor_id)
         if any(atom.channel is not Channel.PUBLIC for atom in bundle.atoms):
             raise GameError("public discussion bundles may only contain public atoms")
 
-        tick = self.scheduler.discussion_tick
-        committed: list[TimedSemanticEvent] = []
-        for atom in bundle.atoms:
-            event_id = f"t{self._next_semantic_event_number}"
-            self._apply_public_board_effect(actor_id, atom, source_event_id=event_id)
-            event = TimedSemanticEvent(
-                event_id=event_id,
-                actor_id=actor_id,
-                day=state.day,
-                discussion_tick=tick,
-                action=atom,
-            )
-            self.semantic_events.append(event)
-            committed.append(event)
-            self._next_semantic_event_number += 1
-
-        # A three-atom bundle is one chat turn, so logical time advances once.
+        committed = self._commit_bundle(
+            actor_id,
+            bundle,
+            logical_tick=self.scheduler.discussion_tick,
+            mirror_public_board=True,
+        )
         self.scheduler.record_emitted_event()
-        return tuple(committed)
+        return committed
+
+    def emit_private_speech(
+        self, actor_id: str, bundle: SpeechBundle
+    ) -> tuple[TimedSemanticEvent, ...]:
+        """Commit a night-only wolf/freemason semantic message."""
+        state = self.controller.state
+        if state.phase is not Phase.NIGHT:
+            raise GameError("private planning is only available at night")
+        player = self._require_alive(actor_id)
+        channels = {atom.channel for atom in bundle.atoms}
+        if len(channels) != 1 or Channel.PUBLIC in channels:
+            raise GameError("a private bundle must use one private channel")
+        channel = next(iter(channels))
+        if channel is Channel.WOLF and player.role is not RoleName.WEREWOLF:
+            raise GameError("only werewolves may use the wolf semantic channel")
+        if channel is Channel.FREEMASON and player.role is not RoleName.FREEMASON:
+            raise GameError("only freemasons may use the freemason semantic channel")
+
+        return self._commit_bundle(
+            actor_id,
+            bundle,
+            logical_tick=-1,
+            mirror_public_board=False,
+        )
 
     def vote(self, voter_id: str, target_id: str) -> None:
         """Votes remain hidden in GameState.pending_votes until resolution."""
@@ -148,15 +161,42 @@ class WerewolfTrainingEnv:
             for player_id, player in state.players.items()
         }
 
+    def _require_alive(self, player_id: str):
+        player = self.controller.state.players.get(player_id)
+        if player is None or not player.alive:
+            raise GameError(f"player {player_id} is not alive")
+        return player
+
+    def _commit_bundle(
+        self,
+        actor_id: str,
+        bundle: SpeechBundle,
+        *,
+        logical_tick: int,
+        mirror_public_board: bool,
+    ) -> tuple[TimedSemanticEvent, ...]:
+        state = self.controller.state
+        committed: list[TimedSemanticEvent] = []
+        for atom in bundle.atoms:
+            event_id = f"t{self._next_semantic_event_number}"
+            if mirror_public_board:
+                self._apply_public_board_effect(actor_id, atom, source_event_id=event_id)
+            event = TimedSemanticEvent(
+                event_id=event_id,
+                actor_id=actor_id,
+                day=state.day,
+                discussion_tick=logical_tick,
+                action=atom,
+            )
+            self.semantic_events.append(event)
+            committed.append(event)
+            self._next_semantic_event_number += 1
+        return tuple(committed)
+
     def _apply_public_board_effect(
         self, actor_id: str, action: SemanticAction, *, source_event_id: str
     ) -> None:
-        """Mirror only board-defining semantics into the production event log.
-
-        Suspicion, proposals, questions and reactions remain in the richer
-        training semantic log. CO/result/partner claims also update the
-        production compatibility views so the existing UI/engine can coexist.
-        """
+        """Mirror only board-defining semantics into the production event log."""
         if action.action_type is ActionType.CLAIM:
             if action.topic is Topic.PARTNER and action.target_id is not None:
                 self.controller.claim_freemason_partner(
