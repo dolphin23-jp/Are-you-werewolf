@@ -300,12 +300,10 @@ class TorchVectorizedEpisodeCollector:
             output = self._model.forward_batch(
                 tuple(request.encoded for request in requests)
             )
+        logits_batch = self._model.policy_logits_batch(output)
         return tuple(
-            _PreparedRequest(
-                request=request,
-                logits=self._model.policy_logits_at(output, index),
-            )
-            for index, request in enumerate(requests)
+            _PreparedRequest(request=request, logits=logits)
+            for request, logits in zip(requests, logits_batch, strict=True)
         )
 
 
