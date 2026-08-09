@@ -32,6 +32,11 @@ class TorchOracleRunProgress:
     next_pool_generation: int
     active_parent_policy_id: str | None
     completed_policy_ids: tuple[str, ...] = ()
+    active_wins: int = 0
+    active_losses: int = 0
+    active_draws: int = 0
+    active_days_sum: float = 0.0
+    active_decisions_sum: float = 0.0
 
     def __post_init__(self) -> None:
         if not self.teams:
@@ -50,6 +55,12 @@ class TorchOracleRunProgress:
             raise ValueError("next_pool_generation cannot be negative")
         if len(self.completed_policy_ids) != self.team_index:
             raise ValueError("completed policy count must equal team_index")
+        if min(self.active_wins, self.active_losses, self.active_draws) < 0:
+            raise ValueError("oracle outcome counts cannot be negative")
+        if self.active_days_sum < 0 or self.active_decisions_sum < 0:
+            raise ValueError("oracle monitoring sums cannot be negative")
+        if self.active_wins + self.active_losses + self.active_draws != self.completed_episodes:
+            raise ValueError("oracle outcome counts must equal completed_episodes")
         if self.is_complete:
             if self.completed_episodes != 0:
                 raise ValueError("completed cycle cannot retain active episodes")
@@ -92,6 +103,18 @@ class TorchOracleRunProgress:
         return (
             self.completed_episodes + self.oracle_batch_size - 1
         ) // self.oracle_batch_size
+
+    @property
+    def mean_days(self) -> float:
+        if self.completed_episodes == 0:
+            return 0.0
+        return self.active_days_sum / self.completed_episodes
+
+    @property
+    def mean_decisions(self) -> float:
+        if self.completed_episodes == 0:
+            return 0.0
+        return self.active_decisions_sum / self.completed_episodes
 
 
 def start_torch_oracle_cycle(
@@ -166,6 +189,13 @@ def train_torch_oracle_subbatch(
     return stats, replace(
         progress,
         completed_episodes=progress.completed_episodes + episodes,
+        active_wins=progress.active_wins + stats.wins,
+        active_losses=progress.active_losses + stats.losses,
+        active_draws=progress.active_draws + stats.draws,
+        active_days_sum=progress.active_days_sum + stats.mean_days * stats.episodes,
+        active_decisions_sum=(
+            progress.active_decisions_sum + stats.mean_decisions * stats.episodes
+        ),
     )
 
 
@@ -201,6 +231,13 @@ def finalize_torch_oracle(
     )
     completed_ids = (*progress.completed_policy_ids, entry.policy_id)
     next_index = progress.team_index + 1
+    reset_metrics = {
+        "active_wins": 0,
+        "active_losses": 0,
+        "active_draws": 0,
+        "active_days_sum": 0.0,
+        "active_decisions_sum": 0.0,
+    }
     if next_index == len(progress.teams):
         return (
             None,
@@ -211,6 +248,7 @@ def finalize_torch_oracle(
                 next_pool_generation=progress.next_pool_generation + 1,
                 active_parent_policy_id=None,
                 completed_policy_ids=completed_ids,
+                **reset_metrics,
             ),
             entry,
         )
@@ -239,6 +277,7 @@ def finalize_torch_oracle(
             next_pool_generation=progress.next_pool_generation + 1,
             active_parent_policy_id=next_parent,
             completed_policy_ids=completed_ids,
+            **reset_metrics,
         ),
         entry,
     )
