@@ -7,7 +7,6 @@ from app.engine.roles import RoleName
 from app.training.encoding import ObservationEncoder
 from app.training.env import WerewolfTrainingEnv
 
-
 torch = pytest.importorskip("torch")
 torch_policy = pytest.importorskip("app.training.torch_policy")
 TorchTransformerPolicy = torch_policy.TorchTransformerPolicy
@@ -48,13 +47,16 @@ def test_transformer_matches_framework_agnostic_policy_contract():
     assert len(logits.vote_target) == 17
     assert len(logits.night_target) == 17
     assert len(logits.reference_event) == 128
-    assert all(torch.isfinite(torch.tensor(values)).all() for values in (
-        logits.timing,
-        logits.action_type,
-        logits.topic,
-        logits.target,
-        logits.reference_event,
-    ))
+    assert all(
+        torch.isfinite(torch.tensor(values)).all()
+        for values in (
+            logits.timing,
+            logits.action_type,
+            logits.topic,
+            logits.target,
+            logits.reference_event,
+        )
+    )
 
 
 def test_transformer_batch_forward_is_differentiable():
