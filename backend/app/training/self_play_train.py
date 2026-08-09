@@ -30,6 +30,7 @@ class NumpySelfPlayTrainingLoop:
         self,
         player_specs: list[PlayerSpec],
         *,
+        model: NumpyMLPPolicy | None = None,
         hidden_size: int = 64,
         model_seed: int = 0,
         ppo_config: PPOConfig | None = None,
@@ -37,7 +38,7 @@ class NumpySelfPlayTrainingLoop:
         temperature: float = 1.0,
     ) -> None:
         self.player_specs = player_specs
-        self.model = NumpyMLPPolicy(hidden_size=hidden_size, seed=model_seed)
+        self.model = model or NumpyMLPPolicy(hidden_size=hidden_size, seed=model_seed)
         self.optimizer = NumpyPPOTrainer(self.model, ppo_config)
         self.max_discussion_ticks = max_discussion_ticks
         self.temperature = temperature
