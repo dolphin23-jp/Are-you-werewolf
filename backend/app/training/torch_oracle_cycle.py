@@ -231,13 +231,6 @@ def finalize_torch_oracle(
     )
     completed_ids = (*progress.completed_policy_ids, entry.policy_id)
     next_index = progress.team_index + 1
-    reset_metrics = {
-        "active_wins": 0,
-        "active_losses": 0,
-        "active_draws": 0,
-        "active_days_sum": 0.0,
-        "active_decisions_sum": 0.0,
-    }
     if next_index == len(progress.teams):
         return (
             None,
@@ -248,7 +241,11 @@ def finalize_torch_oracle(
                 next_pool_generation=progress.next_pool_generation + 1,
                 active_parent_policy_id=None,
                 completed_policy_ids=completed_ids,
-                **reset_metrics,
+                active_wins=0,
+                active_losses=0,
+                active_draws=0,
+                active_days_sum=0.0,
+                active_decisions_sum=0.0,
             ),
             entry,
         )
@@ -277,7 +274,11 @@ def finalize_torch_oracle(
             next_pool_generation=progress.next_pool_generation + 1,
             active_parent_policy_id=next_parent,
             completed_policy_ids=completed_ids,
-            **reset_metrics,
+            active_wins=0,
+            active_losses=0,
+            active_draws=0,
+            active_days_sum=0.0,
+            active_decisions_sum=0.0,
         ),
         entry,
     )
