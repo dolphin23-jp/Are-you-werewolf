@@ -38,6 +38,7 @@ class TorchRunProgress:
     base_seed: int
     parent_policy_id: str | None = None
     next_pool_generation: int | None = None
+    batch_size: int | None = None
 
     def __post_init__(self) -> None:
         if self.completed_episodes < 0:
@@ -46,6 +47,8 @@ class TorchRunProgress:
             raise ValueError("batch_number cannot be negative")
         if self.next_pool_generation is not None and self.next_pool_generation < 0:
             raise ValueError("next_pool_generation cannot be negative")
+        if self.batch_size is not None and self.batch_size <= 0:
+            raise ValueError("batch_size must be positive when present")
 
 
 def save_torch_run_state(
@@ -205,16 +208,20 @@ def _progress(metadata: dict[str, Any]) -> TorchRunProgress:
     raw = _mapping(metadata, "progress")
     parent = raw.get("parent_policy_id")
     next_generation = raw.get("next_pool_generation")
+    batch_size = raw.get("batch_size")
     if parent is not None and not isinstance(parent, str):
         raise ValueError("run-state parent_policy_id is invalid")
     if next_generation is not None and not isinstance(next_generation, int):
         raise ValueError("run-state next_pool_generation is invalid")
+    if batch_size is not None and (not isinstance(batch_size, int) or batch_size <= 0):
+        raise ValueError("run-state batch_size must be a positive integer or null")
     return TorchRunProgress(
         completed_episodes=_required_int(raw, "completed_episodes"),
         batch_number=_required_int(raw, "batch_number"),
         base_seed=_required_int(raw, "base_seed"),
         parent_policy_id=parent,
         next_pool_generation=next_generation,
+        batch_size=batch_size,
     )
 
 
