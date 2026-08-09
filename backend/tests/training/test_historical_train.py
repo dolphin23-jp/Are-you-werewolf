@@ -39,7 +39,7 @@ def test_historical_self_play_trains_only_selected_faction(tmp_path: Path):
     )
 
     stats = loop.train_batch(
-        learner_team=Team.FOX,
+        learner_team=Team.VILLAGE,
         start_seed=204,
         episodes=1,
     )
