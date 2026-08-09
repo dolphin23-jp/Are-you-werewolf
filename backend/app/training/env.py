@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 
-from app.engine.game import GameController, GameError, PlayerSpec
+from app.engine.game import GameController, GameError, NightActionType, PlayerSpec
 from app.engine.phases import Phase
 from app.engine.roles import RoleName
 from app.training.actions import (
@@ -125,11 +125,12 @@ class WerewolfTrainingEnv:
 
     def night_action(self, player_id: str, topic: Topic, target_id: str) -> None:
         """Night submissions remain hidden until the production resolver runs."""
-        action_type = {
+        action_types: dict[Topic, NightActionType] = {
             Topic.DIVINE: "divine",
             Topic.GUARD: "guard",
             Topic.ATTACK: "attack",
-        }.get(topic)
+        }
+        action_type = action_types.get(topic)
         if action_type is None:
             raise GameError(f"{topic} is not a night execution action")
         self.controller.submit_night_action(player_id, action_type, target_id)
