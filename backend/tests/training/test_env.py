@@ -53,6 +53,33 @@ def test_emit_speech_advances_one_tick_and_updates_existing_claim_view():
     )
 
 
+def test_semantic_retract_of_role_claim_updates_production_claim_view():
+    env = _env()
+    _enter_day_one_discussion(env)
+    claim = env.emit_speech(
+        "p0",
+        SpeechBundle(
+            (SemanticAction(ActionType.CLAIM, topic=Topic.ROLE, role=RoleName.SEER),)
+        ),
+    )[0]
+
+    assert next(player for player in env.observe("p0").players if player.player_id == "p0").current_claim is RoleName.SEER
+
+    env.emit_speech(
+        "p0",
+        SpeechBundle(
+            (
+                SemanticAction(
+                    ActionType.RETRACT,
+                    reference_event_id=claim.event_id,
+                ),
+            )
+        ),
+    )
+
+    assert next(player for player in env.observe("p0").players if player.player_id == "p0").current_claim is None
+
+
 def test_new_public_event_can_change_next_speaker_plan():
     env = _env()
     _enter_day_one_discussion(env)
