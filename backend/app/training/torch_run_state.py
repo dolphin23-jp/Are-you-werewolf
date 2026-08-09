@@ -69,6 +69,7 @@ def save_torch_run_state(
         "runtime": {
             "max_discussion_ticks": loop.max_discussion_ticks,
             "max_parallel_games": loop.max_parallel_games,
+            "max_inference_batch_size": loop.max_inference_batch_size,
             "temperature": loop.temperature,
         },
         "progress": asdict(progress),
@@ -121,6 +122,10 @@ def load_torch_run_state(
         runtime = _mapping(metadata, "runtime")
         max_discussion_ticks = _required_int(runtime, "max_discussion_ticks")
         max_parallel_games = _required_int(runtime, "max_parallel_games")
+        max_inference_batch_size = _optional_positive_int(
+            runtime,
+            "max_inference_batch_size",
+        )
         temperature = _required_float(runtime, "temperature")
         loop = TorchSelfPlayTrainingLoop(
             player_specs,
@@ -128,6 +133,7 @@ def load_torch_run_state(
             ppo_config=ppo_config,
             max_discussion_ticks=max_discussion_ticks,
             max_parallel_games=max_parallel_games,
+            max_inference_batch_size=max_inference_batch_size,
             temperature=temperature,
         )
 
@@ -240,6 +246,15 @@ def _required_int(mapping: dict[str, Any], key: str) -> int:
     value = mapping.get(key)
     if not isinstance(value, int):
         raise ValueError(f"run-state {key} must be an integer")
+    return value
+
+
+def _optional_positive_int(mapping: dict[str, Any], key: str) -> int | None:
+    value = mapping.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, int) or value <= 0:
+        raise ValueError(f"run-state {key} must be a positive integer or null")
     return value
 
 
