@@ -8,12 +8,18 @@ engine to a learning library.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 
 from app.engine.roles import RoleName
 from app.training.actions import ActionType, Channel, ResultValue, Scope, Stance, Topic
-from app.training.observation import PolicyObservation, SemanticEventObservation
+from app.training.observation import (
+    PolicyObservation,
+    PrivateResultObservation,
+    PrivateTargetObservation,
+    SemanticEventObservation,
+)
 
 MAX_SEATS = 17
 MAX_SEMANTIC_EVENTS = 128
@@ -123,18 +129,18 @@ class ObservationEncoder:
         )
 
 
-def _target_counts(records: tuple[object, ...]) -> dict[str, int]:
+def _target_counts(records: tuple[PrivateTargetObservation, ...]) -> dict[str, int]:
     counts: dict[str, int] = {}
     for record in records:
-        target_id = getattr(record, "target_id")
+        target_id = record.target_id
         counts[target_id] = counts.get(target_id, 0) + 1
     return counts
 
 
-def _private_result_code(result: object | None) -> int:
+def _private_result_code(result: PrivateResultObservation | None) -> int:
     if result is None:
         return 0
-    return 2 if bool(getattr(result, "is_werewolf")) else 1
+    return 2 if result.is_werewolf else 1
 
 
 def _encode_semantics(
@@ -195,15 +201,16 @@ def _encode_dawns(
 
 
 def _pad(
-    tokens: list[tuple[int, ...]],
+    tokens: Sequence[tuple[int, ...]],
     length: int,
     *,
     width: int,
 ) -> tuple[tuple[tuple[int, ...], ...], tuple[int, ...]]:
-    if any(len(token) != width for token in tokens):
+    padded = list(tokens)
+    if any(len(token) != width for token in padded):
         raise ValueError("encoded token width mismatch")
-    mask = [1] * len(tokens)
-    while len(tokens) < length:
-        tokens.append((0,) * width)
+    mask = [1] * len(padded)
+    while len(padded) < length:
+        padded.append((0,) * width)
         mask.append(0)
-    return tuple(tokens), tuple(mask)
+    return tuple(padded), tuple(mask)
