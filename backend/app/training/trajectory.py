@@ -16,6 +16,7 @@ from app.training.policy_sampling import PolicySampleTrace
 
 
 class DecisionKind(StrEnum):
+    TIMING = "timing"
     SPEECH = "speech"
     VOTE = "vote"
     NIGHT = "night"
@@ -33,7 +34,14 @@ class RecordedDecision:
     reward: float = 0.0
 
     def __post_init__(self) -> None:
-        if self.kind is DecisionKind.SPEECH:
+        if self.kind is DecisionKind.TIMING:
+            if (
+                self.speech_bundle is not None
+                or self.target_id is not None
+                or self.night_topic is not None
+            ):
+                raise ValueError("timing decision cannot carry an executed action")
+        elif self.kind is DecisionKind.SPEECH:
             if (
                 self.speech_bundle is None
                 or self.target_id is not None
