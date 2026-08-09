@@ -21,7 +21,7 @@ jobs:
       # merges; the job still fails, but now the report says what else is broken.
       - name: Install dependencies
         id: install
-        run: pip install -e ".[dev]"
+        run: pip install -e ".[dev,rl]"
       - name: Lint (ruff)
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: ruff check app tests scripts
