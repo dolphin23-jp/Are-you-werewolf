@@ -16,6 +16,15 @@ def _encoded_observation():
     return ObservationEncoder().encode(env.observe("p0"))
 
 
+def _vote_decision(player_id: str, target_id: str) -> RecordedDecision:
+    return RecordedDecision(
+        player_id=player_id,
+        kind=DecisionKind.VOTE,
+        observation=_encoded_observation(),
+        target_id=target_id,
+    )
+
+
 def test_finalize_attaches_only_terminal_team_reward():
     trajectory = EpisodeTrajectory("episode-1")
     trajectory.append(
@@ -34,6 +43,20 @@ def test_finalize_attaches_only_terminal_team_reward():
     assert trajectory.finalized is True
     assert trajectory.decisions[0].reward == 1.0
     assert trajectory.terminal_rewards["p1"] == -1.0
+
+
+def test_finalized_trajectory_can_filter_to_currently_controlled_seats():
+    trajectory = EpisodeTrajectory("episode-2")
+    trajectory.append(_vote_decision("p0", "p2"))
+    trajectory.append(_vote_decision("p1", "p2"))
+    trajectory.finalize({"p0": 1.0, "p1": -1.0})
+
+    filtered = trajectory.for_players({"p0"})
+
+    assert filtered.finalized is True
+    assert [decision.player_id for decision in filtered.decisions] == ["p0"]
+    assert filtered.decisions[0].reward == 1.0
+    assert filtered.terminal_rewards == {"p0": 1.0}
 
 
 def test_invalid_mixed_decision_payload_is_rejected():
