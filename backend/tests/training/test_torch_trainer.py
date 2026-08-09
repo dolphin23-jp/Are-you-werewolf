@@ -6,7 +6,7 @@ from app.training.actions import ActionType
 from app.training.encoding import ObservationEncoder
 from app.training.env import WerewolfTrainingEnv
 from app.training.legal import LegalActionMask
-from app.training.policy_sampling import MaskedPolicySampler
+from app.training.policy_sampling import HeadChoice, MaskedPolicySampler, PolicySampleTrace
 from app.training.trajectory import DecisionKind, EpisodeTrajectory, RecordedDecision
 
 torch = pytest.importorskip("torch")
@@ -16,6 +16,8 @@ TorchTransformerPolicy = torch_policy.TorchTransformerPolicy
 TransformerPolicyConfig = torch_policy.TransformerPolicyConfig
 TorchPPOConfig = torch_trainer.TorchPPOConfig
 TorchPPOTrainer = torch_trainer.TorchPPOTrainer
+_trace_log_prob = torch_trainer._trace_log_prob
+_trace_log_probs = torch_trainer._trace_log_probs
 
 
 def _env() -> WerewolfTrainingEnv:
@@ -70,6 +72,57 @@ def _vote_trajectory(model, *, reward: float, episode_id: str) -> EpisodeTraject
     )
     trajectory.finalize({"p0": reward})
     return trajectory
+
+
+def test_vectorized_trace_log_probs_match_scalar_reference_for_mixed_heads():
+    torch.manual_seed(499)
+    model = _model().train()
+    encoded = ObservationEncoder().encode(_env().observe("p0"))
+    output = model.forward_batch((encoded, encoded, encoded))
+    traces = [
+        PolicySampleTrace(
+            (
+                HeadChoice("timing", 1, (0, 1, 2, 3, 4), 0.0),
+                HeadChoice("action_type", 2, (0, 2, 4), 0.0),
+                HeadChoice("target", 3, (1, 3, 5), 0.0),
+            ),
+            0.0,
+        ),
+        PolicySampleTrace(
+            (HeadChoice("vote_target", 2, (1, 2, 3), 0.0),),
+            0.0,
+        ),
+        PolicySampleTrace(
+            (
+                HeadChoice("night_topic", 1, (0, 1, 2), 0.0),
+                HeadChoice("night_target", 4, (4, 6, 8), 0.0),
+            ),
+            0.0,
+        ),
+    ]
+
+    vectorized = _trace_log_probs(output, traces)
+    scalar = torch.stack(
+        [_trace_log_prob(output, index, trace) for index, trace in enumerate(traces)]
+    )
+
+    assert vectorized.shape == (3,)
+    assert torch.allclose(vectorized, scalar, atol=1e-6, rtol=1e-6)
+
+
+def test_vectorized_trace_log_prob_matches_rollout_probability():
+    torch.manual_seed(501)
+    model = _model().eval()
+    trajectory = _vote_trajectory(model, reward=1.0, episode_id="on-policy")
+    decision = trajectory.decisions[0]
+    trace = decision.policy_trace
+    assert trace is not None
+
+    model.train()
+    output = model.forward_batch((decision.observation,))
+    current = _trace_log_probs(output, [trace])[0]
+
+    assert float(current.detach().cpu()) == pytest.approx(trace.log_prob, abs=1e-6)
 
 
 def test_torch_ppo_changes_transformer_parameters_from_terminal_reward():

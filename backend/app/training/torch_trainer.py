@@ -16,7 +16,7 @@ from torch import Tensor
 from torch.nn.utils import clip_grad_norm_
 
 from app.training.numpy_trainer import PPOUpdateStats
-from app.training.policy_sampling import PolicySampleTrace
+from app.training.policy_sampling import HeadChoice, PolicySampleTrace
 from app.training.torch_policy import TorchPolicyTensorOutput, TorchTransformerPolicy
 from app.training.trajectory import EpisodeTrajectory, RecordedDecision
 
@@ -145,12 +145,7 @@ class TorchPPOTrainer:
             raise RuntimeError("Torch PPO minibatch contains a decision without a trace")
         typed_traces = [trace for trace in traces if trace is not None]
 
-        current_log_probs = torch.stack(
-            [
-                _trace_log_prob(output, batch_index, trace)
-                for batch_index, trace in enumerate(typed_traces)
-            ]
-        )
+        current_log_probs = _trace_log_probs(output, typed_traces)
         device = output.value.device
         old_log_probs = torch.tensor(
             [trace.log_prob for trace in typed_traces],
@@ -297,11 +292,77 @@ def _player_gae_targets(
     return tuple(reversed(reversed_targets))
 
 
+def _trace_log_probs(
+    output: TorchPolicyTensorOutput,
+    traces: list[PolicySampleTrace],
+) -> Tensor:
+    """Compute factorized masked log-probs in head-sized vectorized groups.
+
+    Rollout traces can contain different heads because timing-only, speech, vote,
+    and night decisions factorize differently. Grouping every sampled choice by
+    head replaces one tiny device operation per choice with at most one masked
+    log-softmax per policy head in the minibatch.
+    """
+
+    if not traces:
+        return output.value.new_empty((0,))
+
+    grouped: dict[str, list[tuple[int, HeadChoice]]] = {}
+    for batch_index, trace in enumerate(traces):
+        if not trace.choices:
+            raise ValueError("policy trace has no sampled heads")
+        for choice in trace.choices:
+            if not choice.valid_indices:
+                raise ValueError(f"{choice.head} trace has no legal indices")
+            if choice.index not in choice.valid_indices:
+                raise ValueError(f"{choice.head} selected index is not legal")
+            grouped.setdefault(choice.head, []).append((batch_index, choice))
+
+    total = output.value.new_zeros((len(traces),))
+    for head, entries in grouped.items():
+        head_logits = output.head(head)
+        if head_logits.ndim != 2 or head_logits.shape[0] != len(traces):
+            raise ValueError(f"{head} output shape does not match PPO minibatch")
+        width = head_logits.shape[1]
+
+        legal_rows: list[list[bool]] = []
+        batch_indices: list[int] = []
+        selected_indices: list[int] = []
+        for batch_index, choice in entries:
+            if any(index < 0 or index >= width for index in choice.valid_indices):
+                raise ValueError(f"{head} legal index exceeds head width")
+            legal = set(choice.valid_indices)
+            legal_rows.append([index in legal for index in range(width)])
+            batch_indices.append(batch_index)
+            selected_indices.append(choice.index)
+
+        device = head_logits.device
+        rows = head_logits.index_select(
+            0,
+            torch.tensor(batch_indices, dtype=torch.long, device=device),
+        )
+        legal_mask = torch.tensor(legal_rows, dtype=torch.bool, device=device)
+        selected = torch.tensor(selected_indices, dtype=torch.long, device=device)
+        masked_log_probs = torch.log_softmax(
+            rows.masked_fill(~legal_mask, float("-inf")),
+            dim=1,
+        )
+        choice_log_probs = masked_log_probs.gather(1, selected.unsqueeze(1)).squeeze(1)
+        total = total.index_add(
+            0,
+            torch.tensor(batch_indices, dtype=torch.long, device=device),
+            choice_log_probs,
+        )
+    return total
+
+
 def _trace_log_prob(
     output: TorchPolicyTensorOutput,
     batch_index: int,
     trace: PolicySampleTrace,
 ) -> Tensor:
+    """Scalar reference implementation retained for equivalence tests."""
+
     total: Tensor | None = None
     for choice in trace.choices:
         if not choice.valid_indices:
