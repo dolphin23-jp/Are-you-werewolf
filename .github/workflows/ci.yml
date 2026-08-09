@@ -32,6 +32,34 @@ jobs:
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: pytest
 
+  # Keep the heavyweight neural dependency out of the normal backend job.
+  # Installing the CPU wheel explicitly also avoids pulling CUDA packages on
+  # GitHub-hosted runners. Transformer tests are isolated and zero-API-cost.
+  backend-transformer:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install CPU PyTorch and transformer dependencies
+        id: install
+        run: |
+          pip install torch==2.13.0 --index-url https://download.pytorch.org/whl/cpu
+          pip install -e ".[dev,rl,transformer]"
+      - name: Lint transformer code
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: ruff check app/training/torch_*.py tests/training/test_torch_*.py
+      - name: Type check transformer code
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: mypy app/training/torch_*.py
+      - name: Test transformer code
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: pytest tests/training/test_torch_*.py
+
   frontend:
     runs-on: ubuntu-latest
     defaults:
