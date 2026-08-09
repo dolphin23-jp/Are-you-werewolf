@@ -113,6 +113,8 @@ It currently provides:
 - immutable policy generations for historical self-play
 - faction-specialized population entries
 - empirical three-faction payoff tables
+- posterior payoff uncertainty estimates for measurement allocation
+- adaptive empirical-payoff sampling
 - payoff-driven population mixtures
 - restricted-population deviation diagnostics
 - PSRO-style faction-specific oracle expansion
@@ -185,7 +187,8 @@ Only decisions made by the current model's faction are passed to PPO. With
 Historical outputs are tagged with `specialized_team`. A village-specialized
 checkpoint remains eligible for the village population but is not sampled as a
 wolf or fox specialist. General initial self-play checkpoints remain eligible
-for all three populations.
+for all three populations. Legacy manifests without `specialized_team` remain
+readable and those older entries are treated as generalists.
 
 ## Empirical three-faction meta-game
 
@@ -197,20 +200,34 @@ python scripts/measure_population_payoffs.py \
   --pool-dir ./training-runs/pool \
   --table ./training-runs/payoffs.json \
   --last 3 \
-  --games-per-profile 10
+  --games-per-profile 10 \
+  --extra-games 20
 ```
 
 A profile is `(village_policy, werewolf_policy, fox_policy)`. The table stores
 only completed-game terminal outcomes, so the meta-game does not receive shaped
 strategic scores either.
 
-Solve a payoff-driven mixture:
+`--games-per-profile` establishes a minimum sample count for every selected
+profile. `--extra-games` then spends additional evaluation budget one game at a
+time on the profile with the largest posterior payoff uncertainty. The current
+uncertainty estimate uses a symmetric Dirichlet model over win/draw/loss solely
+for measurement allocation; it is never exposed to the acting policy and is not
+a strategic reward.
+
+Solve a payoff-driven mixture using the currently eligible faction populations:
 
 ```bash
 python scripts/solve_population_meta.py \
   --table ./training-runs/payoffs.json \
+  --pool-dir ./training-runs/pool \
+  --last 3 \
   --output ./training-runs/meta.json
 ```
+
+Passing `--pool-dir` prevents stale payoff-table profiles from reintroducing a
+policy that is no longer eligible for that faction. Explicit `--village`,
+`--werewolf`, or `--fox` ID lists can still override the inferred populations.
 
 The current solver is an iterated damped logit-response mixture. It is an
 intermediate empirical meta-strategy, not a Nash/JPSRO guarantee.
@@ -263,6 +280,7 @@ population loop is therefore:
 ```text
 initial self-play
   -> measure faction-profile payoffs
+  -> spend extra games on uncertain profiles
   -> solve empirical meta-strategy
   -> inspect restricted deviation gains
   -> train village/wolf/fox response oracles
@@ -293,7 +311,7 @@ sequence. Self-play uses all AI seats only for speed.
 
 1. Replace the smoke MLP with a player/event Transformer while preserving the same protocol.
 2. Replace the heuristic logit-response meta-solver with a stronger multiplayer PSRO/JPSRO-style solver.
-3. Add confidence intervals / adaptive sampling to the empirical payoff table.
+3. Add confidence-aware stopping criteria and better population/profile pruning as the pool grows.
 4. Add private wolf/freemason planning decisions to learned rollouts.
 5. Add human-text semantic parsing and final natural-language rendering.
 6. Only after the learned path is validated, integrate it as an optional production AI mode.
