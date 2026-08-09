@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from app.engine.game import PlayerSpec
@@ -26,19 +27,21 @@ class LearnedEpisodeResult:
 
 
 class LearnedEpisodeRunner:
-    """Drive all 17 seats through one shared role-conditioned model."""
+    """Drive all seats through one shared model or faction-specific overrides."""
 
     def __init__(
         self,
         player_specs: list[PlayerSpec],
         model: LearnedPolicyModel,
         *,
+        team_models: Mapping[Team, LearnedPolicyModel] | None = None,
         max_loops: int = 200,
         max_discussion_ticks: int = 12,
         temperature: float = 1.0,
     ) -> None:
         self._player_specs = player_specs
         self._model = model
+        self._team_models = dict(team_models or {})
         self._max_loops = max_loops
         self._max_discussion_ticks = max_discussion_ticks
         self._temperature = temperature
@@ -47,11 +50,13 @@ class LearnedEpisodeRunner:
         env = WerewolfTrainingEnv(self._player_specs, seed=seed)
         policies = {
             player_id: LearnedStructuredPolicy(
-                self._model,
+                self._team_models.get(player.team, self._model),
                 seed=seed * 1000 + index,
                 temperature=self._temperature,
             )
-            for index, player_id in enumerate(env.controller.state.players)
+            for index, (player_id, player) in enumerate(
+                env.controller.state.players.items()
+            )
         }
         trajectory = EpisodeTrajectory(f"learned-{seed}")
 
