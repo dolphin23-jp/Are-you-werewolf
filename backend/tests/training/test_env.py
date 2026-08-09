@@ -63,7 +63,10 @@ def test_semantic_retract_of_role_claim_updates_production_claim_view():
         ),
     )[0]
 
-    assert next(player for player in env.observe("p0").players if player.player_id == "p0").current_claim is RoleName.SEER
+    player_before = next(
+        player for player in env.observe("p0").players if player.player_id == "p0"
+    )
+    assert player_before.current_claim is RoleName.SEER
 
     env.emit_speech(
         "p0",
@@ -77,7 +80,10 @@ def test_semantic_retract_of_role_claim_updates_production_claim_view():
         ),
     )
 
-    assert next(player for player in env.observe("p0").players if player.player_id == "p0").current_claim is None
+    player_after = next(
+        player for player in env.observe("p0").players if player.player_id == "p0"
+    )
+    assert player_after.current_claim is None
 
 
 def test_new_public_event_can_change_next_speaker_plan():
