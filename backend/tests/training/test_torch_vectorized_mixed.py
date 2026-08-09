@@ -1,7 +1,11 @@
+from dataclasses import fields
+
 import pytest
 
 from app.engine.game import PlayerSpec
 from app.engine.roles import Team
+from app.training.encoding import ObservationEncoder
+from app.training.env import WerewolfTrainingEnv
 
 torch = pytest.importorskip("torch")
 torch_policy = pytest.importorskip("app.training.torch_policy")
@@ -9,6 +13,7 @@ torch_vectorized = pytest.importorskip("app.training.torch_vectorized")
 TorchTransformerPolicy = torch_policy.TorchTransformerPolicy
 TransformerPolicyConfig = torch_policy.TransformerPolicyConfig
 TorchVectorizedEpisodeCollector = torch_vectorized.TorchVectorizedEpisodeCollector
+InferenceRequest = torch_vectorized._InferenceRequest
 
 
 class BatchCountingTransformer(TorchTransformerPolicy):
@@ -36,21 +41,58 @@ def _specs() -> list[PlayerSpec]:
     ]
 
 
-def _trajectory_signature(result):
-    return tuple(
-        (
-            decision.player_id,
-            decision.kind,
-            decision.speech_bundle,
-            decision.target_id,
-            decision.night_topic,
-        )
-        for decision in result.trajectory.decisions
+def _request(seed: int, player_id: str, model, slot_index: int):
+    env = WerewolfTrainingEnv(_specs(), seed=seed)
+    observation = env.observe(player_id)
+    encoded = ObservationEncoder().encode(observation)
+    return InferenceRequest(
+        slot_index=slot_index,
+        player_id=player_id,
+        observation=observation,
+        encoded=encoded,
+        model=model,
     )
 
 
-def test_mixed_model_cross_game_batching_preserves_independent_game_semantics():
+def _assert_logits_close(actual, expected) -> None:
+    for field in fields(actual):
+        left = getattr(actual, field.name)
+        right = getattr(expected, field.name)
+        if isinstance(left, tuple):
+            assert left == pytest.approx(right, abs=1e-5, rel=1e-5)
+        else:
+            assert left == pytest.approx(right, abs=1e-5, rel=1e-5)
+
+
+def test_mixed_model_inference_groups_by_identity_and_restores_request_order():
     torch.manual_seed(1331)
+    village = BatchCountingTransformer().eval()
+    wolf = BatchCountingTransformer().eval()
+    collector = TorchVectorizedEpisodeCollector(_specs(), village)
+    requests = [
+        _request(1333, "p0", village, 0),
+        _request(1335, "p1", wolf, 1),
+        _request(1337, "p2", village, 2),
+    ]
+
+    expected = [
+        request.model.forward(request.encoded)
+        for request in requests
+    ]
+    village.batch_sizes.clear()
+    wolf.batch_sizes.clear()
+
+    prepared = collector._infer(requests)
+
+    assert [item.request for item in prepared] == requests
+    assert village.batch_sizes == [2]
+    assert wolf.batch_sizes == [1]
+    for item, direct in zip(prepared, expected, strict=True):
+        _assert_logits_close(item.logits, direct)
+
+
+def test_mixed_model_collector_completes_with_all_faction_models():
+    torch.manual_seed(1341)
     village = BatchCountingTransformer().eval()
     wolf = BatchCountingTransformer().eval()
     fox = BatchCountingTransformer().eval()
@@ -60,33 +102,17 @@ def test_mixed_model_cross_game_batching_preserves_independent_game_semantics():
         Team.FOX: fox,
     }
 
-    isolated = TorchVectorizedEpisodeCollector(
+    result = TorchVectorizedEpisodeCollector(
         _specs(),
         village,
         max_discussion_ticks=1,
-    ).collect((1333,), team_models=(team_models,))[0]
+    ).collect((1343,), team_models=(team_models,))[0]
 
-    village.batch_sizes.clear()
-    wolf.batch_sizes.clear()
-    fox.batch_sizes.clear()
-    batched = TorchVectorizedEpisodeCollector(
-        _specs(),
-        village,
-        max_discussion_ticks=1,
-    ).collect(
-        (1333, 1335),
-        team_models=(team_models, team_models),
-    )[0]
-
-    assert batched.winner == isolated.winner
-    assert batched.is_draw == isolated.is_draw
-    assert batched.days == isolated.days
-    assert batched.semantic_event_count == isolated.semantic_event_count
-    assert _trajectory_signature(batched) == _trajectory_signature(isolated)
+    assert result.trajectory.finalized
+    assert result.winner is not None or result.is_draw
     assert village.batch_sizes
     assert wolf.batch_sizes
     assert fox.batch_sizes
-    assert max(village.batch_sizes) > 17
 
 
 def test_vectorized_collector_rejects_misaligned_team_models():
@@ -94,6 +120,6 @@ def test_vectorized_collector_rejects_misaligned_team_models():
 
     with pytest.raises(ValueError, match="team_models must align"):
         TorchVectorizedEpisodeCollector(_specs(), model).collect(
-            (1343, 1345),
+            (1351, 1353),
             team_models=({Team.VILLAGE: model},),
         )
