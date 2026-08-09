@@ -98,7 +98,9 @@ python scripts/run_population_iterations_torch.py \
   --oracle-batch-size 16 \
   --parallel-games 8 \
   --inference-batch-size 64 \
-  --seed 1001 \
+  --evaluation-seed 1101 \
+  --oracle-seed 1201 \
+  --opponent-seed 1301 \
   --device auto
 ```
 
@@ -154,6 +156,9 @@ python scripts/run_population_iterations_torch.py \
   --oracle-batch-size 32 \
   --parallel-games 16 \
   --inference-batch-size 64 \
+  --evaluation-seed 2101 \
+  --oracle-seed 2201 \
+  --opponent-seed 2301 \
   --device auto
 ```
 
