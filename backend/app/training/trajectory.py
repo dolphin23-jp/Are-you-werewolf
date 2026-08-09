@@ -12,6 +12,7 @@ from enum import StrEnum
 
 from app.training.actions import SpeechBundle, Topic
 from app.training.encoding import EncodedPolicyObservation
+from app.training.policy_sampling import PolicySampleTrace
 
 
 class DecisionKind(StrEnum):
@@ -28,6 +29,7 @@ class RecordedDecision:
     speech_bundle: SpeechBundle | None = None
     target_id: str | None = None
     night_topic: Topic | None = None
+    policy_trace: PolicySampleTrace | None = None
     reward: float = 0.0
 
     def __post_init__(self) -> None:
