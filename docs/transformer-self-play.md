@@ -69,6 +69,34 @@ silently corrupt the PPO probability ratio, so the trainer rejects those cases.
 
 The strategic reward remains only the final faction result: `+1 / -1 / 0`.
 
+### Advantage estimation
+
+Torch PPO supports per-seat GAE without adding intermediate rewards. Between a
+seat's own recorded decisions the reward is zero; its faction payoff is attached
+only after its final recorded decision.
+
+The defaults are deliberately backward compatible:
+
+```text
+gamma = 1.0
+gae_lambda = 1.0
+normalize_advantages = false
+```
+
+With those values, GAE telescopes exactly to the previous Monte-Carlo target:
+every value target is the final faction payoff and every advantage is
+`terminal_payoff - rollout_value`.
+
+For experiments, use for example:
+
+```bash
+--gamma 0.99 --gae-lambda 0.95 --normalize-advantages
+```
+
+Changing these parameters changes credit assignment, not the game reward. No
+CO timing, kill, guard, role result, survival, or other strategic event receives
+an authored bonus.
+
 ## Batched rollout
 
 `TorchBatchedEpisodeRunner` always creates each seat's information-safe
@@ -86,9 +114,27 @@ runner and the batched runner and checks that winner, day count, semantic event
 count, and the complete structured action sequence are identical. Batching is
 therefore a neural-compute optimization, not an information-sharing mechanism.
 
-## Safe checkpoints
+### Cross-game vectorized collection
 
-Transformer checkpoints are `.npz` archives containing:
+`TorchVectorizedEpisodeCollector` advances multiple independent games together.
+At each logical phase it concatenates every currently eligible seat observation
+across those games into one Transformer inference batch. The environments never
+share state; only neural inference is shared.
+
+`TorchSelfPlayTrainingLoop` uses this collector directly. `--parallel-games`
+controls how many independent games are collected together before moving to the
+next group.
+
+Rollout output conversion is also batched: each Tensor policy head is transferred
+from the accelerator to the framework-agnostic CPU `PolicyLogits` representation
+once per inference batch instead of once per seat. Scalar and batched adapters
+are regression-tested for exact equality.
+
+## Checkpoints and long-run recovery
+
+### Policy checkpoints
+
+Transformer policy checkpoints are `.npz` archives containing:
 
 - JSON architecture/head metadata encoded as `uint8`
 - raw `state_dict` tensors as arrays
@@ -96,14 +142,81 @@ Transformer checkpoints are `.npz` archives containing:
 Loading uses `numpy.load(..., allow_pickle=False)`. `torch.save` object-pickle
 loading is not required.
 
+### Run-state snapshots
+
+Long self-play runs additionally keep a self-contained run-state NPZ at every
+completed batch boundary. The file stores:
+
+- model tensors
+- Adam optimizer tensors and parameter-group metadata
+- PPO minibatch RNG state
+- PPO configuration
+- logical runtime settings such as discussion ticks and parallel-game count
+- completed episode count and base seed
+- immutable population lineage / next generation when a policy pool is enabled
+
+The archive is written atomically and loaded with `allow_pickle=False`.
+Therefore a crash can resume from the last committed batch without resetting
+Adam moments, changing the minibatch permutation stream, or consuming a new seed
+range.
+
+The default run-state path is derived from `--output`. For example:
+
+```text
+current-transformer.npz
+current-transformer.npz.run.npz
+```
+
+Resume with the same total episode target or a larger one:
+
+```bash
+python scripts/train_self_play_torch.py \
+  --episodes 1000000 \
+  --output ./training-runs/current-transformer.npz \
+  --run-state ./training-runs/current-transformer.run.npz \
+  --pool-dir ./training-runs/torch-pool \
+  --metrics-jsonl ./training-runs/train.jsonl \
+  --resume
+```
+
+On resume, the run-state's training hyperparameters, base seed, optimizer state,
+and parallelism settings are authoritative. `--episodes` remains the total target,
+so it may be increased to extend a run.
+
+When a policy pool is enabled, the run state also records the intended next
+immutable generation. If a crash happens after that generation was added but
+before the run-state commit, deterministic replay recognizes the existing
+entry, verifies that its tensors match, and continues instead of creating a
+second generation.
+
+## Training metrics
+
+`train_self_play_torch.py` reports, and can append as JSONL with
+`--metrics-jsonl`:
+
+- rollout seconds
+- rollout episodes / second
+- rollout decisions / second
+- learner seconds
+- learner decisions / second
+- faction wins and draws
+- mean game days and decisions
+- PPO policy/value loss, ratio, clipping fraction, and gradient norm
+
+These are runtime/research measurements only. Wall-clock timing is never placed
+inside `PolicyObservation` and therefore cannot become a strategic input.
+
 ## Initial self-play
 
 ```bash
 python scripts/train_self_play_torch.py \
-  --episodes 20 \
-  --batch-size 2 \
+  --episodes 20000 \
+  --batch-size 256 \
+  --parallel-games 32 \
   --discussion-ticks 8 \
   --pool-dir ./training-runs/torch-pool \
+  --metrics-jsonl ./training-runs/train.jsonl \
+  --run-state ./training-runs/current-transformer.run.npz \
   --output ./training-runs/current-transformer.npz
 ```
 
@@ -119,7 +232,12 @@ dropout=0
 
 `--device auto` uses CUDA when available, otherwise CPU.
 
-Each batch can be stored as a general immutable population generation.
+The example sizes above are starting points for throughput measurement, not
+recommended final hyperparameters. Tune `--parallel-games`, `--batch-size`, and
+PPO minibatch size from observed GPU/CPU utilization and memory use.
+
+Each completed learner batch can also be stored as a general immutable population
+generation.
 
 ## Faction evaluation
 
@@ -201,7 +319,9 @@ and repeat.
 ## Current complete loop
 
 ```text
-Transformer initial self-play
+vectorized Transformer self-play
+  -> PPO / optional GAE learner update
+  -> atomic policy + resumable run-state snapshots
   -> save general generations
   -> historical self-play / faction specialists
   -> measure 3-faction payoff profiles
@@ -217,8 +337,11 @@ Transformer initial self-play
 
 ## Next performance/research steps
 
-1. Vectorize multiple independent games per GPU batch.
-2. Add a better advantage estimator after the baseline is empirically stable.
-3. Replace the heuristic meta-solver with a stronger multiplayer PSRO/JPSRO-style solver.
-4. Add learned private wolf/freemason planning turns.
-5. Integrate semantic parsing and LLM surface realization only after strategic training is validated.
+1. Benchmark CPU/GPU saturation across larger independent-game batches and tune observation-to-tensor staging.
+2. Reduce Python-side rollout/sampling overhead after profiling identifies the dominant path.
+3. Improve PPO learner data staging and minibatch execution for very large batches.
+4. Improve long semantic-history representation and learned memory/compression.
+5. Replace the heuristic meta-solver with a stronger multiplayer PSRO/JPSRO-style solver.
+6. Add learned private wolf/freemason planning turns.
+7. Build post-training strategy analysis over structured logs without feeding those concepts into reward.
+8. Integrate semantic parsing and LLM surface realization only after strategic training is validated.

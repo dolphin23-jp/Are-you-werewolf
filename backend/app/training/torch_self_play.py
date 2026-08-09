@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from time import perf_counter
+
 from app.engine.game import PlayerSpec
 from app.engine.roles import Team
 from app.training.learned_runner import LearnedEpisodeResult
@@ -9,6 +12,32 @@ from app.training.self_play_train import SelfPlayBatchStats
 from app.training.torch_policy import TorchTransformerPolicy, TransformerPolicyConfig
 from app.training.torch_trainer import TorchPPOConfig, TorchPPOTrainer
 from app.training.torch_vectorized import TorchVectorizedEpisodeCollector
+
+
+@dataclass(frozen=True)
+class TorchSelfPlayBatchStats(SelfPlayBatchStats):
+    """Self-play outcomes plus runtime metrics kept outside policy observations."""
+
+    rollout_seconds: float
+    learner_seconds: float
+
+    @property
+    def rollout_episodes_per_second(self) -> float:
+        if self.rollout_seconds <= 0:
+            return 0.0
+        return self.episodes / self.rollout_seconds
+
+    @property
+    def rollout_decisions_per_second(self) -> float:
+        if self.rollout_seconds <= 0:
+            return 0.0
+        return (self.mean_decisions * self.episodes) / self.rollout_seconds
+
+    @property
+    def learner_decisions_per_second(self) -> float:
+        if self.learner_seconds <= 0:
+            return 0.0
+        return self.update.decisions / self.learner_seconds
 
 
 class TorchSelfPlayTrainingLoop:
@@ -45,7 +74,7 @@ class TorchSelfPlayTrainingLoop:
         self.max_parallel_games = max_parallel_games
         self.temperature = temperature
 
-    def train_batch(self, *, start_seed: int, episodes: int) -> SelfPlayBatchStats:
+    def train_batch(self, *, start_seed: int, episodes: int) -> TorchSelfPlayBatchStats:
         if episodes <= 0:
             raise ValueError("episodes must be positive")
         seeds = tuple(start_seed + offset for offset in range(episodes))
@@ -56,14 +85,18 @@ class TorchSelfPlayTrainingLoop:
             temperature=self.temperature,
         )
         results: list[LearnedEpisodeResult] = []
+        rollout_started = perf_counter()
         for start in range(0, len(seeds), self.max_parallel_games):
             results.extend(
                 collector.collect(seeds[start : start + self.max_parallel_games])
             )
+        rollout_seconds = perf_counter() - rollout_started
         trajectories = [result.trajectory for result in results]
 
+        learner_started = perf_counter()
         update = self.optimizer.update(trajectories)
-        return SelfPlayBatchStats(
+        learner_seconds = perf_counter() - learner_started
+        return TorchSelfPlayBatchStats(
             episodes=episodes,
             village_wins=sum(result.winner is Team.VILLAGE for result in results),
             werewolf_wins=sum(result.winner is Team.WEREWOLF for result in results),
@@ -74,4 +107,6 @@ class TorchSelfPlayTrainingLoop:
                 sum(len(result.trajectory.decisions) for result in results) / episodes
             ),
             update=update,
+            rollout_seconds=rollout_seconds,
+            learner_seconds=learner_seconds,
         )
