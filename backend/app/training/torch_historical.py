@@ -7,11 +7,10 @@ import random
 from app.engine.game import PlayerSpec
 from app.engine.roles import Team
 from app.training.historical_train import HistoricalBatchStats
-from app.training.learned_runner import LearnedEpisodeRunner
 from app.training.meta_strategy import PopulationMetaStrategy
-from app.training.policy_contract import LearnedPolicyModel
 from app.training.torch_policy import TorchTransformerPolicy
 from app.training.torch_pool import TorchPolicyPool
+from app.training.torch_runner import TorchBatchedEpisodeRunner
 from app.training.torch_trainer import TorchPPOConfig, TorchPPOTrainer
 
 
@@ -66,16 +65,15 @@ class TorchHistoricalTrainingLoop:
         self.model.eval()
 
         for offset in range(episodes):
-            team_models: dict[Team, LearnedPolicyModel] = {learner_team: self.model}
+            team_models: dict[Team, TorchTransformerPolicy] = {learner_team: self.model}
             for team in Team:
                 if team is learner_team:
                     continue
                 policy_id = self._sample_opponent(team)
-                opponent = self.pool.load(policy_id).eval()
-                team_models[team] = opponent
+                team_models[team] = self.pool.load(policy_id).eval()
                 opponent_ids.append(f"{team.value}:{policy_id}")
 
-            result = LearnedEpisodeRunner(
+            result = TorchBatchedEpisodeRunner(
                 self.player_specs,
                 self.model,
                 team_models=team_models,
