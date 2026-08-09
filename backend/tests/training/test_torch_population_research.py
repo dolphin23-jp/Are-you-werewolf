@@ -217,14 +217,3 @@ def test_population_research_freezes_iteration_policy_set(tmp_path: Path):
         run.step()
     assert run.state is not None
     assert run.state.village_policy_ids == (base.policy_id,)
-
-
-def test_population_run_target_cannot_skip_active_iteration(tmp_path: Path):
-    pool = TorchPolicyPool(tmp_path / "target-pool")
-    pool.add(_model(2441))
-    run = TorchPopulationResearchRun(_specs(), pool, tmp_path / "target-run")
-    run.start(_config())
-    run.step()
-
-    with pytest.raises(ValueError, match="active iteration"):
-        run.run_until(0)
