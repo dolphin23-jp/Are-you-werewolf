@@ -34,7 +34,8 @@ def _resolve_device(raw: str) -> torch.device:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--episodes", type=int, default=20)
-    parser.add_argument("--batch-size", type=int, default=2)
+    parser.add_argument("--batch-size", type=int, default=8)
+    parser.add_argument("--parallel-games", type=int, default=8)
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--discussion-ticks", type=int, default=8)
     parser.add_argument("--learning-rate", type=float, default=3e-4)
@@ -54,6 +55,8 @@ def main() -> None:
         parser.error("--episodes must be positive")
     if args.batch_size <= 0:
         parser.error("--batch-size must be positive")
+    if args.parallel_games <= 0:
+        parser.error("--parallel-games must be positive")
 
     try:
         device = _resolve_device(args.device)
@@ -81,6 +84,7 @@ def main() -> None:
         _player_specs(),
         model=model,
         max_discussion_ticks=args.discussion_ticks,
+        max_parallel_games=args.parallel_games,
         trainer_seed=args.seed,
         ppo_config=TorchPPOConfig(
             learning_rate=args.learning_rate,
@@ -115,7 +119,7 @@ def main() -> None:
         update = stats.update
         print(
             f"batch={batch_number} episodes={completed}/{args.episodes} "
-            f"device={device} "
+            f"parallel_games={args.parallel_games} device={device} "
             f"wins(v/w/f)={stats.village_wins}/{stats.werewolf_wins}/{stats.fox_wins} "
             f"draws={stats.draws} mean_days={stats.mean_days:.2f} "
             f"mean_decisions={stats.mean_decisions:.1f} "
