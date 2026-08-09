@@ -173,7 +173,7 @@ class TorchVectorizedEpisodeCollector:
 
         prepared = self._infer(requests)
         for item in prepared:
-            slot = slots[item.request.slot_index]
+            slot = _slot_by_index(slots, item.request.slot_index)
             player_id = item.request.player_id
             sampled = slot.samplers[player_id].sample_night_action(
                 item.request.observation,
@@ -212,7 +212,7 @@ class TorchVectorizedEpisodeCollector:
             slot.index: {} for slot in discussion_slots
         }
         for item in prepared:
-            slot = slots[item.request.slot_index]
+            slot = _slot_by_index(slots, item.request.slot_index)
             player_id = item.request.player_id
             sampled = slot.samplers[player_id].sample_speech(
                 item.request.observation,
@@ -260,7 +260,7 @@ class TorchVectorizedEpisodeCollector:
 
         prepared = self._infer(requests)
         for item in prepared:
-            slot = slots[item.request.slot_index]
+            slot = _slot_by_index(slots, item.request.slot_index)
             player_id = item.request.player_id
             sampled = slot.samplers[player_id].sample_vote(
                 item.request.observation,
@@ -307,6 +307,13 @@ class TorchVectorizedEpisodeCollector:
             )
             for index, request in enumerate(requests)
         )
+
+
+def _slot_by_index(slots: list[_EpisodeSlot], index: int) -> _EpisodeSlot:
+    for slot in slots:
+        if slot.index == index:
+            return slot
+    raise RuntimeError(f"episode slot {index} is not active in this batch")
 
 
 def _require_result(slot: _EpisodeSlot) -> LearnedEpisodeResult:
