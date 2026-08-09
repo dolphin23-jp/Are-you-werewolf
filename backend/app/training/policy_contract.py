@@ -1,0 +1,92 @@
+"""Framework-agnostic output contract for learned policies.
+
+A future neural model may implement these heads with PyTorch, JAX or another
+library. Keeping the contract here lets the game/training environment remain
+independent from that choice.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Protocol
+
+from app.engine.roles import RoleName
+from app.training.actions import (
+    ActionType,
+    ResultValue,
+    Scope,
+    Stance,
+    TimingBucket,
+    Topic,
+)
+from app.training.encoding import EncodedPolicyObservation, MAX_SEATS
+
+MAX_REFERENCED_DAYS = 16
+MAX_QUANTITY = 3
+
+
+@dataclass(frozen=True)
+class PolicyHeadSizes:
+    timing: int = len(TimingBucket)
+    action_type: int = len(ActionType)
+    topic: int = len(Topic)
+    target: int = MAX_SEATS
+    secondary_target: int = MAX_SEATS
+    role: int = len(RoleName)
+    result: int = len(ResultValue)
+    quantity: int = MAX_QUANTITY + 1
+    referenced_day: int = MAX_REFERENCED_DAYS + 1
+    scope: int = len(Scope)
+    stance: int = len(Stance)
+    vote_target: int = MAX_SEATS
+    night_topic: int = 3
+    night_target: int = MAX_SEATS
+
+
+@dataclass(frozen=True)
+class PolicyLogits:
+    """One model forward pass before legal masks and sampling are applied."""
+
+    timing: tuple[float, ...]
+    action_type: tuple[float, ...]
+    topic: tuple[float, ...]
+    target: tuple[float, ...]
+    secondary_target: tuple[float, ...]
+    role: tuple[float, ...]
+    result: tuple[float, ...]
+    quantity: tuple[float, ...]
+    referenced_day: tuple[float, ...]
+    scope: tuple[float, ...]
+    stance: tuple[float, ...]
+    vote_target: tuple[float, ...]
+    night_topic: tuple[float, ...]
+    night_target: tuple[float, ...]
+    value: float
+
+    def validate(self, sizes: PolicyHeadSizes = PolicyHeadSizes()) -> None:
+        expected = {
+            "timing": sizes.timing,
+            "action_type": sizes.action_type,
+            "topic": sizes.topic,
+            "target": sizes.target,
+            "secondary_target": sizes.secondary_target,
+            "role": sizes.role,
+            "result": sizes.result,
+            "quantity": sizes.quantity,
+            "referenced_day": sizes.referenced_day,
+            "scope": sizes.scope,
+            "stance": sizes.stance,
+            "vote_target": sizes.vote_target,
+            "night_topic": sizes.night_topic,
+            "night_target": sizes.night_target,
+        }
+        for name, width in expected.items():
+            actual = len(getattr(self, name))
+            if actual != width:
+                raise ValueError(f"{name} head has width {actual}; expected {width}")
+
+
+class LearnedPolicyModel(Protocol):
+    """Minimal interface expected from a trainable policy/value network."""
+
+    def forward(self, observation: EncodedPolicyObservation) -> PolicyLogits: ...
