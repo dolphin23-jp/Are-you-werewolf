@@ -4,19 +4,16 @@ from __future__ import annotations
 
 import random
 
-from app.engine.roles import RoleName
 from app.training.actions import (
     ActionType,
-    ResultValue,
-    Scope,
     SemanticAction,
     SpeechBundle,
-    Stance,
     TimingBucket,
     Topic,
 )
 from app.training.legal import LegalActionMask
 from app.training.observation import PolicyObservation
+from app.training.parameters import SemanticParameterMask, semantic_parameter_mask
 from app.training.scheduler import SpeakIntent
 
 
@@ -28,7 +25,10 @@ class RandomPolicy:
     def speak_intent(self, observation: PolicyObservation) -> SpeakIntent:
         if self._rng.random() >= self._speak_probability:
             return SpeakIntent(TimingBucket.HOLD, None)
-        bundle = SpeechBundle((self._random_speech_atom(observation),))
+        atom = self._random_speech_atom(observation)
+        if atom.action_type is ActionType.PASS:
+            return SpeakIntent(TimingBucket.HOLD, None)
+        bundle = SpeechBundle((atom,))
         timing = self._rng.choice(
             [
                 TimingBucket.IMMEDIATE,
@@ -58,42 +58,92 @@ class RandomPolicy:
             ActionType.DECLARE,
             ActionType.PROPOSE,
         ]
-        action_type = self._rng.choice(candidates)
-        player_ids = [player.player_id for player in observation.players]
-        alive_ids = [player.player_id for player in observation.players if player.alive]
-        other_alive = [player_id for player_id in alive_ids if player_id != observation.viewer_id]
+        self._rng.shuffle(candidates)
+        for action_type in candidates:
+            atom = self._try_random_atom(observation, action_type)
+            if atom is not None:
+                return atom
+        return SemanticAction(ActionType.PASS)
 
+    def _try_random_atom(
+        self,
+        observation: PolicyObservation,
+        action_type: ActionType,
+    ) -> SemanticAction | None:
+        base = semantic_parameter_mask(observation, action_type)
+        if not base.topics:
+            return None
+        topics = list(base.topics)
+        self._rng.shuffle(topics)
+        for topic in topics:
+            mask = semantic_parameter_mask(observation, action_type, topic=topic)
+            atom = self._atom_from_mask(action_type, topic, mask)
+            if atom is not None:
+                return atom
+        return None
+
+    def _atom_from_mask(
+        self,
+        action_type: ActionType,
+        topic: Topic,
+        mask: SemanticParameterMask,
+    ) -> SemanticAction | None:
         if action_type is ActionType.CLAIM:
-            return SemanticAction(
-                action_type,
-                topic=Topic.ROLE,
-                role=self._rng.choice(list(RoleName)),
-            )
+            if topic is Topic.ROLE and mask.roles:
+                return SemanticAction(action_type, topic=topic, role=self._rng.choice(mask.roles))
+            if topic is Topic.PARTNER and mask.target_ids:
+                return SemanticAction(
+                    action_type,
+                    topic=topic,
+                    target_id=self._rng.choice(mask.target_ids),
+                )
+            if topic is Topic.WOLF_COUNT and mask.quantities:
+                return SemanticAction(
+                    action_type,
+                    topic=topic,
+                    quantity=self._rng.choice(mask.quantities),
+                )
+            return None
 
         if action_type is ActionType.REPORT:
+            if not mask.target_ids or not mask.referenced_days:
+                return None
+            result = self._rng.choice(mask.results) if mask.results else None
             return SemanticAction(
                 action_type,
-                topic=self._rng.choice([Topic.SEER_RESULT, Topic.MEDIUM_RESULT]),
-                target_id=self._rng.choice(player_ids),
-                result=self._rng.choice([ResultValue.WHITE, ResultValue.BLACK]),
-                referenced_day=max(0, observation.day - 1),
+                topic=topic,
+                target_id=self._rng.choice(mask.target_ids),
+                result=result,
+                referenced_day=self._rng.choice(mask.referenced_days),
+            )
+
+        if action_type is ActionType.EVALUATE:
+            if not mask.target_ids or not mask.stances:
+                return None
+            return SemanticAction(
+                action_type,
+                topic=topic,
+                target_id=self._rng.choice(mask.target_ids),
+                stance=self._rng.choice(mask.stances),
+            )
+
+        if action_type is ActionType.DECLARE:
+            if not mask.target_ids:
+                return None
+            return SemanticAction(
+                action_type,
+                topic=topic,
+                target_id=self._rng.choice(mask.target_ids),
             )
 
         if action_type is ActionType.PROPOSE:
-            target_id = self._rng.choice(alive_ids or player_ids)
+            if not mask.target_ids or not mask.scopes:
+                return None
             return SemanticAction(
                 action_type,
-                topic=Topic.EXECUTION,
-                target_id=target_id,
-                scope=Scope.SELF if target_id == observation.viewer_id else Scope.NONE,
+                topic=topic,
+                target_id=self._rng.choice(mask.target_ids),
+                scope=self._rng.choice(mask.scopes),
             )
 
-        target_id = self._rng.choice(other_alive or alive_ids or player_ids)
-        if action_type is ActionType.EVALUATE:
-            return SemanticAction(
-                action_type,
-                topic=Topic.WOLF,
-                target_id=target_id,
-                stance=self._rng.choice([Stance.SUSPECT, Stance.TRUST]),
-            )
-        return SemanticAction(action_type, topic=Topic.VOTE, target_id=target_id)
+        return None
