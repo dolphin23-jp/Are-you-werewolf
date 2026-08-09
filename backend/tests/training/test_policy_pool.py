@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import numpy as np
@@ -66,3 +67,30 @@ def test_policy_pool_separates_team_specialists_but_keeps_generalists(tmp_path: 
         include_general=False,
     ) == (village.policy_id,)
     assert pool.policy_ids_for_team(Team.FOX, last=1) == (fox.policy_id,)
+
+
+def test_legacy_manifest_without_specialized_team_is_generalist(tmp_path: Path):
+    root = tmp_path / "legacy-pool"
+    root.mkdir()
+    (root / "manifest.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "entries": [
+                    {
+                        "policy_id": "g000000",
+                        "generation": 0,
+                        "checkpoint": "g000000.npz",
+                        "parent_id": None,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    pool = NumpyPolicyPool(root)
+
+    assert pool.entries[0].specialized_team is None
+    for team in Team:
+        assert pool.policy_ids_for_team(team) == ("g000000",)
