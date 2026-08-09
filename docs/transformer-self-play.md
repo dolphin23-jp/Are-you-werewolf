@@ -71,14 +71,20 @@ The strategic reward remains only the final faction result: `+1 / -1 / 0`.
 
 ## Batched rollout
 
-When all 17 seats share one Transformer, `TorchBatchedEpisodeRunner` batches all
-eligible seat observations at each discussion/vote/night decision point. Each
-seat still has an independent sampler and RNG stream. Only neural inference is
-batched; information visibility and game mechanics do not change.
+`TorchBatchedEpisodeRunner` always creates each seat's information-safe
+observation independently. It then groups seats only when they use the exact same
+Transformer instance and performs one batched forward for that group. Each seat
+keeps its own `MaskedPolicySampler` and RNG stream.
 
-Historical/population games may use different models for the three factions.
-Those mixed-model games currently use the generic correct runner; grouping
-multiple models into a few batched faction forwards is a later performance step.
+This gives two useful cases without changing game semantics:
+
+- all 17 seats share one policy -> normally one Transformer forward per decision point
+- Village / Werewolf / Fox use different historical policies -> normally at most three forwards per decision point
+
+A regression test runs the same model and seed through the generic sequential
+runner and the batched runner and checks that winner, day count, semantic event
+count, and the complete structured action sequence are identical. Batching is
+therefore a neural-compute optimization, not an information-sharing mechanism.
 
 ## Safe checkpoints
 
@@ -211,9 +217,8 @@ Transformer initial self-play
 
 ## Next performance/research steps
 
-1. Batch mixed-model historical/population inference by faction/model.
-2. Vectorize multiple independent games per GPU batch.
-3. Add a better advantage estimator after the baseline is empirically stable.
-4. Replace the heuristic meta-solver with a stronger multiplayer PSRO/JPSRO-style solver.
-5. Add learned private wolf/freemason planning turns.
-6. Integrate semantic parsing and LLM surface realization only after strategic training is validated.
+1. Vectorize multiple independent games per GPU batch.
+2. Add a better advantage estimator after the baseline is empirically stable.
+3. Replace the heuristic meta-solver with a stronger multiplayer PSRO/JPSRO-style solver.
+4. Add learned private wolf/freemason planning turns.
+5. Integrate semantic parsing and LLM surface realization only after strategic training is validated.
