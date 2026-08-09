@@ -9,7 +9,8 @@ from dataclasses import dataclass
 from app.engine.game import GameController
 from app.engine.phases import Phase
 from app.engine.roles import RoleName
-from app.training.actions import ActionType, Topic
+
+from .actions import ActionType, Topic
 
 
 _PUBLIC_SPEECH_ACTIONS = (
