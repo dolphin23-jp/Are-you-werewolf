@@ -122,11 +122,11 @@ class TorchPolicyPool:
         policy_id = f"g{generation:06d}"
         try:
             existing = self.get(policy_id)
-        except KeyError:
+        except KeyError as exc:
             if self.next_generation != generation:
                 raise ValueError(
                     "policy pool advanced beyond the expected generation boundary"
-                )
+                ) from exc
             return self.add(
                 model,
                 generation=generation,
