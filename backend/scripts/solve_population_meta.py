@@ -6,7 +6,10 @@ import argparse
 from pathlib import Path
 
 from app.engine.roles import Team
-from app.training.meta_strategy import solve_logit_response_mixture
+from app.training.meta_strategy import (
+    diagnose_meta_strategy,
+    solve_logit_response_mixture,
+)
 from app.training.population_payoff import PopulationPayoffTable
 
 
@@ -48,6 +51,7 @@ def main() -> None:
         iterations=args.iterations,
         damping=args.damping,
     )
+    diagnostics = diagnose_meta_strategy(table, strategy)
     strategy.save(args.output)
 
     for team in Team:
@@ -55,7 +59,16 @@ def main() -> None:
             f"{item.policy_id}:{item.probability:.4f}"
             for item in strategy.weights(team)
         )
+        diagnostic = diagnostics.for_team(team)
         print(f"{team.value}={rendered}")
+        print(
+            f"{team.value}_diagnostic="
+            f"mixture_payoff:{diagnostic.mixture_payoff:.4f},"
+            f"best:{diagnostic.best_policy_id},"
+            f"best_payoff:{diagnostic.best_policy_payoff:.4f},"
+            f"deviation_gain:{diagnostic.deviation_gain:.4f}"
+        )
+    print(f"max_restricted_deviation_gain={diagnostics.max_deviation_gain:.4f}")
     print(f"saved={args.output}")
 
 
