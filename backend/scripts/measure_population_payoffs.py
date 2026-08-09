@@ -7,6 +7,7 @@ import itertools
 from pathlib import Path
 
 from app.engine.game import PlayerSpec
+from app.engine.roles import Team
 from app.training.policy_pool import NumpyPolicyPool
 from app.training.population_payoff import (
     PolicyProfile,
@@ -71,9 +72,9 @@ def main() -> None:
             f"games={record.games} wins(v/w/f)="
             f"{record.village_wins}/{record.werewolf_wins}/{record.fox_wins} "
             f"draws={record.draws} payoffs(v/w/f)="
-            f"{record.mean_payoff.__call__(__import__('app.engine.roles', fromlist=['Team']).Team.VILLAGE):.3f}/"
-            f"{record.mean_payoff.__call__(__import__('app.engine.roles', fromlist=['Team']).Team.WEREWOLF):.3f}/"
-            f"{record.mean_payoff.__call__(__import__('app.engine.roles', fromlist=['Team']).Team.FOX):.3f}"
+            f"{record.mean_payoff(Team.VILLAGE):.3f}/"
+            f"{record.mean_payoff(Team.WEREWOLF):.3f}/"
+            f"{record.mean_payoff(Team.FOX):.3f}"
         )
 
     print(
