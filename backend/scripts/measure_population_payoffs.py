@@ -12,8 +12,8 @@ from app.engine.roles import Team
 from app.training.policy_pool import NumpyPolicyPool
 from app.training.population_payoff import (
     PolicyProfile,
-    ProfilePayoff,
     PopulationPayoffTable,
+    ProfilePayoff,
     evaluate_policy_profile,
 )
 
