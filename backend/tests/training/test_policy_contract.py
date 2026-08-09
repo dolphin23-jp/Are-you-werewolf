@@ -1,24 +1,27 @@
 from app.training.policy_contract import PolicyHeadSizes, PolicyLogits
 
 
+def _zeros(width: int) -> tuple[float, ...]:
+    return (0.0,) * width
+
+
 def _valid_logits() -> PolicyLogits:
     sizes = PolicyHeadSizes()
-    zeros = lambda width: (0.0,) * width
     return PolicyLogits(
-        timing=zeros(sizes.timing),
-        action_type=zeros(sizes.action_type),
-        topic=zeros(sizes.topic),
-        target=zeros(sizes.target),
-        secondary_target=zeros(sizes.secondary_target),
-        role=zeros(sizes.role),
-        result=zeros(sizes.result),
-        quantity=zeros(sizes.quantity),
-        referenced_day=zeros(sizes.referenced_day),
-        scope=zeros(sizes.scope),
-        stance=zeros(sizes.stance),
-        vote_target=zeros(sizes.vote_target),
-        night_topic=zeros(sizes.night_topic),
-        night_target=zeros(sizes.night_target),
+        timing=_zeros(sizes.timing),
+        action_type=_zeros(sizes.action_type),
+        topic=_zeros(sizes.topic),
+        target=_zeros(sizes.target),
+        secondary_target=_zeros(sizes.secondary_target),
+        role=_zeros(sizes.role),
+        result=_zeros(sizes.result),
+        quantity=_zeros(sizes.quantity),
+        referenced_day=_zeros(sizes.referenced_day),
+        scope=_zeros(sizes.scope),
+        stance=_zeros(sizes.stance),
+        vote_target=_zeros(sizes.vote_target),
+        night_topic=_zeros(sizes.night_topic),
+        night_target=_zeros(sizes.night_target),
         value=0.0,
     )
 
