@@ -7,7 +7,8 @@ still sparse terminal faction rewards; no strategic shaping is added here.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import math
+from dataclasses import dataclass, replace
 
 import torch
 from torch import Tensor
@@ -27,6 +28,9 @@ class TorchPPOConfig:
     epochs: int = 2
     max_grad_norm: float = 5.0
     minibatch_size: int = 64
+    gamma: float = 1.0
+    gae_lambda: float = 1.0
+    normalize_advantages: bool = False
 
     def __post_init__(self) -> None:
         if self.learning_rate <= 0:
@@ -41,6 +45,17 @@ class TorchPPOConfig:
             raise ValueError("max_grad_norm cannot be negative")
         if self.minibatch_size <= 0:
             raise ValueError("minibatch_size must be positive")
+        if not 0.0 <= self.gamma <= 1.0:
+            raise ValueError("gamma must be in [0, 1]")
+        if not 0.0 <= self.gae_lambda <= 1.0:
+            raise ValueError("gae_lambda must be in [0, 1]")
+
+
+@dataclass(frozen=True)
+class _TorchPPOSample:
+    decision: RecordedDecision
+    advantage: float
+    value_target: float
 
 
 class TorchPPOTrainer:
@@ -66,13 +81,8 @@ class TorchPPOTrainer:
     def update(self, trajectories: list[EpisodeTrajectory]) -> PPOUpdateStats:
         if any(not trajectory.finalized for trajectory in trajectories):
             raise ValueError("PPO update requires finalized trajectories")
-        decisions = [
-            decision
-            for trajectory in trajectories
-            for decision in trajectory.decisions
-            if decision.policy_trace is not None
-        ]
-        if not decisions:
+        samples = _prepare_samples(trajectories, self.config)
+        if not samples:
             return PPOUpdateStats(0, 0, 0.0, 0.0, 1.0, 0.0, 0.0)
 
         policy_losses: list[float] = []
@@ -83,10 +93,10 @@ class TorchPPOTrainer:
         self.model.train()
 
         for _ in range(self.config.epochs):
-            permutation = torch.randperm(len(decisions), generator=self._generator).tolist()
+            permutation = torch.randperm(len(samples), generator=self._generator).tolist()
             for start in range(0, len(permutation), self.config.minibatch_size):
                 indices = permutation[start : start + self.config.minibatch_size]
-                batch = [decisions[index] for index in indices]
+                batch = [samples[index] for index in indices]
                 batch_stats = self._update_minibatch(batch)
                 policy_losses.append(batch_stats[0])
                 value_losses.append(batch_stats[1])
@@ -95,7 +105,7 @@ class TorchPPOTrainer:
                 gradient_norm = batch_stats[4]
 
         return PPOUpdateStats(
-            decisions=len(decisions),
+            decisions=len(samples),
             epochs=self.config.epochs,
             mean_policy_loss=_mean(policy_losses),
             mean_value_loss=_mean(value_losses),
@@ -106,8 +116,9 @@ class TorchPPOTrainer:
 
     def _update_minibatch(
         self,
-        decisions: list[RecordedDecision],
+        samples: list[_TorchPPOSample],
     ) -> tuple[float, float, list[float], list[float], float]:
+        decisions = [sample.decision for sample in samples]
         output = self.model.forward_batch(
             tuple(decision.observation for decision in decisions)
         )
@@ -128,16 +139,13 @@ class TorchPPOTrainer:
             dtype=output.value.dtype,
             device=device,
         )
-        rewards = torch.tensor(
-            [decision.reward for decision in decisions],
+        value_targets = torch.tensor(
+            [sample.value_target for sample in samples],
             dtype=output.value.dtype,
             device=device,
         )
         advantages = torch.tensor(
-            [
-                decision.reward - trace.value_estimate
-                for decision, trace in zip(decisions, typed_traces, strict=True)
-            ],
+            [sample.advantage for sample in samples],
             dtype=output.value.dtype,
             device=device,
         )
@@ -151,7 +159,7 @@ class TorchPPOTrainer:
         )
         surrogate = torch.minimum(ratio * advantages, clipped_ratio * advantages)
         policy_loss = -surrogate.mean()
-        value_error = output.value - rewards
+        value_error = output.value - value_targets
         value_loss = (
             0.5 * self.config.value_coefficient * torch.square(value_error).mean()
         )
@@ -184,6 +192,91 @@ class TorchPPOTrainer:
             [float(value) for value in (~active).float().detach().cpu().tolist()],
             norm_value,
         )
+
+
+def _prepare_samples(
+    trajectories: list[EpisodeTrajectory],
+    config: TorchPPOConfig,
+) -> list[_TorchPPOSample]:
+    samples: list[_TorchPPOSample] = []
+    for trajectory in trajectories:
+        traced_decisions = [
+            decision
+            for decision in trajectory.decisions
+            if decision.policy_trace is not None
+        ]
+        by_player: dict[str, list[RecordedDecision]] = {}
+        for decision in traced_decisions:
+            by_player.setdefault(decision.player_id, []).append(decision)
+
+        targets_by_decision: dict[int, tuple[float, float]] = {}
+        for player_id, decisions in by_player.items():
+            targets = _player_gae_targets(
+                decisions,
+                terminal_reward=trajectory.terminal_rewards.get(player_id, 0.0),
+                gamma=config.gamma,
+                gae_lambda=config.gae_lambda,
+            )
+            for decision, target in zip(decisions, targets, strict=True):
+                targets_by_decision[id(decision)] = target
+
+        for decision in traced_decisions:
+            advantage, value_target = targets_by_decision[id(decision)]
+            samples.append(
+                _TorchPPOSample(
+                    decision=decision,
+                    advantage=advantage,
+                    value_target=value_target,
+                )
+            )
+
+    if config.normalize_advantages and len(samples) > 1:
+        mean = sum(sample.advantage for sample in samples) / len(samples)
+        variance = sum(
+            (sample.advantage - mean) ** 2 for sample in samples
+        ) / len(samples)
+        scale = math.sqrt(variance + 1e-8)
+        samples = [
+            replace(sample, advantage=(sample.advantage - mean) / scale)
+            for sample in samples
+        ]
+    return samples
+
+
+def _player_gae_targets(
+    decisions: list[RecordedDecision],
+    *,
+    terminal_reward: float,
+    gamma: float,
+    gae_lambda: float,
+) -> tuple[tuple[float, float], ...]:
+    """Compute per-seat GAE without introducing intermediate shaped rewards.
+
+    A seat receives zero reward between its decisions and its faction terminal
+    payoff after its final recorded decision. With ``gamma=1`` and
+    ``gae_lambda=1`` this telescopes exactly to the previous Monte-Carlo target:
+    every value target is the terminal faction payoff and every advantage is
+    ``terminal_reward - rollout_value``.
+    """
+
+    if not decisions:
+        return ()
+    reversed_targets: list[tuple[float, float]] = []
+    next_value = 0.0
+    gae = 0.0
+    last_index = len(decisions) - 1
+    for index in range(last_index, -1, -1):
+        decision = decisions[index]
+        trace = decision.policy_trace
+        if trace is None:
+            raise ValueError("GAE requires traced decisions")
+        reward = terminal_reward if index == last_index else 0.0
+        value = trace.value_estimate
+        delta = reward + gamma * next_value - value
+        gae = delta + gamma * gae_lambda * gae
+        reversed_targets.append((gae, gae + value))
+        next_value = value
+    return tuple(reversed(reversed_targets))
 
 
 def _trace_log_prob(
