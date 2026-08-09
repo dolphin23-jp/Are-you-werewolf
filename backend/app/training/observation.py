@@ -8,8 +8,8 @@ the same public no-death event and must reason from their own private history.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable
 
 from app.engine.game import GameController
 from app.engine.roles import RoleName
