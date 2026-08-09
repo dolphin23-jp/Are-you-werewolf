@@ -50,6 +50,36 @@ def test_population_payoff_persists_empirical_terminal_rewards(tmp_path: Path):
     assert restored.mean_days == 4.0
 
 
+def test_payoff_uncertainty_remains_positive_and_shrinks_with_evidence(tmp_path: Path):
+    table = PopulationPayoffTable(tmp_path / "uncertainty.json")
+    profile = PolicyProfile("v0", "w0", "f0")
+    first = table.record_result(
+        profile,
+        winner=Team.VILLAGE,
+        is_draw=False,
+        days=3,
+    )
+    first_std = first.posterior_payoff_std(Team.VILLAGE)
+
+    latest = first
+    for _ in range(20):
+        latest = table.record_result(
+            profile,
+            winner=Team.VILLAGE,
+            is_draw=False,
+            days=3,
+        )
+
+    assert first_std > 0.0
+    assert latest.posterior_payoff_std(Team.VILLAGE) > 0.0
+    assert latest.posterior_payoff_std(Team.VILLAGE) < first_std
+    assert latest.posterior_payoff_mean(Team.VILLAGE) < 1.0
+    assert latest.posterior_payoff_mean(Team.VILLAGE) > 0.0
+    assert latest.max_posterior_payoff_std() >= latest.posterior_payoff_std(
+        Team.VILLAGE
+    )
+
+
 def test_profile_evaluation_runs_three_saved_policies(tmp_path: Path):
     pool = NumpyPolicyPool(tmp_path / "pool")
     entries = [pool.add(_initialized_model(seed)) for seed in (301, 302, 303)]
