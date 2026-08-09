@@ -27,7 +27,9 @@ jobs:
         run: ruff check app tests scripts
       - name: Type check (mypy)
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
-        run: mypy app
+        # Torch is intentionally absent from this lightweight environment. The
+        # dedicated job below installs the real package and checks these modules.
+        run: mypy app --exclude '^app/training/torch_.*\.py$'
       - name: Test (pytest, mock provider only -- zero API cost)
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: pytest
