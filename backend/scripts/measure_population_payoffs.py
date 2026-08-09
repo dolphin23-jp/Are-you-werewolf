@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import itertools
 from pathlib import Path
 
@@ -21,6 +22,12 @@ def _player_specs() -> list[PlayerSpec]:
         PlayerSpec(player_id=f"p{i}", name=f"Player{i}", is_human=False)
         for i in range(17)
     ]
+
+
+def _profile_seed_offset(profile: PolicyProfile) -> int:
+    encoded = f"{profile.village}|{profile.werewolf}|{profile.fox}".encode()
+    digest = hashlib.sha256(encoded).digest()
+    return int.from_bytes(digest[:4], "big")
 
 
 def main() -> None:
@@ -48,12 +55,12 @@ def main() -> None:
         for village, werewolf, fox in itertools.product(selected, repeat=3)
     )
 
-    for profile_index, profile in enumerate(profiles):
+    for profile in profiles:
         existing = table.get(profile)
         existing_games = existing.games if existing is not None else 0
         missing = max(0, args.games_per_profile - existing_games)
         if missing:
-            seed_start = args.seed + profile_index * 100000 + existing_games
+            seed_start = args.seed + _profile_seed_offset(profile) + existing_games
             seeds = tuple(range(seed_start, seed_start + missing))
             record = evaluate_policy_profile(
                 _player_specs(),
