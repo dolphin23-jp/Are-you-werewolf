@@ -154,7 +154,9 @@ class TorchPPOTrainer:
         loss = policy_loss + value_loss
 
         self.optimizer.zero_grad(set_to_none=True)
-        loss.backward()
+        # PyTorch 2.13's Tensor.backward stub is untyped even though the runtime
+        # method is the standard autograd entry point; keep the exception local.
+        loss.backward()  # type: ignore[no-untyped-call]
         raw_norm = clip_grad_norm_(
             self.model.parameters(),
             max_norm=self.config.max_grad_norm
