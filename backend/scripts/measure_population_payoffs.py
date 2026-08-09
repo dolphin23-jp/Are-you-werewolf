@@ -48,11 +48,20 @@ def main() -> None:
     pool = NumpyPolicyPool(args.pool_dir)
     if not pool.entries:
         parser.error("--pool-dir contains no policy generations")
-    selected = tuple(entry.policy_id for entry in pool.entries[-args.last :])
+    village_ids = pool.policy_ids_for_team(Team.VILLAGE, last=args.last)
+    werewolf_ids = pool.policy_ids_for_team(Team.WEREWOLF, last=args.last)
+    fox_ids = pool.policy_ids_for_team(Team.FOX, last=args.last)
+    if not village_ids or not werewolf_ids or not fox_ids:
+        parser.error("each faction must have at least one eligible policy")
+
     table = PopulationPayoffTable(args.table)
     profiles = tuple(
         PolicyProfile(village, werewolf, fox)
-        for village, werewolf, fox in itertools.product(selected, repeat=3)
+        for village, werewolf, fox in itertools.product(
+            village_ids,
+            werewolf_ids,
+            fox_ids,
+        )
     )
 
     for profile in profiles:
@@ -85,8 +94,10 @@ def main() -> None:
         )
 
     print(
-        f"measured_profiles={len(profiles)} selected_policies={','.join(selected)} "
-        f"table={args.table}"
+        f"measured_profiles={len(profiles)} "
+        f"village={','.join(village_ids)} "
+        f"werewolf={','.join(werewolf_ids)} "
+        f"fox={','.join(fox_ids)} table={args.table}"
     )
 
 
