@@ -159,10 +159,35 @@ def _validate_resume_pool(
         raise ValueError("policy pool advanced beyond the resumable run state")
 
 
+def _resume_batch_size(
+    parser: argparse.ArgumentParser,
+    progress: TorchRunProgress,
+    requested: int | None,
+    target_episodes: int,
+) -> int:
+    saved = progress.batch_size
+    if saved is not None:
+        if requested is not None and requested != saved:
+            parser.error(
+                "--batch-size cannot change across exact resume; "
+                f"run state requires {saved}"
+            )
+        return saved
+
+    if progress.completed_episodes >= target_episodes:
+        return requested or 8
+    if requested is None:
+        parser.error(
+            "legacy run state does not record --batch-size; supply the original "
+            "--batch-size explicitly before extending or continuing this run"
+        )
+    return requested
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--episodes", type=int, default=20)
-    parser.add_argument("--batch-size", type=int, default=8)
+    parser.add_argument("--batch-size", type=int)
     parser.add_argument("--parallel-games", type=int, default=8)
     parser.add_argument("--inference-batch-size", type=int)
     parser.add_argument("--seed", type=int, default=1)
@@ -188,7 +213,7 @@ def main() -> None:
 
     if args.episodes <= 0:
         parser.error("--episodes must be positive")
-    if args.batch_size <= 0:
+    if args.batch_size is not None and args.batch_size <= 0:
         parser.error("--batch-size must be positive")
     if args.parallel_games <= 0:
         parser.error("--parallel-games must be positive")
@@ -229,6 +254,12 @@ def main() -> None:
             parser.error(
                 "--episodes is a total target and cannot be below resumed progress"
             )
+        batch_size = _resume_batch_size(
+            parser,
+            progress,
+            args.batch_size,
+            args.episodes,
+        )
         if (
             args.inference_batch_size is not None
             and args.inference_batch_size != loop.max_inference_batch_size
@@ -238,6 +269,7 @@ def main() -> None:
                 "the run-state value is authoritative"
             )
     else:
+        batch_size = args.batch_size or 8
         if run_state_path.exists():
             parser.error(
                 f"run state already exists: {run_state_path}; use --resume or another path"
@@ -287,11 +319,12 @@ def main() -> None:
             base_seed=args.seed,
             parent_policy_id=latest.policy_id if latest is not None else None,
             next_pool_generation=pool.next_generation if pool is not None else None,
+            batch_size=batch_size,
         )
         save_torch_run_state(loop, progress, run_state_path)
 
     while progress.completed_episodes < args.episodes:
-        count = min(args.batch_size, args.episodes - progress.completed_episodes)
+        count = min(batch_size, args.episodes - progress.completed_episodes)
         batch_start_seed = progress.base_seed + progress.completed_episodes
         stats = loop.train_batch(
             start_seed=batch_start_seed,
@@ -321,6 +354,7 @@ def main() -> None:
             base_seed=progress.base_seed,
             parent_policy_id=parent_policy_id,
             next_pool_generation=next_pool_generation,
+            batch_size=batch_size,
         )
         save_torch_run_state(loop, progress, run_state_path)
 
@@ -338,7 +372,8 @@ def main() -> None:
         inference_limit = loop.max_inference_batch_size or "unbounded"
         print(
             f"batch={batch_number} episodes={completed}/{args.episodes} "
-            f"parallel_games={loop.max_parallel_games} device={device} "
+            f"batch_size={batch_size} parallel_games={loop.max_parallel_games} "
+            f"device={device} "
             f"wins(v/w/f)={stats.village_wins}/{stats.werewolf_wins}/{stats.fox_wins} "
             f"draws={stats.draws} mean_days={stats.mean_days:.2f} "
             f"mean_decisions={stats.mean_decisions:.1f} "
