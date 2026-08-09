@@ -50,6 +50,14 @@ def test_transformer_self_play_runs_episode_and_updates_model():
     assert stats.update.decisions > 0
     assert torch.isfinite(torch.tensor(stats.update.mean_policy_loss))
     assert torch.isfinite(torch.tensor(stats.update.mean_value_loss))
+    assert torch.isfinite(torch.tensor(stats.update.mean_approx_kl))
+    assert torch.isfinite(torch.tensor(stats.update.mean_path_entropy))
+    assert torch.isfinite(
+        torch.tensor(stats.update.rollout_value_explained_variance)
+    )
+    assert stats.update.mean_approx_kl >= -1e-7
+    assert stats.update.mean_path_entropy > 0.0
+    assert stats.update.rollout_value_explained_variance <= 1.0
     assert stats.update.gradient_norm > 0.0
     assert stats.inference_calls > 0
     assert stats.inference_observations > 0
