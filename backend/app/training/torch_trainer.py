@@ -53,10 +53,30 @@ class TorchPPOConfig:
 
 
 @dataclass(frozen=True)
+class TorchPPOUpdateStats(PPOUpdateStats):
+    """PPO update metrics for long-running Transformer training diagnostics."""
+
+    mean_approx_kl: float
+    mean_path_entropy: float
+    rollout_value_explained_variance: float
+
+
+@dataclass(frozen=True)
 class _TorchPPOSample:
     decision: RecordedDecision
     advantage: float
     value_target: float
+
+
+@dataclass(frozen=True)
+class _TorchPPOMinibatchStats:
+    policy_loss: float
+    value_loss: float
+    ratios: list[float]
+    clipped: list[float]
+    gradient_norm: float
+    approx_kls: list[float]
+    path_entropies: list[float]
 
 
 class TorchPPOTrainer:
@@ -96,18 +116,32 @@ class TorchPPOTrainer:
         self.optimizer.load_state_dict(optimizer_state)
         self._generator.set_state(generator_state.detach().cpu())
 
-    def update(self, trajectories: list[EpisodeTrajectory]) -> PPOUpdateStats:
+    def update(self, trajectories: list[EpisodeTrajectory]) -> TorchPPOUpdateStats:
         if any(not trajectory.finalized for trajectory in trajectories):
             raise ValueError("PPO update requires finalized trajectories")
         samples = _prepare_samples(trajectories, self.config)
         if not samples:
-            return PPOUpdateStats(0, 0, 0.0, 0.0, 1.0, 0.0, 0.0)
+            return TorchPPOUpdateStats(
+                decisions=0,
+                epochs=0,
+                mean_policy_loss=0.0,
+                mean_value_loss=0.0,
+                mean_ratio=1.0,
+                clip_fraction=0.0,
+                gradient_norm=0.0,
+                mean_approx_kl=0.0,
+                mean_path_entropy=0.0,
+                rollout_value_explained_variance=0.0,
+            )
 
         policy_losses: list[float] = []
         value_losses: list[float] = []
         ratios: list[float] = []
         clipped: list[float] = []
+        approx_kls: list[float] = []
+        path_entropies: list[float] = []
         gradient_norm = 0.0
+        explained_variance = _rollout_value_explained_variance(samples)
         self.model.train()
 
         for _ in range(self.config.epochs):
@@ -116,13 +150,15 @@ class TorchPPOTrainer:
                 indices = permutation[start : start + self.config.minibatch_size]
                 batch = [samples[index] for index in indices]
                 batch_stats = self._update_minibatch(batch)
-                policy_losses.append(batch_stats[0])
-                value_losses.append(batch_stats[1])
-                ratios.extend(batch_stats[2])
-                clipped.extend(batch_stats[3])
-                gradient_norm = batch_stats[4]
+                policy_losses.append(batch_stats.policy_loss)
+                value_losses.append(batch_stats.value_loss)
+                ratios.extend(batch_stats.ratios)
+                clipped.extend(batch_stats.clipped)
+                approx_kls.extend(batch_stats.approx_kls)
+                path_entropies.extend(batch_stats.path_entropies)
+                gradient_norm = batch_stats.gradient_norm
 
-        return PPOUpdateStats(
+        return TorchPPOUpdateStats(
             decisions=len(samples),
             epochs=self.config.epochs,
             mean_policy_loss=_mean(policy_losses),
@@ -130,12 +166,15 @@ class TorchPPOTrainer:
             mean_ratio=_mean(ratios),
             clip_fraction=_mean(clipped),
             gradient_norm=gradient_norm,
+            mean_approx_kl=_mean(approx_kls),
+            mean_path_entropy=_mean(path_entropies),
+            rollout_value_explained_variance=explained_variance,
         )
 
     def _update_minibatch(
         self,
         samples: list[_TorchPPOSample],
-    ) -> tuple[float, float, list[float], list[float], float]:
+    ) -> _TorchPPOMinibatchStats:
         decisions = [sample.decision for sample in samples]
         output = self.model.forward_batch(
             tuple(decision.observation for decision in decisions)
@@ -145,7 +184,10 @@ class TorchPPOTrainer:
             raise RuntimeError("Torch PPO minibatch contains a decision without a trace")
         typed_traces = [trace for trace in traces if trace is not None]
 
-        current_log_probs = _trace_log_probs(output, typed_traces)
+        current_log_probs, path_entropies = _trace_log_probs_and_entropy(
+            output,
+            typed_traces,
+        )
         device = output.value.device
         old_log_probs = torch.tensor(
             [trace.log_prob for trace in typed_traces],
@@ -165,6 +207,7 @@ class TorchPPOTrainer:
 
         log_ratios = torch.clamp(current_log_probs - old_log_probs, min=-20.0, max=20.0)
         ratio = torch.exp(log_ratios)
+        approx_kl = (ratio - 1.0) - log_ratios
         clipped_ratio = torch.clamp(
             ratio,
             min=1.0 - self.config.clip_ratio,
@@ -198,12 +241,20 @@ class TorchPPOTrainer:
         norm_value = float(raw_norm.detach().cpu())
         if self.config.max_grad_norm > 0:
             norm_value = min(norm_value, self.config.max_grad_norm)
-        return (
-            float(policy_loss.detach().cpu()),
-            float(value_loss.detach().cpu()),
-            [float(value) for value in ratio.detach().cpu().tolist()],
-            [float(value) for value in (~active).float().detach().cpu().tolist()],
-            norm_value,
+        return _TorchPPOMinibatchStats(
+            policy_loss=float(policy_loss.detach().cpu()),
+            value_loss=float(value_loss.detach().cpu()),
+            ratios=[float(value) for value in ratio.detach().cpu().tolist()],
+            clipped=[
+                float(value) for value in (~active).float().detach().cpu().tolist()
+            ],
+            gradient_norm=norm_value,
+            approx_kls=[
+                float(value) for value in approx_kl.detach().cpu().tolist()
+            ],
+            path_entropies=[
+                float(value) for value in path_entropies.detach().cpu().tolist()
+            ],
         )
 
 
@@ -256,6 +307,35 @@ def _prepare_samples(
     return samples
 
 
+def _rollout_value_explained_variance(samples: list[_TorchPPOSample]) -> float:
+    """Explain GAE value targets using values frozen into the rollout traces."""
+
+    if len(samples) < 2:
+        return 0.0
+    targets = [sample.value_target for sample in samples]
+    predictions: list[float] = []
+    for sample in samples:
+        trace = sample.decision.policy_trace
+        if trace is None:
+            raise ValueError("explained variance requires traced decisions")
+        predictions.append(trace.value_estimate)
+
+    target_mean = sum(targets) / len(targets)
+    target_variance = sum((value - target_mean) ** 2 for value in targets) / len(targets)
+    if target_variance <= 1e-12:
+        return 0.0
+
+    residuals = [
+        target - prediction
+        for target, prediction in zip(targets, predictions, strict=True)
+    ]
+    residual_mean = sum(residuals) / len(residuals)
+    residual_variance = sum(
+        (value - residual_mean) ** 2 for value in residuals
+    ) / len(residuals)
+    return 1.0 - residual_variance / target_variance
+
+
 def _player_gae_targets(
     decisions: list[RecordedDecision],
     *,
@@ -296,16 +376,25 @@ def _trace_log_probs(
     output: TorchPolicyTensorOutput,
     traces: list[PolicySampleTrace],
 ) -> Tensor:
-    """Compute factorized masked log-probs in head-sized vectorized groups.
+    log_probs, _ = _trace_log_probs_and_entropy(output, traces)
+    return log_probs
 
-    Rollout traces can contain different heads because timing-only, speech, vote,
-    and night decisions factorize differently. Grouping every sampled choice by
-    head replaces one tiny device operation per choice with at most one masked
-    log-softmax per policy head in the minibatch.
+
+def _trace_log_probs_and_entropy(
+    output: TorchPolicyTensorOutput,
+    traces: list[PolicySampleTrace],
+) -> tuple[Tensor, Tensor]:
+    """Compute masked path log-probability and conditional path entropy.
+
+    Each sampled structured action is factorized into a variable sequence of
+    legal policy heads. We sum conditional log-probabilities and conditional
+    entropies along that sampled path. The diagnostic is computed from exactly
+    the same legal-index sets used by PPO; it never changes masks or sampling.
     """
 
     if not traces:
-        return output.value.new_empty((0,))
+        empty = output.value.new_empty((0,))
+        return empty, empty
 
     grouped: dict[str, list[tuple[int, HeadChoice]]] = {}
     for batch_index, trace in enumerate(traces):
@@ -318,7 +407,8 @@ def _trace_log_probs(
                 raise ValueError(f"{choice.head} selected index is not legal")
             grouped.setdefault(choice.head, []).append((batch_index, choice))
 
-    total = output.value.new_zeros((len(traces),))
+    total_log_prob = output.value.new_zeros((len(traces),))
+    total_entropy = output.value.new_zeros((len(traces),))
     for head, entries in grouped.items():
         head_logits = output.head(head)
         if head_logits.ndim != 2 or head_logits.shape[0] != len(traces):
@@ -337,10 +427,12 @@ def _trace_log_probs(
             selected_indices.append(choice.index)
 
         device = head_logits.device
-        rows = head_logits.index_select(
-            0,
-            torch.tensor(batch_indices, dtype=torch.long, device=device),
+        batch_index_tensor = torch.tensor(
+            batch_indices,
+            dtype=torch.long,
+            device=device,
         )
+        rows = head_logits.index_select(0, batch_index_tensor)
         legal_mask = torch.tensor(legal_rows, dtype=torch.bool, device=device)
         selected = torch.tensor(selected_indices, dtype=torch.long, device=device)
         masked_log_probs = torch.log_softmax(
@@ -348,12 +440,21 @@ def _trace_log_probs(
             dim=1,
         )
         choice_log_probs = masked_log_probs.gather(1, selected.unsqueeze(1)).squeeze(1)
-        total = total.index_add(
+        safe_log_probs = masked_log_probs.masked_fill(~legal_mask, 0.0)
+        choice_entropies = -(
+            masked_log_probs.exp() * safe_log_probs
+        ).sum(dim=1)
+        total_log_prob = total_log_prob.index_add(
             0,
-            torch.tensor(batch_indices, dtype=torch.long, device=device),
+            batch_index_tensor,
             choice_log_probs,
         )
-    return total
+        total_entropy = total_entropy.index_add(
+            0,
+            batch_index_tensor,
+            choice_entropies,
+        )
+    return total_log_prob, total_entropy
 
 
 def _trace_log_prob(

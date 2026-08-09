@@ -18,6 +18,7 @@ TorchPPOConfig = torch_trainer.TorchPPOConfig
 TorchPPOTrainer = torch_trainer.TorchPPOTrainer
 _trace_log_prob = torch_trainer._trace_log_prob
 _trace_log_probs = torch_trainer._trace_log_probs
+_trace_log_probs_and_entropy = torch_trainer._trace_log_probs_and_entropy
 
 
 def _env() -> WerewolfTrainingEnv:
@@ -74,6 +75,21 @@ def _vote_trajectory(model, *, reward: float, episode_id: str) -> EpisodeTraject
     return trajectory
 
 
+def _scalar_path_entropy(output, batch_index: int, trace: PolicySampleTrace):
+    total = output.value.new_zeros(())
+    for choice in trace.choices:
+        logits = output.head(choice.head)[batch_index]
+        valid_indices = torch.tensor(
+            choice.valid_indices,
+            dtype=torch.long,
+            device=logits.device,
+        )
+        valid_logits = logits.index_select(0, valid_indices)
+        log_probs = torch.log_softmax(valid_logits, dim=0)
+        total = total - (log_probs.exp() * log_probs).sum()
+    return total
+
+
 def test_vectorized_trace_log_probs_match_scalar_reference_for_mixed_heads():
     torch.manual_seed(499)
     model = _model().train()
@@ -101,13 +117,23 @@ def test_vectorized_trace_log_probs_match_scalar_reference_for_mixed_heads():
         ),
     ]
 
-    vectorized = _trace_log_probs(output, traces)
+    vectorized, path_entropy = _trace_log_probs_and_entropy(output, traces)
     scalar = torch.stack(
         [_trace_log_prob(output, index, trace) for index, trace in enumerate(traces)]
     )
+    scalar_entropy = torch.stack(
+        [
+            _scalar_path_entropy(output, index, trace)
+            for index, trace in enumerate(traces)
+        ]
+    )
 
     assert vectorized.shape == (3,)
+    assert path_entropy.shape == (3,)
+    assert torch.allclose(_trace_log_probs(output, traces), vectorized)
     assert torch.allclose(vectorized, scalar, atol=1e-6, rtol=1e-6)
+    assert torch.allclose(path_entropy, scalar_entropy, atol=1e-6, rtol=1e-6)
+    assert torch.all(path_entropy >= 0.0)
 
 
 def test_vectorized_trace_log_prob_matches_rollout_probability():
@@ -146,6 +172,11 @@ def test_torch_ppo_changes_transformer_parameters_from_terminal_reward():
     assert stats.epochs == 2
     assert torch.isfinite(torch.tensor(stats.mean_policy_loss))
     assert torch.isfinite(torch.tensor(stats.mean_value_loss))
+    assert torch.isfinite(torch.tensor(stats.mean_approx_kl))
+    assert torch.isfinite(torch.tensor(stats.mean_path_entropy))
+    assert stats.mean_approx_kl >= 0.0
+    assert stats.mean_path_entropy > 0.0
+    assert stats.rollout_value_explained_variance == 0.0
     assert stats.gradient_norm > 0.0
     assert not torch.allclose(before, after)
 
@@ -170,6 +201,10 @@ def test_torch_ppo_batches_multiple_traced_decisions():
     assert stats.epochs == 1
     assert stats.mean_ratio > 0.0
     assert 0.0 <= stats.clip_fraction <= 1.0
+    assert stats.mean_approx_kl >= 0.0
+    assert stats.mean_path_entropy > 0.0
+    assert torch.isfinite(torch.tensor(stats.rollout_value_explained_variance))
+    assert stats.rollout_value_explained_variance <= 1.0
     assert stats.gradient_norm > 0.0
 
 

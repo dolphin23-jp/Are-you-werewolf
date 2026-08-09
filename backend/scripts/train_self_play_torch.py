@@ -83,6 +83,11 @@ def _append_metrics(
             "mean_ratio": update.mean_ratio,
             "clip_fraction": update.clip_fraction,
             "gradient_norm": update.gradient_norm,
+            "mean_approx_kl": update.mean_approx_kl,
+            "mean_path_entropy": update.mean_path_entropy,
+            "rollout_value_explained_variance": (
+                update.rollout_value_explained_variance
+            ),
         },
     }
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -349,6 +354,9 @@ def main() -> None:
             f"policy_loss={update.mean_policy_loss:.4f} "
             f"value_loss={update.mean_value_loss:.4f} "
             f"ratio={update.mean_ratio:.4f} clip={update.clip_fraction:.3f} "
+            f"kl={update.mean_approx_kl:.6f} "
+            f"entropy={update.mean_path_entropy:.4f} "
+            f"value_ev={update.rollout_value_explained_variance:.4f} "
             f"grad_norm={update.gradient_norm:.4f} checkpoint={args.output} "
             f"run_state={run_state_path} policy_id={policy_id}"
         )

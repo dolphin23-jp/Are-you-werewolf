@@ -229,10 +229,19 @@ second generation.
 - faction wins and draws
 - mean game days and decisions
 - PPO policy/value loss, ratio, clipping fraction, and gradient norm
+- sampled-policy approximate KL
+- mean factorized action-path entropy
+- rollout value explained variance against GAE value targets
 
-These are runtime/research measurements only. Wall-clock timing and batching
-statistics are never placed inside `PolicyObservation` and therefore cannot
-become strategic inputs.
+The additional PPO diagnostics are observational only:
+
+- approximate KL estimates how far the updated sampled-action probabilities have moved from their rollout probabilities; it does not currently trigger a KL penalty, reward, or automatic early stop
+- path entropy sums the conditional entropy of the legal factorized heads actually traversed by timing, speech, vote, and night decisions; there is no entropy bonus in the loss or reward
+- rollout value explained variance measures how much of the GAE value-target variation was explained by the value estimates frozen into rollout traces; `1` is ideal, `0` means no variance explained, and negative values are possible when the critic is worse than a constant predictor
+
+These are runtime/research measurements only. Wall-clock timing, batching
+statistics, KL, entropy, and value diagnostics are never placed inside
+`PolicyObservation`, never alter action masks, and never become reward terms.
 
 ## Initial self-play
 
@@ -264,7 +273,9 @@ dropout=0
 The example sizes above are starting points for throughput measurement, not
 recommended final hyperparameters. Tune `--parallel-games`,
 `--inference-batch-size`, `--batch-size`, and PPO minibatch size from observed
-GPU/CPU utilization, inference batch metrics, and memory use.
+GPU/CPU utilization, inference batch metrics, and memory use. Track KL, entropy,
+and explained variance to detect unstable policy updates, premature collapse,
+or a critic that is not learning before scaling a run further.
 
 Each completed learner batch can also be stored as a general immutable population
 generation.
@@ -352,6 +363,7 @@ and repeat.
 vectorized Transformer self-play
   -> bounded inference microbatches if configured
   -> PPO / optional GAE learner update
+  -> policy/value health diagnostics (observational only)
   -> atomic policy + resumable run-state snapshots
   -> save general generations
   -> historical self-play / faction specialists
