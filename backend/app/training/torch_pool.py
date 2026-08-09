@@ -107,6 +107,48 @@ class TorchPolicyPool:
         self._write_manifest()
         return entry
 
+    def ensure_generation(
+        self,
+        model: TorchTransformerPolicy,
+        *,
+        generation: int,
+        parent_id: str | None,
+        specialized_team: Team | None,
+    ) -> PolicyPoolEntry:
+        """Create an expected generation or safely reuse its exact crash replay."""
+
+        if generation < 0:
+            raise ValueError("generation cannot be negative")
+        policy_id = f"g{generation:06d}"
+        try:
+            existing = self.get(policy_id)
+        except KeyError as exc:
+            if self.next_generation != generation:
+                raise ValueError(
+                    "policy pool advanced beyond the expected generation boundary"
+                ) from exc
+            return self.add(
+                model,
+                generation=generation,
+                parent_id=parent_id,
+                specialized_team=specialized_team,
+            )
+
+        if existing.parent_id != parent_id:
+            raise ValueError(
+                f"existing {policy_id} has unexpected parent {existing.parent_id}"
+            )
+        if existing.specialized_team is not specialized_team:
+            raise ValueError(
+                f"existing {policy_id} has unexpected specialized faction"
+            )
+        persisted = self.load(policy_id)
+        if not _same_model_state(model, persisted):
+            raise ValueError(
+                f"existing {policy_id} does not match replayed model tensors"
+            )
+        return existing
+
     def get(self, policy_id: str) -> PolicyPoolEntry:
         for entry in self._entries:
             if entry.policy_id == policy_id:
@@ -149,6 +191,17 @@ class TorchPolicyPool:
             encoding="utf-8",
         )
         temporary.replace(self.manifest_path)
+
+
+def _same_model_state(
+    left: TorchTransformerPolicy,
+    right: TorchTransformerPolicy,
+) -> bool:
+    left_state = left.state_dict()
+    right_state = right.state_dict()
+    if left_state.keys() != right_state.keys():
+        return False
+    return all(torch.equal(left_state[name], right_state[name]) for name in left_state)
 
 
 def _entry_from_json(item: Any) -> PolicyPoolEntry:

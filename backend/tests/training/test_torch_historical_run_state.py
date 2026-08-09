@@ -5,7 +5,7 @@ import pytest
 
 from app.engine.game import PlayerSpec
 from app.engine.roles import Team
-from app.training.meta_strategy import PopulationMetaStrategy, PopulationWeight
+from app.training.meta_strategy import PolicyWeight, PopulationMetaStrategy
 
 torch = pytest.importorskip("torch")
 torch_historical = pytest.importorskip("app.training.torch_historical")
@@ -50,15 +50,14 @@ def _model(seed: int) -> TorchTransformerPolicy:
 
 
 def _strategy(policy_ids: tuple[str, str]) -> PopulationMetaStrategy:
+    weights = (
+        PolicyWeight(policy_ids[0], 0.65),
+        PolicyWeight(policy_ids[1], 0.35),
+    )
     return PopulationMetaStrategy(
-        by_team={
-            team: (
-                PopulationWeight(policy_ids[0], 0.65),
-                PopulationWeight(policy_ids[1], 0.35),
-            )
-            for team in Team
-        },
-        temperature=0.75,
+        village=weights,
+        werewolf=weights,
+        fox=weights,
     )
 
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import random
 from dataclasses import dataclass
 from time import perf_counter
+from typing import Any
 
 from app.engine.game import PlayerSpec
 from app.engine.roles import Team
@@ -206,6 +207,16 @@ class TorchHistoricalTrainingLoop:
             max_inference_batch=inference.max_inference_batch,
             opponent_checkpoint_loads=opponent_checkpoint_loads,
         )
+
+    def checkpoint_opponent_rng_state(self) -> tuple[Any, ...]:
+        """Return the historical-opponent RNG state at a batch boundary."""
+
+        return self._rng.getstate()
+
+    def restore_opponent_rng_state(self, state: tuple[Any, ...]) -> None:
+        """Restore the exact historical-opponent sampling stream."""
+
+        self._rng.setstate(state)
 
     def _sample_opponent(self, team: Team) -> str:
         if self.opponent_strategy is not None:

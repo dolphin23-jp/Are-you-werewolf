@@ -13,7 +13,7 @@ from torch import Tensor
 
 from app.engine.game import PlayerSpec
 from app.engine.roles import Team
-from app.training.meta_strategy import PopulationMetaStrategy, PopulationWeight
+from app.training.meta_strategy import PolicyWeight, PopulationMetaStrategy
 from app.training.policy_contract import PolicyHeadSizes
 from app.training.torch_historical import TorchHistoricalTrainingLoop
 from app.training.torch_policy import TorchTransformerPolicy, TransformerPolicyConfig
@@ -45,6 +45,8 @@ class TorchHistoricalRunProgress:
             raise ValueError("episodes_per_batch must be positive")
         if not self.requested_teams:
             raise ValueError("requested_teams cannot be empty")
+        if len(set(self.requested_teams)) != len(self.requested_teams):
+            raise ValueError("requested_teams cannot contain duplicates")
         if self.next_pool_generation is not None and self.next_pool_generation < 0:
             raise ValueError("next_pool_generation cannot be negative")
 
@@ -183,14 +185,11 @@ def _strategy_payload(
     if strategy is None:
         return None
     return {
-        "temperature": strategy.temperature,
-        "weights": {
-            team.value: [
-                {"policy_id": item.policy_id, "weight": item.weight}
-                for item in strategy.weights(team)
-            ]
-            for team in Team
-        },
+        team.value: [
+            {"policy_id": item.policy_id, "probability": item.probability}
+            for item in strategy.weights(team)
+        ]
+        for team in Team
     }
 
 
@@ -199,27 +198,30 @@ def _strategy_from_payload(raw: Any) -> PopulationMetaStrategy | None:
         return None
     if not isinstance(raw, dict):
         raise ValueError("historical run-state opponent strategy is invalid")
-    temperature = raw.get("temperature")
-    weights = raw.get("weights")
-    if not isinstance(temperature, (int, float)) or not isinstance(weights, dict):
-        raise ValueError("historical run-state opponent strategy is invalid")
 
-    by_team: dict[Team, tuple[PopulationWeight, ...]] = {}
+    by_team: dict[Team, tuple[PolicyWeight, ...]] = {}
     for team in Team:
-        items = weights.get(team.value)
+        items = raw.get(team.value)
         if not isinstance(items, list):
             raise ValueError("historical run-state opponent weights are invalid")
-        parsed: list[PopulationWeight] = []
+        parsed: list[PolicyWeight] = []
         for item in items:
             if not isinstance(item, dict):
                 raise ValueError("historical run-state opponent weight is invalid")
             policy_id = item.get("policy_id")
-            weight = item.get("weight")
-            if not isinstance(policy_id, str) or not isinstance(weight, (int, float)):
+            probability = item.get("probability")
+            if not isinstance(policy_id, str) or not isinstance(
+                probability,
+                (int, float),
+            ):
                 raise ValueError("historical run-state opponent weight is invalid")
-            parsed.append(PopulationWeight(policy_id, float(weight)))
+            parsed.append(PolicyWeight(policy_id, float(probability)))
         by_team[team] = tuple(parsed)
-    return PopulationMetaStrategy(by_team=by_team, temperature=float(temperature))
+    return PopulationMetaStrategy(
+        village=by_team[Team.VILLAGE],
+        werewolf=by_team[Team.WEREWOLF],
+        fox=by_team[Team.FOX],
+    )
 
 
 def _restore_model_tensors(model: TorchTransformerPolicy, archive: Any) -> None:
