@@ -222,12 +222,12 @@ class WerewolfTrainingEnv:
                 and previous.topic in (Topic.SEER_RESULT, Topic.MEDIUM_RESULT)
                 and previous.target_id is not None
             ):
-                result_type = (
+                retracted_result_type = (
                     "seer" if previous.topic is Topic.SEER_RESULT else "medium"
                 )
                 self.controller.retract_public_result(
                     actor_id,
-                    result_type,
+                    retracted_result_type,
                     previous.target_id,
                     source_message_id=source_event_id,
                     referenced_day=previous.referenced_day,
