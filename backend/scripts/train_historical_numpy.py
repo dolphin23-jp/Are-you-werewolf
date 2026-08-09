@@ -8,6 +8,7 @@ from pathlib import Path
 from app.engine.game import PlayerSpec
 from app.engine.roles import Team
 from app.training.historical_train import HistoricalNumpyTrainingLoop
+from app.training.meta_strategy import PopulationMetaStrategy
 from app.training.numpy_policy import NumpyMLPPolicy
 from app.training.numpy_trainer import PPOConfig
 from app.training.policy_pool import NumpyPolicyPool
@@ -25,6 +26,7 @@ def main() -> None:
     parser.add_argument("--load", type=Path, required=True)
     parser.add_argument("--pool-dir", type=Path, required=True)
     parser.add_argument("--output", type=Path, default=Path("historical-policy.npz"))
+    parser.add_argument("--meta-strategy", type=Path)
     parser.add_argument("--batches", type=int, default=3)
     parser.add_argument("--episodes-per-batch", type=int, default=2)
     parser.add_argument("--seed", type=int, default=20000)
@@ -48,11 +50,17 @@ def main() -> None:
     pool = NumpyPolicyPool(args.pool_dir)
     if not pool.entries:
         parser.error("--pool-dir must contain at least one saved generation")
+    opponent_strategy = (
+        PopulationMetaStrategy.load(args.meta_strategy)
+        if args.meta_strategy is not None
+        else None
+    )
 
     loop = HistoricalNumpyTrainingLoop(
         _player_specs(),
         model,
         pool,
+        opponent_strategy=opponent_strategy,
         opponent_seed=args.opponent_seed,
         max_discussion_ticks=args.discussion_ticks,
         ppo_config=PPOConfig(
