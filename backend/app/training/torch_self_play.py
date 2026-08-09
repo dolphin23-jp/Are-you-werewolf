@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from app.engine.game import PlayerSpec
 from app.engine.roles import Team
-from app.training.learned_runner import LearnedEpisodeRunner
 from app.training.self_play_train import SelfPlayBatchStats
 from app.training.torch_policy import TorchTransformerPolicy, TransformerPolicyConfig
+from app.training.torch_runner import TorchBatchedEpisodeRunner
 from app.training.torch_trainer import TorchPPOConfig, TorchPPOTrainer
 
 
@@ -43,7 +43,7 @@ class TorchSelfPlayTrainingLoop:
         trajectories = []
         self.model.eval()
         for offset in range(episodes):
-            result = LearnedEpisodeRunner(
+            result = TorchBatchedEpisodeRunner(
                 self.player_specs,
                 self.model,
                 max_discussion_ticks=self.max_discussion_ticks,
