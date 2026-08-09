@@ -1,7 +1,10 @@
-from app.engine.game import PlayerSpec
+import pytest
+
+from app.engine.game import GameError, PlayerSpec
 from app.engine.roles import RoleName
 from app.training.actions import (
     ActionType,
+    Channel,
     SemanticAction,
     SpeechBundle,
     TimingBucket,
@@ -74,3 +77,31 @@ def test_new_public_event_can_change_next_speaker_plan():
     assert env.select_next_speaker(
         {second_actor: SpeakIntent(TimingBucket.HOLD, None)}
     ) is None
+
+
+def test_wolf_private_plan_is_visible_to_wolves_only():
+    env = _env()
+    bundle = SpeechBundle(
+        (
+            SemanticAction(
+                ActionType.PRIVATE_PLAN,
+                topic=Topic.ATTACK,
+                target_id="p0",
+                channel=Channel.WOLF,
+            ),
+        )
+    )
+
+    events = env.emit_private_speech("p1", bundle)
+    fox_id = next(
+        player.player_id
+        for player in env.controller.state.players.values()
+        if player.role is RoleName.FOX
+    )
+
+    assert events[0].discussion_tick == -1
+    assert [event.event_id for event in env.observe("p1").private.semantic_events] == ["t1"]
+    assert env.observe(fox_id).private.semantic_events == ()
+
+    with pytest.raises(GameError):
+        env.emit_private_speech(fox_id, bundle)
