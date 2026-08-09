@@ -1,19 +1,22 @@
-"""Cross-game vectorized rollout for shared-policy Transformer self-play.
+"""Cross-game vectorized rollout for Transformer self-play.
 
 Several independent ``WerewolfTrainingEnv`` instances advance together. At each
 logical decision point, observations from all currently eligible seats across
-all games are concatenated into Transformer inference batches. Games remain
-fully independent; only neural inference is shared.
+all games are grouped by the exact Transformer instance that owns the seat, then
+run in inference microbatches. Games remain fully independent; only neural
+inference is shared.
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 import torch
 
 from app.engine.game import PlayerSpec
 from app.engine.phases import Phase
+from app.engine.roles import Team
 from app.training.encoding import EncodedPolicyObservation, ObservationEncoder
 from app.training.env import WerewolfTrainingEnv
 from app.training.learned_policy import SpeechPolicyStep
@@ -68,6 +71,7 @@ class _EpisodeSlot:
     seed: int
     env: WerewolfTrainingEnv
     samplers: dict[str, MaskedPolicySampler]
+    player_models: dict[str, TorchTransformerPolicy]
     trajectory: EpisodeTrajectory
     discussion_ticks: int = 0
     result: LearnedEpisodeResult | None = None
@@ -79,6 +83,7 @@ class _InferenceRequest:
     player_id: str
     observation: PolicyObservation
     encoded: EncodedPolicyObservation
+    model: TorchTransformerPolicy
 
 
 @dataclass(frozen=True)
@@ -88,7 +93,7 @@ class _PreparedRequest:
 
 
 class TorchVectorizedEpisodeCollector:
-    """Collect multiple independent shared-model episodes in lockstep batches."""
+    """Collect multiple independent episodes while batching shared model calls."""
 
     def __init__(
         self,
@@ -111,13 +116,42 @@ class TorchVectorizedEpisodeCollector:
         self._encoder = ObservationEncoder()
         self.inference_stats = TorchRolloutInferenceStats()
 
-    def collect(self, seeds: tuple[int, ...]) -> tuple[LearnedEpisodeResult, ...]:
+    def collect(
+        self,
+        seeds: tuple[int, ...],
+        *,
+        team_models: tuple[Mapping[Team, TorchTransformerPolicy], ...] | None = None,
+    ) -> tuple[LearnedEpisodeResult, ...]:
+        """Collect games, optionally assigning a model per faction per game.
+
+        ``team_models`` is aligned one-to-one with ``seeds``. Missing factions
+        fall back to the collector's default model. This keeps the shared-policy
+        self-play API unchanged while allowing historical/population games to
+        batch seats across independent games only when they truly share the same
+        immutable model instance.
+        """
+
         if not seeds:
             raise ValueError("vectorized rollout requires at least one seed")
         if len(set(seeds)) != len(seeds):
             raise ValueError("vectorized rollout seeds must be unique")
-        slots = [self._make_slot(index, seed) for index, seed in enumerate(seeds)]
-        self._model.eval()
+        if team_models is not None and len(team_models) != len(seeds):
+            raise ValueError("team_models must align one-to-one with seeds")
+
+        slots = [
+            self._make_slot(
+                index,
+                seed,
+                team_models[index] if team_models is not None else None,
+            )
+            for index, seed in enumerate(seeds)
+        ]
+        for model in _unique_models(
+            model
+            for slot in slots
+            for model in slot.player_models.values()
+        ):
+            model.eval()
 
         for _ in range(self._max_global_steps):
             unfinished = [slot for slot in slots if slot.result is None]
@@ -140,7 +174,12 @@ class TorchVectorizedEpisodeCollector:
             f"vectorized rollout exceeded {self._max_global_steps} steps; pending={pending}"
         )
 
-    def _make_slot(self, index: int, seed: int) -> _EpisodeSlot:
+    def _make_slot(
+        self,
+        index: int,
+        seed: int,
+        team_models: Mapping[Team, TorchTransformerPolicy] | None,
+    ) -> _EpisodeSlot:
         env = WerewolfTrainingEnv(self._player_specs, seed=seed)
         samplers = {
             player_id: MaskedPolicySampler(
@@ -149,11 +188,17 @@ class TorchVectorizedEpisodeCollector:
             )
             for seat_index, player_id in enumerate(env.controller.state.players)
         }
+        supplied_models = team_models or {}
+        player_models = {
+            player_id: supplied_models.get(player.team, self._model)
+            for player_id, player in env.controller.state.players.items()
+        }
         return _EpisodeSlot(
             index=index,
             seed=seed,
             env=env,
             samplers=samplers,
+            player_models=player_models,
             trajectory=EpisodeTrajectory(f"torch-vectorized-{seed}"),
         )
 
@@ -329,6 +374,7 @@ class TorchVectorizedEpisodeCollector:
             player_id=player_id,
             observation=observation,
             encoded=self._encoder.encode(observation),
+            model=slot.player_models[player_id],
         )
 
     def _infer(
@@ -338,21 +384,52 @@ class TorchVectorizedEpisodeCollector:
         if not requests:
             return ()
         self.inference_stats.record_pending(len(requests))
-        limit = self.max_inference_batch_size or len(requests)
-        prepared: list[_PreparedRequest] = []
-        for start in range(0, len(requests), limit):
-            batch = requests[start : start + limit]
-            self.inference_stats.record_inference(len(batch))
-            with torch.no_grad():
-                output = self._model.forward_batch(
-                    tuple(request.encoded for request in batch)
-                )
-            logits_batch = self._model.policy_logits_batch(output)
-            prepared.extend(
-                _PreparedRequest(request=request, logits=logits)
-                for request, logits in zip(batch, logits_batch, strict=True)
-            )
-        return tuple(prepared)
+
+        grouped: dict[
+            int,
+            tuple[TorchTransformerPolicy, list[tuple[int, _InferenceRequest]]],
+        ] = {}
+        for request_index, request in enumerate(requests):
+            key = id(request.model)
+            existing = grouped.get(key)
+            if existing is None:
+                grouped[key] = (request.model, [(request_index, request)])
+            else:
+                existing[1].append((request_index, request))
+
+        prepared: list[_PreparedRequest | None] = [None] * len(requests)
+        for model, indexed_requests in grouped.values():
+            limit = self.max_inference_batch_size or len(indexed_requests)
+            for start in range(0, len(indexed_requests), limit):
+                batch = indexed_requests[start : start + limit]
+                self.inference_stats.record_inference(len(batch))
+                with torch.no_grad():
+                    output = model.forward_batch(
+                        tuple(request.encoded for _, request in batch)
+                    )
+                logits_batch = model.policy_logits_batch(output)
+                for (request_index, request), logits in zip(
+                    batch,
+                    logits_batch,
+                    strict=True,
+                ):
+                    prepared[request_index] = _PreparedRequest(
+                        request=request,
+                        logits=logits,
+                    )
+
+        return tuple(_require_prepared(item) for item in prepared)
+
+
+def _unique_models(
+    models: object,
+) -> tuple[TorchTransformerPolicy, ...]:
+    unique: dict[int, TorchTransformerPolicy] = {}
+    for model in models:  # type: ignore[union-attr]
+        if not isinstance(model, TorchTransformerPolicy):
+            raise TypeError("rollout model collection contains a non-Transformer")
+        unique[id(model)] = model
+    return tuple(unique.values())
 
 
 def _slot_by_index(slots: list[_EpisodeSlot], index: int) -> _EpisodeSlot:
@@ -366,6 +443,12 @@ def _require_result(slot: _EpisodeSlot) -> LearnedEpisodeResult:
     if slot.result is None:
         raise RuntimeError(f"episode {slot.seed} is not finalized")
     return slot.result
+
+
+def _require_prepared(item: _PreparedRequest | None) -> _PreparedRequest:
+    if item is None:
+        raise RuntimeError("mixed-model inference did not prepare every request")
+    return item
 
 
 def _record_discussion_cycle(
