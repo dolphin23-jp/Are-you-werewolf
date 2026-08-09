@@ -12,6 +12,11 @@ from app.engine.roles import Team
 from app.training.meta_strategy import PopulationMetaStrategy
 from app.training.torch_checkpoint import load_torch_policy, save_torch_policy
 from app.training.torch_historical import TorchHistoricalTrainingLoop
+from app.training.torch_historical_run_state import (
+    TorchHistoricalRunProgress,
+    load_torch_historical_run_state,
+    save_torch_historical_run_state,
+)
 from app.training.torch_pool import TorchPolicyPool
 from app.training.torch_trainer import TorchPPOConfig
 
@@ -32,11 +37,27 @@ def _resolve_device(raw: str) -> torch.device:
     return device
 
 
+def _validate_pool_boundary(
+    pool: TorchPolicyPool,
+    progress: TorchHistoricalRunProgress,
+) -> None:
+    expected = progress.next_pool_generation
+    if expected is None:
+        raise ValueError("historical run-state is missing next pool generation")
+    actual = pool.next_generation
+    if actual not in (expected, expected + 1):
+        raise ValueError(
+            "policy pool does not match the committed historical generation boundary"
+        )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--load", type=Path, required=True)
+    parser.add_argument("--load", type=Path)
     parser.add_argument("--pool-dir", type=Path, required=True)
     parser.add_argument("--output", type=Path, default=Path("historical-transformer.npz"))
+    parser.add_argument("--run-state", type=Path, default=Path("historical.run.npz"))
+    parser.add_argument("--resume", action="store_true")
     parser.add_argument("--meta-strategy", type=Path)
     parser.add_argument("--batches", type=int, default=3)
     parser.add_argument("--episodes-per-batch", type=int, default=2)
@@ -64,55 +85,109 @@ def main() -> None:
         parser.error("--parallel-games must be positive")
     if args.inference_batch_size is not None and args.inference_batch_size <= 0:
         parser.error("--inference-batch-size must be positive")
+    if args.resume and args.load is not None:
+        parser.error("--load cannot be combined with --resume")
+    if not args.resume and args.load is None:
+        parser.error("--load is required for a fresh historical run")
     try:
         device = _resolve_device(args.device)
     except (RuntimeError, ValueError) as exc:
         parser.error(str(exc))
 
-    model = load_torch_policy(args.load, device=device).eval()
     pool = TorchPolicyPool(args.pool_dir, device=device)
     if not pool.entries:
         parser.error("--pool-dir must contain at least one saved generation")
-    opponent_strategy = (
-        PopulationMetaStrategy.load(args.meta_strategy)
-        if args.meta_strategy is not None
-        else None
-    )
-    loop = TorchHistoricalTrainingLoop(
-        _player_specs(),
-        model,
-        pool,
-        opponent_strategy=opponent_strategy,
-        opponent_seed=args.opponent_seed,
-        max_discussion_ticks=args.discussion_ticks,
-        max_parallel_games=args.parallel_games,
-        max_inference_batch_size=args.inference_batch_size,
-        trainer_seed=args.seed,
-        ppo_config=TorchPPOConfig(
-            learning_rate=args.learning_rate,
-            epochs=args.ppo_epochs,
-            minibatch_size=args.minibatch_size,
-        ),
-    )
-    requested_teams = tuple(Team) if args.team == "all" else (Team(args.team),)
-    latest = pool.latest()
-    parent_id = latest.policy_id if latest is not None else None
 
-    for batch_index in range(args.batches):
-        learner_team = requested_teams[batch_index % len(requested_teams)]
-        start_seed = args.seed + batch_index * args.episodes_per_batch
+    if args.resume:
+        if not args.run_state.exists():
+            parser.error("--run-state does not exist")
+        try:
+            loop, progress = load_torch_historical_run_state(
+                args.run_state,
+                _player_specs(),
+                pool,
+                device=device,
+            )
+            _validate_pool_boundary(pool, progress)
+        except ValueError as exc:
+            parser.error(str(exc))
+        if args.batches < progress.completed_batches:
+            parser.error(
+                "--batches cannot be lower than the completed run-state batch count"
+            )
+        if args.meta_strategy is not None:
+            supplied = PopulationMetaStrategy.load(args.meta_strategy)
+            if supplied != loop.opponent_strategy:
+                parser.error("--meta-strategy does not match the saved run-state")
+    else:
+        assert args.load is not None
+        model = load_torch_policy(args.load, device=device).eval()
+        opponent_strategy = (
+            PopulationMetaStrategy.load(args.meta_strategy)
+            if args.meta_strategy is not None
+            else None
+        )
+        loop = TorchHistoricalTrainingLoop(
+            _player_specs(),
+            model,
+            pool,
+            opponent_strategy=opponent_strategy,
+            opponent_seed=args.opponent_seed,
+            max_discussion_ticks=args.discussion_ticks,
+            max_parallel_games=args.parallel_games,
+            max_inference_batch_size=args.inference_batch_size,
+            trainer_seed=args.seed,
+            ppo_config=TorchPPOConfig(
+                learning_rate=args.learning_rate,
+                epochs=args.ppo_epochs,
+                minibatch_size=args.minibatch_size,
+            ),
+        )
+        requested_teams = (
+            tuple(Team) if args.team == "all" else (Team(args.team),)
+        )
+        latest = pool.latest()
+        progress = TorchHistoricalRunProgress(
+            completed_batches=0,
+            base_seed=args.seed,
+            episodes_per_batch=args.episodes_per_batch,
+            requested_teams=requested_teams,
+            parent_policy_id=latest.policy_id if latest is not None else None,
+            next_pool_generation=pool.next_generation,
+        )
+        save_torch_historical_run_state(loop, progress, args.run_state)
+
+    for batch_index in range(progress.completed_batches, args.batches):
+        learner_team = progress.next_learner_team
+        start_seed = progress.next_start_seed
         stats = loop.train_batch(
             learner_team=learner_team,
             start_seed=start_seed,
-            episodes=args.episodes_per_batch,
+            episodes=progress.episodes_per_batch,
         )
-        save_torch_policy(model, args.output)
-        entry = pool.add(
-            model,
-            parent_id=parent_id,
-            specialized_team=learner_team,
+        save_torch_policy(loop.model, args.output)
+        expected_generation = progress.next_pool_generation
+        if expected_generation is None:
+            parser.error("run-state is missing next pool generation")
+        try:
+            entry = pool.ensure_generation(
+                loop.model,
+                generation=expected_generation,
+                parent_id=progress.parent_policy_id,
+                specialized_team=learner_team,
+            )
+        except ValueError as exc:
+            parser.error(str(exc))
+        progress = TorchHistoricalRunProgress(
+            completed_batches=batch_index + 1,
+            base_seed=progress.base_seed,
+            episodes_per_batch=progress.episodes_per_batch,
+            requested_teams=progress.requested_teams,
+            parent_policy_id=entry.policy_id,
+            next_pool_generation=expected_generation + 1,
         )
-        parent_id = entry.policy_id
+        save_torch_historical_run_state(loop, progress, args.run_state)
+
         update = stats.update
         opponents = ",".join(sorted(set(stats.opponent_policy_ids)))
         inference_limit = loop.max_inference_batch_size or "unbounded"
