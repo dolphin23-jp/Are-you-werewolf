@@ -228,23 +228,33 @@ class TorchTransformerPolicy(nn.Module):
         """Framework-agnostic inference adapter expected by rollout policies."""
         with torch.no_grad():
             output = self.forward_batch((observation,))
+        return self.policy_logits_at(output, 0)
+
+    def policy_logits_at(
+        self,
+        output: TorchPolicyTensorOutput,
+        batch_index: int,
+    ) -> PolicyLogits:
+        """Detach one row of a batched forward pass into the rollout contract."""
+        if batch_index < 0 or batch_index >= output.value.shape[0]:
+            raise IndexError(batch_index)
         logits = PolicyLogits(
-            timing=_as_tuple(output.timing[0]),
-            action_type=_as_tuple(output.action_type[0]),
-            topic=_as_tuple(output.topic[0]),
-            target=_as_tuple(output.target[0]),
-            secondary_target=_as_tuple(output.secondary_target[0]),
-            role=_as_tuple(output.role[0]),
-            result=_as_tuple(output.result[0]),
-            quantity=_as_tuple(output.quantity[0]),
-            referenced_day=_as_tuple(output.referenced_day[0]),
-            scope=_as_tuple(output.scope[0]),
-            stance=_as_tuple(output.stance[0]),
-            reference_event=_as_tuple(output.reference_event[0]),
-            vote_target=_as_tuple(output.vote_target[0]),
-            night_topic=_as_tuple(output.night_topic[0]),
-            night_target=_as_tuple(output.night_target[0]),
-            value=float(output.value[0].detach().cpu()),
+            timing=_as_tuple(output.timing[batch_index]),
+            action_type=_as_tuple(output.action_type[batch_index]),
+            topic=_as_tuple(output.topic[batch_index]),
+            target=_as_tuple(output.target[batch_index]),
+            secondary_target=_as_tuple(output.secondary_target[batch_index]),
+            role=_as_tuple(output.role[batch_index]),
+            result=_as_tuple(output.result[batch_index]),
+            quantity=_as_tuple(output.quantity[batch_index]),
+            referenced_day=_as_tuple(output.referenced_day[batch_index]),
+            scope=_as_tuple(output.scope[batch_index]),
+            stance=_as_tuple(output.stance[batch_index]),
+            reference_event=_as_tuple(output.reference_event[batch_index]),
+            vote_target=_as_tuple(output.vote_target[batch_index]),
+            night_topic=_as_tuple(output.night_topic[batch_index]),
+            night_target=_as_tuple(output.night_target[batch_index]),
+            value=float(output.value[batch_index].detach().cpu()),
         )
         logits.validate(self.sizes)
         return logits
