@@ -214,6 +214,8 @@ class WerewolfTrainingEnv:
 
         if action.action_type not in (ActionType.REPORT, ActionType.CORRECT):
             return
+        if action.topic is None:
+            return
         result_type = {
             Topic.SEER_RESULT: "seer",
             Topic.MEDIUM_RESULT: "medium",
