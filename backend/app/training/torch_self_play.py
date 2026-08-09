@@ -26,6 +26,10 @@ class TorchSelfPlayTrainingLoop:
     ) -> None:
         if model is not None and model_config is not None:
             raise ValueError("provide either model or model_config, not both")
+        if temperature != 1.0:
+            raise ValueError(
+                "Torch PPO currently requires temperature=1 because traces do not store it"
+            )
         self.player_specs = player_specs
         self.model = model or TorchTransformerPolicy(model_config)
         self.optimizer = TorchPPOTrainer(
