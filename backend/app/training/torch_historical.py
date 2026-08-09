@@ -122,27 +122,6 @@ class TorchHistoricalTrainingLoop:
                 opponent_ids.append(f"{team.value}:{policy_id}")
             sampled_matchups.append(matchup)
 
-        unique_opponent_ids = sorted(
-            {
-                policy_id
-                for matchup in sampled_matchups
-                for policy_id in matchup.values()
-            }
-        )
-        opponent_models = {
-            policy_id: self.pool.load(policy_id).eval()
-            for policy_id in unique_opponent_ids
-        }
-        game_team_models = tuple(
-            {
-                learner_team: self.model,
-                **{
-                    team: opponent_models[policy_id]
-                    for team, policy_id in matchup.items()
-                },
-            }
-            for matchup in sampled_matchups
-        )
         seeds = tuple(start_seed + offset for offset in range(episodes))
         collector = TorchVectorizedEpisodeCollector(
             self.player_specs,
@@ -153,13 +132,37 @@ class TorchHistoricalTrainingLoop:
         )
 
         results: list[LearnedEpisodeResult] = []
+        opponent_checkpoint_loads = 0
         rollout_started = perf_counter()
         for start in range(0, episodes, self.max_parallel_games):
-            stop = start + self.max_parallel_games
+            stop = min(start + self.max_parallel_games, episodes)
+            chunk_matchups = sampled_matchups[start:stop]
+            unique_opponent_ids = sorted(
+                {
+                    policy_id
+                    for matchup in chunk_matchups
+                    for policy_id in matchup.values()
+                }
+            )
+            opponent_models = {
+                policy_id: self.pool.load(policy_id).eval()
+                for policy_id in unique_opponent_ids
+            }
+            opponent_checkpoint_loads += len(opponent_models)
+            chunk_team_models = tuple(
+                {
+                    learner_team: self.model,
+                    **{
+                        team: opponent_models[policy_id]
+                        for team, policy_id in matchup.items()
+                    },
+                }
+                for matchup in chunk_matchups
+            )
             results.extend(
                 collector.collect(
                     seeds[start:stop],
-                    team_models=game_team_models[start:stop],
+                    team_models=chunk_team_models,
                 )
             )
         rollout_seconds = perf_counter() - rollout_started
@@ -201,7 +204,7 @@ class TorchHistoricalTrainingLoop:
             inference_observations=inference.inference_observations,
             max_pending_inference_requests=inference.max_pending_requests,
             max_inference_batch=inference.max_inference_batch,
-            opponent_checkpoint_loads=len(opponent_models),
+            opponent_checkpoint_loads=opponent_checkpoint_loads,
         )
 
     def _sample_opponent(self, team: Team) -> str:
