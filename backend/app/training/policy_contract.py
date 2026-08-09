@@ -63,7 +63,8 @@ class PolicyLogits:
     night_target: tuple[float, ...]
     value: float
 
-    def validate(self, sizes: PolicyHeadSizes = PolicyHeadSizes()) -> None:
+    def validate(self, sizes: PolicyHeadSizes | None = None) -> None:
+        sizes = sizes or PolicyHeadSizes()
         actual = (
             ("timing", len(self.timing), sizes.timing),
             ("action_type", len(self.action_type), sizes.action_type),
