@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from app.engine.game import PlayerSpec
 from app.engine.roles import Team
+from app.training.learned_runner import LearnedEpisodeResult
 from app.training.self_play_train import SelfPlayBatchStats
 from app.training.torch_policy import TorchTransformerPolicy, TransformerPolicyConfig
 from app.training.torch_trainer import TorchPPOConfig, TorchPPOTrainer
@@ -21,11 +22,14 @@ class TorchSelfPlayTrainingLoop:
         model_config: TransformerPolicyConfig | None = None,
         ppo_config: TorchPPOConfig | None = None,
         max_discussion_ticks: int = 8,
+        max_parallel_games: int = 8,
         temperature: float = 1.0,
         trainer_seed: int = 0,
     ) -> None:
         if model is not None and model_config is not None:
             raise ValueError("provide either model or model_config, not both")
+        if max_parallel_games <= 0:
+            raise ValueError("max_parallel_games must be positive")
         if temperature != 1.0:
             raise ValueError(
                 "Torch PPO currently requires temperature=1 because traces do not store it"
@@ -38,18 +42,24 @@ class TorchSelfPlayTrainingLoop:
             seed=trainer_seed,
         )
         self.max_discussion_ticks = max_discussion_ticks
+        self.max_parallel_games = max_parallel_games
         self.temperature = temperature
 
     def train_batch(self, *, start_seed: int, episodes: int) -> SelfPlayBatchStats:
         if episodes <= 0:
             raise ValueError("episodes must be positive")
         seeds = tuple(start_seed + offset for offset in range(episodes))
-        results = TorchVectorizedEpisodeCollector(
+        collector = TorchVectorizedEpisodeCollector(
             self.player_specs,
             self.model,
             max_discussion_ticks=self.max_discussion_ticks,
             temperature=self.temperature,
-        ).collect(seeds)
+        )
+        results: list[LearnedEpisodeResult] = []
+        for start in range(0, len(seeds), self.max_parallel_games):
+            results.extend(
+                collector.collect(seeds[start : start + self.max_parallel_games])
+            )
         trajectories = [result.trajectory for result in results]
 
         update = self.optimizer.update(trajectories)
