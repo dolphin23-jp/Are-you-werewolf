@@ -103,7 +103,8 @@ class LearnedEpisodeRunner:
                 player_id: step.sampled.intent for player_id, step in steps.items()
             }
             selected = env.select_next_speaker(intents)
-            self._record_discussion_cycle(steps, selected.player_id if selected else None, trajectory)
+            selected_player_id = selected.player_id if selected else None
+            self._record_discussion_cycle(steps, selected_player_id, trajectory)
             if selected is None:
                 return
             bundle = steps[selected.player_id].sampled.intent.bundle
