@@ -58,6 +58,7 @@ class Topic(StrEnum):
     HUNTER_AUTHENTICITY = "hunter_authenticity"
     FREEMASON_AUTHENTICITY = "freemason_authenticity"
     WOLF = "wolf"
+    WOLF_COUNT = "wolf_count"
     FOX = "fox"
     MADMAN = "madman"
 
@@ -104,6 +105,7 @@ class SemanticAction:
     secondary_target_id: str | None = None
     role: RoleName | None = None
     result: ResultValue | None = None
+    quantity: int | None = None
     referenced_day: int | None = None
     scope: Scope | None = None
     stance: Stance | None = None
