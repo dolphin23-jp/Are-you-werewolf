@@ -16,6 +16,13 @@ def test_random_training_episodes_terminate_with_sparse_terminal_rewards():
         result = runner.run(seed)
         assert result.is_draw or result.winner is not None
         assert set(result.rewards.values()) <= {-1.0, 0.0, 1.0}
+        assert result.trajectory.finalized is True
+        assert result.trajectory.terminal_rewards == result.rewards
+        assert result.trajectory.decisions
+        assert all(
+            decision.reward == result.rewards[decision.player_id]
+            for decision in result.trajectory.decisions
+        )
         if not result.is_draw:
             assert 1.0 in result.rewards.values()
             assert -1.0 in result.rewards.values()
