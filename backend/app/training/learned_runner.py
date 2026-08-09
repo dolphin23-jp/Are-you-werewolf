@@ -23,6 +23,7 @@ class LearnedEpisodeResult:
     days: int
     semantic_event_count: int
     rewards: dict[str, float]
+    teams: dict[str, Team]
     trajectory: EpisodeTrajectory
 
 
@@ -48,6 +49,10 @@ class LearnedEpisodeRunner:
 
     def run(self, seed: int) -> LearnedEpisodeResult:
         env = WerewolfTrainingEnv(self._player_specs, seed=seed)
+        teams = {
+            player_id: player.team
+            for player_id, player in env.controller.state.players.items()
+        }
         policies = {
             player_id: LearnedStructuredPolicy(
                 self._team_models.get(player.team, self._model),
@@ -71,6 +76,7 @@ class LearnedEpisodeRunner:
                     days=state.day,
                     semantic_event_count=len(env.semantic_events),
                     rewards=rewards,
+                    teams=teams,
                     trajectory=trajectory,
                 )
 
