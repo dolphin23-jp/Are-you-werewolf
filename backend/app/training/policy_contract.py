@@ -19,7 +19,11 @@ from app.training.actions import (
     TimingBucket,
     Topic,
 )
-from app.training.encoding import EncodedPolicyObservation, MAX_SEATS
+from app.training.encoding import (
+    MAX_SEATS,
+    MAX_SEMANTIC_EVENTS,
+    EncodedPolicyObservation,
+)
 
 MAX_REFERENCED_DAYS = 16
 MAX_QUANTITY = 3
@@ -38,6 +42,7 @@ class PolicyHeadSizes:
     referenced_day: int = MAX_REFERENCED_DAYS + 1
     scope: int = len(Scope)
     stance: int = len(Stance)
+    reference_event: int = MAX_SEMANTIC_EVENTS
     vote_target: int = MAX_SEATS
     night_topic: int = 3
     night_target: int = MAX_SEATS
@@ -58,6 +63,7 @@ class PolicyLogits:
     referenced_day: tuple[float, ...]
     scope: tuple[float, ...]
     stance: tuple[float, ...]
+    reference_event: tuple[float, ...]
     vote_target: tuple[float, ...]
     night_topic: tuple[float, ...]
     night_target: tuple[float, ...]
@@ -77,6 +83,7 @@ class PolicyLogits:
             ("referenced_day", len(self.referenced_day), sizes.referenced_day),
             ("scope", len(self.scope), sizes.scope),
             ("stance", len(self.stance), sizes.stance),
+            ("reference_event", len(self.reference_event), sizes.reference_event),
             ("vote_target", len(self.vote_target), sizes.vote_target),
             ("night_topic", len(self.night_topic), sizes.night_topic),
             ("night_target", len(self.night_target), sizes.night_target),
