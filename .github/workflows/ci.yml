@@ -115,6 +115,7 @@ jobs:
         run: >-
           bash -n .devcontainer/setup.sh .devcontainer/start.sh
           tools/runpod_pilot002.sh tools/runpod_pilot002_last5.sh
+          tools/runpod_pilot002_last5_parallel.sh
       - name: Install backend
         run: pip install -e "./backend[dev]"
       - name: Install and build frontend
