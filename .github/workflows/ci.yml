@@ -72,7 +72,7 @@ jobs:
       - uses: pnpm/action-setup@v4
         with:
           version: 10
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: "22"
           cache: "pnpm"
@@ -106,13 +106,15 @@ jobs:
       - uses: pnpm/action-setup@v4
         with:
           version: 10
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: "22"
           cache: "pnpm"
           cache-dependency-path: frontend/pnpm-lock.yaml
-      - name: Check devcontainer scripts parse
-        run: bash -n .devcontainer/setup.sh && bash -n .devcontainer/start.sh
+      - name: Check shell scripts parse
+        run: >-
+          bash -n .devcontainer/setup.sh .devcontainer/start.sh
+          tools/runpod_pilot002.sh tools/runpod_pilot002_last5.sh
       - name: Install backend
         run: pip install -e "./backend[dev]"
       - name: Install and build frontend
