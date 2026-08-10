@@ -92,7 +92,10 @@ def main() -> None:
     if args.resume:
         try:
             state = run.resume()
-            if args.recent_policies is not None:
+            if (
+                args.recent_policies is not None
+                and args.recent_policies != state.config.recent_policies
+            ):
                 state = run.set_recent_policies(args.recent_policies)
         except ValueError as exc:
             parser.error(str(exc))
