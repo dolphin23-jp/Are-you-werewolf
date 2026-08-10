@@ -61,9 +61,9 @@ class TorchPopulationRunPhase(StrEnum):
 
 @dataclass(frozen=True)
 class TorchPopulationResearchConfig:
-    """Settings frozen for all iterations in one empirical-population run."""
+    """Settings persisted across empirical-population iterations."""
 
-    recent_policies: int = 3
+    recent_policies: int = 5
     games_per_profile: int = 3
     extra_games: int = 0
     uncertainty_prior: float = 0.5
@@ -240,6 +240,22 @@ class TorchPopulationResearchRun:
         self.state = load_torch_population_research_state(self.state_path)
         self.table = PopulationPayoffTable(self.payoff_path)
         self._validate_active_pool()
+        return self.state
+
+    def set_recent_policies(
+        self,
+        recent_policies: int,
+    ) -> TorchPopulationResearchState:
+        state = self._require_state()
+        if state.phase is not TorchPopulationRunPhase.IDLE:
+            raise ValueError(
+                "recent_policies can only change at an idle iteration boundary"
+            )
+        self.state = replace(
+            state,
+            config=replace(state.config, recent_policies=recent_policies),
+        )
+        self._save_state()
         return self.state
 
     def run_until(
