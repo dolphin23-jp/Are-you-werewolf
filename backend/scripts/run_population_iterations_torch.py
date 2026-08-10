@@ -43,7 +43,14 @@ def main() -> None:
     parser.add_argument("--run-dir", type=Path, required=True)
     parser.add_argument("--iterations", type=int, default=1)
     parser.add_argument("--resume", action="store_true")
-    parser.add_argument("--recent-policies", type=int, default=3)
+    parser.add_argument(
+        "--recent-policies",
+        type=int,
+        help=(
+            "restricted policies per faction; on --resume this may only change "
+            "at an idle iteration boundary"
+        ),
+    )
     parser.add_argument("--games-per-profile", type=int, default=3)
     parser.add_argument("--extra-games", type=int, default=0)
     parser.add_argument("--uncertainty-prior", type=float, default=0.5)
@@ -85,18 +92,24 @@ def main() -> None:
     if args.resume:
         try:
             state = run.resume()
+            if args.recent_policies is not None:
+                state = run.set_recent_policies(args.recent_policies)
         except ValueError as exc:
             parser.error(str(exc))
         print(
             f"resume completed_iterations={state.completed_iterations} "
-            f"phase={state.phase.value} device={device}"
+            f"phase={state.phase.value} recent_policies={state.config.recent_policies} "
+            f"device={device}"
         )
     else:
         oracle_batch_size = args.oracle_batch_size or args.oracle_episodes
+        config_overrides = {}
+        if args.recent_policies is not None:
+            config_overrides["recent_policies"] = args.recent_policies
         try:
             state = run.start(
                 TorchPopulationResearchConfig(
-                    recent_policies=args.recent_policies,
+                    **config_overrides,
                     games_per_profile=args.games_per_profile,
                     extra_games=args.extra_games,
                     uncertainty_prior=args.uncertainty_prior,
@@ -125,7 +138,8 @@ def main() -> None:
             parser.error(str(exc))
         print(
             f"start completed_iterations={state.completed_iterations} "
-            f"phase={state.phase.value} device={device}"
+            f"phase={state.phase.value} recent_policies={state.config.recent_policies} "
+            f"device={device}"
         )
 
     try:
