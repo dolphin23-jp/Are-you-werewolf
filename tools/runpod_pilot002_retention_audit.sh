@@ -59,7 +59,7 @@ worker() {
   validate
   mkdir -p "$OUTPUT_DIR"
   cd "$REPO_DIR/backend"
-  exec env PYTHONPATH=. python scripts/audit_population_retention_torch.py \
+  env PYTHONPATH=. python scripts/audit_population_retention_torch.py \
     --pool-dir "$PILOT_ROOT/pool" \
     --run-dir "$PILOT_ROOT/population" \
     --iteration "$ITERATION" \
