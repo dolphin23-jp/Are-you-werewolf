@@ -13,6 +13,7 @@ import torch
 from app.engine.game import PlayerSpec
 from app.engine.roles import Team
 from app.training.population_payoff import PolicyProfile, PopulationPayoffTable, ProfilePayoff
+from app.training.population_shards import select_profile_shard
 from app.training.torch_pool import TorchPolicyPool
 from app.training.torch_population import (
     TorchPopulationEvaluationStats,
@@ -109,6 +110,8 @@ def main() -> None:
     parser.add_argument("--discussion-ticks", type=int, default=8)
     parser.add_argument("--parallel-games", type=int, default=8)
     parser.add_argument("--inference-batch-size", type=int)
+    parser.add_argument("--shard-count", type=int, default=1)
+    parser.add_argument("--shard-index", type=int, default=0)
     parser.add_argument("--device", default="auto")
     args = parser.parse_args()
 
@@ -124,6 +127,12 @@ def main() -> None:
         parser.error("--parallel-games must be positive")
     if args.inference_batch_size is not None and args.inference_batch_size <= 0:
         parser.error("--inference-batch-size must be positive")
+    if args.shard_count <= 0:
+        parser.error("--shard-count must be positive")
+    if args.shard_index < 0 or args.shard_index >= args.shard_count:
+        parser.error("--shard-index must satisfy 0 <= index < shard-count")
+    if args.shard_count > 1 and args.extra_games:
+        parser.error("adaptive --extra-games is not supported with sharded evaluation")
     try:
         device = _resolve_device(args.device)
     except (RuntimeError, ValueError) as exc:
@@ -139,7 +148,7 @@ def main() -> None:
         parser.error("each faction must have at least one eligible policy")
 
     table = PopulationPayoffTable(args.table)
-    profiles = tuple(
+    all_profiles = tuple(
         PolicyProfile(village, werewolf, fox)
         for village, werewolf, fox in itertools.product(
             village_ids,
@@ -147,6 +156,13 @@ def main() -> None:
             fox_ids,
         )
     )
+    profiles = select_profile_shard(
+        all_profiles,
+        shard_count=args.shard_count,
+        shard_index=args.shard_index,
+    )
+    if not profiles:
+        parser.error("selected shard contains no profiles")
     totals = _EvaluationTotals()
 
     missing_requests: list[TorchProfileEvaluationRequest] = []
@@ -223,8 +239,9 @@ def main() -> None:
         )
     inference_limit = args.inference_batch_size or "unbounded"
     print(
-        f"measured_profiles={len(profiles)} new_games={totals.games} "
+        f"measured_profiles={len(profiles)}/{len(all_profiles)} new_games={totals.games} "
         f"extra_games={args.extra_games} parallel_games={args.parallel_games} "
+        f"shard={args.shard_index}/{args.shard_count} "
         f"rollout_chunks={totals.rollout_chunks} "
         f"evaluation_s={totals.rollout_seconds:.3f} "
         f"games_s={totals.games_per_second:.2f} "
