@@ -38,8 +38,13 @@ ensure_repo() {
 }
 
 ensure_runtime() {
-  command -v nvidia-smi >/dev/null 2>&1 || die "nvidia-smi is missing; deploy an NVIDIA GPU Pod."
-  nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader
+  if command -v nvidia-smi >/dev/null 2>&1; then
+    if ! nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader; then
+      say "nvidia-smi probe failed; continuing to the authoritative PyTorch CUDA probe."
+    fi
+  else
+    say "nvidia-smi is unavailable in this container; continuing to the authoritative PyTorch CUDA probe."
+  fi
 
   export PATH="$HOME/.local/bin:$PATH"
   if ! command -v uv >/dev/null 2>&1; then
@@ -69,7 +74,10 @@ print(f"torch={torch.__version__}")
 print(f"torch_cuda={torch.version.cuda}")
 print(f"cuda_available={torch.cuda.is_available()}")
 if not torch.cuda.is_available():
-    raise SystemExit("PyTorch cannot see CUDA on this Pod")
+    raise SystemExit(
+        "PyTorch cannot see CUDA on this Pod. Verify that an NVIDIA GPU is attached "
+        "to the running Pod and restart/redeploy the Pod if needed."
+    )
 print(f"gpu={torch.cuda.get_device_name(0)}")
 print(f"gpu_vram_gb={torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f}")
 PY
