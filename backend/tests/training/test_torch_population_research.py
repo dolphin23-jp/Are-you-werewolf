@@ -74,6 +74,42 @@ def _config(*, extra_games: int = 0) -> TorchPopulationResearchConfig:
     )
 
 
+def test_population_research_default_recent_policies_is_five():
+    assert TorchPopulationResearchConfig().recent_policies == 5
+
+
+def test_population_research_updates_recent_policies_only_at_idle_boundary(
+    tmp_path: Path,
+):
+    pool = TorchPolicyPool(tmp_path / "boundary-pool")
+    pool.add(_model(2407))
+    run_dir = tmp_path / "boundary-run"
+    run = TorchPopulationResearchRun(_specs(), pool, run_dir)
+    original = run.start(_config())
+
+    updated = run.set_recent_policies(5)
+    assert updated.completed_iterations == original.completed_iterations
+    assert updated.phase is TorchPopulationRunPhase.IDLE
+    assert updated.config.recent_policies == 5
+    assert updated.config.games_per_profile == original.config.games_per_profile
+    assert updated.config.ppo_config == original.config.ppo_config
+
+    restored = TorchPopulationResearchRun(_specs(), pool, run_dir)
+    restored_state = restored.resume()
+    assert restored_state.config.recent_policies == 5
+
+    with pytest.raises(ValueError, match="recent_policies must be positive"):
+        restored.set_recent_policies(0)
+    assert restored.state is not None
+    assert restored.state.config.recent_policies == 5
+
+    assert restored.step().kind == "iteration_started"
+    with pytest.raises(ValueError, match="idle iteration boundary"):
+        restored.set_recent_policies(3)
+    assert restored.state is not None
+    assert restored.state.config.recent_policies == 5
+
+
 def test_population_research_state_roundtrips_active_strategy_and_pending(tmp_path: Path):
     profile = PolicyProfile("g000000", "g000001", "g000002")
     strategy = PopulationMetaStrategy(
