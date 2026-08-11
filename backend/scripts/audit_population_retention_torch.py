@@ -30,6 +30,9 @@ from app.training.torch_population import (
     TorchProfileEvaluationRequest,
     evaluate_torch_policy_profiles,
 )
+from app.training.torch_population_multiprocess import (
+    evaluate_torch_policy_profiles_multiprocess,
+)
 
 _CONFIG_VERSION = 1
 _REPORT_VERSION = 1
@@ -185,6 +188,13 @@ def main() -> None:
     parser.add_argument("--parallel-games", type=int, default=16)
     parser.add_argument("--inference-batch-size", type=int, default=64)
     parser.add_argument("--request-batch-profiles", type=int, default=25)
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=0,
+        help="multiprocess rollout workers; zero keeps the single-process evaluator",
+    )
+    parser.add_argument("--inference-coalesce-ms", type=float, default=4.0)
     parser.add_argument("--device", default="auto")
     args = parser.parse_args()
 
@@ -196,6 +206,10 @@ def main() -> None:
         parser.error("--inference-batch-size must be positive")
     if args.request_batch_profiles <= 0:
         parser.error("--request-batch-profiles must be positive")
+    if args.workers < 0:
+        parser.error("--workers cannot be negative")
+    if args.inference_coalesce_ms < 0:
+        parser.error("--inference-coalesce-ms cannot be negative")
     try:
         device = _resolve_device(args.device)
     except (RuntimeError, ValueError) as exc:
@@ -265,6 +279,10 @@ def main() -> None:
         "meta_iterations": int(config["meta_iterations"]),
         "meta_damping": float(config["meta_damping"]),
     }
+    if args.workers > 0:
+        audit_config["evaluation_backend"] = "multiprocess"
+        audit_config["workers"] = args.workers
+        audit_config["inference_coalesce_ms"] = args.inference_coalesce_ms
     if audit_config_path.exists():
         if _load_json(audit_config_path) != audit_config:
             parser.error(
@@ -297,17 +315,35 @@ def main() -> None:
             )
         )
 
+    backend = "multiprocess" if args.workers > 0 else "single-process"
+    print(
+        f"evaluation_backend={backend} workers={args.workers} "
+        f"coalesce_ms={args.inference_coalesce_ms:.3f}"
+    )
     for start in range(0, len(requests), args.request_batch_profiles):
         batch = tuple(requests[start : start + args.request_batch_profiles])
-        stats = evaluate_torch_policy_profiles(
-            _player_specs(),
-            pool,
-            table,
-            batch,
-            max_discussion_ticks=discussion_ticks,
-            max_parallel_games=args.parallel_games,
-            max_inference_batch_size=args.inference_batch_size,
-        )
+        if args.workers > 0:
+            stats = evaluate_torch_policy_profiles_multiprocess(
+                _player_specs(),
+                pool,
+                table,
+                batch,
+                worker_count=args.workers,
+                max_discussion_ticks=discussion_ticks,
+                max_parallel_games=args.parallel_games,
+                max_inference_batch_size=args.inference_batch_size,
+                inference_coalesce_seconds=args.inference_coalesce_ms / 1000.0,
+            )
+        else:
+            stats = evaluate_torch_policy_profiles(
+                _player_specs(),
+                pool,
+                table,
+                batch,
+                max_discussion_ticks=discussion_ticks,
+                max_parallel_games=args.parallel_games,
+                max_inference_batch_size=args.inference_batch_size,
+            )
         complete = sum(
             int(
                 table.get(profile) is not None
