@@ -9,9 +9,9 @@ shared.
 
 from __future__ import annotations
 
+import typing
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from typing import Protocol
 
 import torch
 
@@ -33,7 +33,7 @@ from app.training.trajectory import DecisionKind, EpisodeTrajectory, RecordedDec
 TorchRolloutInferenceTarget = TorchTransformerPolicy | str
 
 
-class TorchRolloutInferenceFn(Protocol):
+class TorchRolloutInferenceFn(typing.Protocol):
     def __call__(
         self,
         target: TorchRolloutInferenceTarget,
