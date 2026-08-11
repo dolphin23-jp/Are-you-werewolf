@@ -76,8 +76,8 @@ strict = true
 [[tool.mypy.overrides]]
 # The rollout callback is intentionally duck-typed so worker implementations do
 # not import or own accelerator models. All function bodies remain type-checked.
-module = "app.training.torch_vectorized"
-allow_untyped_defs = true
+module = ["app.training.torch_vectorized", "torch_vectorized"]
+disallow_untyped_defs = false
 
 [[tool.mypy.overrides]]
 # The v2 evaluator normalizes several heterogeneous Pydantic sections in one
