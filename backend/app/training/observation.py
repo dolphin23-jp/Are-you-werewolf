@@ -7,7 +7,7 @@ night are deliberately absent.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
 from app.engine.game import GameController
@@ -122,8 +122,35 @@ class ObservationBuilder:
         discussion_tick: int = 0,
         semantic_events: Iterable[TimedSemanticEvent] = (),
     ) -> PolicyObservation:
+        """Build one information-safe observation."""
+        return self.build_many(
+            controller,
+            (viewer_id,),
+            discussion_tick=discussion_tick,
+            semantic_events=semantic_events,
+        )[viewer_id]
+
+    def build_many(
+        self,
+        controller: GameController,
+        viewer_ids: Sequence[str],
+        *,
+        discussion_tick: int = 0,
+        semantic_events: Iterable[TimedSemanticEvent] = (),
+    ) -> dict[str, PolicyObservation]:
+        """Build same-state observations while constructing public data once.
+
+        All returned observations retain viewer-specific private information.
+        Only immutable public tuples are shared between viewers, so the policy
+        information boundary is identical to repeated :meth:`build` calls.
+        """
+        if not viewer_ids:
+            return {}
+        if len(set(viewer_ids)) != len(viewer_ids):
+            raise ValueError("viewer_ids must be unique")
+
         state = controller.state
-        viewer = state.players[viewer_id]
+        viewers = {viewer_id: state.players[viewer_id] for viewer_id in viewer_ids}
         current_claims = {
             claim.player_id: claim.claimed_role for claim in state.co_declarations
         }
@@ -160,11 +187,14 @@ class ObservationBuilder:
             for event in all_semantic_events
             if event.action.channel is Channel.PUBLIC
         )
-        private_semantic_events = tuple(
-            _semantic_observation(event)
-            for event in all_semantic_events
-            if _private_event_visible(viewer.role, event.action.channel)
-        )
+        private_semantic_events_by_role = {
+            role: tuple(
+                _semantic_observation(event)
+                for event in all_semantic_events
+                if _private_event_visible(role, event.action.channel)
+            )
+            for role in {viewer.role for viewer in viewers.values()}
+        }
 
         votes = tuple(
             VoteObservation(
@@ -175,51 +205,71 @@ class ObservationBuilder:
             )
             for vote in state.vote_records
         )
-
-        private = PrivateObservation(
-            role=viewer.role,
-            allies=_allies(controller, viewer_id),
-            is_alpha_wolf=(
-                viewer.role is RoleName.WEREWOLF
-                and viewer_id == controller.alpha_wolf_id
-            ),
-            divine_results=tuple(
-                PrivateResultObservation(r.target_id, r.day, r.is_werewolf)
-                for r in state.divine_records
-                if r.seer_id == viewer_id
-            ),
-            medium_results=tuple(
-                PrivateResultObservation(r.target_id, r.day, r.is_werewolf)
-                for r in state.medium_records
-                if r.medium_id == viewer_id
-            ),
-            guard_history=tuple(
-                PrivateTargetObservation(r.target_id, r.day)
-                for r in state.guard_records
-                if viewer.role is RoleName.HUNTER and r.hunter_id == viewer_id
-            ),
-            attack_history=tuple(
-                PrivateTargetObservation(r.target_id, r.day)
-                for r in state.attack_records
-                if viewer.role is RoleName.WEREWOLF
-            ),
-            semantic_events=private_semantic_events,
+        dawns = _dawn_history(controller)
+        werewolf_ids = tuple(
+            player.player_id
+            for player in state.players.values()
+            if player.role is RoleName.WEREWOLF
+        )
+        freemason_ids = tuple(
+            player.player_id
+            for player in state.players.values()
+            if player.role is RoleName.FREEMASON
+        )
+        wolf_attack_history = tuple(
+            PrivateTargetObservation(record.target_id, record.day)
+            for record in state.attack_records
         )
 
-        return PolicyObservation(
-            viewer_id=viewer_id,
-            day=state.day,
-            phase=state.phase.value,
-            discussion_tick=discussion_tick,
-            vote_round=state.vote_round,
-            first_victim_id=state.first_victim_id,
-            players=players,
-            claim_events=claim_events,
-            semantic_events=public_semantic_events,
-            votes=votes,
-            dawns=_dawn_history(controller),
-            private=private,
-        )
+        result: dict[str, PolicyObservation] = {}
+        for viewer_id, viewer in viewers.items():
+            private = PrivateObservation(
+                role=viewer.role,
+                allies=_allies_from_role_members(
+                    viewer.role,
+                    viewer_id,
+                    werewolf_ids=werewolf_ids,
+                    freemason_ids=freemason_ids,
+                ),
+                is_alpha_wolf=(
+                    viewer.role is RoleName.WEREWOLF
+                    and viewer_id == controller.alpha_wolf_id
+                ),
+                divine_results=tuple(
+                    PrivateResultObservation(record.target_id, record.day, record.is_werewolf)
+                    for record in state.divine_records
+                    if record.seer_id == viewer_id
+                ),
+                medium_results=tuple(
+                    PrivateResultObservation(record.target_id, record.day, record.is_werewolf)
+                    for record in state.medium_records
+                    if record.medium_id == viewer_id
+                ),
+                guard_history=tuple(
+                    PrivateTargetObservation(record.target_id, record.day)
+                    for record in state.guard_records
+                    if viewer.role is RoleName.HUNTER and record.hunter_id == viewer_id
+                ),
+                attack_history=(
+                    wolf_attack_history if viewer.role is RoleName.WEREWOLF else ()
+                ),
+                semantic_events=private_semantic_events_by_role[viewer.role],
+            )
+            result[viewer_id] = PolicyObservation(
+                viewer_id=viewer_id,
+                day=state.day,
+                phase=state.phase.value,
+                discussion_tick=discussion_tick,
+                vote_round=state.vote_round,
+                first_victim_id=state.first_victim_id,
+                players=players,
+                claim_events=claim_events,
+                semantic_events=public_semantic_events,
+                votes=votes,
+                dawns=dawns,
+                private=private,
+            )
+        return result
 
 
 def _semantic_observation(event: TimedSemanticEvent) -> SemanticEventObservation:
@@ -251,22 +301,39 @@ def _private_event_visible(role: RoleName, channel: Channel) -> bool:
     return False
 
 
+def _allies_from_role_members(
+    role: RoleName,
+    viewer_id: str,
+    *,
+    werewolf_ids: tuple[str, ...],
+    freemason_ids: tuple[str, ...],
+) -> tuple[str, ...]:
+    if role is RoleName.WEREWOLF:
+        return tuple(player_id for player_id in werewolf_ids if player_id != viewer_id)
+    if role is RoleName.FREEMASON:
+        return tuple(player_id for player_id in freemason_ids if player_id != viewer_id)
+    return ()
+
+
 def _allies(controller: GameController, viewer_id: str) -> tuple[str, ...]:
     state = controller.state
     viewer = state.players[viewer_id]
-    if viewer.role is RoleName.WEREWOLF:
-        return tuple(
-            player.player_id
-            for player in state.players.values()
-            if player.role is RoleName.WEREWOLF and player.player_id != viewer_id
-        )
-    if viewer.role is RoleName.FREEMASON:
-        return tuple(
-            player.player_id
-            for player in state.players.values()
-            if player.role is RoleName.FREEMASON and player.player_id != viewer_id
-        )
-    return ()
+    werewolf_ids = tuple(
+        player.player_id
+        for player in state.players.values()
+        if player.role is RoleName.WEREWOLF
+    )
+    freemason_ids = tuple(
+        player.player_id
+        for player in state.players.values()
+        if player.role is RoleName.FREEMASON
+    )
+    return _allies_from_role_members(
+        viewer.role,
+        viewer_id,
+        werewolf_ids=werewolf_ids,
+        freemason_ids=freemason_ids,
+    )
 
 
 def _public_death_kind(cause: DeathCause | None) -> str | None:
