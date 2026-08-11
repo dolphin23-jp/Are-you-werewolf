@@ -44,12 +44,12 @@ def export_strategy_snapshot(
     source_manifest = _load_json(pool_root / "manifest.json")
     population, source = _resolve_population(run_root, iteration=iteration)
     selected_ids = tuple(
-        policy_id
-        for team in _TEAM_KEYS
-        for policy_id in population[team]
+        dict.fromkeys(
+            policy_id
+            for team in _TEAM_KEYS
+            for policy_id in population[team]
+        )
     )
-    if len(selected_ids) != len(set(selected_ids)):
-        raise ValueError("strategy snapshot population contains duplicate policy IDs")
 
     entries_raw = source_manifest.get("entries")
     if not isinstance(entries_raw, list):
@@ -104,7 +104,9 @@ def export_strategy_snapshot(
         )
         for entry in selected_entries:
             checkpoint = str(entry["checkpoint"])
-            shutil.copy2(pool_root / checkpoint, pool_out / checkpoint)
+            checkpoint_out = pool_out / checkpoint
+            checkpoint_out.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(pool_root / checkpoint, checkpoint_out)
 
         mode = "w:gz" if output.suffix == ".gz" else "w"
         with tarfile.open(output, mode) as archive:
