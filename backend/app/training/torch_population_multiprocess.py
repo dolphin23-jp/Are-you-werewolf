@@ -168,13 +168,13 @@ class _RemoteInferenceCollector(TorchVectorizedEpisodeCollector):
             reply = self._response_queue.get()
             if not isinstance(reply, _InferenceReply):
                 raise RuntimeError("multiprocess inference returned an invalid reply")
-            batch = pending.pop(reply.request_id, None)
-            if batch is None:
+            reply_batch = pending.pop(reply.request_id, None)
+            if reply_batch is None:
                 raise RuntimeError("multiprocess inference returned an unexpected reply")
-            if len(reply.logits) != len(batch):
+            if len(reply.logits) != len(reply_batch):
                 raise RuntimeError("multiprocess inference returned the wrong batch length")
             for (original_index, request), logits in zip(
-                batch,
+                reply_batch,
                 reply.logits,
                 strict=True,
             ):
