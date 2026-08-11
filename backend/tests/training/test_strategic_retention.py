@@ -42,6 +42,47 @@ def test_retention_trigger_requires_both_fixed_lower_bounds_positive():
     )
 
 
+def test_payoff_compression_can_leave_out_current_policy(tmp_path: Path):
+    table = PopulationPayoffTable(tmp_path / "payoffs.json")
+    current = {
+        Team.VILLAGE: ("v0",),
+        Team.WEREWOLF: ("w0",),
+        Team.FOX: ("f0", "f1", "f2"),
+    }
+    _record(
+        table,
+        PolicyProfile("v0", "w0", "f0"),
+        winner=Team.VILLAGE,
+    )
+    _record(
+        table,
+        PolicyProfile("v0", "w0", "f1"),
+        winner=None,
+        is_draw=True,
+    )
+    _record(
+        table,
+        PolicyProfile("v0", "w0", "f2"),
+        winner=Team.FOX,
+    )
+
+    selection = select_team_population_subset(
+        table,
+        current_population=current,
+        team=Team.FOX,
+        candidate_policy_ids=current[Team.FOX],
+        keep=2,
+        temperature=0.25,
+        iterations=20,
+        damping=0.5,
+    )
+
+    assert selection.selected_policy_ids == ("f1", "f2")
+    assert selection.held_out_policy_ids == ("f0",)
+    assert selection.max_held_out_gain < 0.0
+    assert len(selection.candidates) == 3
+
+
 def test_strategic_retention_keeps_nonreplaceable_payoff_response(tmp_path: Path):
     table = PopulationPayoffTable(tmp_path / "payoffs.json")
     current = {

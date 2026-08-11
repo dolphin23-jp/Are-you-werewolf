@@ -23,7 +23,7 @@ from app.training.torch_population_research import (
     save_torch_population_research_state,
 )
 
-_PLAN_VERSION = 1
+_PLAN_VERSION = 2
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -119,13 +119,9 @@ def _validate_source_population(
     summary_population = summary.get("restricted_population")
     if not isinstance(config_population, dict) or not isinstance(summary_population, dict):
         raise ValueError("audit or iteration summary is missing its restricted population")
-    current = {
-        team: _team_string_tuple(config_population, team)
-        for team in Team
-    }
+    current = {team: _team_string_tuple(config_population, team) for team in Team}
     summary_current = {
-        team: _team_string_tuple(summary_population, team)
-        for team in Team
+        team: _team_string_tuple(summary_population, team) for team in Team
     }
     if current != summary_current:
         raise ValueError("audit current population differs from source iteration summary")
@@ -193,10 +189,7 @@ def main() -> None:
         challengers_raw = audit_config.get("challengers")
         if not isinstance(challengers_raw, dict):
             raise ValueError("audit configuration is missing challengers")
-        challengers = {
-            team: str(challengers_raw[team.value])
-            for team in Team
-        }
+        challengers = {team: str(challengers_raw[team.value]) for team in Team}
         for team, challenger in challengers.items():
             if challenger in current[team]:
                 raise ValueError(f"{team.value} challenger is already in source population")
@@ -204,8 +197,10 @@ def main() -> None:
 
         oracles = _parse_oracles(summary, pool)
         capacity = state.config.recent_policies
-        if capacity <= 0:
-            raise ValueError("restricted population capacity must be positive")
+        if capacity <= 1:
+            raise ValueError(
+                "payoff compression requires capacity for history and the newest oracle"
+            )
 
         table = PopulationPayoffTable(payoff_path)
         retention_report = report.get("retention_diagnostics")
@@ -234,6 +229,28 @@ def main() -> None:
             if not recent:
                 raise ValueError(f"no eligible recent policies for {team.value}")
 
+            historical_slots = capacity - 1
+            candidate_history = current[team] + ((challengers[team],) if trigger else ())
+            if len(candidate_history) <= historical_slots:
+                raise ValueError(
+                    f"{team.value} audited history has {len(candidate_history)} candidates; "
+                    f"need more than {historical_slots} for payoff compression"
+                )
+            selection = select_team_population_subset(
+                table,
+                current_population=current,
+                team=team,
+                candidate_policy_ids=candidate_history,
+                keep=historical_slots,
+                temperature=float(audit_config["meta_temperature"]),
+                iterations=int(audit_config["meta_iterations"]),
+                damping=float(audit_config["meta_damping"]),
+            )
+            selected = _generation_sorted(
+                pool,
+                selection.selected_policy_ids + (oracles[team],),
+            )
+
             team_payload: dict[str, Any] = {
                 "challenger_policy_id": challengers[team],
                 "saved_meta_ci95_low": saved_ci_low,
@@ -241,37 +258,10 @@ def main() -> None:
                 "triggered": trigger,
                 "recent_baseline": list(recent),
                 "reserved_newest_oracle": oracles[team],
+                "mode": "strategic_retention" if trigger else "payoff_compression",
+                "compression": _diagnostic_payload(selection),
+                "next_population": list(selected),
             }
-            if not trigger:
-                selected = recent
-                team_payload["mode"] = "recent"
-            else:
-                historical_slots = capacity - 1
-                if historical_slots <= 0:
-                    raise ValueError(
-                        "strategic retention requires capacity for both a newest oracle and history"
-                    )
-                candidate_history = current[team] + (challengers[team],)
-                if historical_slots >= len(candidate_history):
-                    raise ValueError(
-                        f"{team.value} retention candidate set is too small to compress"
-                    )
-                selection = select_team_population_subset(
-                    table,
-                    current_population=current,
-                    team=team,
-                    candidate_policy_ids=candidate_history,
-                    keep=historical_slots,
-                    temperature=float(audit_config["meta_temperature"]),
-                    iterations=int(audit_config["meta_iterations"]),
-                    damping=float(audit_config["meta_damping"]),
-                )
-                selected = _generation_sorted(
-                    pool,
-                    selection.selected_policy_ids + (oracles[team],),
-                )
-                team_payload["mode"] = "strategic_retention"
-                team_payload["compression"] = _diagnostic_payload(selection)
 
             if len(selected) != min(capacity, len(pool.policy_ids_for_team(team))):
                 raise ValueError(
@@ -280,7 +270,6 @@ def main() -> None:
             if oracles[team] not in selected:
                 raise ValueError(f"{team.value} newest oracle was not retained")
             next_population[team] = selected
-            team_payload["next_population"] = list(selected)
             team_plans[team] = team_payload
 
         target_iteration = source_iteration + 1
@@ -291,13 +280,9 @@ def main() -> None:
             "source_audit": str(args.audit_dir),
             "ci_low_threshold": args.ci_low_threshold,
             "capacity_per_faction": capacity,
-            "teams": {
-                team.value: team_plans[team]
-                for team in Team
-            },
+            "teams": {team.value: team_plans[team] for team in Team},
             "next_population": {
-                team.value: list(next_population[team])
-                for team in Team
+                team.value: list(next_population[team]) for team in Team
             },
             "pool_generation_boundary": pool.next_generation,
         }
@@ -318,14 +303,13 @@ def main() -> None:
                 f"fixed_ci_low={item['fixed_meta_ci95_low']:+.6f} "
                 f"reserved={item['reserved_newest_oracle']}"
             )
-            compression = item.get("compression")
-            if isinstance(compression, dict):
-                line += (
-                    f" history={','.join(compression['selected_policy_ids'])} "
-                    f"held_out={','.join(compression['held_out_policy_ids'])} "
-                    f"max_held_out_gain={compression['max_held_out_gain']:+.6f} "
-                    f"max_ci_high={compression['max_held_out_ci95_high']:+.6f}"
-                )
+            compression = item["compression"]
+            line += (
+                f" history={','.join(compression['selected_policy_ids'])} "
+                f"held_out={','.join(compression['held_out_policy_ids'])} "
+                f"max_held_out_gain={compression['max_held_out_gain']:+.6f} "
+                f"max_ci_high={compression['max_held_out_ci95_high']:+.6f}"
+            )
             line += f" next={','.join(item['next_population'])}"
             print(line)
         print(f"plan_json={plan_path}")
