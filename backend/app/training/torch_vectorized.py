@@ -2,14 +2,14 @@
 
 Several independent ``WerewolfTrainingEnv`` instances advance together. At each
 logical decision point, observations from all currently eligible seats across
-all games are grouped by the exact Transformer instance that owns the seat, then
-run in inference microbatches. Games remain fully independent; only neural
-inference is shared.
+all games are grouped by the exact policy target that owns the seat, then run in
+inference microbatches. Games remain fully independent; only neural inference is
+shared.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Hashable, Iterable, Mapping
 from dataclasses import dataclass
 
 import torch
@@ -27,6 +27,12 @@ from app.training.policy_contract import PolicyLogits
 from app.training.policy_sampling import MaskedPolicySampler, PolicySampleTrace
 from app.training.torch_policy import TorchTransformerPolicy
 from app.training.trajectory import DecisionKind, EpisodeTrajectory, RecordedDecision
+
+
+TorchRolloutInferenceFn = Callable[
+    [Hashable, tuple[EncodedPolicyObservation, ...]],
+    tuple[PolicyLogits, ...],
+]
 
 
 @dataclass
@@ -71,7 +77,7 @@ class _EpisodeSlot:
     seed: int
     env: WerewolfTrainingEnv
     samplers: dict[str, MaskedPolicySampler]
-    player_models: dict[str, TorchTransformerPolicy]
+    player_models: dict[str, Hashable]
     trajectory: EpisodeTrajectory
     discussion_ticks: int = 0
     result: LearnedEpisodeResult | None = None
@@ -83,7 +89,7 @@ class _InferenceRequest:
     player_id: str
     observation: PolicyObservation
     encoded: EncodedPolicyObservation
-    model: TorchTransformerPolicy
+    model: Hashable
 
 
 @dataclass(frozen=True)
@@ -93,26 +99,32 @@ class _PreparedRequest:
 
 
 class TorchVectorizedEpisodeCollector:
-    """Collect multiple independent episodes while batching shared model calls."""
+    """Collect multiple independent episodes while batching shared inference."""
 
     def __init__(
         self,
         player_specs: list[PlayerSpec],
-        model: TorchTransformerPolicy,
+        model: Hashable,
         *,
         max_global_steps: int = 2000,
         max_discussion_ticks: int = 12,
         max_inference_batch_size: int | None = None,
         temperature: float = 1.0,
+        inference_fn: TorchRolloutInferenceFn | None = None,
     ) -> None:
         if max_inference_batch_size is not None and max_inference_batch_size <= 0:
             raise ValueError("max_inference_batch_size must be positive")
+        if inference_fn is None and not isinstance(model, TorchTransformerPolicy):
+            raise TypeError(
+                "non-Torch inference targets require an explicit inference_fn"
+            )
         self._player_specs = player_specs
         self._model = model
         self._max_global_steps = max_global_steps
         self._max_discussion_ticks = max_discussion_ticks
         self.max_inference_batch_size = max_inference_batch_size
         self._temperature = temperature
+        self._inference_fn = inference_fn
         self._encoder = ObservationEncoder()
         self.inference_stats = TorchRolloutInferenceStats()
 
@@ -120,15 +132,16 @@ class TorchVectorizedEpisodeCollector:
         self,
         seeds: tuple[int, ...],
         *,
-        team_models: tuple[Mapping[Team, TorchTransformerPolicy], ...] | None = None,
+        team_models: tuple[Mapping[Team, Hashable], ...] | None = None,
     ) -> tuple[LearnedEpisodeResult, ...]:
-        """Collect games, optionally assigning a model per faction per game.
+        """Collect games, optionally assigning an inference target per faction.
 
         ``team_models`` is aligned one-to-one with ``seeds``. Missing factions
-        fall back to the collector's default model. This keeps the shared-policy
-        self-play API unchanged while allowing historical/population games to
-        batch seats across independent games only when they truly share the same
-        immutable model instance.
+        fall back to the collector's default target. By default targets are local
+        ``TorchTransformerPolicy`` instances. Supplying ``inference_fn`` permits
+        lightweight hashable targets such as policy ids, which lets environment
+        workers remain CPU-only while a separate owner performs accelerator
+        inference.
         """
 
         if not seeds:
@@ -146,12 +159,13 @@ class TorchVectorizedEpisodeCollector:
             )
             for index, seed in enumerate(seeds)
         ]
-        for model in _unique_models(
-            model
-            for slot in slots
-            for model in slot.player_models.values()
-        ):
-            model.eval()
+        if self._inference_fn is None:
+            for target in _unique_targets(
+                model
+                for slot in slots
+                for model in slot.player_models.values()
+            ):
+                _require_torch_model(target).eval()
 
         for _ in range(self._max_global_steps):
             unfinished = [slot for slot in slots if slot.result is None]
@@ -178,7 +192,7 @@ class TorchVectorizedEpisodeCollector:
         self,
         index: int,
         seed: int,
-        team_models: Mapping[Team, TorchTransformerPolicy] | None,
+        team_models: Mapping[Team, Hashable] | None,
     ) -> _EpisodeSlot:
         env = WerewolfTrainingEnv(self._player_specs, seed=seed)
         samplers = {
@@ -410,11 +424,11 @@ class TorchVectorizedEpisodeCollector:
         self.inference_stats.record_pending(len(requests))
 
         grouped: dict[
-            int,
-            tuple[TorchTransformerPolicy, list[tuple[int, _InferenceRequest]]],
+            tuple[str, Hashable],
+            tuple[Hashable, list[tuple[int, _InferenceRequest]]],
         ] = {}
         for request_index, request in enumerate(requests):
-            key = id(request.model)
+            key = _target_identity(request.model)
             existing = grouped.get(key)
             if existing is None:
                 grouped[key] = (request.model, [(request_index, request)])
@@ -422,16 +436,18 @@ class TorchVectorizedEpisodeCollector:
                 existing[1].append((request_index, request))
 
         prepared: list[_PreparedRequest | None] = [None] * len(requests)
-        for model, indexed_requests in grouped.values():
+        infer = self._inference_fn or self._local_infer
+        for target, indexed_requests in grouped.values():
             limit = self.max_inference_batch_size or len(indexed_requests)
             for start in range(0, len(indexed_requests), limit):
                 batch = indexed_requests[start : start + limit]
                 self.inference_stats.record_inference(len(batch))
-                with torch.no_grad():
-                    output = model.forward_batch(
-                        tuple(request.encoded for _, request in batch)
+                encoded = tuple(request.encoded for _, request in batch)
+                logits_batch = infer(target, encoded)
+                if len(logits_batch) != len(batch):
+                    raise RuntimeError(
+                        "rollout inference returned a batch with the wrong length"
                     )
-                logits_batch = model.policy_logits_batch(output)
                 for (request_index, request), logits in zip(
                     batch,
                     logits_batch,
@@ -444,14 +460,34 @@ class TorchVectorizedEpisodeCollector:
 
         return tuple(_require_prepared(item) for item in prepared)
 
+    @staticmethod
+    def _local_infer(
+        target: Hashable,
+        observations: tuple[EncodedPolicyObservation, ...],
+    ) -> tuple[PolicyLogits, ...]:
+        model = _require_torch_model(target)
+        with torch.no_grad():
+            output = model.forward_batch(observations)
+        return model.policy_logits_batch(output)
 
-def _unique_models(
-    models: Iterable[TorchTransformerPolicy],
-) -> tuple[TorchTransformerPolicy, ...]:
-    unique: dict[int, TorchTransformerPolicy] = {}
-    for model in models:
-        unique[id(model)] = model
+
+def _target_identity(target: Hashable) -> tuple[str, Hashable]:
+    if isinstance(target, TorchTransformerPolicy):
+        return ("model", id(target))
+    return ("key", target)
+
+
+def _unique_targets(targets: Iterable[Hashable]) -> tuple[Hashable, ...]:
+    unique: dict[tuple[str, Hashable], Hashable] = {}
+    for target in targets:
+        unique[_target_identity(target)] = target
     return tuple(unique.values())
+
+
+def _require_torch_model(target: Hashable) -> TorchTransformerPolicy:
+    if not isinstance(target, TorchTransformerPolicy):
+        raise TypeError("local rollout inference requires TorchTransformerPolicy targets")
+    return target
 
 
 def _slot_by_index(slots: list[_EpisodeSlot], index: int) -> _EpisodeSlot:
