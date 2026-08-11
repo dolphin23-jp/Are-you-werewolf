@@ -263,57 +263,82 @@ class TorchTransformerPolicy(nn.Module):
         self,
         output: TorchPolicyTensorOutput,
     ) -> tuple[PolicyLogits, ...]:
-        """Detach a rollout batch with one device-to-host transfer per head.
+        """Detach a rollout batch with one device-to-host transfer total.
 
-        Structured sampling remains framework agnostic and CPU-side. Moving an
-        entire head at once avoids synchronizing the accelerator separately for
-        every seat while preserving exactly the same logits and sampling code.
+        Structured sampling remains framework agnostic and CPU-side. Packing all
+        policy heads and values before copying avoids one accelerator
+        synchronization per head while preserving the exact rollout logits.
         """
 
         batch_size = int(output.value.shape[0])
         if batch_size == 0:
             return ()
-        timing = _as_batch_tuples(output.timing)
-        action_type = _as_batch_tuples(output.action_type)
-        topic = _as_batch_tuples(output.topic)
-        target = _as_batch_tuples(output.target)
-        secondary_target = _as_batch_tuples(output.secondary_target)
-        role = _as_batch_tuples(output.role)
-        result = _as_batch_tuples(output.result)
-        quantity = _as_batch_tuples(output.quantity)
-        referenced_day = _as_batch_tuples(output.referenced_day)
-        scope = _as_batch_tuples(output.scope)
-        stance = _as_batch_tuples(output.stance)
-        reference_event = _as_batch_tuples(output.reference_event)
-        vote_target = _as_batch_tuples(output.vote_target)
-        night_topic = _as_batch_tuples(output.night_topic)
-        night_target = _as_batch_tuples(output.night_target)
-        values = tuple(float(value) for value in output.value.detach().cpu().tolist())
 
-        batch = tuple(
-            PolicyLogits(
-                timing=timing[index],
-                action_type=action_type[index],
-                topic=topic[index],
-                target=target[index],
-                secondary_target=secondary_target[index],
-                role=role[index],
-                result=result[index],
-                quantity=quantity[index],
-                referenced_day=referenced_day[index],
-                scope=scope[index],
-                stance=stance[index],
-                reference_event=reference_event[index],
-                vote_target=vote_target[index],
-                night_topic=night_topic[index],
-                night_target=night_target[index],
-                value=values[index],
-            )
-            for index in range(batch_size)
+        heads = (
+            output.timing,
+            output.action_type,
+            output.topic,
+            output.target,
+            output.secondary_target,
+            output.role,
+            output.result,
+            output.quantity,
+            output.referenced_day,
+            output.scope,
+            output.stance,
+            output.reference_event,
+            output.vote_target,
+            output.night_topic,
+            output.night_target,
         )
-        for logits in batch:
+        widths = tuple(int(head.shape[1]) for head in heads)
+        packed_rows = torch.cat((*heads, output.value.unsqueeze(1)), dim=1).detach().cpu().tolist()
+
+        batch: list[PolicyLogits] = []
+        for row in packed_rows:
+            offset = 0
+            unpacked: list[tuple[float, ...]] = []
+            for width in widths:
+                unpacked.append(tuple(float(value) for value in row[offset : offset + width]))
+                offset += width
+            (
+                timing,
+                action_type,
+                topic,
+                target,
+                secondary_target,
+                role,
+                result,
+                quantity,
+                referenced_day,
+                scope,
+                stance,
+                reference_event,
+                vote_target,
+                night_topic,
+                night_target,
+            ) = unpacked
+            logits = PolicyLogits(
+                timing=timing,
+                action_type=action_type,
+                topic=topic,
+                target=target,
+                secondary_target=secondary_target,
+                role=role,
+                result=result,
+                quantity=quantity,
+                referenced_day=referenced_day,
+                scope=scope,
+                stance=stance,
+                reference_event=reference_event,
+                vote_target=vote_target,
+                night_topic=night_topic,
+                night_target=night_target,
+                value=float(row[offset]),
+            )
             logits.validate(self.sizes)
-        return batch
+            batch.append(logits)
+        return tuple(batch)
 
     def forward_batch(
         self,
