@@ -78,11 +78,16 @@ class WerewolfTrainingEnv:
             semantic_events=self.semantic_events,
         )
 
+    def observe_many(self, player_ids: Sequence[str]) -> dict[str, PolicyObservation]:
+        return self._observation_builder.build_many(
+            self.controller,
+            player_ids,
+            discussion_tick=self.scheduler.discussion_tick,
+            semantic_events=self.semantic_events,
+        )
+
     def observe_alive(self) -> dict[str, PolicyObservation]:
-        return {
-            player_id: self.observe(player_id)
-            for player_id in self.controller.state.alive_ids()
-        }
+        return self.observe_many(self.controller.state.alive_ids())
 
     def select_next_speaker(
         self, intents: Mapping[str, SpeakIntent]
