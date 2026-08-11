@@ -7,7 +7,8 @@ claims, self-sacrifice proposals, late COs, and contradictory public stories.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from threading import local
 
 from app.engine.roles import RoleName
 from app.training.actions import (
@@ -41,13 +42,85 @@ class SemanticParameterMask:
     )
 
 
+@dataclass
+class _SemanticMaskCacheState:
+    """Bounded per-thread cache for repeated queries on one immutable observation."""
+
+    observation: PolicyObservation | None = None
+    values: dict[tuple[ActionType, Topic | None], SemanticParameterMask] = field(
+        default_factory=dict
+    )
+
+
+_SEMANTIC_MASK_CACHE = local()
+_TOPIC_INSENSITIVE_ACTIONS = frozenset(
+    {
+        ActionType.PASS,
+        ActionType.EVALUATE,
+        ActionType.DECLARE,
+        ActionType.QUESTION,
+        ActionType.REACT,
+        ActionType.RETRACT,
+    }
+)
+
+
+def _cache_topic(action_type: ActionType, topic: Topic | None) -> Topic | None:
+    if action_type in _TOPIC_INSENSITIVE_ACTIONS:
+        return None
+    if action_type is ActionType.PROPOSE and topic is not Topic.EXECUTION:
+        return None
+    return topic
+
+
+def _cache_state() -> _SemanticMaskCacheState:
+    state = getattr(_SEMANTIC_MASK_CACHE, "state", None)
+    if not isinstance(state, _SemanticMaskCacheState):
+        state = _SemanticMaskCacheState()
+        setattr(_SEMANTIC_MASK_CACHE, "state", state)
+    return state
+
+
 def semantic_parameter_mask(
     observation: PolicyObservation,
     action_type: ActionType,
     *,
     topic: Topic | None = None,
 ) -> SemanticParameterMask:
-    """Return legal semantic parameters using only information in ``observation``."""
+    """Return legal semantic parameters using only information in ``observation``.
+
+    ``PolicyObservation`` is frozen, and speech sampling asks for the same masks
+    repeatedly while materializing one decision. Cache only the current
+    observation per thread so duplicate legality queries avoid rebuilding the
+    same player/event tuples without retaining rollout history.
+    """
+
+    state = _cache_state()
+    if state.observation is not observation:
+        state.observation = observation
+        state.values.clear()
+
+    normalized_topic = _cache_topic(action_type, topic)
+    key = (action_type, normalized_topic)
+    cached = state.values.get(key)
+    if cached is not None:
+        return cached
+
+    mask = _build_semantic_parameter_mask(
+        observation,
+        action_type,
+        topic=normalized_topic,
+    )
+    state.values[key] = mask
+    return mask
+
+
+def _build_semantic_parameter_mask(
+    observation: PolicyObservation,
+    action_type: ActionType,
+    *,
+    topic: Topic | None = None,
+) -> SemanticParameterMask:
     alive = tuple(player.player_id for player in observation.players if player.alive)
     others_alive = tuple(player_id for player_id in alive if player_id != observation.viewer_id)
     all_players = tuple(player.player_id for player in observation.players)
