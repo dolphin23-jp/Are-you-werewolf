@@ -57,7 +57,7 @@ class StrategyObservatoryRunner:
 
     def run(self, seed: int) -> dict[str, Any]:
         env = WerewolfTrainingEnv(self._player_specs, seed=seed)
-        players = {
+        players: dict[str, dict[str, Any]] = {
             player_id: {
                 "player_id": player_id,
                 "role": player.role.value,
