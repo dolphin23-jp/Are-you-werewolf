@@ -8,7 +8,7 @@ import shutil
 import tarfile
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 _SNAPSHOT_VERSION = 1
 _TEAM_KEYS = ("village", "werewolf", "fox")
@@ -108,7 +108,7 @@ def export_strategy_snapshot(
             checkpoint_out.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(pool_root / checkpoint, checkpoint_out)
 
-        mode = "w:gz" if output.suffix == ".gz" else "w"
+        mode: Literal["w:gz", "w"] = "w:gz" if output.suffix == ".gz" else "w"
         with tarfile.open(output, mode) as archive:
             archive.add(root / "snapshot.json", arcname="snapshot.json")
             archive.add(pool_out, arcname="pool")
