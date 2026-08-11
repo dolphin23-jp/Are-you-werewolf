@@ -77,3 +77,39 @@ def test_private_result_is_encoded_only_for_the_entitled_viewer():
     p1_fox = fox.player_tokens[1]
     assert p1_seer[7] == 2
     assert p1_fox[7] == 0
+
+
+def test_encode_many_matches_scalar_encoding_and_shares_public_tokens():
+    env = _env()
+    env.controller.resolve_night()
+    env.controller.start_discussion()
+    env.emit_speech(
+        "p1",
+        SpeechBundle(
+            (
+                SemanticAction(
+                    ActionType.CLAIM,
+                    topic=Topic.ROLE,
+                    role=RoleName.SEER,
+                ),
+            )
+        ),
+    )
+    player_ids = ("p0", "p1", "p2")
+    observations_by_id = env.observe_many(player_ids)
+    observations = tuple(observations_by_id[player_id] for player_id in player_ids)
+
+    scalar_encoder = ObservationEncoder()
+    scalar = tuple(scalar_encoder.encode(observation) for observation in observations)
+    batched = ObservationEncoder().encode_many(observations)
+
+    assert batched == scalar
+    first = batched[0]
+    for encoded in batched[1:]:
+        assert encoded.semantic_tokens is first.semantic_tokens
+        assert encoded.semantic_mask is first.semantic_mask
+        assert encoded.vote_tokens is first.vote_tokens
+        assert encoded.vote_mask is first.vote_mask
+        assert encoded.dawn_tokens is first.dawn_tokens
+        assert encoded.dawn_mask is first.dawn_mask
+    assert batched[0].player_tokens != batched[1].player_tokens
