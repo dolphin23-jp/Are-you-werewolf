@@ -1,5 +1,7 @@
 import pytest
 
+pytest.importorskip("torch")
+
 from app.training.population_runtime import with_runtime_batching_at_idle
 from app.training.torch_population_research import (
     TorchPopulationResearchConfig,
