@@ -9,8 +9,9 @@ shared.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Hashable, Iterable, Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
+from typing import Protocol
 
 import torch
 
@@ -29,10 +30,15 @@ from app.training.torch_policy import TorchTransformerPolicy
 from app.training.trajectory import DecisionKind, EpisodeTrajectory, RecordedDecision
 
 
-TorchRolloutInferenceFn = Callable[
-    [Hashable, tuple[EncodedPolicyObservation, ...]],
-    tuple[PolicyLogits, ...],
-]
+TorchRolloutInferenceTarget = TorchTransformerPolicy | str
+
+
+class TorchRolloutInferenceFn(Protocol):
+    def __call__(
+        self,
+        target: TorchRolloutInferenceTarget,
+        observations: tuple[EncodedPolicyObservation, ...],
+    ) -> tuple[PolicyLogits, ...]: ...
 
 
 @dataclass
@@ -77,7 +83,7 @@ class _EpisodeSlot:
     seed: int
     env: WerewolfTrainingEnv
     samplers: dict[str, MaskedPolicySampler]
-    player_models: dict[str, Hashable]
+    player_models: dict[str, TorchRolloutInferenceTarget]
     trajectory: EpisodeTrajectory
     discussion_ticks: int = 0
     result: LearnedEpisodeResult | None = None
@@ -89,7 +95,7 @@ class _InferenceRequest:
     player_id: str
     observation: PolicyObservation
     encoded: EncodedPolicyObservation
-    model: Hashable
+    model: TorchRolloutInferenceTarget
 
 
 @dataclass(frozen=True)
@@ -104,7 +110,7 @@ class TorchVectorizedEpisodeCollector:
     def __init__(
         self,
         player_specs: list[PlayerSpec],
-        model: Hashable,
+        model: TorchRolloutInferenceTarget,
         *,
         max_global_steps: int = 2000,
         max_discussion_ticks: int = 12,
@@ -132,16 +138,18 @@ class TorchVectorizedEpisodeCollector:
         self,
         seeds: tuple[int, ...],
         *,
-        team_models: tuple[Mapping[Team, Hashable], ...] | None = None,
+        team_models: tuple[
+            Mapping[Team, TorchRolloutInferenceTarget], ...
+        ]
+        | None = None,
     ) -> tuple[LearnedEpisodeResult, ...]:
         """Collect games, optionally assigning an inference target per faction.
 
         ``team_models`` is aligned one-to-one with ``seeds``. Missing factions
         fall back to the collector's default target. By default targets are local
         ``TorchTransformerPolicy`` instances. Supplying ``inference_fn`` permits
-        lightweight hashable targets such as policy ids, which lets environment
-        workers remain CPU-only while a separate owner performs accelerator
-        inference.
+        lightweight policy ids, which lets environment workers remain CPU-only
+        while a separate owner performs accelerator inference.
         """
 
         if not seeds:
@@ -192,7 +200,7 @@ class TorchVectorizedEpisodeCollector:
         self,
         index: int,
         seed: int,
-        team_models: Mapping[Team, Hashable] | None,
+        team_models: Mapping[Team, TorchRolloutInferenceTarget] | None,
     ) -> _EpisodeSlot:
         env = WerewolfTrainingEnv(self._player_specs, seed=seed)
         samplers = {
@@ -424,8 +432,8 @@ class TorchVectorizedEpisodeCollector:
         self.inference_stats.record_pending(len(requests))
 
         grouped: dict[
-            tuple[str, Hashable],
-            tuple[Hashable, list[tuple[int, _InferenceRequest]]],
+            tuple[str, int | str],
+            tuple[TorchRolloutInferenceTarget, list[tuple[int, _InferenceRequest]]],
         ] = {}
         for request_index, request in enumerate(requests):
             key = _target_identity(request.model)
@@ -462,7 +470,7 @@ class TorchVectorizedEpisodeCollector:
 
     @staticmethod
     def _local_infer(
-        target: Hashable,
+        target: TorchRolloutInferenceTarget,
         observations: tuple[EncodedPolicyObservation, ...],
     ) -> tuple[PolicyLogits, ...]:
         model = _require_torch_model(target)
@@ -471,20 +479,24 @@ class TorchVectorizedEpisodeCollector:
         return model.policy_logits_batch(output)
 
 
-def _target_identity(target: Hashable) -> tuple[str, Hashable]:
+def _target_identity(target: TorchRolloutInferenceTarget) -> tuple[str, int | str]:
     if isinstance(target, TorchTransformerPolicy):
         return ("model", id(target))
     return ("key", target)
 
 
-def _unique_targets(targets: Iterable[Hashable]) -> tuple[Hashable, ...]:
-    unique: dict[tuple[str, Hashable], Hashable] = {}
+def _unique_targets(
+    targets: Iterable[TorchRolloutInferenceTarget],
+) -> tuple[TorchRolloutInferenceTarget, ...]:
+    unique: dict[tuple[str, int | str], TorchRolloutInferenceTarget] = {}
     for target in targets:
         unique[_target_identity(target)] = target
     return tuple(unique.values())
 
 
-def _require_torch_model(target: Hashable) -> TorchTransformerPolicy:
+def _require_torch_model(
+    target: TorchRolloutInferenceTarget,
+) -> TorchTransformerPolicy:
     if not isinstance(target, TorchTransformerPolicy):
         raise TypeError("local rollout inference requires TorchTransformerPolicy targets")
     return target
