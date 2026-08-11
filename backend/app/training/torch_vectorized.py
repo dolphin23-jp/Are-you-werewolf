@@ -9,7 +9,6 @@ shared.
 
 from __future__ import annotations
 
-import typing
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 
@@ -31,14 +30,6 @@ from app.training.trajectory import DecisionKind, EpisodeTrajectory, RecordedDec
 
 
 TorchRolloutInferenceTarget = TorchTransformerPolicy | str
-
-
-class TorchRolloutInferenceFn(typing.Protocol):
-    def __call__(
-        self,
-        target: TorchRolloutInferenceTarget,
-        observations: tuple[EncodedPolicyObservation, ...],
-    ) -> tuple[PolicyLogits, ...]: ...
 
 
 @dataclass
@@ -116,7 +107,7 @@ class TorchVectorizedEpisodeCollector:
         max_discussion_ticks: int = 12,
         max_inference_batch_size: int | None = None,
         temperature: float = 1.0,
-        inference_fn: TorchRolloutInferenceFn | None = None,
+        inference_fn=None,
     ) -> None:
         if max_inference_batch_size is not None and max_inference_batch_size <= 0:
             raise ValueError("max_inference_batch_size must be positive")
