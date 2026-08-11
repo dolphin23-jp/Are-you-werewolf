@@ -140,6 +140,11 @@ class _RemoteInferenceCollector(TorchVectorizedEpisodeCollector):
             grouped.setdefault(proxy.policy_id, []).append((request_index, request))
 
         prepared: list[_PreparedRequest | None] = [None] * len(requests)
+        pending: dict[int, list[tuple[int, _InferenceRequest]]] = {}
+
+        # Submit every policy microbatch for this logical decision before waiting.
+        # This lets the parent combine matching policies across workers instead of
+        # serializing each worker behind a request/reply round trip per policy.
         for policy_id, indexed_requests in grouped.items():
             limit = self.max_inference_batch_size or len(indexed_requests)
             for start in range(0, len(indexed_requests), limit):
@@ -147,6 +152,7 @@ class _RemoteInferenceCollector(TorchVectorizedEpisodeCollector):
                 self.inference_stats.record_inference(len(batch))
                 request_id = self._next_request_id
                 self._next_request_id += 1
+                pending[request_id] = batch
                 self._inference_queue.put(
                     _InferenceMessage(
                         worker_id=self._worker_id,
@@ -155,19 +161,24 @@ class _RemoteInferenceCollector(TorchVectorizedEpisodeCollector):
                         observations=tuple(request.encoded for _, request in batch),
                     )
                 )
-                reply = self._response_queue.get()
-                if not isinstance(reply, _InferenceReply):
-                    raise RuntimeError("multiprocess inference returned an invalid reply")
-                if reply.request_id != request_id:
-                    raise RuntimeError("multiprocess inference reply order was corrupted")
-                if len(reply.logits) != len(batch):
-                    raise RuntimeError("multiprocess inference returned the wrong batch length")
-                for (original_index, request), logits in zip(
-                    batch,
-                    reply.logits,
-                    strict=True,
-                ):
-                    prepared[original_index] = _PreparedRequest(request=request, logits=logits)
+
+        # Replies can arrive out of request order because the parent regroups all
+        # workers' requests by policy before forwarding them through CUDA.
+        while pending:
+            reply = self._response_queue.get()
+            if not isinstance(reply, _InferenceReply):
+                raise RuntimeError("multiprocess inference returned an invalid reply")
+            batch = pending.pop(reply.request_id, None)
+            if batch is None:
+                raise RuntimeError("multiprocess inference returned an unexpected reply")
+            if len(reply.logits) != len(batch):
+                raise RuntimeError("multiprocess inference returned the wrong batch length")
+            for (original_index, request), logits in zip(
+                batch,
+                reply.logits,
+                strict=True,
+            ):
+                prepared[original_index] = _PreparedRequest(request=request, logits=logits)
 
         if any(item is None for item in prepared):
             raise RuntimeError("multiprocess inference did not prepare every request")
@@ -418,16 +429,25 @@ def _serve_worker_jobs(
         except Empty:
             _assert_workers_not_failed(completed)
             continue
+
         messages = [first]
-        deadline = perf_counter() + inference_coalesce_seconds
-        while len(messages) < active_workers:
-            remaining = deadline - perf_counter()
-            if remaining <= 0:
-                break
-            try:
-                messages.append(inference_queue.get(timeout=remaining))
-            except Empty:
-                break
+        if inference_coalesce_seconds == 0:
+            while True:
+                try:
+                    messages.append(inference_queue.get_nowait())
+                except Empty:
+                    break
+        else:
+            deadline = perf_counter() + inference_coalesce_seconds
+            while True:
+                remaining = deadline - perf_counter()
+                if remaining <= 0:
+                    break
+                try:
+                    messages.append(inference_queue.get(timeout=remaining))
+                except Empty:
+                    break
+
         _serve_inference_messages(
             messages,
             model_cache=model_cache,
