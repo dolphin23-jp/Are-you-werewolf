@@ -250,12 +250,14 @@ class TorchVectorizedEpisodeCollector:
             slot for slot in slots if slot.env.controller.state.phase is Phase.NIGHT
         ]
         for slot in night_slots:
+            eligible_player_ids: list[str] = []
             for player_id in slot.env.controller.state.alive_ids():
                 mask = legal_action_mask(slot.env.controller, player_id)
                 if not mask.night_choices:
                     continue
                 masks[(slot.index, player_id)] = mask
-                requests.append(self._request(slot, player_id))
+                eligible_player_ids.append(player_id)
+            requests.extend(self._requests(slot, eligible_player_ids))
 
         prepared = self._infer(requests)
         for item in prepared:
@@ -288,11 +290,9 @@ class TorchVectorizedEpisodeCollector:
             if slot.env.controller.state.phase is Phase.DISCUSSION
             and slot.discussion_ticks < self._max_discussion_ticks
         ]
-        requests = [
-            self._request(slot, player_id)
-            for slot in discussion_slots
-            for player_id in slot.env.controller.state.alive_ids()
-        ]
+        requests: list[_InferenceRequest] = []
+        for slot in discussion_slots:
+            requests.extend(self._requests(slot, slot.env.controller.state.alive_ids()))
         prepared = self._infer(requests)
         by_slot: dict[int, dict[str, SpeechPolicyStep]] = {
             slot.index: {} for slot in discussion_slots
@@ -337,12 +337,14 @@ class TorchVectorizedEpisodeCollector:
             if slot.env.controller.state.phase in (Phase.VOTING, Phase.RUNOFF)
         ]
         for slot in voting_slots:
+            eligible_player_ids: list[str] = []
             for player_id in slot.env.controller.state.alive_ids():
                 mask = legal_action_mask(slot.env.controller, player_id)
                 if not mask.vote_target_ids:
                     continue
                 masks[(slot.index, player_id)] = mask
-                requests.append(self._request(slot, player_id))
+                eligible_player_ids.append(player_id)
+            requests.extend(self._requests(slot, eligible_player_ids))
 
         prepared = self._infer(requests)
         for item in prepared:
@@ -368,14 +370,36 @@ class TorchVectorizedEpisodeCollector:
             slot.env.controller.resolve_votes()
 
     def _request(self, slot: _EpisodeSlot, player_id: str) -> _InferenceRequest:
-        observation = slot.env.observe(player_id)
-        return _InferenceRequest(
-            slot_index=slot.index,
-            player_id=player_id,
-            observation=observation,
-            encoded=self._encoder.encode(observation),
-            model=slot.player_models[player_id],
+        return self._requests(slot, (player_id,))[0]
+
+    def _requests(
+        self,
+        slot: _EpisodeSlot,
+        player_ids: Iterable[str],
+    ) -> list[_InferenceRequest]:
+        ordered_player_ids = tuple(player_ids)
+        if not ordered_player_ids:
+            return []
+        observations_by_id = slot.env.observe_many(ordered_player_ids)
+        observations = tuple(
+            observations_by_id[player_id] for player_id in ordered_player_ids
         )
+        encoded_batch = self._encoder.encode_many(observations)
+        return [
+            _InferenceRequest(
+                slot_index=slot.index,
+                player_id=player_id,
+                observation=observation,
+                encoded=encoded,
+                model=slot.player_models[player_id],
+            )
+            for player_id, observation, encoded in zip(
+                ordered_player_ids,
+                observations,
+                encoded_batch,
+                strict=True,
+            )
+        ]
 
     def _infer(
         self,

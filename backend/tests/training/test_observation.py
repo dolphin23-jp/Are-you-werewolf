@@ -123,3 +123,63 @@ def test_public_and_role_private_semantic_events_are_separated():
     assert [event.event_id for event in wolf.private.semantic_events] == ["t2"]
     assert madman.private.semantic_events == ()
     assert wolf.semantic_events[-1].quantity == 1
+
+
+def test_build_many_matches_scalar_observations_and_shares_public_snapshot():
+    controller = _controller()
+    events = (
+        TimedSemanticEvent(
+            event_id="public",
+            actor_id="p3",
+            day=1,
+            discussion_tick=2,
+            action=SemanticAction(
+                ActionType.CLAIM,
+                topic=Topic.ROLE,
+                role=RoleName.SEER,
+                channel=Channel.PUBLIC,
+            ),
+        ),
+        TimedSemanticEvent(
+            event_id="wolf",
+            actor_id="p1",
+            day=1,
+            discussion_tick=-1,
+            action=SemanticAction(
+                ActionType.PRIVATE_PLAN,
+                topic=Topic.ATTACK,
+                target_id="p3",
+                channel=Channel.WOLF,
+            ),
+        ),
+    )
+    viewer_ids = ("p0", "p1", "p2", "p3")
+
+    scalar_builder = ObservationBuilder()
+    scalar = {
+        viewer_id: scalar_builder.build(
+            controller,
+            viewer_id,
+            discussion_tick=2,
+            semantic_events=events,
+        )
+        for viewer_id in viewer_ids
+    }
+    batched = ObservationBuilder().build_many(
+        controller,
+        viewer_ids,
+        discussion_tick=2,
+        semantic_events=events,
+    )
+
+    assert batched == scalar
+    first = batched[viewer_ids[0]]
+    for viewer_id in viewer_ids[1:]:
+        observation = batched[viewer_id]
+        assert observation.players is first.players
+        assert observation.claim_events is first.claim_events
+        assert observation.semantic_events is first.semantic_events
+        assert observation.votes is first.votes
+        assert observation.dawns is first.dawns
+    assert batched["p1"].private.semantic_events[0].event_id == "wolf"
+    assert batched["p2"].private.semantic_events == ()

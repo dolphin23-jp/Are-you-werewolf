@@ -69,57 +69,16 @@ class EncodedPolicyObservation:
 
 class ObservationEncoder:
     def encode(self, observation: PolicyObservation) -> EncodedPolicyObservation:
-        seat_ids = tuple(player.player_id for player in observation.players)
-        if len(seat_ids) != MAX_SEATS:
-            raise ValueError(f"expected {MAX_SEATS} seats, got {len(seat_ids)}")
-        seat_index = {player_id: index + 1 for index, player_id in enumerate(seat_ids)}
-
-        global_features = (
-            observation.day,
-            _PHASE_INDEX.get(observation.phase, 0),
-            observation.discussion_tick,
-            observation.vote_round,
-            seat_index[observation.viewer_id],
-            seat_index.get(observation.first_victim_id or "", 0),
-            _ROLE_INDEX[observation.private.role.value],
-            int(observation.private.is_alpha_wolf),
-        )
-
-        allies = set(observation.private.allies)
-        divine = {result.target_id: result for result in observation.private.divine_results}
-        medium = {result.target_id: result for result in observation.private.medium_results}
-        guard_counts = _target_counts(observation.private.guard_history)
-        attack_counts = _target_counts(observation.private.attack_history)
-
-        player_tokens = tuple(
-            (
-                seat_index[player.player_id],
-                int(player.player_id == observation.viewer_id),
-                int(player.alive),
-                (player.death_day + 1) if player.death_day is not None else 0,
-                _DEATH_INDEX.get(player.death_kind or "", 0),
-                _ROLE_INDEX.get(player.current_claim.value, 0)
-                if player.current_claim is not None
-                else 0,
-                int(player.player_id in allies),
-                _private_result_code(divine.get(player.player_id)),
-                _private_result_code(medium.get(player.player_id)),
-                guard_counts.get(player.player_id, 0),
-                attack_counts.get(player.player_id, 0),
-            )
-            for player in observation.players
-        )
-
+        seat_index = _seat_index(observation)
         semantic_tokens, semantic_mask = _encode_semantics(
             observation.semantic_events,
             seat_index,
         )
         vote_tokens, vote_mask = _encode_votes(observation, seat_index)
         dawn_tokens, dawn_mask = _encode_dawns(observation, seat_index)
-
-        return EncodedPolicyObservation(
-            global_features=global_features,
-            player_tokens=player_tokens,
+        return _encode_viewer(
+            observation,
+            seat_index,
             semantic_tokens=semantic_tokens,
             semantic_mask=semantic_mask,
             vote_tokens=vote_tokens,
@@ -127,6 +86,120 @@ class ObservationEncoder:
             dawn_tokens=dawn_tokens,
             dawn_mask=dawn_mask,
         )
+
+    def encode_many(
+        self,
+        observations: Sequence[PolicyObservation],
+    ) -> tuple[EncodedPolicyObservation, ...]:
+        """Encode same-state viewers while reusing public fixed-shape tokens.
+
+        ``ObservationBuilder.build_many`` returns the public tuples by identity
+        for every viewer. If callers provide unrelated observations, fall back to
+        scalar encoding rather than assuming shared public state.
+        """
+        if not observations:
+            return ()
+        first = observations[0]
+        if any(not _shares_public_snapshot(first, observation) for observation in observations[1:]):
+            return tuple(self.encode(observation) for observation in observations)
+
+        seat_index = _seat_index(first)
+        semantic_tokens, semantic_mask = _encode_semantics(first.semantic_events, seat_index)
+        vote_tokens, vote_mask = _encode_votes(first, seat_index)
+        dawn_tokens, dawn_mask = _encode_dawns(first, seat_index)
+        return tuple(
+            _encode_viewer(
+                observation,
+                seat_index,
+                semantic_tokens=semantic_tokens,
+                semantic_mask=semantic_mask,
+                vote_tokens=vote_tokens,
+                vote_mask=vote_mask,
+                dawn_tokens=dawn_tokens,
+                dawn_mask=dawn_mask,
+            )
+            for observation in observations
+        )
+
+
+def _shares_public_snapshot(first: PolicyObservation, other: PolicyObservation) -> bool:
+    return (
+        other.day == first.day
+        and other.phase == first.phase
+        and other.discussion_tick == first.discussion_tick
+        and other.vote_round == first.vote_round
+        and other.first_victim_id == first.first_victim_id
+        and other.players is first.players
+        and other.semantic_events is first.semantic_events
+        and other.votes is first.votes
+        and other.dawns is first.dawns
+    )
+
+
+def _seat_index(observation: PolicyObservation) -> dict[str, int]:
+    seat_ids = tuple(player.player_id for player in observation.players)
+    if len(seat_ids) != MAX_SEATS:
+        raise ValueError(f"expected {MAX_SEATS} seats, got {len(seat_ids)}")
+    return {player_id: index + 1 for index, player_id in enumerate(seat_ids)}
+
+
+def _encode_viewer(
+    observation: PolicyObservation,
+    seat_index: dict[str, int],
+    *,
+    semantic_tokens: tuple[tuple[int, ...], ...],
+    semantic_mask: tuple[int, ...],
+    vote_tokens: tuple[tuple[int, ...], ...],
+    vote_mask: tuple[int, ...],
+    dawn_tokens: tuple[tuple[int, ...], ...],
+    dawn_mask: tuple[int, ...],
+) -> EncodedPolicyObservation:
+    global_features = (
+        observation.day,
+        _PHASE_INDEX.get(observation.phase, 0),
+        observation.discussion_tick,
+        observation.vote_round,
+        seat_index[observation.viewer_id],
+        seat_index.get(observation.first_victim_id or "", 0),
+        _ROLE_INDEX[observation.private.role.value],
+        int(observation.private.is_alpha_wolf),
+    )
+
+    allies = set(observation.private.allies)
+    divine = {result.target_id: result for result in observation.private.divine_results}
+    medium = {result.target_id: result for result in observation.private.medium_results}
+    guard_counts = _target_counts(observation.private.guard_history)
+    attack_counts = _target_counts(observation.private.attack_history)
+
+    player_tokens = tuple(
+        (
+            seat_index[player.player_id],
+            int(player.player_id == observation.viewer_id),
+            int(player.alive),
+            (player.death_day + 1) if player.death_day is not None else 0,
+            _DEATH_INDEX.get(player.death_kind or "", 0),
+            _ROLE_INDEX.get(player.current_claim.value, 0)
+            if player.current_claim is not None
+            else 0,
+            int(player.player_id in allies),
+            _private_result_code(divine.get(player.player_id)),
+            _private_result_code(medium.get(player.player_id)),
+            guard_counts.get(player.player_id, 0),
+            attack_counts.get(player.player_id, 0),
+        )
+        for player in observation.players
+    )
+
+    return EncodedPolicyObservation(
+        global_features=global_features,
+        player_tokens=player_tokens,
+        semantic_tokens=semantic_tokens,
+        semantic_mask=semantic_mask,
+        vote_tokens=vote_tokens,
+        vote_mask=vote_mask,
+        dawn_tokens=dawn_tokens,
+        dawn_mask=dawn_mask,
+    )
 
 
 def _target_counts(records: tuple[PrivateTargetObservation, ...]) -> dict[str, int]:
