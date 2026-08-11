@@ -52,7 +52,12 @@ class _SemanticMaskCacheState:
     )
 
 
-_SEMANTIC_MASK_CACHE = local()
+class _SemanticMaskCache(local):
+    def __init__(self) -> None:
+        self.state = _SemanticMaskCacheState()
+
+
+_SEMANTIC_MASK_CACHE = _SemanticMaskCache()
 _TOPIC_INSENSITIVE_ACTIONS = frozenset(
     {
         ActionType.PASS,
@@ -73,14 +78,6 @@ def _cache_topic(action_type: ActionType, topic: Topic | None) -> Topic | None:
     return topic
 
 
-def _cache_state() -> _SemanticMaskCacheState:
-    state = getattr(_SEMANTIC_MASK_CACHE, "state", None)
-    if not isinstance(state, _SemanticMaskCacheState):
-        state = _SemanticMaskCacheState()
-        setattr(_SEMANTIC_MASK_CACHE, "state", state)
-    return state
-
-
 def semantic_parameter_mask(
     observation: PolicyObservation,
     action_type: ActionType,
@@ -95,7 +92,7 @@ def semantic_parameter_mask(
     same player/event tuples without retaining rollout history.
     """
 
-    state = _cache_state()
+    state = _SEMANTIC_MASK_CACHE.state
     if state.observation is not observation:
         state.observation = observation
         state.values.clear()
