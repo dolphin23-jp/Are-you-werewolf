@@ -21,6 +21,9 @@ from app.training.torch_population import (
     TorchProfileEvaluationRequest,
     evaluate_torch_policy_profiles,
 )
+from app.training.torch_population_multiprocess import (
+    evaluate_torch_policy_profiles_multiprocess,
+)
 
 
 def _player_specs() -> list[PlayerSpec]:
@@ -49,8 +52,11 @@ def _policy_ids(strategy: PopulationMetaStrategy, team: Team) -> tuple[str, ...]
 
 
 def _usage_seconds() -> float:
-    usage = resource.getrusage(resource.RUSAGE_SELF)
-    return usage.ru_utime + usage.ru_stime
+    total = 0.0
+    for who in (resource.RUSAGE_SELF, resource.RUSAGE_CHILDREN):
+        usage = resource.getrusage(who)
+        total += usage.ru_utime + usage.ru_stime
+    return total
 
 
 def main() -> None:
@@ -62,6 +68,8 @@ def main() -> None:
     parser.add_argument("--games-per-profile", type=int, default=20)
     parser.add_argument("--parallel-games", type=int, default=32)
     parser.add_argument("--inference-batch-size", type=int, default=128)
+    parser.add_argument("--workers", type=int, default=1)
+    parser.add_argument("--inference-coalesce-ms", type=float, default=2.0)
     parser.add_argument("--discussion-ticks", type=int)
     parser.add_argument("--seed", type=int, default=191_001)
     parser.add_argument("--device", default="auto")
@@ -75,6 +83,10 @@ def main() -> None:
         parser.error("--parallel-games must be positive")
     if args.inference_batch_size <= 0:
         parser.error("--inference-batch-size must be positive")
+    if args.workers <= 0:
+        parser.error("--workers must be positive")
+    if args.inference_coalesce_ms < 0:
+        parser.error("--inference-coalesce-ms cannot be negative")
 
     try:
         device = _resolve_device(args.device)
@@ -122,15 +134,28 @@ def main() -> None:
         table = PopulationPayoffTable(Path(tmp_dir) / "payoffs.json")
         process_cpu_before = _usage_seconds()
         wall_before = perf_counter()
-        stats = evaluate_torch_policy_profiles(
-            _player_specs(),
-            pool,
-            table,
-            tuple(requests),
-            max_discussion_ticks=discussion_ticks,
-            max_parallel_games=args.parallel_games,
-            max_inference_batch_size=args.inference_batch_size,
-        )
+        if args.workers == 1:
+            stats = evaluate_torch_policy_profiles(
+                _player_specs(),
+                pool,
+                table,
+                tuple(requests),
+                max_discussion_ticks=discussion_ticks,
+                max_parallel_games=args.parallel_games,
+                max_inference_batch_size=args.inference_batch_size,
+            )
+        else:
+            stats = evaluate_torch_policy_profiles_multiprocess(
+                _player_specs(),
+                pool,
+                table,
+                tuple(requests),
+                worker_count=args.workers,
+                max_discussion_ticks=discussion_ticks,
+                max_parallel_games=args.parallel_games,
+                max_inference_batch_size=args.inference_batch_size,
+                inference_coalesce_seconds=args.inference_coalesce_ms / 1000.0,
+            )
         if device.type == "cuda":
             torch.cuda.synchronize(device)
         wall_seconds = perf_counter() - wall_before
@@ -141,7 +166,9 @@ def main() -> None:
     print(
         f"profiles={len(selected)} games={stats.games} "
         f"parallel_games={args.parallel_games} "
-        f"inference_batch_size={args.inference_batch_size}"
+        f"inference_batch_size={args.inference_batch_size} "
+        f"workers={args.workers} "
+        f"inference_coalesce_ms={args.inference_coalesce_ms:.3f}"
     )
     print(
         f"wall_s={wall_seconds:.3f} process_cpu_s={process_cpu_seconds:.3f} "
