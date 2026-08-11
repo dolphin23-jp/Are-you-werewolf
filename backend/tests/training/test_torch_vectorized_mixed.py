@@ -75,10 +75,7 @@ def test_mixed_model_inference_groups_by_identity_and_restores_request_order():
         _request(1337, "p2", village, 2),
     ]
 
-    expected = [
-        request.model.forward(request.encoded)
-        for request in requests
-    ]
+    expected = [request.model.forward(request.encoded) for request in requests]
     village.batch_sizes.clear()
     wolf.batch_sizes.clear()
 
@@ -123,3 +120,47 @@ def test_vectorized_collector_rejects_misaligned_team_models():
             (1351, 1353),
             team_models=({Team.VILLAGE: model},),
         )
+
+
+def test_external_inference_callback_supports_hashable_policy_keys():
+    torch.manual_seed(1361)
+    models = {
+        "village": BatchCountingTransformer().eval(),
+        "werewolf": BatchCountingTransformer().eval(),
+        "fox": BatchCountingTransformer().eval(),
+    }
+    callback_batches: list[tuple[str, int]] = []
+
+    def infer(policy_key, observations):
+        assert isinstance(policy_key, str)
+        callback_batches.append((policy_key, len(observations)))
+        model = models[policy_key]
+        with torch.no_grad():
+            output = model.forward_batch(observations)
+        return model.policy_logits_batch(output)
+
+    result = TorchVectorizedEpisodeCollector(
+        _specs(),
+        "village",
+        max_discussion_ticks=1,
+        inference_fn=infer,
+    ).collect(
+        (1363,),
+        team_models=(
+            {
+                Team.VILLAGE: "village",
+                Team.WEREWOLF: "werewolf",
+                Team.FOX: "fox",
+            },
+        ),
+    )[0]
+
+    assert result.trajectory.finalized
+    assert result.winner is not None or result.is_draw
+    assert {key for key, _ in callback_batches} == {"village", "werewolf", "fox"}
+    assert all(size > 0 for _, size in callback_batches)
+
+
+def test_non_torch_target_requires_external_inference_callback():
+    with pytest.raises(TypeError, match="explicit inference_fn"):
+        TorchVectorizedEpisodeCollector(_specs(), "policy-id")
