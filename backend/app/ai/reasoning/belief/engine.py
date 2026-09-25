@@ -20,8 +20,8 @@ ledger, the solver and explicit corrections.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from dataclasses import dataclass
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, replace
 
 from app.ai.reasoning.belief.corrections import (
     CorrectionStatus,
@@ -37,6 +37,7 @@ from app.ai.reasoning.belief.state import (
     HARD_EXCLUDED_SCORE,
     EvidenceOrigin,
     EvidenceRecord,
+    EvidenceVisibility,
     OriginKind,
     PlayerBeliefState,
     RankedHypothesis,
@@ -156,6 +157,8 @@ class BeliefEngine:
         self.traits = traits or CognitiveTraits()
         self._evidence: dict[str, EvidenceRecord] = {}
         self._hard: dict[str, Certainty] = {}
+        # What the table can settle without any seat's private knowledge.
+        self._public_hard: dict[str, Certainty] = {}
         self._ranked: tuple[RankedView, ...] = ()
         # Filled from the perspective, never from the observations directly.
         self._self_role: RoleName | None = None
@@ -181,12 +184,17 @@ class BeliefEngine:
     def public_argument_evidence_for(
         self, subject_id: str | None = None
     ) -> tuple[EvidenceRecord, ...]:
-        """Only reasons safe to put into speech; private certainty stays usable internally."""
-        from app.ai.reasoning.belief.state import EvidenceVisibility
+        """Only reasons safe to put into speech; private certainty stays usable internally.
 
-        return tuple(record for record in self.active_evidence()
-                     if record.visibility is EvidenceVisibility.PUBLIC_ARGUMENT
-                     and (subject_id is None or record.subject_id == subject_id))
+        Public-facing code reads evidence through here and never through
+        `active_evidence()`, which includes what only this seat can know.
+        """
+        return tuple(
+            record
+            for record in self.active_evidence()
+            if record.visibility is EvidenceVisibility.PUBLIC_ARGUMENT
+            and (subject_id is None or record.subject_id == subject_id)
+        )
 
     def add_evidence(self, record: EvidenceRecord) -> EvidenceRecord:
         """Register a reason. Re-adding an id keeps the first, so re-observing
@@ -194,8 +202,12 @@ class BeliefEngine:
         existing = self._evidence.get(record.evidence_id)
         if existing is None or not existing.active:
             self._evidence[record.evidence_id] = record
-        elif existing.weight != record.weight:
-            self._evidence[record.evidence_id] = existing.reweighed(record.weight)
+        elif existing.weight != record.weight or existing.visibility != record.visibility:
+            # Same reason, but its force or its audience moved: a conclusion
+            # that was private can become one the table reaches as well.
+            self._evidence[record.evidence_id] = replace(
+                existing, weight=record.weight, visibility=record.visibility
+            )
         return self._evidence[record.evidence_id]
 
     def invalidate_source_facts(
@@ -218,13 +230,20 @@ class BeliefEngine:
         ledger: PublicFactLedger,
         solver: RoleSolver | None = None,
         observations: ObservationSet | None = None,
+        public_certainties: Mapping[str, Certainty] | None = None,
     ) -> None:
         """Derive evidence from the public record and recompute.
 
         Only public facts, this seat's own private knowledge and solver verdicts
         are read. Free-text memos are not re-parsed on every update -- they are
         opinion, and opinion is not a source of evidence.
+
+        `public_certainties` is what the *table* can settle on its own. It is how
+        a reason built on this seat's private certainty is told apart from one
+        anybody could argue, and with none supplied every such reason is treated
+        as private: the safe direction for something that may reach a speech.
         """
+        self._public_hard = dict(public_certainties or {})
         if observations is not None:
             self._absorb_private_knowledge(observations)
         # Before deriving anything new: drop what the record no longer contains.
@@ -446,6 +465,21 @@ class BeliefEngine:
             )
         )
 
+    def _visibility_of(self, target_id: str, certainty: Certainty) -> EvidenceVisibility:
+        """Whether a conclusion about `target_id` is one the table could reach too.
+
+        The seat's certainty comes from its own solver, which may know things
+        nobody else does: a seer's unpublished black, or a wolf's knowledge of
+        exactly which three seats are wolves -- and therefore that every other
+        seat is not. Reasoning from that is fine. Saying "p2 voted for a
+        confirmed wolf" out loud is not, when only this seat can confirm it.
+        """
+        if self._public_hard.get(target_id) is certainty:
+            return EvidenceVisibility.PUBLIC_ARGUMENT
+        if self._self_role is RoleName.WEREWOLF:
+            return EvidenceVisibility.TEAM_PRIVATE
+        return EvidenceVisibility.PRIVATE_REASONING
+
     def _derive_vote_evidence(self, ledger: PublicFactLedger) -> None:
         """Who someone voted for, read against what the solver has since settled."""
         for vote in ledger.votes():
@@ -456,6 +490,7 @@ class BeliefEngine:
                         evidence_id=f"vote_cleared:{vote.voter_id}:{vote.day}:{vote.round}",
                         subject_id=vote.voter_id,
                         category="voted_for_cleared",
+                        visibility=self._visibility_of(vote.target_id, certainty),
                         source_event_ids=(
                             vote_fact_id(
                                 vote.voter_id, vote.day, vote.round, vote.target_id
@@ -480,6 +515,7 @@ class BeliefEngine:
                         evidence_id=f"vote_wolf:{vote.voter_id}:{vote.day}:{vote.round}",
                         subject_id=vote.voter_id,
                         category="voted_for_wolf",
+                        visibility=self._visibility_of(vote.target_id, certainty),
                         source_event_ids=(
                             vote_fact_id(
                                 vote.voter_id, vote.day, vote.round, vote.target_id

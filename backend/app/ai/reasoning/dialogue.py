@@ -24,6 +24,7 @@ from enum import StrEnum
 
 from app.ai.reasoning.belief.corrections import FactCorrection, parse_fact_corrections
 from app.ai.reasoning.facts import PublicFactLedger, mentions_player
+from app.engine.roles import RoleName
 
 
 class SpeechGoal(StrEnum):
@@ -50,6 +51,21 @@ class BeliefChange:
 
 
 @dataclass(frozen=True)
+class RequiredPublicResult:
+    """A result this seat will publish this turn, decided in code.
+
+    Only ever the seat's own, legally held result -- read through its
+    perspective. `referenced_day` is the night (for a medium, the execution day)
+    the result is about, which is not the day it is spoken.
+    """
+
+    result_type: str
+    target_id: str
+    is_werewolf: bool
+    referenced_day: int
+
+
+@dataclass(frozen=True)
 class DiscussionDecision:
     """What this turn concludes. The model renders it; it does not revise it.
 
@@ -67,6 +83,11 @@ class DiscussionDecision:
     strongest_countercase: str = ""
     public_story_status: str | None = None
     speech_goal: SpeechGoal = SpeechGoal.OBSERVE
+    # Results this turn publishes, and the CO they need behind them. Decided
+    # here rather than left to the model: `public_results=[]` from a model that
+    # forgot the field used to make a real result silently vanish.
+    required_public_results: tuple[RequiredPublicResult, ...] = ()
+    required_claim_role: RoleName | None = None
 
     def render_brief(self) -> str:
         """The block handed to the model. Facts only, in fixed wording."""
@@ -92,6 +113,14 @@ class DiscussionDecision:
             lines.append(f"- 処刑しない最強の理由: {self.strongest_countercase}")
         if self.public_story_status:
             lines.append(f"- 自分の公開主張の状態: {self.public_story_status}")
+        if self.required_claim_role is not None:
+            lines.append(f"- この発言で{self.required_claim_role.value}COします")
+        for item in self.required_public_results:
+            colour = "黒" if item.is_werewolf else "白"
+            lines.append(
+                f"- 公開する結果: {item.result_type} {item.target_id}={colour}"
+                f"（{item.referenced_day}日目の夜のもの）"
+            )
         lines.append(
             "上の結論・根拠・数値は変更しないでください。口調、長さ、説明の順序、"
             "誰に質問するかだけがあなたの裁量です。"

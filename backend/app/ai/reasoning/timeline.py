@@ -80,6 +80,15 @@ def _execution_day(observations: ObservationSet, player_id: str) -> int | None:
 
 
 def _night_death(observations: ObservationSet, player_id: str) -> int | None:
+    """The night a player died overnight, if they did.
+
+    The first victim counts: they die on night 0 like any other overnight death.
+    `night_deaths` holds only attacks and curses, so reading it alone made the
+    first victim look alive for every later night -- "I divined the first victim
+    on night 2" passed as a legal look at someone buried since night 0.
+    """
+    if player_id == observations.first_victim_id:
+        return 0
     return next((d.night for d in observations.night_deaths if d.player_id == player_id), None)
 
 
