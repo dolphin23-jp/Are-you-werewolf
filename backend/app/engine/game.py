@@ -28,6 +28,7 @@ from app.engine.state import (
     ChatMessage,
     GameState,
     PlayerState,
+    public_death_cause,
 )
 from app.engine.victory import VictoryChecker
 from app.engine.vote import VoteManager
@@ -154,9 +155,17 @@ class GameController:
             player = self.state.players[death.player_id]
             if player.role == RoleName.WEREWOLF:
                 self._alpha_tracker.on_wolf_death(death.player_id)
+            # Broadcast to every seat, so it carries the *public* cause. A cursed
+            # fox and an attacked villager are both just a night death to the
+            # table; shipping the true cause here told any client with devtools
+            # open that the corpse was the fox and that the seer had divined it.
             self.events.publish(
                 GameEvent(
-                    GameEventType.PLAYER_DIED, {"player_id": death.player_id, "cause": death.cause}
+                    GameEventType.PLAYER_DIED,
+                    {
+                        "player_id": death.player_id,
+                        "cause": public_death_cause(death.cause),
+                    },
                 )
             )
 

@@ -43,6 +43,10 @@ from app.ai.reasoning.claims import (
     ensure_fact_sentences,
     register_claim_drafts,
 )
+from app.ai.reasoning.rendering import (
+    displayed_execution_target,
+    enforce_execution_target,
+)
 from app.ai.reasoning.runtime import ReasoningRuntime, SeatReasoning
 from app.ai.schemas import (
     DiscussionOutput,
@@ -52,6 +56,7 @@ from app.ai.schemas import (
     VoteOutput,
 )
 from app.ai.schemas import PublicResultClaim as SchemaPublicResultClaim
+from app.engine.game import GameError
 from app.engine.phases import Phase
 from app.engine.roles import RoleName
 from app.engine.speech_events import SpeechEventType
@@ -455,11 +460,27 @@ class AICoordinator:
             if self.reasoning.holds_unpublished_result(state, pid)
             or self._pending_questions.get(pid)
         ]
-        planned_claims: list[str] = []
-        if self._freemason_public_plan is not None:
-            leader = self._freemason_public_plan[0]
-            if leader in alive and PublicFactLedger(state).claimed_role_of(leader) is None:
-                planned_claims.append(leader)
+        # Every seat with a claim to make, change or correct -- the freemason
+        # leader, a result holder without its CO, a planned fake claimant, a
+        # bluffer whose story collapsed. Only the freemason leader used to be
+        # here, so a planned seer counter-CO could simply never get a turn.
+        planned_fake_roles = {
+            **self._wolf_deception.fake_role_by_player,
+            **self._madman_fake_role_by_player,
+        }
+        planned_claims = [
+            pid
+            for pid in self.reasoning.required_claim_speakers(
+                state,
+                planned_fake_roles=planned_fake_roles,
+                freemason_leader=(
+                    self._freemason_public_plan[0]
+                    if self._freemason_public_plan is not None
+                    else None
+                ),
+            )
+            if pid in alive
+        ]
         duty.extend(planned_claims)
         chosen = self.reasoning.select_opening_speakers(
             state,
@@ -804,53 +825,32 @@ class AICoordinator:
             # let an AI argue one name all day and then vote for another.
             output.reasoning_memo.execution_target = decision.execution_target
             output.alternative_execution_target = decision.alternative_target
-            if decision.execution_target is not None:
-                target = state.players[decision.execution_target]
-                canonical = (
-                    f"現時点の第一処刑候補は{target.name}({decision.execution_target})です。"
-                )
-                # Candidate declarations are conclusions, not model prose. Remove
-                # every free-text sentence that tries to supply a competing one.
-                rationale = "。".join(
-                    sentence
-                    for sentence in output.public_message.split("。")
-                    if sentence.strip() and "第一候補" not in sentence
-                )
-                output.public_message = canonical + (rationale + "。" if rationale else "")
-            if decision.speech_goal.value == "publish_result":
-                ledger = PublicFactLedger(state)
-                published = {
-                    (r.result_type, r.target_id, r.referenced_day)
-                    for r in ledger.public_results()
-                    if r.claimant_id == player_id
-                }
+            if decision.required_public_results:
+                # The decision already says which results go out and at which
+                # night. The model's own `public_results` is replaced, not merged:
+                # a model that forgot the field used to make a result vanish,
+                # and one that invented an extra would publish a result the
+                # seat never held.
                 required = [
                     PublicResultClaim(
-                        result_type="seer",
-                        target_id=r.target_id,
-                        is_werewolf=r.is_werewolf,
-                        referenced_day=r.day,
+                        result_type=item.result_type,
+                        target_id=item.target_id,
+                        is_werewolf=item.is_werewolf,
+                        referenced_day=item.referenced_day,
                     )
-                    for r in state.divine_records
-                    if r.seer_id == player_id and ("seer", r.target_id, r.day) not in published
+                    for item in decision.required_public_results
                 ]
-                required.extend(
-                    PublicResultClaim(
-                        result_type="medium",
-                        target_id=r.target_id,
-                        is_werewolf=r.is_werewolf,
-                        referenced_day=r.day,
-                    )
-                    for r in state.medium_records
-                    if r.medium_id == player_id and ("medium", r.target_id, r.day) not in published
-                )
                 output.public_results = required
+                if decision.required_claim_role is not None and output.claim_action is None:
+                    # A result needs a claim behind it. Without one the table
+                    # reads a verdict from nobody in particular, and the
+                    # validator drops a result that contradicts a standing claim.
+                    output.public_claim_role = decision.required_claim_role.value
+                    output.contains_co_claim = True
                 # Only what the engine actually demanded is a requirement. A
                 # result the model volunteers on some later turn is speech, not
                 # an obligation, and must not be audited as one.
                 enforced_results = tuple(required)
-            assert self.reasoning is not None
-            self.reasoning.record_stated_target(player_id, decision.execution_target)
         pending_relation = next(
             (
                 claim
@@ -884,6 +884,26 @@ class AICoordinator:
             # sentence boundary so the shortened line still reads as finished Japanese.
             output.public_message = truncate_at_sentence(output.public_message, _REACTION_MAX_CHARS)
         self._context.set_reasoning_memo(player_id, output.reasoning_memo.model_dump())
+        # The claims this turn publishes are decided before it is spoken, so the
+        # message can be made to state them. Dropping a declared verdict because
+        # the prose forgot to name its target is how a result silently vanishes.
+        drafts = build_claim_drafts(output, PublicFactLedger(state), speaker_id=player_id)
+        output.public_message = ensure_fact_sentences(
+            output.public_message,
+            drafts,
+            PublicFactLedger(state),
+            speaker_id=player_id,
+        )
+        if decision is not None:
+            # Last change to the text, on purpose. Anything that ran after it --
+            # the freemason confirmation overwrite did -- could drop the decided
+            # candidate and leave the table hearing a different one.
+            output.public_message = enforce_execution_target(
+                output.public_message,
+                decision.execution_target,
+                PublicFactLedger(state),
+                speaker_id=player_id,
+            )
         self._record(
             state,
             player_id,
@@ -901,16 +921,6 @@ class AICoordinator:
             key_point=output.key_point,
             agrees_with=output.agrees_with,
         )
-        # The claims this turn publishes are decided before it is spoken, so the
-        # message can be made to state them. Dropping a declared verdict because
-        # the prose forgot to name its target is how a result silently vanishes.
-        drafts = build_claim_drafts(output, PublicFactLedger(state), speaker_id=player_id)
-        output.public_message = ensure_fact_sentences(
-            output.public_message,
-            drafts,
-            PublicFactLedger(state),
-            speaker_id=player_id,
-        )
         try:
             message_id = controller.chat(  # type: ignore[attr-defined]
                 player_id,
@@ -919,8 +929,18 @@ class AICoordinator:
                 output.reply_to,
                 output.quote,
             )
-        except Exception:
+        except GameError:
+            # The engine refused the message (the speaker died mid-round, say).
+            # Nothing was displayed, so nothing is recorded as said.
             return None
+        displayed_target: str | None = None
+        if decision is not None and self.reasoning is not None:
+            # Read back from the string the table saw, not copied from the
+            # decision: that is the only way the two can be caught disagreeing.
+            displayed_target = displayed_execution_target(
+                output.public_message, PublicFactLedger(state)
+            )
+            self.reasoning.record_stated_target(player_id, displayed_target)
         required_ids: tuple[str, ...] = ()
         if self._recorder is not None and decision is not None and self.reasoning is not None:
             belief = self.reasoning.seats[player_id].belief
@@ -946,7 +966,7 @@ class AICoordinator:
                     phase=state.phase.value,
                     player_id=player_id,
                     decision_target=decision.execution_target,
-                    displayed_target=decision.execution_target,
+                    displayed_target=displayed_target,
                     public_evidence_ids=tuple(r.evidence_id for r in public_records),
                     private_evidence_ids=tuple(r.evidence_id for r in private_records),
                     team_private_evidence_ids=tuple(r.evidence_id for r in team_records),

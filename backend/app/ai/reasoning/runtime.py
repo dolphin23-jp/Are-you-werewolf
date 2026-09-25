@@ -16,7 +16,7 @@ Everything here is deterministic given the same board and seed.
 from __future__ import annotations
 
 import random
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 
 from app.ai.metrics import MetricsCollector
@@ -42,17 +42,23 @@ from app.ai.reasoning.dialogue import (
     BeliefChange,
     ConclusionType,
     DiscussionDecision,
+    RequiredPublicResult,
     SpeechGoal,
     parse_argument,
 )
 from app.ai.reasoning.facts import PublicFactLedger
 from app.ai.reasoning.observations import ObservationSet
-from app.ai.reasoning.perspectives import Perspective, PlayerPrivatePerspective
+from app.ai.reasoning.perspectives import (
+    CommonPublicPerspective,
+    Perspective,
+    PlayerPrivatePerspective,
+)
 from app.ai.reasoning.solver import (
     AccurateTimeline,
     RoleSolver,
     SolverCache,
     build_solver,
+    has_role,
 )
 from app.engine.roles import RoleName
 from app.engine.state import GameState
@@ -182,11 +188,21 @@ class ReasoningRuntime:
         self.observations = observations
         ledger = PublicFactLedger(state)
         bluffs = self._bluffed_roles(ledger, observations)
+        # What the table can settle with no seat's private knowledge. Computed
+        # once per board and shared, so each seat can tell a conclusion anyone
+        # could argue from one only it can reach.
+        public_solver = build_solver(observations, CommonPublicPerspective(), cache=self._cache)
+        public_certainties = {
+            player_id: public_solver.assess(has_role(player_id, RoleName.WEREWOLF))
+            for player_id in observations.player_ids
+        }
         for seat in self.seats.values():
             seat.last_scores = dict(seat.belief.state.public_suspicion_scores)
             seat.last_target = seat.belief.state.current_execution_target
             seat.solver = build_solver(observations, seat.perspective, cache=self._cache)
-            seat.belief.observe(ledger, seat.solver, observations)
+            seat.belief.observe(
+                ledger, seat.solver, observations, public_certainties=public_certainties
+            )
             claimed = (claimed_roles or {}).get(seat.player_id) or bluffs.get(
                 seat.player_id
             )
@@ -297,6 +313,10 @@ class ReasoningRuntime:
             for record in seat.belief.public_argument_evidence_for(target_id)
             if record.evidence_id in reasons
         ]
+        if not explanations:
+            # Every reason is private. Say so neutrally rather than returning an
+            # empty reason, and never reach for the private one to fill the gap.
+            return f"{target_id}への疑いが現時点で最も強い。"
         return "".join(explanations[:2])
 
     def night_target(
@@ -424,16 +444,110 @@ class ReasoningRuntime:
         never dropped by the value ranking -- a seer who cannot get a word in
         is a lost game, not a quiet morning.
         """
+        return bool(self.unpublished_results(state, player_id))
+
+    def required_claim_speakers(
+        self,
+        state: GameState,
+        *,
+        planned_fake_roles: Mapping[str, RoleName] | None = None,
+        freemason_leader: str | None = None,
+    ) -> tuple[str, ...]:
+        """Seats with a claim to make, change or correct -- never dropped from the day.
+
+        A claim that has been planned but never gets a turn is worse than one
+        never planned: the freemason plan existed and the leader simply was not
+        picked, so nobody COed. Each source below is a claim this seat *must*
+        say out loud, and the value ranking is not allowed to outvote it.
+
+        Sources, all read from state the seat legitimately has:
+
+        * the freemason leader, until the freemason CO is made;
+        * a seer or medium holding a result without the CO it needs;
+        * a planned fake claimant, until that claim is actually made;
+        * a bluffer whose story has collapsed and must retract or slide;
+        * a seer or medium whose published colour contradicts its own result.
+        """
+        ledger = PublicFactLedger(state)
+        observations = ObservationSet.from_state(state)
+        required: list[str] = []
+
+        def alive_ai(player_id: str) -> bool:
+            return player_id in self.seats and state.players[player_id].alive
+
+        if freemason_leader and alive_ai(freemason_leader):
+            if ledger.claimed_role_of(freemason_leader) is not RoleName.FREEMASON:
+                required.append(freemason_leader)
+        for player_id, seat in self.seats.items():
+            if not alive_ai(player_id):
+                continue
+            standing = ledger.claimed_role_of(player_id)
+            unpublished = self.unpublished_results(state, player_id)
+            if unpublished and self._claim_needed_for(state, player_id, unpublished):
+                required.append(player_id)
+            planned = (planned_fake_roles or {}).get(player_id)
+            if planned is not None and standing is not planned:
+                required.append(player_id)
+            if seat.deception is not None and seat.deception.status is StoryStatus.COLLAPSED:
+                required.append(player_id)
+            if self._published_colour_contradicts_own(ledger, observations, seat):
+                required.append(player_id)
+        return tuple(dict.fromkeys(required))
+
+    def _published_colour_contradicts_own(
+        self, ledger: PublicFactLedger, observations: ObservationSet, seat: SeatReasoning
+    ) -> bool:
+        own = {
+            ("seer", r.target_id): r.is_werewolf
+            for r in seat.perspective.known_divine_results(observations)
+        }
+        own |= {
+            ("medium", r.target_id): r.is_werewolf
+            for r in seat.perspective.known_medium_results(observations)
+        }
+        return any(
+            own.get((result.result_type, result.target_id), result.is_werewolf)
+            != result.is_werewolf
+            for result in ledger.public_results()
+            if result.claimant_id == seat.player_id
+        )
+
+    def unpublished_results(
+        self, state: GameState, player_id: str
+    ) -> tuple[RequiredPublicResult, ...]:
+        """This seat's own results that it has not yet published, oldest first.
+
+        Read through the seat's perspective, which is the only legal route to a
+        private result -- so a seat can never be told to publish someone else's.
+        One method feeds both the speech goal and the requirement, so "you have
+        something to publish" and "here is what to publish" cannot disagree.
+
+        "Published" is keyed on the target, not the night: a result already out
+        under a free-text claim with no stated night would otherwise look
+        unpublished forever and be repeated every turn.
+        """
+        seat = self.seats.get(player_id)
+        if seat is None:
+            return ()
+        observations = ObservationSet.from_state(state)
         published = {
             (result.result_type, result.target_id)
             for result in PublicFactLedger(state).public_results()
             if result.claimant_id == player_id
         }
-        held = {("seer", r.target_id) for r in state.divine_records if r.seer_id == player_id}
-        held |= {
-            ("medium", r.target_id) for r in state.medium_records if r.medium_id == player_id
-        }
-        return bool(held - published)
+        held = [
+            RequiredPublicResult("seer", r.target_id, r.is_werewolf, r.night)
+            for r in seat.perspective.known_divine_results(observations)
+        ] + [
+            RequiredPublicResult("medium", r.target_id, r.is_werewolf, r.day)
+            for r in seat.perspective.known_medium_results(observations)
+        ]
+        return tuple(
+            sorted(
+                (item for item in held if (item.result_type, item.target_id) not in published),
+                key=lambda item: (item.referenced_day, item.result_type, item.target_id),
+            )
+        )
 
     def _belief_moved(self, seat: SeatReasoning) -> bool:
         current = seat.belief.state.public_suspicion_scores
@@ -496,6 +610,17 @@ class ReasoningRuntime:
             if record.subject_id == target and record.weight < 0
         )[:2]
         rank = self.top_rank(player_id)
+        speech_goal = self._speech_goal(
+            state,
+            seat,
+            pending_question=pending_question,
+            under_pressure=under_pressure,
+        )
+        required: tuple[RequiredPublicResult, ...] = ()
+        required_claim: RoleName | None = None
+        if speech_goal is SpeechGoal.PUBLISH_RESULT:
+            required = self.unpublished_results(state, player_id)
+            required_claim = self._claim_needed_for(state, player_id, required)
         return DiscussionDecision(
             speaker_id=player_id,
             execution_target=target,
@@ -508,13 +633,30 @@ class ReasoningRuntime:
             public_story_status=(
                 seat.deception.status.value if seat.deception is not None else None
             ),
-            speech_goal=self._speech_goal(
-                state,
-                seat,
-                pending_question=pending_question,
-                under_pressure=under_pressure,
-            ),
+            speech_goal=speech_goal,
+            required_public_results=required,
+            required_claim_role=required_claim,
         )
+
+    def _claim_needed_for(
+        self,
+        state: GameState,
+        player_id: str,
+        results: Sequence[RequiredPublicResult],
+    ) -> RoleName | None:
+        """The CO a result needs behind it, if the seat has not made it.
+
+        A verdict with no claim is incoherent to the table, and worse, the result
+        validator drops a result whose role contradicts a standing claim -- so a
+        seer who had slid elsewhere would lose the result without a trace. The
+        role asked for is the one the result itself proves the seat holds.
+        """
+        if not results:
+            return None
+        role = RoleName.SEER if results[0].result_type == "seer" else RoleName.MEDIUM
+        if PublicFactLedger(state).claimed_role_of(player_id) is role:
+            return None
+        return role
 
     def _belief_changes(self, seat: SeatReasoning) -> tuple[BeliefChange, ...]:
         current = seat.belief.state.public_suspicion_scores
@@ -524,10 +666,13 @@ class ReasoningRuntime:
             if abs(after - before) <= 0.5:
                 continue
             reasons = seat.belief.state.reasons_for(subject)
+            # This text goes into the brief, and from the brief into speech. A
+            # change driven by something only this seat knows -- a private black,
+            # the wolf roster -- is voiced without its reason, not with it.
             explanation = next(
                 (
                     record.explanation
-                    for record in seat.belief.active_evidence()
+                    for record in seat.belief.public_argument_evidence_for(subject)
                     if record.evidence_id in reasons
                 ),
                 "根拠が更新された",
