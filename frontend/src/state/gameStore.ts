@@ -47,8 +47,19 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
   selectedSpeakerId: null,
 
   setScreen: (screen) => set({ screen }),
+  // Every new game starts with hidden information hidden. debugMode is the
+  // game-over "show all roles" toggle too; carried over, the next game would
+  // open with every role and all wolf chat on screen.
   setSession: (sessionId, humanId, playerNames) =>
-    set({ sessionId, humanId, playerNames, view: null, debug: null, screen: "role-reveal" }),
+    set({
+      sessionId,
+      humanId,
+      playerNames,
+      view: null,
+      debug: null,
+      debugMode: false,
+      screen: "role-reveal",
+    }),
   setConnected: (connected) => set({ connected }),
   setError: (error) => set({ error }),
   setBusy: (busy) => set({ busy }),
@@ -85,6 +96,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
       playerNames: {},
       view: null,
       debug: null,
+      debugMode: false,
       connected: false,
       error: null,
       busy: false,

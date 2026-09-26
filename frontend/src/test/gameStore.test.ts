@@ -34,4 +34,17 @@ describe("gameStore", () => {
     useGameStore.getState().toggleDebug();
     expect(useGameStore.getState().debugMode).toBe(true);
   });
+
+  it("reset turns off the all-roles view before the next game", () => {
+    useGameStore.getState().setSession("sess1", "p0", { p0: "Taro" });
+    useGameStore.setState({ debugMode: true });
+    useGameStore.getState().reset();
+    expect(useGameStore.getState().debugMode).toBe(false);
+  });
+
+  it("a new session never inherits the previous game's all-roles view", () => {
+    useGameStore.setState({ debugMode: true });
+    useGameStore.getState().setSession("sess2", "p0", { p0: "Taro" });
+    expect(useGameStore.getState().debugMode).toBe(false);
+  });
 });
