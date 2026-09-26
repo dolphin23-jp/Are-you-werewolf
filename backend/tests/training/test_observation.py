@@ -183,3 +183,27 @@ def test_build_many_matches_scalar_observations_and_shares_public_snapshot():
         assert observation.dawns is first.dawns
     assert batched["p1"].private.semantic_events[0].event_id == "wolf"
     assert batched["p2"].private.semantic_events == ()
+
+
+def test_a_night_zero_curse_shows_up_as_a_dawn_for_everyone():
+    controller = _controller()
+    controller.start_game()
+    assert controller.state.first_victim_id not in ("p2", "p3")
+    controller.submit_night_action("p3", "divine", "p2")
+    controller.resolve_night()
+    builder = ObservationBuilder()
+
+    for seat in ("p0", "p1", "p5"):
+        dawns = builder.build(controller, seat).dawns
+        assert [(d.night_day, d.dead_player_ids, d.no_death) for d in dawns] == [
+            (0, ("p2",), False)
+        ]
+
+
+def test_a_night_zero_without_a_curse_adds_no_dawn():
+    controller = _controller()
+    controller.start_game()
+    controller.submit_night_action("p3", "divine", "p5")
+    controller.resolve_night()
+
+    assert ObservationBuilder().build(controller, "p0").dawns == ()

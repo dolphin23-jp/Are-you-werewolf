@@ -30,7 +30,8 @@ class DeathRuleModule(BaseRuleModule):
     Usually nothing: one night death is an attack or a curse and there is no way
     to tell. Two on the same night is the exception -- there is only one attack
     and only one curse per night, so one of the two was the fox. That is public,
-    exact, and worth a great deal.
+    exact, and worth a great deal. Night 0 is the other exception: there is no
+    attack at all, so any body besides the scripted first victim is the fox.
     """
 
     module_id = "death"
@@ -43,6 +44,20 @@ class DeathRuleModule(BaseRuleModule):
     ) -> None:
         for night in observations.nights_with_deaths():
             deaths = observations.deaths_on(night)
+            if night == 0:
+                # Nobody attacks on night 0; the first victim is scripted and not
+                # a night death here. Any other body that night was cursed.
+                for death in deaths:
+                    self._record(
+                        builder,
+                        f"night_zero_death_is_fox:{death.player_id}",
+                        RoleIs(player_id=death.player_id, role=RoleName.FOX),
+                        (
+                            f"初日の夜に{death.player_id}が死亡しています。初日は襲撃がなく、"
+                            "初日犠牲者以外の死体は呪殺しかあり得ないため、妖狐です。"
+                        ),
+                    )
+                continue
             if len(deaths) < 2:
                 # One corpse could be either cause. Saying more here is exactly
                 # the overclaim this module exists to avoid.
@@ -140,11 +155,8 @@ class FoxCurseRuleModule(BaseRuleModule):
 
     A divined fox always dies that night. So the seat the seer looked at is not
     the fox if it survived, and any *other* seat that died that night is not the
-    fox either -- nothing cursed it, and the attack cannot kill a fox.
-
-    Except on night 0: the engine resolves the Day-0 divination without a curse
-    (`NightResolver.resolve_day_zero`), so a fox divined then survives it. Reading
-    that survival as "not the fox" ruled the real world out for the seer.
+    fox either -- nothing cursed it, and the attack cannot kill a fox. This holds
+    on night 0 too: the Day-0 divination curses like any other.
     """
 
     module_id = "fox_curse"
@@ -159,8 +171,6 @@ class FoxCurseRuleModule(BaseRuleModule):
         if not divines:
             return
         for night, target_id in sorted(divines.items()):
-            if night == 0:
-                continue
             deaths = {death.player_id for death in observations.deaths_on(night)}
             if target_id not in deaths:
                 self._record(

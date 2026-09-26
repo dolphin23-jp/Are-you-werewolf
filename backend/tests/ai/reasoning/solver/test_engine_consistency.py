@@ -2,9 +2,8 @@
 
 Hand-built boards only test the rules against the author's reading of the game.
 These run real `GameController` games and check that, after every night and
-every execution, the true assignment stays possible from every seat's view. A
-night-0 fox divination -- which the engine resolves without a curse -- used to
-make it impossible for the seer.
+every execution, the true assignment stays possible from every seat's view.
+Night 0 is included: its divination curses the fox like any other night's.
 """
 
 from __future__ import annotations
@@ -41,7 +40,7 @@ def _assert_real_world_possible_everywhere(controller: GameController, moment: s
         assert solver.is_possible(truth), f"{view.perspective_id} rules out the real world {moment}"
 
 
-def test_a_fox_divined_on_night_zero_leaves_the_real_world_possible():
+def test_a_fox_divined_on_night_zero_is_cursed_and_the_table_can_tell():
     controller = GameController(
         session_id="night-zero-fox",
         player_specs=make_player_specs(),
@@ -53,8 +52,12 @@ def test_a_fox_divined_on_night_zero_leaves_the_real_world_possible():
     controller.submit_night_action("p1", "divine", "p2")
     controller.resolve_night()
 
-    assert controller.state.players["p2"].alive
+    assert not controller.state.players["p2"].alive
     _assert_real_world_possible_everywhere(controller, "after night 0")
+    public = build_solver(
+        ObservationSet.from_state(controller.state), CommonPublicPerspective()
+    )
+    assert public.possible_roles("p2") == (RoleName.FOX,)
 
 
 def _play(seed: int) -> None:

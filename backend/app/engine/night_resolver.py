@@ -3,8 +3,10 @@
 Day-0 night (the scripted "first victim" night before Day 1 discussion):
   1. The scripted first victim dies unconditionally (never Wolf/Fox).
   2. The Seer may optionally divine (result revealed at dawn). A divined Fox
-     is *not* cursed on Day 0; it survives and reads as "not a werewolf".
-No guard/attack/medium activity happens on Day 0.
+     is cursed exactly as on any other night -- "divined, so dead" holds
+     without exceptions for the reasoning built on it.
+No guard/attack/medium activity happens on Day 0, so a second body on Day 1
+can only be the cursed Fox.
 
 Regular night (Day N >= 1):
   1. Medium result: if a player was executed at the end of Day N, every
@@ -44,18 +46,17 @@ class NightResult:
 
 class NightResolver:
     def resolve_day_zero(self, state: GameState, first_victim_id: str) -> NightResult:
-        deaths: list[DeathRecord] = []
         victim = state.players[first_victim_id]
         victim.alive = False
         victim.death_cause = DeathCause.FIRST_VICTIM
         victim.death_day = state.day
-        record = DeathRecord(
+        first_victim_death = DeathRecord(
             player_id=first_victim_id, cause=DeathCause.FIRST_VICTIM, day=state.day
         )
-        state.death_records.append(record)
-        deaths.append(record)
 
         divine_result = self._resolve_divine(state)
+        curse_death = self._apply_curse(state, divine_result)
+        deaths = _record_in_seat_order(state, first_victim_death, curse_death)
 
         state.pending_divine = None
         state.pending_guard = None
@@ -68,16 +69,7 @@ class NightResolver:
         guard_target = self._resolve_guard(state)
         curse_death = self._apply_curse(state, divine_result)
         attack_death = self._apply_attack(state, guard_target)
-        # Record (and so announce) the night's deaths in seat order. Resolution
-        # order always put the cursed fox before the attack victim, which told
-        # every seat -- and every prompt, summary and policy observation built
-        # from these records -- which of the two bodies was the fox.
-        seat_order = {player_id: index for index, player_id in enumerate(state.players)}
-        deaths = sorted(
-            (death for death in (curse_death, attack_death) if death is not None),
-            key=lambda death: seat_order[death.player_id],
-        )
-        state.death_records.extend(deaths)
+        deaths = _record_in_seat_order(state, curse_death, attack_death)
 
         state.pending_divine = None
         state.pending_guard = None
@@ -159,3 +151,19 @@ class NightResolver:
         target.death_cause = DeathCause.ATTACKED
         target.death_day = state.day
         return DeathRecord(player_id=target_id, cause=DeathCause.ATTACKED, day=state.day)
+
+
+def _record_in_seat_order(state: GameState, *deaths: DeathRecord | None) -> list[DeathRecord]:
+    """Record (and so announce) one night's deaths in seat order.
+
+    Resolution order always put the cursed fox before the attack victim, which
+    told every seat -- and every prompt, summary and policy observation built
+    from these records -- which of the two bodies was the fox.
+    """
+    seat_order = {player_id: index for index, player_id in enumerate(state.players)}
+    ordered = sorted(
+        (death for death in deaths if death is not None),
+        key=lambda death: seat_order[death.player_id],
+    )
+    state.death_records.extend(ordered)
+    return ordered

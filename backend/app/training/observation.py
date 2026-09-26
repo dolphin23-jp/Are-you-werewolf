@@ -349,9 +349,15 @@ def _public_death_kind(cause: DeathCause | None) -> str | None:
 def _dawn_history(controller: GameController) -> tuple[DawnObservation, ...]:
     """Expose who died overnight, never why an attack failed or a fox died."""
     state = controller.state
-    resolved_regular_nights = sorted({record.day for record in state.attack_records})
+    resolved_nights = {record.day for record in state.attack_records}
+    # Night 0 has no attack, so it only has a dawn to report when the Day-0
+    # divination cursed the fox -- a body the whole table sees on Day 1.
+    if any(
+        record.day == 0 and record.cause is DeathCause.CURSED for record in state.death_records
+    ):
+        resolved_nights.add(0)
     dawns: list[DawnObservation] = []
-    for night_day in resolved_regular_nights:
+    for night_day in sorted(resolved_nights):
         dead = tuple(
             record.player_id
             for record in state.death_records

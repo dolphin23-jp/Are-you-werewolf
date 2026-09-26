@@ -216,16 +216,28 @@ def test_a_divined_fox_dies_that_night():
     assert seer.is_possible(has_role("p6", RoleName.FOX)) is True
 
 
-def test_a_fox_divined_on_night_zero_survives_and_stays_possible():
+def test_a_night_zero_divination_curses_like_any_other():
     state = _wolf_board()
-    boards.divine(state, "p4", "p6", night=0)
+    boards.divine(state, "p4", "p9", night=0)
 
     seer = _solver(state, PlayerPrivatePerspective("p4"))
 
-    # The engine does not curse on Day 0, so surviving that divination says
-    # nothing about the fox -- only that p6 is not a werewolf.
-    assert seer.is_possible(has_role("p6", RoleName.FOX)) is True
-    assert seer.is_possible(has_role("p6", RoleName.WEREWOLF)) is False
+    # No Day-0 exception: surviving the night-0 look rules out the fox too.
+    assert seer.is_possible(has_role("p9", RoleName.FOX)) is False
+
+
+def test_a_night_zero_body_besides_the_first_victim_is_the_fox():
+    state = _wolf_board()
+    boards.kill_first_victim(state, "p16")
+    boards.divine(state, "p4", "p6", night=0)
+    boards.die_by_curse(state, "p6", night=0)
+
+    solver = _public(state)
+
+    # Nobody attacks on night 0, so the table knows the second body was cursed.
+    assert solver.is_possible(has_role("p6", RoleName.FOX)) is True
+    for role in (RoleName.VILLAGER, RoleName.WEREWOLF, RoleName.SEER, RoleName.MADMAN):
+        assert solver.is_possible(has_role("p6", role)) is False
 
 
 def test_a_corpse_the_seer_did_not_look_at_is_not_the_fox():
