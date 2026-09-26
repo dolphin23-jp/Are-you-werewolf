@@ -181,7 +181,13 @@ _KEEP_ROLE_RE = re.compile(r"(?:占い師?|霊媒師?|共有者?)を(?:残|守)"
 _CLOSED_WORLD_RE = re.compile(
     r"(?:真(?:の)?)?(?:占い師?|霊媒師?)(?:は)?(?:どこ|誰|不在|いなく|いない)"
 )
-_SUSPECT_RE = re.compile(r"(?:が|は)(?:怪しい|あやしい|黒|狼)")
+# A negated predicate is the opposite claim: 「p3は狼じゃない」 is a defence.
+_NEGATION_AFTER = r"(?!じゃ|では|で(?:は)?な|ではな|ない|っぽくな|くな|とは思わ|と思わな)"
+_SUSPECT_RE = re.compile(rf"(?:が|は)(?:怪しい|あやしい|黒|狼|人狼){_NEGATION_AFTER}")
+_DEFEND_RE = re.compile(
+    r"(?:が|は)(?:村|白|人間|信じ|信用し)(?!っぽくな|くな|できな|しな|じゃ|では|で(?:は)?な)"
+    r"|(?:が|は)(?:狼|人狼|黒)(?:じゃ|では|で(?:は)?)な"
+)
 _EMPHASIS_RE = re.compile(r"(?:絶対|明らかに|間違いなく|確実に|必ず)")
 
 
@@ -201,34 +207,46 @@ def parse_argument(
     )
     corrections = tuple(parse_fact_corrections(text, ledger, speaker_id))
     strategic: list[StrategicClaim] = []
+    # Merely naming someone concludes nothing about them; only a recognised
+    # accusation or defence below carries weight (see runtime._ARGUMENT_WEIGHTS).
     conclusion = ConclusionType.STRATEGIC_CLAIM
     target: str | None = mentioned[0] if mentioned else None
+
+    def about(match: re.Match[str]) -> str | None:
+        # The player named closest before the predicate is its subject, not the
+        # first in seat order: 「p2は白、p5が怪しい」 accuses p5.
+        return _nearest_mention_before(text, match.start() + 1, mentioned, ledger) or target
 
     if corrections:
         conclusion = ConclusionType.FACT_CORRECTION
         target = corrections[0].subject_id
-    elif _SPARE_RE.search(text):
+    elif spare := _SPARE_RE.search(text):
         conclusion = ConclusionType.DEFENCE
+        target = about(spare)
         strategic.append(
             StrategicClaim(claim_type="spare_target", subject_id=target, text=text)
         )
-    elif _BANDWAGON_RE.search(text) and mentioned:
+    elif (bandwagon := _BANDWAGON_RE.search(text)) and mentioned:
         conclusion = ConclusionType.ACCUSATION
+        target = about(bandwagon)
         strategic.append(
-            StrategicClaim(claim_type="bandwagon", subject_id=mentioned[0], text=text)
+            StrategicClaim(claim_type="bandwagon", subject_id=target, text=text)
         )
     elif _CLOSED_WORLD_RE.search(text):
         conclusion = ConclusionType.CLOSED_WORLD_CHALLENGE
         strategic.append(
             StrategicClaim(claim_type="missing_true_role", subject_id=target, text=text)
         )
+    elif (suspect := _SUSPECT_RE.search(text)) and mentioned:
+        conclusion = ConclusionType.ACCUSATION
+        target = about(suspect)
+    elif (defend := _DEFEND_RE.search(text)) and mentioned:
+        conclusion = ConclusionType.DEFENCE
+        target = about(defend)
     elif _KEEP_ROLE_RE.search(text):
         strategic.append(
             StrategicClaim(claim_type="protect_power_role", subject_id=target, text=text)
         )
-    elif _SUSPECT_RE.search(text) and mentioned:
-        conclusion = ConclusionType.ACCUSATION
-        target = mentioned[0]
     elif not mentioned:
         return None
 
@@ -248,3 +266,20 @@ def parse_argument(
         strategic_claims=tuple(strategic),
         rhetorical_strength=1.3 if _EMPHASIS_RE.search(text) else 1.0,
     )
+
+
+def _nearest_mention_before(
+    text: str, end: int, candidates: tuple[str, ...], ledger: PublicFactLedger
+) -> str | None:
+    """The candidate whose id or name appears last before `end`."""
+    best: tuple[int, str] | None = None
+    for player_id in candidates:
+        for label in (player_id, ledger.name_of(player_id)):
+            if not label:
+                continue
+            for match in re.finditer(
+                rf"(?<![0-9A-Za-z]){re.escape(label)}(?![0-9])", text[:end]
+            ):
+                if best is None or match.start() > best[0]:
+                    best = (match.start(), player_id)
+    return best[1] if best else None

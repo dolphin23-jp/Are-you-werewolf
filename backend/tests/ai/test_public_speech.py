@@ -1,4 +1,10 @@
-from app.ai.public_speech import DetectedPublicResult, detect_public_result
+import pytest
+
+from app.ai.public_speech import (
+    DetectedPublicResult,
+    detect_public_result,
+    detect_public_results,
+)
 from app.engine.roles import RoleName
 
 
@@ -56,3 +62,30 @@ def test_result_with_player_id_and_honorific_is_detected():
     )
 
     assert result == DetectedPublicResult("seer", "p0", True)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # Each of these fell through the narrow white pattern to the black
+        # pattern's bare 人狼 and was published as the opposite verdict.
+        "占いCO。ユイ(p3)は人狼ではありませんでした。",
+        "占いCO。ユイは人狼ではありません。",
+        "占い結果、ユイは人狼じゃない。",
+        "占い結果、ユイは人狼じゃなかった。",
+        "占い結果、ユイ(p3)は人狼ではなく村人側です。",
+        "占い結果、ユイは人間でした。",
+    ],
+)
+def test_negated_werewolf_verdicts_are_white(text: str):
+    results = detect_public_results(
+        text, RoleName.SEER, {"p3": "ユイ"}, role_claimed_in_message=True
+    )
+    assert results == [DetectedPublicResult("seer", "p3", False)]
+
+
+def test_a_plain_werewolf_verdict_is_still_black():
+    results = detect_public_results(
+        "占い結果、ユイは人狼でした。", RoleName.SEER, {"p3": "ユイ"}, role_claimed_in_message=True
+    )
+    assert results == [DetectedPublicResult("seer", "p3", True)]

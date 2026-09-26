@@ -46,6 +46,8 @@ class VoteCitation:
     day: int
     recorded_target_id: str | None
     source_message_id: str = ""
+    # The round the cited ballot was cast in, when the record has it.
+    round_number: int = 1
 
     @property
     def is_accurate(self) -> bool:
@@ -58,7 +60,7 @@ class VoteCitation:
     @property
     def fact_id(self) -> str:
         """Keyed on the ballot *as cited*, so a misquote is its own fact."""
-        return vote_fact_id(self.voter_id, self.day, 1, self.cited_target_id)
+        return vote_fact_id(self.voter_id, self.day, self.round_number, self.cited_target_id)
 
 
 def parse_vote_citations(
@@ -73,7 +75,12 @@ def parse_vote_citations(
         target = _named(match.group("target"), ledger)
         if voter is None or target is None or voter == target:
             continue
-        recorded = ledger.vote_of(voter, day)
+        # On a runoff day the voter cast several ballots; a quote of any of
+        # them is accurate. Only the last one used to count, so a correct quote
+        # of round 1 became `misremembered_vote` evidence against the voter.
+        ballots = [vote for vote in ledger.votes_on(day) if vote.voter_id == voter]
+        matching = next((vote for vote in ballots if vote.target_id == target), None)
+        recorded = matching or (ballots[-1] if ballots else None)
         citations.append(
             VoteCitation(
                 speaker_id=speaker_id,
@@ -82,6 +89,7 @@ def parse_vote_citations(
                 day=day,
                 recorded_target_id=recorded.target_id if recorded else None,
                 source_message_id=source_message_id,
+                round_number=matching.round if matching else 1,
             )
         )
     return tuple(citations)

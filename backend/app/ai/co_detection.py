@@ -46,7 +46,7 @@ _CLAIM_SUFFIX = (
     r"[\s、，,]{0,2}(?:CO|ＣＯ|ｃｏ|co|カミングアウト)(?!の|を|が|は|者|数)"
     r"|です(?![かね？?])"
     r"|でした"
-    r"|だ(?![とがけろうねよ])"
+    r"|だ(?![とがけろうねよか])"
     r"|をやってい"
     r"|を担当"
     r")"
@@ -57,6 +57,25 @@ CO_PATTERNS: dict[RoleName, re.Pattern[str]] = {
 }
 
 _SENTENCE_SPLIT_RE = re.compile(r"[。！？!?\n]")
+
+# What follows a CO marker when the speaker is asking for, asking about or
+# denying a claim rather than making one: 「占いCOしてください」「対抗占いCO
+# ありますか」「占いCOなし」「狩人COするな」. The role word and CO sit side by
+# side in all of them, so the marker alone read each as the speaker's own CO.
+_NOT_A_CLAIM_AFTER_RE = re.compile(
+    r"^[\s、，,]*(?:"
+    r"して(?:ください|下さい|くだ|ほし|欲し|もら|くれ|よ|ね|$)"
+    r"|しろ|するな|しないで|しない|せず|しなかった|するか|しますか|しません"
+    r"|お願い|求む|希望|待ち|まだ|予定"
+    r"|あります|ある[かの]|あれば|ありませ|ない|なし|無し|なかった"
+    r"|出て|出な|出た|が出"
+    r")"
+)
+# A nominalised subject right before the role word -- 「噛まれたのは占い師でした」
+# 「昨日吊られた人は霊媒師です」 -- describes someone else's role.
+_OTHER_SUBJECT_BEFORE_RE = re.compile(
+    r"(?:のは|のが|人は|人が|方は|方が|彼は|彼が|彼女は|彼女が|あなたは|あなたが|君は|君が)\s*$"
+)
 
 # Forms that make a claim-shaped sentence something other than a claim: relaying
 # what someone else said, or hedging one's own. These still produce an event --
@@ -105,7 +124,12 @@ def detect_claimed_role_with_confidence(
     # describing oneself (「ユイの共有CO、相方は私…」).  It is nevertheless an
     # explicit self-claim, so handle this established form before the generic
     # third-person-report guard below.
-    if _PARTNER_CONFIRMATION_RE.search(text):
+    confirmation = _PARTNER_CONFIRMATION_RE.search(text)
+    if confirmation is not None:
+        sentence = _sentence_around(text, confirmation.start())
+        # Quoting or supposing a confirmation is not making one.
+        if _REPORTED_SPEECH_RE.search(sentence) or _HEDGE_RE.search(sentence):
+            return RoleName.FREEMASON, AMBIGUOUS_CLAIM_CONFIDENCE
         return RoleName.FREEMASON, SPOKEN_CLAIM_CONFIDENCE
 
     for sentence in _SENTENCE_SPLIT_RE.split(text):
@@ -116,6 +140,10 @@ def detect_claimed_role_with_confidence(
             if match is None:
                 continue
             if _mentions_other_before(sentence, names, match.start()):
+                continue
+            if _NOT_A_CLAIM_AFTER_RE.match(sentence[match.end() :]):
+                continue
+            if _OTHER_SUBJECT_BEFORE_RE.search(sentence[: match.start()]):
                 continue
             if _REPORTED_SPEECH_RE.search(sentence) or _HEDGE_RE.search(sentence):
                 return role, AMBIGUOUS_CLAIM_CONFIDENCE
@@ -160,6 +188,12 @@ def detect_freemason_partner(
 def _mentions_player(text: str, player_id: str, name: str) -> bool:
     """Match p1 without accidentally treating the p1 prefix in p11 as a hit."""
     return mentions_player(text, player_id, name)
+
+
+def _sentence_around(text: str, index: int) -> str:
+    start = max((text.rfind(mark, 0, index) for mark in "。！？!?\n"), default=-1) + 1
+    ends = [end for end in (text.find(mark, index) for mark in "。！？!?\n") if end != -1]
+    return text[start : min(ends) if ends else len(text)]
 
 
 def _mentions_other_before(sentence: str, names: list[str], role_index: int) -> bool:

@@ -11,6 +11,12 @@ import asyncio
 
 from app.ai.coordinator import AICoordinator
 from app.ai.provider.base import Message, SchemaT
+from app.ai.reasoning.belief.corrections import (
+    CorrectionStatus,
+    parse_fact_corrections,
+    verify,
+)
+from app.ai.reasoning.citations import parse_vote_citations
 from app.ai.reasoning.dialogue import (
     ConclusionType,
     DiscussionDecision,
@@ -390,3 +396,91 @@ def test_seats_whose_reasons_were_withdrawn_are_queued_to_speak():
     # Queued, not discarded: a correction that lands in silence is a correction
     # the table never sees acted on.
     assert runtime.take_reassessment_speakers() == ["p1"]
+
+
+# -- human arguments: what a sentence is about --
+
+
+def test_a_negated_accusation_is_a_defence():
+    state = _board()
+    ledger = PublicFactLedger(state)
+    name = ledger.name_of("p3")
+
+    argument = parse_argument(f"{name}は狼じゃないと思う。", ledger, "p0", "m1")
+
+    assert argument is not None
+    assert argument.conclusion_type is ConclusionType.DEFENCE
+    assert argument.conclusion_target_id == "p3"
+
+
+def test_the_accused_is_the_player_named_nearest_the_predicate():
+    state = _board()
+    ledger = PublicFactLedger(state)
+    first, second = ledger.name_of("p2"), ledger.name_of("p5")
+
+    argument = parse_argument(f"{first}は白、{second}が怪しい。", ledger, "p0", "m2")
+
+    assert argument is not None
+    assert argument.conclusion_type is ConclusionType.ACCUSATION
+    assert argument.conclusion_target_id == "p5"
+
+
+def _suspicion_of(runtime: ReasoningRuntime, subject: str) -> dict[str, float]:
+    return {
+        pid: seat.belief.state.public_suspicion_scores.get(subject, 0.0)
+        for pid, seat in runtime.seats.items()
+    }
+
+
+def test_praising_or_protecting_someone_adds_no_suspicion():
+    state = _board()
+    runtime = ReasoningRuntime(state, AI_IDS, seed=5)
+    runtime.refresh(state)
+    name = state.players["p9"].name
+    before = _suspicion_of(runtime, "p9")
+
+    runtime.apply_human_message(state, "p0", f"{name}さんは村だと信じてる。", "m3")
+    runtime.apply_human_message(state, "p0", f"{name}の占い師を守ろう。", "m4")
+
+    after = _suspicion_of(runtime, "p9")
+    assert all(after[pid] <= before[pid] for pid in after)
+
+
+def test_quoting_someone_elses_vote_is_not_a_correction_of_your_own():
+    state = _board()
+    state.vote_records.append(VoteRecord(voter_id="p0", target_id="p7", day=1, round=1))
+    state.vote_records.append(VoteRecord(voter_id="p2", target_id="p5", day=1, round=1))
+    runtime = ReasoningRuntime(state, AI_IDS, seed=5)
+    runtime.refresh(state)
+    trust_before = {
+        pid: seat.belief.state.source_trust.get("p0", 0.0) for pid, seat in runtime.seats.items()
+    }
+    voter, target = state.players["p2"].name, state.players["p5"].name
+
+    outcomes = runtime.apply_human_message(
+        state, "p0", f"1日目、{voter}は{target}に投票した。", "m5"
+    )
+
+    assert outcomes == []
+    assert {
+        pid: seat.belief.state.source_trust.get("p0", 0.0) for pid, seat in runtime.seats.items()
+    } == trust_before
+
+
+def test_quoting_or_correcting_a_first_round_ballot_on_a_runoff_day():
+    state = _board()
+    state.vote_records.append(VoteRecord(voter_id="p0", target_id="p7", day=1, round=1))
+    state.vote_records.append(VoteRecord(voter_id="p0", target_id="p9", day=1, round=2))
+    state.vote_records.append(VoteRecord(voter_id="p2", target_id="p5", day=1, round=1))
+    state.vote_records.append(VoteRecord(voter_id="p2", target_id="p9", day=1, round=2))
+    ledger = PublicFactLedger(state)
+    voter, target = ledger.name_of("p2"), ledger.name_of("p5")
+
+    (citation,) = parse_vote_citations(f"1日目、{voter}は{target}に投票した。", ledger, "p1")
+    assert citation.is_accurate
+    assert citation.round_number == 1
+
+    (correction,) = parse_fact_corrections(
+        f"1日目、私は{ledger.name_of('p7')}に投票しました。", ledger, "p0"
+    )
+    assert verify(correction, ledger).status is CorrectionStatus.CONFIRMED

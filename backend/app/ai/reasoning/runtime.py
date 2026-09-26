@@ -89,7 +89,10 @@ CITED_VOTE_WEIGHT = 0.5
 _ARGUMENT_WEIGHTS: dict[ConclusionType, tuple[float, str]] = {
     ConclusionType.ACCUSATION: (0.9, "accusation"),
     ConclusionType.DEFENCE: (-0.9, "accusation"),
-    ConclusionType.STRATEGIC_CLAIM: (0.4, "accusation"),
+    # Naming someone -- to praise them, protect their role, ask them something --
+    # is not an accusation. This used to add 0.4 suspicion to the first-named
+    # seat in every listener for 「p4さんは村だと信じてる」.
+    ConclusionType.STRATEGIC_CLAIM: (0.0, "accusation"),
     ConclusionType.CLOSED_WORLD_CHALLENGE: (0.5, "accusation"),
 }
 

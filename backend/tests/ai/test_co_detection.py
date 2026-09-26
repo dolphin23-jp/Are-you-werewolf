@@ -6,7 +6,11 @@ from __future__ import annotations
 
 import pytest
 
-from app.ai.co_detection import detect_claimed_role, detect_freemason_partner
+from app.ai.co_detection import (
+    detect_claimed_role,
+    detect_claimed_role_with_confidence,
+    detect_freemason_partner,
+)
 from app.engine.roles import RoleName
 
 
@@ -53,6 +57,34 @@ def test_detects_genuine_self_claims(text: str, expected: RoleName):
 )
 def test_does_not_fire_on_talk_about_roles(text: str):
     assert detect_claimed_role(text) is None
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # Asking for, asking about, or denying a claim -- the role word and CO
+        # sit side by side in every one, and each used to register at 0.9.
+        "占いCOしてください",
+        "早く霊媒COして！",
+        "対抗占いCOありますか？",
+        "狩人COするな",
+        "共有COお願いします",
+        "占いCOなし",
+        "霊媒COはまだ出ていません",
+        # Someone else's role, described through a nominalised subject.
+        "噛まれたのは占い師でした",
+        "昨日吊られた人は霊媒師です",
+        "占い師だからといって信用しない",
+    ],
+)
+def test_requests_questions_and_reports_are_not_claims(text: str):
+    assert detect_claimed_role_with_confidence(text) == (None, 0.0)
+
+
+def test_quoted_or_supposed_partner_confirmation_is_not_a_claim():
+    assert detect_claimed_role("ユイは「相方は私です」と言っていた。") is None
+    assert detect_claimed_role("もし相方が私だったら困ります。") is None
+    assert detect_claimed_role("ユイの共有CO、相方は私です。") is RoleName.FREEMASON
 
 
 def test_third_person_report_is_not_a_self_claim():

@@ -20,11 +20,16 @@ class DetectedPublicResult:
 
 
 _TARGET_TRAILER_RE = re.compile(r"^(?:\(p\d+\))?(?:さん|君|ちゃん|氏)?\s*")
+# "Not a werewolf" in its everyday forms. Only 「ではない/ではなかった」 used to
+# count, so 「人狼ではありませんでした」「人狼じゃない」「人狼ではなく」 fell
+# through to the black pattern's bare 人狼 and published the opposite verdict.
+_NOT_WEREWOLF = r"人狼(?:では|じゃ|で)(?:な(?:い|かった|く)|ありません|無い)"
 _WHITE_RE = re.compile(
-    r"^(?:は|が|=|＝|を占って[、，,]?)?\s*(?:人狼ではな(?:い|かった)|白|○)"
+    rf"^(?:は|が|=|＝|を占って[、，,]?)?\s*(?:{_NOT_WEREWOLF}|人間|白|○)"
 )
 _BLACK_RE = re.compile(
-    r"^(?:は|が|=|＝|を占って[、，,]?)?\s*(?:人狼(?:でした|だった|です|だ)?|黒|●)"
+    r"^(?:は|が|=|＝|を占って[、，,]?)?\s*"
+    r"(?:人狼(?!(?:では|じゃ|で)(?:な|ありません|無))(?:でした|だった|です|だ)?|黒|●)"
 )
 _SPECULATION_RE = re.compile(r"(?:と思|に見え|かもしれ|可能性)")
 

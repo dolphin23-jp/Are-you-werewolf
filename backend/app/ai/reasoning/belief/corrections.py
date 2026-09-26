@@ -109,6 +109,17 @@ def _verify_vote(
             CorrectionStatus.UNVERIFIABLE,
             f"{day}日目の{correction.subject_id}の投票記録がありません。",
         )
+    # A runoff day has more than one ballot per voter. "I voted for X" is true if
+    # any of them went to X; `vote_of` alone returns only the last one.
+    day_targets = {
+        vote.target_id for vote in ledger.votes_on(day) if vote.voter_id == correction.subject_id
+    }
+    if correction.asserted is not None and correction.asserted in day_targets:
+        recorded = next(
+            vote
+            for vote in ledger.votes_on(day)
+            if vote.voter_id == correction.subject_id and vote.target_id == correction.asserted
+        )
     if correction.asserted is not None and recorded.target_id != correction.asserted:
         return CorrectionVerdict(
             correction,
@@ -118,7 +129,7 @@ def _verify_vote(
                 f"{recorded.target_id}で、{correction.asserted}ではありません。"
             ),
         )
-    if correction.denied is not None and recorded.target_id == correction.denied:
+    if correction.denied is not None and correction.denied in day_targets:
         return CorrectionVerdict(
             correction,
             CorrectionStatus.REFUTED,
@@ -269,6 +280,12 @@ def parse_fact_corrections(
     asserted = _first_named(_VOTE_ASSERTION_RE, text, ledger, speaker_id)
     if denied is None and asserted is None:
         return []
+    if _names_another_voter(text, ledger, speaker_id):
+        # 「1日目、p2はp5に投票した」 is an account of p2's ballot -- a citation,
+        # checked by `citations.parse_vote_citations` -- not the speaker
+        # correcting their own record. Reading it as the latter refuted a true
+        # statement and cost the speaker trust with every seat.
+        return []
     subject = _correction_subject(text, ledger, speaker_id)
     return [
         FactCorrection(
@@ -296,11 +313,36 @@ def _correction_subject(text: str, ledger: PublicFactLedger, speaker_id: str) ->
 def _first_named(
     pattern: re.Pattern[str], text: str, ledger: PublicFactLedger, speaker_id: str
 ) -> str | None:
+    """The ballot's target: the player named last in the label, nearest the verb."""
     for match in pattern.finditer(text):
         label = match.group("label")
-        for player_id in ledger.known_player_ids():
-            if player_id == speaker_id:
-                continue
-            if mentions_player(label, player_id, ledger.name_of(player_id)):
-                return player_id
+        named = [
+            (_last_position(label, player_id, ledger.name_of(player_id)), player_id)
+            for player_id in ledger.known_player_ids()
+            if player_id != speaker_id
+            and mentions_player(label, player_id, ledger.name_of(player_id))
+        ]
+        if named:
+            return max(named)[1]
     return None
+
+
+def _last_position(text: str, player_id: str, name: str) -> int:
+    return max(text.rfind(player_id), text.rfind(name) if name else -1)
+
+
+_VOTER_TOPIC_RE = re.compile(
+    r"(?P<voter>[^、，。！？!?\s]{1,20}?)(?:は|が)[^、，。！？!?]{0,12}?(?:へ|に)(?:は)?投票"
+)
+
+
+def _names_another_voter(text: str, ledger: PublicFactLedger, speaker_id: str) -> bool:
+    """Whether someone other than the speaker is the は/が subject of a vote."""
+    for match in _VOTER_TOPIC_RE.finditer(text):
+        voter = match.group("voter")
+        if any(
+            player_id != speaker_id and mentions_player(voter, player_id, ledger.name_of(player_id))
+            for player_id in ledger.known_player_ids()
+        ):
+            return True
+    return False
