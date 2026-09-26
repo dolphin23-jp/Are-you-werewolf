@@ -102,16 +102,13 @@ class ExpertScenarioCase:
 
         return {
             "task_version": "expert-scenario-closed-set-v1",
-            "scenario_id": self.scenario_id,
-            "log_id": self.log_id,
-            "cutoff_event_id": self.cutoff_event_id,
+            "case_id": opaque_case_id(self.scenario_id),
             "perspective": self.perspective,
             "observed_facts": list(self.facts),
             "world_candidates": [
                 {
                     "world_id": world.world_id,
                     "summary": world.summary,
-                    "required_assumptions": list(world.required_assumptions),
                 }
                 for world in self.worlds
             ],
@@ -201,6 +198,17 @@ possible unless a rules contradiction makes them impossible. The most likely
 wolf is not automatically today's best execution; account for fox/LW loss
 conditions and information gained by the next night. Return only the requested
 structured object."""
+
+
+def opaque_case_id(scenario_id: str) -> str:
+    """What the model sees instead of the scenario, log and cutoff ids.
+
+    Those name the gold plan (`...-low-credit-seer-before-panda`) and the real
+    public game the case was cut from. `required_assumptions` is withheld for
+    the same reason: only possible worlds carried any, so "empty means
+    impossible" scored 33 of 33 worlds without reading a single fact.
+    """
+    return "case-" + hashlib.sha256(scenario_id.encode()).hexdigest()[:12]
 
 
 def _stable_rng(seed: int, scenario_id: str) -> random.Random:

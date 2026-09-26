@@ -24,6 +24,7 @@ from typing import Any, Literal, Protocol
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.ai.provider.base import LLMProvider, Message
+from app.eval.expert_scenarios import opaque_case_id
 
 Confidence = Literal["low", "medium", "high"]
 WorldStatus = Literal["possible", "impossible"]
@@ -157,9 +158,8 @@ class ExpertScenarioV2Case:
     def prompt_payload(self) -> dict[str, Any]:
         return {
             "task_version": "expert-scenario-phase-plan-v2",
-            "scenario_id": self.scenario_id,
-            "log_id": self.log_id,
-            "cutoff_event_id": self.cutoff_event_id,
+            # See `expert_scenarios.opaque_case_id` for what these used to leak.
+            "case_id": opaque_case_id(self.scenario_id),
             "perspective": self.perspective,
             "observed_facts": list(self.facts),
             "basic_rules": [asdict(item) for item in self.rules],
@@ -167,7 +167,6 @@ class ExpertScenarioV2Case:
                 {
                     "world_id": item.world_id,
                     "summary": item.summary,
-                    "required_assumptions": list(item.required_assumptions),
                 }
                 for item in self.worlds
             ],

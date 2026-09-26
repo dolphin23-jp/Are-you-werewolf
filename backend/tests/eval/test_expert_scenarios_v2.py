@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from app.eval.expert_scenarios import load_cases, render_model_prompt
 from app.eval.expert_scenarios_v2 import (
     ActionAssessment,
     BaselineV2AnswerProvider,
@@ -185,3 +186,19 @@ def test_v2_summary_aggregates() -> None:
     assert summary.scenario_count == 1
     assert summary.mean_overall_score == pytest.approx(1.0)
     assert summary.mean_phase_choice_exact == 1.0
+
+
+def test_no_prompt_carries_the_labels_or_ids_it_is_scored_on() -> None:
+    """Only possible worlds had `required_assumptions`, so their presence alone
+    classified every world; the scenario, log and cutoff ids name the gold plan
+    and the real game. None of it may reach the model."""
+    root, _ = _paths()
+    v1_cases = load_cases(root, seed=1)
+    v2_cases = _cases()
+    assert v1_cases and v2_cases
+    for case, prompt in [(c, render_model_prompt(c)) for c in v1_cases] + [
+        (c, render_v2_model_prompt(c)) for c in v2_cases
+    ]:
+        assert "required_assumptions" not in prompt
+        for identifier in (case.scenario_id, case.log_id, case.cutoff_event_id):
+            assert identifier not in prompt, identifier
