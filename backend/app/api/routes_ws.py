@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from app.config import get_settings
 from app.sessions.store import get_session_store
 
 router = APIRouter(tags=["ws"])
@@ -12,6 +13,11 @@ async def game_ws(websocket: WebSocket, session_id: str, player_id: str) -> None
     session = get_session_store().get(session_id)
     if session is None:
         await websocket.close(code=4404)
+        return
+    # Another seat's socket receives that seat's private pushes (divine and
+    # medium results, private-channel chat).
+    if player_id != session.human_id and not get_settings().dev_tools_enabled:
+        await websocket.close(code=4403)
         return
 
     await session.ws_hub.connect(player_id, websocket)

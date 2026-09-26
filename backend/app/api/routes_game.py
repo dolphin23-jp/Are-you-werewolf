@@ -77,7 +77,24 @@ def _get_session(session_id: str) -> GameSession:
 
 
 def _resolve_player_id(session: GameSession, player_id: str | None) -> str:
-    return player_id or session.human_id
+    if player_id is None or player_id == session.human_id:
+        return session.human_id
+    if not get_settings().dev_tools_enabled:
+        raise HTTPException(
+            status_code=403,
+            detail="他の席として操作できるのは開発環境(WEREWOLF_ENV=development)だけです",
+        )
+    if player_id not in session.controller.state.players:
+        raise HTTPException(status_code=404, detail="player not found")
+    return player_id
+
+
+def _debug_available(session: GameSession) -> bool:
+    """Every role and private channel, mid-game only in development."""
+    return (
+        get_settings().dev_tools_enabled
+        or session.controller.state.phase == Phase.GAME_OVER
+    )
 
 
 def _run(fn: object, *args: object, **kwargs: object) -> Any:
@@ -188,6 +205,7 @@ def get_view(session_id: str, player_id: str | None = Query(default=None)) -> di
         and round_state.day == state.day
     )
     view["awaiting_your_speech"] = awaiting
+    view["debug_available"] = _debug_available(session)
     view["discussion_paused"] = bool(
         session.discussion_paused or session.discussion_pause_requested
     )
@@ -213,6 +231,8 @@ def get_view(session_id: str, player_id: str | None = Query(default=None)) -> di
 @router.get("/{session_id}/debug")
 def get_debug(session_id: str) -> dict[str, Any]:
     session = _get_session(session_id)
+    if not _debug_available(session):
+        raise HTTPException(status_code=409, detail="全員の役職はゲーム終了後に表示できます")
     return session.controller.get_debug_view()
 
 

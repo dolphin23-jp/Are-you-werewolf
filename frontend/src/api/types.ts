@@ -153,6 +153,9 @@ export interface GameView {
   speech_wait_token: string | null;
   discussion_progress: { spoken: number; total: number };
   discussion_paused: boolean;
+  /** Whether `/debug` (every role, private channels) may be read right now:
+   * always in development, otherwise only once the game is over. */
+  debug_available: boolean;
   your_divine_results: DivineResult[];
   your_medium_results: MediumResult[];
   co_declarations: CoDeclarationRecord[];

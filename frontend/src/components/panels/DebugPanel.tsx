@@ -7,10 +7,14 @@ export function DebugPanel() {
   const debug = useGameStore((s) => s.debug);
   const toggleDebug = useGameStore((s) => s.toggleDebug);
   const refreshDebug = useGameStore((s) => s.refreshDebug);
+  // The server decides: every role mid-game is a development-only view.
+  const available = useGameStore((s) => s.view?.debug_available ?? false);
 
   useEffect(() => {
-    if (debugMode) void refreshDebug();
-  }, [debugMode, refreshDebug]);
+    if (debugMode && available) void refreshDebug();
+  }, [available, debugMode, refreshDebug]);
+
+  if (!available) return null;
 
   return (
     <div className="panel debug-panel">

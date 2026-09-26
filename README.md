@@ -142,11 +142,17 @@ LUNA_API_KEY=<実際のキー>
 LUNA_BASE_URL=<OpenAI互換エンドポイントURL>
 LUNA_MODEL=gpt-5.6-luna
 WEREWOLF_ACCESS_PASSWORD=<長いランダムなパスワード>
+WEREWOLF_ENV=production
 ```
 
 公開URLを第三者に使われるとAPI費用が発生するため、`WEREWOLF_ACCESS_PASSWORD`は
 必ず設定してください。ブラウザの認証画面ではユーザー名`werewolf`と、設定した
 パスワードを入力します。`/api/health`だけはホスティングの死活監視用に認証不要です。
+
+`WEREWOLF_ENV=production`にすると、開発用の機能(進行中の全役職表示`/debug`と、
+`?player_id=`で他の席として閲覧・操作する機能、他の席のWebSocket)が無効になります。
+全役職はゲーム終了後の画面から引き続き確認できます。既定値の`development`では
+従来どおりすべて使えます。
 
 ```bash
 docker build -t are-you-werewolf .

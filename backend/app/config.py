@@ -89,6 +89,14 @@ class Settings(BaseSettings):
         return value
 
     @property
+    def dev_tools_enabled(self) -> bool:
+        """Mid-game `/debug` and acting as any seat (`?player_id=`, other seats'
+        WebSockets). Handy for curl/Swagger play-testing; anywhere else they hand
+        one client every role and the AI seats' controls. Set WEREWOLF_ENV to
+        anything but "development" (e.g. "production") to switch them off."""
+        return self.werewolf_env.strip().lower() == "development"
+
+    @property
     def cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.werewolf_cors_origins.split(",") if o.strip()]
 

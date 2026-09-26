@@ -35,6 +35,7 @@ export function makeView(overrides: Partial<GameView> = {}): GameView {
     speech_wait_token: null,
     discussion_progress: { spoken: 0, total: 0 },
     discussion_paused: false,
+    debug_available: false,
     your_divine_results: [],
     your_medium_results: [],
     co_declarations: [],
