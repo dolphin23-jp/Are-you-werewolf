@@ -62,7 +62,13 @@ The semantic layer exposes mechanisms such as:
 - questions, reactions and declarations
 - voting
 - divine / guard / attack night actions
-- wolf/freemason private semantic planning channels
+
+Wolf/freemason private channels exist at the environment level only:
+`WerewolfTrainingEnv.emit_private_speech` validates membership and observations
+show those events only to channel members, but no runner (numpy or Torch,
+self-play, historical or population) schedules private turns yet. Current
+policies therefore never practise private planning; do not read results as
+evidence about it until a runner drives that channel.
 
 Any role may be claimed publicly, including wolf, madman and fox. False results,
 late claims, contradictory stories and self-execution proposals remain possible.

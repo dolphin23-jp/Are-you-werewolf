@@ -33,8 +33,12 @@ ensure_repo() {
     git -C "$REPO_DIR" checkout -q main
     git -C "$REPO_DIR" reset --hard origin/main
   else
+    # REPO_DIR comes from the environment; a typo such as the workspace root
+    # must never be wiped. Only an absent or empty directory is cloned into.
+    if [[ -e "$REPO_DIR" ]] && [[ -n "$(ls -A "$REPO_DIR" 2>/dev/null)" ]]; then
+      die "$REPO_DIR exists but is not a git checkout; refusing to replace it."
+    fi
     say "Cloning repository into $REPO_DIR"
-    rm -rf "$REPO_DIR"
     git clone --depth 1 "$REPO_URL" "$REPO_DIR"
   fi
 }
@@ -216,14 +220,16 @@ is_running() {
 }
 
 start_background() {
-  ensure_repo
-  [[ -f "$PILOT_ROOT/population/population.run.json" ]] || die \
-    "pilot-002 has not been transferred to $PILOT_ROOT yet."
+  # Check before updating: `ensure_repo` resets the checkout the running
+  # worker is executing from, swapping its code mid-experiment.
   if is_running; then
     say "Already running with PID $(cat "$PID_FILE")."
     say "Use: bash $REPO_DIR/tools/runpod_pilot002.sh status"
     return 0
   fi
+  ensure_repo
+  [[ -f "$PILOT_ROOT/population/population.run.json" ]] || die \
+    "pilot-002 has not been transferred to $PILOT_ROOT yet."
 
   mkdir -p "$PILOT_ROOT"
   rm -f "$DONE_FILE" "$FAIL_FILE"

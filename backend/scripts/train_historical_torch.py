@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 import torch
@@ -10,6 +11,7 @@ import torch
 from app.engine.game import PlayerSpec
 from app.engine.roles import Team
 from app.training.meta_strategy import PopulationMetaStrategy
+from app.training.resume_flags import warn_ignored_on_resume
 from app.training.torch_checkpoint import load_torch_policy, save_torch_policy
 from app.training.torch_historical import TorchHistoricalTrainingLoop
 from app.training.torch_historical_run_state import (
@@ -99,6 +101,22 @@ def main() -> None:
         parser.error("--pool-dir must contain at least one saved generation")
 
     if args.resume:
+        warn_ignored_on_resume(
+            parser,
+            sys.argv[1:],
+            (
+                "episodes_per_batch",
+                "parallel_games",
+                "inference_batch_size",
+                "seed",
+                "opponent_seed",
+                "discussion_ticks",
+                "learning_rate",
+                "ppo_epochs",
+                "minibatch_size",
+                "team",
+            ),
+        )
         if not args.run_state.exists():
             parser.error("--run-state does not exist")
         try:

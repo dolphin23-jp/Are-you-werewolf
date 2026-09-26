@@ -9,7 +9,11 @@ from pathlib import Path
 from typing import Any
 
 from app.engine.roles import Team
-from app.training.atomic_io import atomic_write_json, exclusive_lock
+from app.training.atomic_io import (
+    atomic_write_json,
+    checkpoint_file_name,
+    exclusive_lock,
+)
 from app.training.numpy_policy import NumpyMLPPolicy
 
 _MANIFEST_VERSION = 1
@@ -163,8 +167,7 @@ def _entry_from_json(item: dict[str, Any]) -> PolicyPoolEntry:
         raise ValueError("policy_id must be a string")
     if not isinstance(generation, int):
         raise ValueError("generation must be an integer")
-    if not isinstance(checkpoint, str):
-        raise ValueError("checkpoint must be a string")
+    checkpoint = checkpoint_file_name(checkpoint)
     if parent_id is not None and not isinstance(parent_id, str):
         raise ValueError("parent_id must be a string or null")
     if raw_specialized_team is None:

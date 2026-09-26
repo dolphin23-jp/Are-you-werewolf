@@ -34,8 +34,13 @@ def merge_payoff_records(
 
     Sharded workers start from a snapshot of the master table and append terminal
     results. Therefore a newer record must contain every count from the older
-    record. Equal-length but different records indicate concurrent/conflicting
-    evaluation and are rejected rather than guessed around.
+    record. Equal-length but different records, or a longer record missing an
+    outcome the shorter one has, indicate concurrent evaluation and are rejected.
+
+    Records carry no base count, so one divergence is undetectable: if both
+    sides added games and every count of one side is still covered by the
+    other, the covered side's extra games are dropped. The shard tools rely on
+    the master table not being written while shards run.
     """
 
     merged: dict[PolicyProfile, ProfilePayoff] = {}

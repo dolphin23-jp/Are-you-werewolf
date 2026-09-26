@@ -80,6 +80,21 @@ def exclusive_lock(path: str | Path) -> Iterator[None]:
             fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
+def checkpoint_file_name(value: object) -> str:
+    """Validate a manifest's checkpoint entry as a bare file name.
+
+    Pools only ever write ``g000123.npz`` beside their manifest. A manifest
+    naming ``../x`` or an absolute path made the pool load, and the snapshot
+    exporter read and write, files outside the pool directory.
+    """
+
+    if not isinstance(value, str):
+        raise ValueError("checkpoint must be a string")
+    if value in ("", ".", "..") or Path(value).name != value or "\\" in value:
+        raise ValueError(f"checkpoint must be a file name inside the pool: {value!r}")
+    return value
+
+
 def _fsync_directory(directory: Path) -> None:
     """Persist the rename itself; best effort where directories can't be opened."""
 

@@ -70,14 +70,34 @@ def test_team_retention_compares_dropped_policy_with_frozen_mixture(
     result = diagnose_team_retention(table, strategy, Team.VILLAGE, "vx")
 
     assert result.mixture.mean == 0.0
-    assert result.mixture.standard_error == 0.0
     assert result.best_current_policy_id == "v1"
     assert result.best_current_policy_payoff == 1.0
     assert result.challenger.mean == 1.0
     assert result.challenger_gain_vs_mixture == 1.0
     assert result.challenger_gain_vs_best_current == 0.0
-    assert result.challenger_gain_ci95_low == 1.0
-    assert result.challenger_gain_ci95_high == 1.0
+    # Four unanimous games are evidence, not certainty: the plug-in variance
+    # used to be zero here and collapse the interval to [1.0, 1.0].
+    assert result.mixture.standard_error > 0.0
+    assert result.challenger.standard_error > 0.0
+    assert 0.0 < result.challenger_gain_ci95_low < 1.0 < result.challenger_gain_ci95_high
+
+
+def test_single_game_profiles_do_not_claim_zero_uncertainty(tmp_path: Path):
+    table = PopulationPayoffTable(tmp_path / "payoffs.json")
+    strategy = PopulationMetaStrategy(
+        village=(PolicyWeight("v0", 1.0),),
+        werewolf=(PolicyWeight("w0", 1.0),),
+        fox=(PolicyWeight("f0", 1.0),),
+    )
+    for village_id, winner in (("v0", Team.WEREWOLF), ("vx", Team.VILLAGE)):
+        table.record_result(
+            PolicyProfile(village_id, "w0", "f0"), winner=winner, is_draw=False, days=3
+        )
+
+    result = diagnose_team_retention(table, strategy, Team.VILLAGE, "vx")
+
+    assert result.challenger_gain_vs_mixture == 2.0
+    assert result.challenger_gain_ci95_low < 1.0
 
 
 def test_team_retention_reports_sampling_uncertainty(tmp_path: Path):

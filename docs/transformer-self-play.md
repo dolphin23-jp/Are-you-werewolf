@@ -218,6 +218,9 @@ immutable generation. If a crash happens after that generation was added but
 before the run-state commit, deterministic replay recognizes the existing
 entry, verifies that its tensors match, and continues instead of creating a
 second generation.
+That check is exact, and CUDA replay is not guaranteed to be bitwise
+identical; see `transformer-historical-recovery.md` for what to do when it
+fails on a GPU.
 
 ## Training metrics
 

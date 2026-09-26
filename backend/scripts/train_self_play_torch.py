@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 import torch
 
 from app.engine.game import PlayerSpec
+from app.training.resume_flags import warn_ignored_on_resume
 from app.training.torch_checkpoint import load_torch_policy, save_torch_policy
 from app.training.torch_policy import TorchTransformerPolicy, TransformerPolicyConfig
 from app.training.torch_pool import TorchPolicyPool
@@ -239,6 +241,25 @@ def main() -> None:
     )
 
     if args.resume:
+        warn_ignored_on_resume(
+            parser,
+            sys.argv[1:],
+            (
+                "parallel_games",
+                "seed",
+                "discussion_ticks",
+                "learning_rate",
+                "ppo_epochs",
+                "minibatch_size",
+                "gamma",
+                "gae_lambda",
+                "normalize_advantages",
+                "d_model",
+                "nhead",
+                "layers",
+                "feedforward",
+            ),
+        )
         if not run_state_path.exists():
             parser.error(f"run state does not exist: {run_state_path}")
         try:

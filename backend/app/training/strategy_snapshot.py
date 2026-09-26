@@ -10,6 +10,8 @@ import tempfile
 from pathlib import Path
 from typing import Any, Literal
 
+from app.training.atomic_io import atomic_write, checkpoint_file_name
+
 _SNAPSHOT_VERSION = 1
 _TEAM_KEYS = ("village", "werewolf", "fox")
 
@@ -65,9 +67,10 @@ def export_strategy_snapshot(
         entry = entries_by_id.get(policy_id)
         if entry is None:
             raise ValueError(f"policy {policy_id} is missing from pool manifest")
-        checkpoint = entry.get("checkpoint")
-        if not isinstance(checkpoint, str):
-            raise ValueError(f"policy {policy_id} has an invalid checkpoint path")
+        try:
+            checkpoint = checkpoint_file_name(entry.get("checkpoint"))
+        except ValueError as exc:
+            raise ValueError(f"policy {policy_id} has an invalid checkpoint path") from exc
         checkpoint_path = pool_root / checkpoint
         if not checkpoint_path.is_file():
             raise ValueError(f"missing checkpoint for {policy_id}: {checkpoint_path}")
@@ -108,8 +111,9 @@ def export_strategy_snapshot(
             checkpoint_out.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(pool_root / checkpoint, checkpoint_out)
 
-        mode: Literal["w:gz", "w"] = "w:gz" if output.suffix == ".gz" else "w"
-        with tarfile.open(output, mode) as archive:
+        compressed = output.suffix in (".gz", ".tgz")
+        mode: Literal["w:gz", "w"] = "w:gz" if compressed else "w"
+        with atomic_write(output) as handle, tarfile.open(fileobj=handle, mode=mode) as archive:
             archive.add(root / "snapshot.json", arcname="snapshot.json")
             archive.add(pool_out, arcname="pool")
 
@@ -120,21 +124,41 @@ def extract_strategy_snapshot(
     archive_path: str | Path,
     destination: str | Path,
 ) -> dict[str, Any]:
-    """Safely extract a snapshot and verify checkpoint hashes."""
+    """Safely extract a snapshot and verify checkpoint hashes.
+
+    The archive is unpacked into a sibling staging directory and only moved to
+    ``destination`` once every hash matches. Extracting straight into the
+    destination used to overwrite an existing ``pool/manifest.json`` and leave
+    unverified files behind when a hash did not match.
+    """
 
     archive_path = Path(archive_path)
     destination = Path(destination)
-    destination.mkdir(parents=True, exist_ok=True)
-    with tarfile.open(archive_path, "r:*") as archive:
-        archive.extractall(destination, filter="data")
+    if destination.exists() and (not destination.is_dir() or any(destination.iterdir())):
+        raise ValueError(f"snapshot destination must be a new or empty directory: {destination}")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix=f".{destination.name}-", dir=destination.parent))
+    try:
+        with tarfile.open(archive_path, "r:*") as archive:
+            archive.extractall(staging, filter="data")
+        snapshot = _verify_extracted_snapshot(staging)
+        if destination.exists():
+            destination.rmdir()
+        staging.rename(destination)
+    except BaseException:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+    return snapshot
 
-    snapshot = _load_json(destination / "snapshot.json")
+
+def _verify_extracted_snapshot(root: Path) -> dict[str, Any]:
+    snapshot = _load_json(root / "snapshot.json")
     if snapshot.get("version") != _SNAPSHOT_VERSION:
         raise ValueError("unsupported strategy snapshot version")
     hashes = snapshot.get("checkpoint_sha256")
     if not isinstance(hashes, dict):
         raise ValueError("strategy snapshot is missing checkpoint hashes")
-    manifest = _load_json(destination / "pool" / "manifest.json")
+    manifest = _load_json(root / "pool" / "manifest.json")
     entries = manifest.get("entries")
     if not isinstance(entries, list):
         raise ValueError("snapshot pool manifest is missing entries")
@@ -145,10 +169,11 @@ def extract_strategy_snapshot(
         checkpoint = entry.get("checkpoint")
         if not isinstance(policy_id, str) or not isinstance(checkpoint, str):
             raise ValueError("invalid snapshot pool policy entry")
+        checkpoint = checkpoint_file_name(checkpoint)
         expected = hashes.get(policy_id)
         if not isinstance(expected, str):
             raise ValueError(f"missing hash for snapshot policy {policy_id}")
-        actual = _sha256(destination / "pool" / checkpoint)
+        actual = _sha256(root / "pool" / checkpoint)
         if actual != expected:
             raise ValueError(f"checkpoint hash mismatch for {policy_id}")
     return snapshot

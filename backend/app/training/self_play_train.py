@@ -37,6 +37,12 @@ class NumpySelfPlayTrainingLoop:
         max_discussion_ticks: int = 8,
         temperature: float = 1.0,
     ) -> None:
+        if temperature != 1.0:
+            # The sampler divides logits by the temperature, the PPO ratio does
+            # not: every first-epoch ratio would be off before any update.
+            raise ValueError(
+                "NumPy PPO currently requires temperature=1 because traces do not store it"
+            )
         self.player_specs = player_specs
         self.model = model or NumpyMLPPolicy(hidden_size=hidden_size, seed=model_seed)
         self.optimizer = NumpyPPOTrainer(self.model, ppo_config)

@@ -29,3 +29,12 @@ def test_numpy_self_play_batch_runs_episode_and_updates_model():
     assert np.isfinite(stats.update.mean_policy_loss)
     assert np.isfinite(stats.update.mean_value_loss)
     assert loop.model.initialized is True
+
+
+def test_numpy_self_play_rejects_a_temperature_its_ratio_ignores():
+    """Traces store log-probs of logits/temperature but the trainer recomputes
+    them without it, so every first-epoch ratio was already off."""
+    import pytest
+
+    with pytest.raises(ValueError, match="temperature=1"):
+        NumpySelfPlayTrainingLoop(_specs(), temperature=0.7)

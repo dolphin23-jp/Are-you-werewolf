@@ -94,6 +94,15 @@ the immutable pool and verifies:
 If all match, the existing generation is reused and progress is committed instead
 of creating a duplicate.
 
+Tensor verification is exact (`torch.equal`). On CPU the replay is bitwise
+reproducible; on CUDA it is not guaranteed, because some kernels (cuBLAS
+reductions, attention, `index_add`-style scatters) may accumulate in a different
+order between runs, and nothing enables `torch.use_deterministic_algorithms`.
+A crash inside this window on a GPU can therefore end in
+`does not match replayed model tensors`. If that happens, the pool entry is
+still the policy the interrupted batch produced: either move that generation
+out of the pool and resume, or restore the pool manifest from before the batch.
+
 The generation written by the interrupted batch is specialized for that batch's
 learner faction. Replaying the same batch trains that same faction, so the newly
 written specialist is not one of the two opponent factions and does not alter that

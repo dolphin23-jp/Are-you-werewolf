@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 import torch
 
 from app.engine.game import PlayerSpec
 from app.training.meta_strategy import PopulationMetaStrategy
+from app.training.resume_flags import warn_ignored_on_resume
 from app.training.torch_oracle_cycle import (
     finalize_torch_oracle,
     start_torch_oracle_cycle,
@@ -79,6 +81,22 @@ def main() -> None:
         parser.error("--pool-dir contains no policy generations")
 
     if args.resume:
+        warn_ignored_on_resume(
+            parser,
+            sys.argv[1:],
+            (
+                "episodes_per_oracle",
+                "oracle_batch_size",
+                "parallel_games",
+                "inference_batch_size",
+                "seed",
+                "opponent_seed",
+                "discussion_ticks",
+                "learning_rate",
+                "ppo_epochs",
+                "minibatch_size",
+            ),
+        )
         if not args.run_state.exists():
             parser.error("--run-state does not exist")
         try:

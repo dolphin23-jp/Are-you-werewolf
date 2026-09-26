@@ -239,14 +239,11 @@ def _weighted_estimate(
 
 
 def _record_mean_variance(record: ProfilePayoff, team: Team) -> float:
-    if record.games <= 1:
-        return 0.0
-    mean = record.mean_payoff(team)
-    rewards_squared = record.games - record.draws
-    sample_variance = (rewards_squared - record.games * mean * mean) / (
-        record.games - 1
-    )
-    return max(0.0, sample_variance / record.games)
+    # The plug-in sample variance is zero for a profile with one game or with
+    # only wins (or only losses), so a handful of lucky games produced a
+    # point-width CI that `retention_triggered_by_fixed_audit` then trusted.
+    # The Dirichlet posterior never collapses and converges to the same value.
+    return record.posterior_payoff_std(team) ** 2
 
 
 def _validate_challengers(

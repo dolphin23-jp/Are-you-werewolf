@@ -86,8 +86,13 @@ start() {
   fi
   mkdir -p "$PILOT_ROOT"
   touch "$LOG_FILE"
+  # `flock -n` exits at once when another audit holds the lock; without these
+  # checks the script still printed "started" and recorded that dead PID.
+  flock -n "$LOCK_FILE" true || die "another audit holds $LOCK_FILE"
   nohup flock -n "$LOCK_FILE" bash "$0" _worker >>"$LOG_FILE" 2>&1 </dev/null &
   local pid=$!
+  sleep 1
+  kill -0 "$pid" 2>/dev/null || die "worker exited immediately; see $LOG_FILE"
   printf '%s\n' "$pid" > "$PID_FILE"
   say "started pid=$pid"
   say "log=$LOG_FILE"
