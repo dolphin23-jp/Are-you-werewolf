@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from dotenv import dotenv_values
+
 from app.config import Settings
 
 
@@ -51,6 +53,20 @@ def test_shipped_env_example_loads_without_error(monkeypatch):
     assert settings.werewolf_rng_seed is None
     # Inline `# comment` suffixes must not bleed into the parsed value.
     assert "#" not in settings.werewolf_llm_provider
+    # A copied template must not lock the app behind a password nobody chose.
+    assert settings.werewolf_access_password == ""
+
+
+def test_shipped_env_example_has_no_comment_parsed_as_a_value():
+    """`KEY=   # note` parses as the value `# note` when nothing precedes the `#`.
+
+    That turned `WEREWOLF_ACCESS_PASSWORD`'s inline note into the password of
+    every deployment that followed the README's `cp .env.example .env`.
+    """
+    example = Path(__file__).resolve().parents[2] / ".env.example"
+    values = dotenv_values(example)
+    assert values
+    assert {key: value for key, value in values.items() if (value or "").startswith("#")} == {}
 
 
 def test_blank_optional_int_is_treated_as_none(tmp_path: Path, monkeypatch):
