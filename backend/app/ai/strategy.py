@@ -88,9 +88,14 @@ class StrategyAnalyzer:
     @staticmethod
     def _rope_count(estimated_wolves: int, alive_count: int) -> int:
         """Rough number of daytime executions the village can still afford
-        to "miss" a wolf before wolves reach parity/majority."""
-        non_wolves = alive_count - estimated_wolves
-        return max(0, non_wolves - estimated_wolves - 1)
+        to "miss" a wolf before wolves reach parity/majority.
+
+        Each day costs an execution and a night attack, so `alive` seats hold
+        `(alive - 1) // 2` executions, and every wolf needs one of them. The
+        old formula ignored the attacks and told every prompt that 16 alive
+        with 3 wolves left 9 misses; it is 4.
+        """
+        return max(0, (alive_count - 1) // 2 - estimated_wolves)
 
 
 ROLE_LABELS: dict[RoleName, str] = {

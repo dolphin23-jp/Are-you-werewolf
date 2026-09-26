@@ -19,3 +19,11 @@ def test_rope_count_decreases_as_wolves_survive_relatively_more():
     assert fewer_non_wolves < baseline
     assert baseline >= 0
     assert fewer_non_wolves >= 0
+
+
+def test_rope_count_is_the_misses_left_after_a_night_attack_each_day():
+    # 16 alive hold 7 executions (each day also loses one seat to the attack);
+    # three of them must hit the three wolves, which leaves four to spare.
+    assert StrategyAnalyzer()._rope_count(3, 16) == 4
+    assert StrategyAnalyzer()._rope_count(1, 5) == 1
+    assert StrategyAnalyzer()._rope_count(3, 6) == 0
