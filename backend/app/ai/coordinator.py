@@ -45,6 +45,7 @@ from app.ai.reasoning import (
 )
 from app.ai.reasoning.belief import CorrectionOutcome, EvidenceVisibility
 from app.ai.reasoning.claims import (
+    DECLARED_CONFIDENCE,
     SpeechEventDraft,
     build_claim_drafts,
     ensure_fact_sentences,
@@ -56,6 +57,7 @@ from app.ai.reasoning.rendering import (
     enforce_execution_target,
 )
 from app.ai.reasoning.runtime import ReasoningRuntime, SeatReasoning
+from app.ai.reasoning.validation import ValidationIssue
 from app.ai.schemas import (
     DirectedQuestion,
     DiscussionOutput,
@@ -113,6 +115,9 @@ def _normalized_result_key(result_id: str) -> tuple[str, str]:
     result_type, _, remainder = result_id.partition(":")
     _, _, target_id = remainder.partition(":")
     return result_type, target_id
+
+
+_SENTENCE_WITH_END_RE = re.compile(r"[^。！？!?\n]+[。！？!?\n]?")
 
 
 def _public_claim_ids(state: GameState) -> tuple[str, ...]:
@@ -831,6 +836,8 @@ class AICoordinator:
                 # The personality's ordinary filler, not a fixed sentence that
                 # only the hidden partner ever said and so identified them.
                 output.public_message = self._personalities[player_id].get_fallback_message()
+        if state.players[player_id].role is not RoleName.FREEMASON:
+            self._drop_fake_freemason_claim(state, player_id, output)
         valid_reassessments = [
             item
             for item in output.reassessments
@@ -917,7 +924,11 @@ class AICoordinator:
         # The claims this turn publishes are decided before it is spoken, so the
         # message can be made to state them. Dropping a declared verdict because
         # the prose forgot to name its target is how a result silently vanishes.
-        drafts = build_claim_drafts(output, PublicFactLedger(state), speaker_id=player_id)
+        drafts = self._ai_claim_policy(
+            state,
+            player_id,
+            build_claim_drafts(output, PublicFactLedger(state), speaker_id=player_id),
+        )
         output.public_message = ensure_fact_sentences(
             output.public_message,
             drafts,
@@ -1284,6 +1295,105 @@ class AICoordinator:
             # thing a later correction is able to take away from them.
             self.reasoning.record_public_speech(state, player_id, output.public_message, message_id)
 
+    def _drop_fake_freemason_claim(
+        self, state: GameState, player_id: str, output: DiscussionOutput
+    ) -> None:
+        """A non-freemason AI never claims freemason.
+
+        The engine allows it (a human may), but for an AI it is a move with
+        almost no upside: the real pair refutes it at once and the claimant is
+        exposed. It is removed from the structured fields and, sentence by
+        sentence, from the prose, so nothing registers or reads as one.
+        """
+        removed = False
+        if output.public_claim_role == RoleName.FREEMASON.value:
+            output.public_claim_role = None
+            removed = True
+        action = output.claim_action
+        if action is not None and action.role == RoleName.FREEMASON.value:
+            output.claim_action = None
+            removed = True
+        names = [p.name for pid, p in state.players.items() if pid != player_id]
+        sentences = _SENTENCE_WITH_END_RE.findall(output.public_message)
+        kept = [
+            sentence
+            for sentence in sentences
+            if detect_claimed_role(sentence, names) is not RoleName.FREEMASON
+        ]
+        if len(kept) != len(sentences):
+            removed = True
+            output.public_message = (
+                "".join(kept).strip() or self._personalities[player_id].get_fallback_message()
+            )
+        if removed:
+            output.contains_co_claim = detect_claimed_role(output.public_message, names) is not None
+            self.validation.extend(
+                [
+                    ValidationIssue(
+                        code="fake_freemason_claim_removed",
+                        detail="共有者ではないAIの共有COを取り除いた",
+                        player_id=player_id,
+                    )
+                ]
+            )
+
+    def _claimable_roles(self, state: GameState, player_id: str) -> frozenset[RoleName]:
+        """What this AI seat is meant to claim: its own role or its planned fake."""
+        roles = {state.players[player_id].role}
+        fake = self._wolf_deception.fake_role_by_player.get(
+            player_id
+        ) or self._madman_fake_role_by_player.get(player_id)
+        if fake is not None:
+            roles.add(fake)
+        return frozenset(roles)
+
+    def _ai_claim_policy(
+        self, state: GameState, player_id: str, drafts: list[SpeechEventDraft]
+    ) -> list[SpeechEventDraft]:
+        """Keep only the claims an AI seat actually meant to make.
+
+        A declared field is the model's decision and stands (except a fake
+        freemason claim, see `_drop_fake_freemason_claim`). A claim read only
+        from the prose is a matcher's inference: it registers when it is the
+        seat's own role or planned fake -- the model forgot the field -- and is
+        dropped otherwise. That is how 「共有CO対抗だったPlayer13が…」 made a
+        villager a freemason in a live game.
+        """
+        allowed = self._claimable_roles(state, player_id)
+        is_freemason = state.players[player_id].role is RoleName.FREEMASON
+        kept: list[SpeechEventDraft] = []
+        for draft in drafts:
+            claims_role = draft.event_type in (
+                SpeechEventType.ROLE_CLAIM,
+                SpeechEventType.ROLE_SWITCH,
+            )
+            reason = ""
+            if claims_role and draft.role is RoleName.FREEMASON and not is_freemason:
+                reason = "fake_freemason_claim_removed"
+            elif (
+                claims_role
+                and draft.role is not None
+                and draft.confidence < DECLARED_CONFIDENCE
+                and draft.role not in allowed
+            ):
+                reason = "unintended_prose_claim_dropped"
+            elif draft.event_type is SpeechEventType.PARTNER_CLAIM and not is_freemason:
+                reason = "fake_freemason_claim_removed"
+            if reason:
+                role = draft.role.value if draft.role else ""
+                self.validation.extend(
+                    [
+                        ValidationIssue(
+                            code=reason,
+                            detail=f"{draft.event_type.value}:{role}",
+                            player_id=player_id,
+                        )
+                    ]
+                )
+                continue
+            kept.append(draft)
+        return kept
+
     def _register_claim_drafts(
         self,
         controller: object,
@@ -1292,6 +1402,8 @@ class AICoordinator:
         message_id: str = "",
     ) -> None:
         state = controller.state  # type: ignore[attr-defined]
+        if player_id in self._ai_player_ids:
+            drafts = self._ai_claim_policy(state, player_id, drafts)
         checked: list[SpeechEventDraft] = []
         # A claim or slide earlier in this same message is in force by the time
         # its results are read (drafts come in that order).

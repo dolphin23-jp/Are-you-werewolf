@@ -10,7 +10,9 @@ Two sources, deliberately unequal:
 * **Free text is a matcher's reading.** It fills the gaps the structured output
   left empty (models do omit the field after writing an unambiguous CO) and
   carries the human path entirely. A quoted or hedged sentence still produces an
-  event, but at a confidence too low to be promoted into a binding claim.
+  event, but at a confidence too low to be promoted into a binding claim. For an
+  AI seat the coordinator then keeps a prose-only claim only when it is that
+  seat's own role or planned fake (`AICoordinator._ai_claim_policy`).
 """
 
 from __future__ import annotations

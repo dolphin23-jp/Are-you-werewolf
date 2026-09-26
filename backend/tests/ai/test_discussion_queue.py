@@ -14,8 +14,25 @@ from app.sessions.models import DiscussionRoundState
 from tests.conftest import make_controller
 
 
-def test_public_claim_registration_falls_back_to_spoken_message():
+def _controller_with_roles(**roles: RoleName):  # type: ignore[no-untyped-def]
+    """Seed 4, with the named seats swapped into the roles they speak as.
+
+    An AI's prose-only claim registers only for its own role (or planned fake),
+    and only a real freemason may claim freemason, so these seats must hold the
+    roles they claim. Swapping keeps the role counts intact.
+    """
     controller = make_controller(seed=4)
+    players = controller.state.players
+    for player_id, role in roles.items():
+        holder = next(
+            p for p in players.values() if p.role is role and p.player_id not in roles
+        )
+        holder.role, players[player_id].role = players[player_id].role, role
+    return controller
+
+
+def test_public_claim_registration_falls_back_to_spoken_message():
+    controller = _controller_with_roles(p1=RoleName.MEDIUM)
     coordinator = AICoordinator(controller.state, ["p1"], MorningPriorityProvider(), seed=1)
     output = DiscussionOutput(
         public_message="霊媒師CO。現時点で処刑結果はありません。",
@@ -30,7 +47,7 @@ def test_public_claim_registration_falls_back_to_spoken_message():
 
 
 def test_named_freemason_partner_is_prompted_and_confirmation_closes_line():
-    controller = make_controller(seed=4)
+    controller = _controller_with_roles(p1=RoleName.FREEMASON, p2=RoleName.FREEMASON)
     coordinator = AICoordinator(controller.state, ["p1", "p2"], MorningPriorityProvider(), seed=1)
 
     coordinator.register_public_claim(
@@ -60,7 +77,7 @@ def test_named_freemason_partner_is_prompted_and_confirmation_closes_line():
 
 
 def test_named_ai_partner_speaks_before_remaining_initial_order():
-    controller = make_controller(seed=4)
+    controller = _controller_with_roles(p1=RoleName.FREEMASON, p2=RoleName.FREEMASON)
     coordinator = AICoordinator(
         controller.state, ["p1", "p2", "p3"], MorningPriorityProvider(), seed=1
     )
