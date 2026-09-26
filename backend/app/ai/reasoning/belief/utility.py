@@ -52,6 +52,12 @@ MADMAN_TRUSTED_TARGET_BONUS = 2.0
 # Fox: survive. Thin both sides, and above all stay off the block.
 FOX_SELF_PRESSURE_RELIEF = 3.0
 
+# Any non-village seat: pushing a seat the whole table holds as 確定白 is
+# legal and would often succeed on a scattered gray vote -- but the ballot is
+# public, and the voters are the next day's suspects. Priced, not forbidden,
+# and set above what a trusted claimer's threat is worth.
+CONFIRMED_WHITE_EXPOSURE_COST = 6.0
+
 # Night
 ALREADY_DIVINED_EXCLUSION = True
 CLAIM_VERIFICATION_VALUE = 1.5
@@ -81,6 +87,9 @@ class UtilityInputs:
     # use it; the "what does the table think" terms use `public_suspicion`.
     # Defaults to the public map for callers that only have that.
     own_suspicion: Mapping[str, float] | None = None
+    # Seats the table treats as 確定白 right now: public logical clears plus
+    # the uncontested freemason pair.
+    confirmed_white: frozenset[str] = frozenset()
 
     @property
     def actor_team(self) -> Team | None:
@@ -116,7 +125,7 @@ def _village_execution_utility(inputs: UtilityInputs, target_id: str) -> float:
     score += FOX_SUSPICION_WEIGHT * inputs.fox_suspicion.get(target_id, 0.0)
     if certainty is RoleCertainty.CONFIRMED:
         score += KNOWN_WOLF_BONUS
-    elif certainty is RoleCertainty.EXCLUDED:
+    elif certainty is RoleCertainty.EXCLUDED or target_id in inputs.confirmed_white:
         # Not a wolf, so the rope is spent for nothing -- unless fox suspicion
         # is high enough to be worth it, which the weight above still allows.
         score -= CLEARED_PENALTY
@@ -138,7 +147,12 @@ def _wolf_execution_utility(inputs: UtilityInputs, target_id: str) -> float:
         # a body and costs the wolves nothing.
         score += VILLAGE_TRUST_BONUS
     score += THREAT_WEIGHT * _village_threat(inputs, target_id)
-    return score
+    return score - _exposure_cost(inputs, target_id)
+
+
+def _exposure_cost(inputs: UtilityInputs, target_id: str) -> float:
+    """What a non-village seat pays for being seen to vote a confirmed white."""
+    return CONFIRMED_WHITE_EXPOSURE_COST if target_id in inputs.confirmed_white else 0.0
 
 
 def _madman_execution_utility(inputs: UtilityInputs, target_id: str) -> float:
@@ -151,7 +165,7 @@ def _madman_execution_utility(inputs: UtilityInputs, target_id: str) -> float:
     score += MADMAN_TRUSTED_TARGET_BONUS * max(
         0.0, inputs.claim_trust.get(target_id, 0.0)
     )
-    return score
+    return score - _exposure_cost(inputs, target_id)
 
 
 def _fox_execution_utility(inputs: UtilityInputs, target_id: str) -> float:
@@ -162,7 +176,7 @@ def _fox_execution_utility(inputs: UtilityInputs, target_id: str) -> float:
         score += FOX_SELF_PRESSURE_RELIEF * max(
             0.0, inputs.public_suspicion.get(inputs.actor_id, 0.0)
         )
-    return score
+    return score - _exposure_cost(inputs, target_id)
 
 
 def _village_threat(inputs: UtilityInputs, target_id: str) -> float:

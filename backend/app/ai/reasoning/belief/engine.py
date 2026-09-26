@@ -66,6 +66,10 @@ PUBLISHED_BLACK_WEIGHT = 1.2
 PUBLISHED_WHITE_WEIGHT = -1.0
 CONTESTED_CLAIM_WEIGHT = 0.6
 VOTED_FOR_CLEARED_WEIGHT = 0.4
+# A ballot on a seat the whole table held as confirmed village when it was
+# cast: the voter knew. This is what keeps a wolf bloc from voting out the
+# freemason pair on a scattered day -- the voters are tomorrow's candidates.
+VOTED_FOR_CONFIRMED_WHITE_WEIGHT = 2.0
 VOTED_FOR_WOLF_WEIGHT = -0.3
 MAJORITY_PRESSURE_WEIGHT = 0.8
 TIMELINE_CONFLICT_WEIGHT = 0.9
@@ -178,6 +182,10 @@ class BeliefEngine:
         # What the table can settle without any seat's private knowledge.
         self._public_hard: dict[str, Certainty] = {}
         self._hard_by_day: dict[int, dict[str, Certainty]] = {}
+        # What the table held as confirmed village during each day, and, per
+        # ballot, whether its target was one when this seat first saw it cast.
+        self._confirmed_white_by_day: dict[int, frozenset[str]] = {}
+        self._ballot_on_confirmed: dict[str, bool] = {}
         self._public_hard_by_day: dict[int, dict[str, Certainty]] = {}
         self._ranked: tuple[RankedView, ...] = ()
         # Filled from the perspective, never from the observations directly.
@@ -281,6 +289,7 @@ class BeliefEngine:
             # judged by what could be known when it was cast.
             self._hard_by_day[ledger.day] = dict(self._hard)
             self._public_hard_by_day[ledger.day] = dict(self._public_hard)
+            self._confirmed_white_by_day[ledger.day] = self._confirmed_white(ledger)
             self._derive_vote_evidence(ledger)
         self.recompute(ledger)
 
@@ -508,6 +517,17 @@ class BeliefEngine:
             return EvidenceVisibility.TEAM_PRIVATE
         return EvidenceVisibility.PRIVATE_REASONING
 
+    def _confirmed_white(self, ledger: PublicFactLedger) -> frozenset[str]:
+        """Seats the whole table holds as 確定白: public logical clears (not a
+        wolf, whatever else) and the uncontested freemason pair. A clear only
+        this seat can reach is not the table's, so it is not here."""
+        cleared = {
+            player_id
+            for player_id, certainty in self._public_hard.items()
+            if certainty is Certainty.IMPOSSIBLE
+        }
+        return frozenset(cleared | set(ledger.conventionally_confirmed_village_ids()))
+
     def _derive_vote_evidence(self, ledger: PublicFactLedger) -> None:
         """Who someone voted for, read against what was settled that same day.
 
@@ -519,6 +539,33 @@ class BeliefEngine:
         for vote in ledger.votes():
             known_then = self._hard_by_day.get(vote.day)
             if known_then is None:
+                continue
+            fact = vote_fact_id(vote.voter_id, vote.day, vote.round, vote.target_id)
+            # Settled once, at first sight: the day's snapshot keeps moving until
+            # the day ends, and a pair that completes after a ballot (a claim in
+            # the runoff) must not turn that ballot into one cast knowingly.
+            on_confirmed = self._ballot_on_confirmed.setdefault(
+                fact,
+                vote.target_id in self._confirmed_white_by_day.get(vote.day, frozenset()),
+            )
+            if on_confirmed:
+                # One per voter per day: a runoff ballot for the same seat is the
+                # same act, not a second piece of evidence.
+                self.add_evidence(
+                    EvidenceRecord(
+                        evidence_id=f"vote_confirmed_white:{vote.voter_id}:{vote.day}",
+                        subject_id=vote.voter_id,
+                        category="voted_for_cleared",
+                        visibility=EvidenceVisibility.PUBLIC_ARGUMENT,
+                        source_event_ids=(fact,),
+                        weight=VOTED_FOR_CONFIRMED_WHITE_WEIGHT,
+                        explanation=(
+                            f"{vote.day}日目、{vote.voter_id}は確定白の"
+                            f"{vote.target_id}へ投票した。"
+                        ),
+                        origin=EvidenceOrigin(kind=OriginKind.VOTE, fact_id=fact),
+                    )
+                )
                 continue
             certainty = known_then.get(vote.target_id)
             if certainty is Certainty.IMPOSSIBLE:
@@ -703,6 +750,7 @@ class BeliefEngine:
             claimed_roles=self._claimed_roles,
             alive_ids=self._alive_ids,
             already_divined=self._already_divined,
+            confirmed_white=self._confirmed_white(ledger),
         )
 
     def _recompute_utilities(self, ledger: PublicFactLedger) -> None:

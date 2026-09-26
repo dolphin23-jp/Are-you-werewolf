@@ -22,7 +22,7 @@ import re
 from dataclasses import dataclass
 
 from app.engine.phases import Phase
-from app.engine.roles import RoleName
+from app.engine.roles import ROLE_DEFINITIONS, RoleName
 from app.engine.speech_events import (
     MEDIUM_RESULT,
     RESULT_TYPES,
@@ -259,6 +259,23 @@ class PublicFactLedger:
             )
             for claim in self._state.co_declarations
         )
+
+    def conventionally_confirmed_village_ids(self) -> tuple[str, ...]:
+        """Seats the table treats as confirmed village without a logical proof.
+
+        The freemason pair: exactly as many freemason claims as the setup has
+        freemasons, and no third. A fake would be countered by the real pair,
+        so an uncontested pair is played as 確定白 -- which is why voting one
+        out marks the voter, not the pair. Logical clears come from the solver.
+        """
+        freemasons = sorted(
+            claim.player_id
+            for claim in self.co_declarations()
+            if claim.claimed_role is RoleName.FREEMASON
+        )
+        if len(freemasons) == ROLE_DEFINITIONS[RoleName.FREEMASON].count:
+            return tuple(freemasons)
+        return ()
 
     def claimed_role_of(self, player_id: str) -> RoleName | None:
         """The claim standing now: None if never made, retracted, or the new role
