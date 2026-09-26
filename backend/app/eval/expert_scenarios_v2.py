@@ -659,6 +659,12 @@ def score_v2_answer(
     case: ExpertScenarioV2Case,
     answer: ExpertScenarioV2Answer | None,
 ) -> ScenarioV2Score:
+    if answer is not None and not (
+        answer.world_judgments or answer.action_assessments or answer.phase_choices
+    ):
+        # Schema-valid but empty: it used to score 100% consistency, 100%
+        # catastrophic avoidance and count as a valid answer.
+        answer = None
     if answer is None:
         return ScenarioV2Score(
             scenario_id=case.scenario_id,
@@ -757,18 +763,30 @@ def score_v2_answer(
         gold_status = "impossible" if world_id in case.gold_impossible_world_ids else "possible"
         if item is not None and item.status == gold_status:
             status_correct += 1
+        gold = case.gold_world_contradictions.get(world_id)
+        # A gold contradiction with no fact (or no rule) IDs is not annotated
+        # on that axis; the prompt still asks to cite both, so citations for
+        # that world are left out rather than scored as false positives.
+        fact_scored = gold is None or bool(gold.fact_ids)
+        rule_scored = gold is None or bool(gold.rule_ids)
         if item is not None and item.status == "impossible":
             predicted_impossible.add(world_id)
-            predicted_fact_pairs.update(
-                f"{world_id}|{fact_id}" for fact_id in item.contradiction_fact_ids
-            )
-            predicted_rule_pairs.update(
-                f"{world_id}|{rule_id}" for rule_id in item.contradiction_rule_ids
-            )
-        if gold_status == "possible" and item is not None:
-            if item.contradiction_fact_ids or item.contradiction_rule_ids:
+            if fact_scored:
+                predicted_fact_pairs.update(
+                    f"{world_id}|{fact_id}" for fact_id in item.contradiction_fact_ids
+                )
+            if rule_scored:
+                predicted_rule_pairs.update(
+                    f"{world_id}|{rule_id}" for rule_id in item.contradiction_rule_ids
+                )
+        if item is not None:
+            # Consistency is judged against the answer's own status, not the
+            # gold one: correctness is already scored by status accuracy.
+            cited = bool(item.contradiction_fact_ids or item.contradiction_rule_ids)
+            if item.status == "possible" and cited:
                 violations += 1
-        gold = case.gold_world_contradictions.get(world_id)
+            if item.status == "impossible" and not cited:
+                violations += 1
         if gold is not None:
             gold_fact_pairs.update(f"{world_id}|{fact_id}" for fact_id in gold.fact_ids)
             gold_rule_pairs.update(f"{world_id}|{rule_id}" for rule_id in gold.rule_ids)
@@ -822,18 +840,23 @@ def score_v2_answer(
     exact_plan = 0
     utility_total = 0.0
     catastrophic_selected = 0
+    answered_slots = 0
     missing_plan_slots: set[str] = set()
     for slot, gold_action_id in gold_plan_by_slot.items():
         choice = phase_choice_by_slot.get(slot)
         if choice is None:
+            # The plan must fill every slot; an omission is an instruction
+            # violation, not a free pass on catastrophic avoidance.
             missing_plan_slots.add(_slot_label(*slot))
+            violations += 1
             continue
         selected = action_by_id.get(choice.selected_action_id)
         if selected is None:
             continue
         if (selected.phase, selected.actor_id) != slot:
-            violations += 1
+            # Counted once, in the slot check below.
             continue
+        answered_slots += 1
         exact_plan += int(choice.selected_action_id == gold_action_id)
         gold_rating = case.gold_action_ratings[choice.selected_action_id]
         utility_total += _RATING_UTILITY[gold_rating]
@@ -844,7 +867,9 @@ def score_v2_answer(
     plan_count = len(gold_plan_by_slot)
     phase_choice_exact = exact_plan / plan_count if plan_count else 1.0
     phase_choice_utility = utility_total / plan_count if plan_count else 1.0
-    catastrophic_avoidance = 1.0 - catastrophic_selected / plan_count if plan_count else 1.0
+    catastrophic_avoidance = (
+        (answered_slots - catastrophic_selected) / plan_count if plan_count else 1.0
+    )
 
     expected_slots = set(gold_plan_by_slot)
     for slot, choice in phase_choice_by_slot.items():
@@ -1009,6 +1034,9 @@ def render_v2_report(
             "- Every action is graded optimal/acceptable/dominated/catastrophic.",
             "- Impossible worlds require explicit fact and rule IDs.",
             "- Selecting an action the answer itself calls dominated/catastrophic is penalized.",
+            "- Consistency is judged against the answer's own verdicts; an omitted plan slot "
+            "is a violation and earns no catastrophic-avoidance credit.",
+            "- An answer with no judgments, assessments or choices counts as invalid.",
             "- v1 remains available for historical comparison.",
             "",
             "## Remaining limits",

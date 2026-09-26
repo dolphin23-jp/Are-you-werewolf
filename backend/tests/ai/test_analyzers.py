@@ -97,6 +97,19 @@ def test_changing_claimed_role_across_days_is_flagged():
     assert analyze(t).count("co_role_changed") == 1
 
 
+def test_one_slide_is_one_change_however_often_the_new_role_is_repeated():
+    """Every utterance after a single slide used to be flagged again."""
+    t = _transcript(
+        utterances=[
+            _say("p0", "占い師です。", day=1, public_claim_role="seer"),
+            _say("p0", "やっぱり霊媒師です。", day=2, public_claim_role="medium"),
+            _say("p0", "結果は白です。", day=2, public_claim_role="medium"),
+            _say("p0", "昨日の処刑は白でした。", day=3, public_claim_role="medium"),
+        ]
+    )
+    assert analyze(t).count("co_role_changed") == 1
+
+
 def test_merely_discussing_someone_elses_co_is_not_a_claim():
     t = _transcript(
         utterances=[

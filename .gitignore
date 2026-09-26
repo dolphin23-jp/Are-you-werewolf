@@ -34,5 +34,8 @@ dist/
 *.log
 
 # --- Evaluation output (transcripts/reports are run artifacts) ---
+# (default --out of evaluate.py and the expert-scenario benchmarks). The
+# reviewed live-ab runs under backend/artifacts/ are tracked on purpose.
 eval-out/
-backend/eval-out/
+expert-eval-out/
+expert-eval-v2-out/

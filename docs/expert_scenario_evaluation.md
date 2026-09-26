@@ -87,6 +87,14 @@ The deterministic scorer reports:
 - internal consistency violations;
 - unknown world/action/fact/rule references.
 
+Contradiction support is scored per axis: a gold contradiction that names only
+rules (for example "the first victim holds one role") does not penalize cited
+facts. Internal consistency compares the answer with itself — an impossible
+verdict without any cited ID, or a possible verdict with contradiction IDs, is a
+violation; a wrong but supported verdict is scored by status accuracy instead.
+An omitted plan slot is a violation and earns no catastrophic-avoidance credit,
+and an answer with no judgments, assessments or choices counts as invalid.
+
 A selected `acceptable` action receives partial plan utility. A `dominated` action receives little utility. A `catastrophic` action receives none. This preserves the distinction between “not the expert optimum” and “immediate or forced faction loss.”
 
 ## Run one cutoff

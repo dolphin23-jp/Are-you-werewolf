@@ -40,6 +40,10 @@ class DecisionAuditRecord:
     board_version: str = ""
     public_result_ids_at_decision: tuple[str, ...] = ()
     correction_ids_at_decision: tuple[str, ...] = ()
+    # Standing COs ("player:role") when the seat spoke. A counter-CO later in
+    # the day is new public evidence; without this snapshot a ballot that moved
+    # because of it could only be classified as unexplained.
+    public_claim_ids_at_decision: tuple[str, ...] = ()
     votable_ids_at_decision: tuple[str, ...] = ()
     attempted_public_evidence_ids: tuple[str, ...] = ()
     brief_public_evidence_ids: tuple[str, ...] = ()

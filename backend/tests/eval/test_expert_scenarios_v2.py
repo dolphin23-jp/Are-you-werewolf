@@ -202,3 +202,109 @@ def test_no_prompt_carries_the_labels_or_ids_it_is_scored_on() -> None:
         assert "required_assumptions" not in prompt
         for identifier in (case.scenario_id, case.log_id, case.cutoff_event_id):
             assert identifier not in prompt, identifier
+
+
+def test_every_perfect_answer_scores_one_without_violations() -> None:
+    for case in _cases():
+        score = score_v2_answer(case, _perfect_answer(case))
+        assert score.overall_score == pytest.approx(1.0), case.scenario_id
+        assert score.consistency_violation_count == 0, case.scenario_id
+
+
+def _board_case():
+    return next(
+        item for item in _cases() if item.scenario_id == "ruru-349517-d2-2-0-public-board"
+    )
+
+
+def test_citing_a_fact_for_a_rule_only_contradiction_is_not_penalized() -> None:
+    """The gold for this world names only a rule; the prompt asks to cite both
+    kinds, and citing one fact used to drop the fact F1 from 1.0 to 0.0."""
+    case = _board_case()
+    answer = _perfect_answer(case)
+    some_fact = sorted(case.fact_ids)[0]
+    answer.world_judgments = [
+        item.model_copy(update={"contradiction_fact_ids": [some_fact]})
+        if item.world_id == "w-reino-and-seer-both-first"
+        else item
+        for item in answer.world_judgments
+    ]
+
+    score = score_v2_answer(case, answer)
+
+    assert score.contradiction_fact_f1 == 1.0
+    assert score.consistency_violation_count == 0
+
+
+def test_consistency_follows_the_answers_own_status_not_the_gold() -> None:
+    case = _board_case()
+    possible_id = next(
+        world.world_id
+        for world in case.worlds
+        if world.world_id not in case.gold_impossible_world_ids
+    )
+    some_fact = sorted(case.fact_ids)[0]
+
+    def judged_impossible(citations: list[str]) -> int:
+        answer = _perfect_answer(case)
+        answer.world_judgments = [
+            item.model_copy(update={"status": "impossible", "contradiction_fact_ids": citations})
+            if item.world_id == possible_id
+            else item
+            for item in answer.world_judgments
+        ]
+        # Keep the answer's own weighting consistent with its own verdict.
+        answer.main_world_ids = [w for w in answer.main_world_ids if w != possible_id]
+        answer.alternative_world_ids = [
+            w for w in answer.alternative_world_ids if w != possible_id
+        ]
+        return score_v2_answer(case, answer).consistency_violation_count
+
+    # Wrong but supported: scored by status accuracy, not as inconsistency.
+    assert judged_impossible([some_fact]) == 0
+    # Unsupported impossibility is the inconsistent one.
+    assert judged_impossible([]) == 1
+
+
+def test_one_wrong_slot_choice_is_one_violation() -> None:
+    case = next(
+        item
+        for item in _cases()
+        if item.scenario_id == "ruru-352698-d6-lw-hold-cross-divination"
+    )
+    answer = _perfect_answer(case)
+    day_slot = next(slot for slot in case.gold_plan if slot.phase == "day")
+    night_action = next(slot.action_id for slot in case.gold_plan if slot.phase != "day")
+    answer.phase_choices = [
+        item.model_copy(update={"selected_action_id": night_action})
+        if (item.phase, item.actor_id) == (day_slot.phase, day_slot.actor_id)
+        else item
+        for item in answer.phase_choices
+    ]
+
+    assert score_v2_answer(case, answer).consistency_violation_count == 1
+
+
+def test_omissions_are_not_scored_as_success() -> None:
+    case = _cases()[0]
+    empty = ExpertScenarioV2Answer(
+        world_judgments=[],
+        main_world_ids=[],
+        alternative_world_ids=[],
+        action_assessments=[],
+        phase_choices=[],
+        next_observation="",
+        confidence="low",
+        rationale="",
+    )
+    score = score_v2_answer(case, empty)
+    assert not score.answer_valid
+    assert score.catastrophic_action_avoidance == 0.0
+    assert score.consistency_score == 0.0
+
+    partial = _perfect_answer(case)
+    partial.phase_choices = partial.phase_choices[1:]
+    score = score_v2_answer(case, partial)
+    assert score.answer_valid
+    assert score.catastrophic_action_avoidance < 1.0
+    assert score.consistency_violation_count == 1

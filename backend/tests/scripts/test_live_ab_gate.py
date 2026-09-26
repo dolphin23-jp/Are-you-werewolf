@@ -38,7 +38,12 @@ def _review(directory: Path, game_id: str, answer: bool) -> None:
     ).write_json(directory / f"{game_id}.json")
 
 
-def _decide(tmp_path: Path, rows: list[dict[str, Any]], answer: bool = True) -> dict[str, Any]:
+def _decide(
+    tmp_path: Path,
+    rows: list[dict[str, Any]],
+    answer: bool = True,
+    mock_llm_reduction: float | None = 0.6,
+) -> dict[str, Any]:
     reviews = tmp_path / "reviews"
     reviews.mkdir()
     for row in rows:
@@ -49,7 +54,7 @@ def _decide(tmp_path: Path, rows: list[dict[str, Any]], answer: bool = True) -> 
         input_price_per_million=1.0,
         output_price_per_million=1.0,
     )
-    _save_aggregate(tmp_path, rows, budget, reviews)
+    _save_aggregate(tmp_path, rows, budget, reviews, mock_llm_reduction=mock_llm_reduction)
     return json.loads((tmp_path / "aggregate.json").read_text(encoding="utf-8"))
 
 
@@ -70,3 +75,29 @@ def test_offline_doubles_and_unfinished_games_are_not_live_evidence(tmp_path):
     )
     assert decision["release_decision"] == "inconclusive"
     assert any(reason.startswith("live_games=0") for reason in decision["release_reasons"])
+
+
+def test_a_supplied_mock_campaign_applies_the_efficiency_threshold(tmp_path):
+    """No caller passed the mock reduction, so the configured efficiency
+    threshold was never applied to a live decision."""
+    decision = _decide(tmp_path, [_row(11), _row(12)], mock_llm_reduction=0.3)
+    assert decision["release_decision"] == "fail"
+    assert "mock_logical_call_reduction" in decision["release_reasons"]
+    assert decision["mock_logical_call_reduction"] == 0.3
+
+
+def test_v2_only_runs_mark_the_paired_stage_skipped(tmp_path):
+    from scripts.live_ab_reasoning_check import _stage_status
+
+    stages = _stage_status([_row(11), _row(12), _row(13)], ("v2",))
+    assert stages["stage_b_paired_smoke"]["status"] == "skipped"
+    assert stages["stage_c_small_evaluation"]["status"] == "passed"
+
+
+def test_mock_reduction_is_read_from_a_campaign_file(tmp_path):
+    from scripts.live_ab_reasoning_check import _mock_reduction
+
+    path = tmp_path / "campaign.json"
+    path.write_text(json.dumps({"comparison": {"logical_call_reduction": 0.55}}))
+    assert _mock_reduction(path) == 0.55
+    assert _mock_reduction(None) is None

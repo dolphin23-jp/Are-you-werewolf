@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import statistics
-from dataclasses import asdict, dataclass
+from collections.abc import Iterable, Mapping
+from dataclasses import asdict, dataclass, fields
 from enum import StrEnum
+from typing import Any
 
 from app.eval.transcript import DecisionAuditRecord, GameTranscript
 
@@ -57,6 +59,35 @@ class ReasoningQualityReport:
     affected_seat_count: int = 0
     mean_belief_delta_per_affected_seat: float = 0.0
     median_belief_delta_per_affected_seat: float = 0.0
+    # The samples behind the two statistics above, so that several games can
+    # be pooled exactly instead of adding up their means and medians.
+    belief_deltas: tuple[float, ...] = ()
+
+    @classmethod
+    def combine(cls, reports: Iterable[Mapping[str, Any]]) -> ReasoningQualityReport:
+        """Pool per-game ``to_dict()`` reports.
+
+        Counts add up; rates and belief-delta statistics are recomputed from the
+        pooled counts and samples. Adding per-game values used to report, e.g.,
+        a vote-change rate of 1.30 over three games.
+        """
+
+        counts = {
+            spec.name: 0
+            for spec in fields(cls)
+            if isinstance(spec.default, int) and not isinstance(spec.default, bool)
+        }
+        deltas: list[float] = []
+        for report in reports:
+            for name in counts:
+                counts[name] += int(report.get(name, 0))
+            deltas.extend(float(value) for value in report.get("belief_deltas", ()))
+        return cls(
+            **counts,
+            mean_belief_delta_per_affected_seat=statistics.fmean(deltas) if deltas else 0.0,
+            median_belief_delta_per_affected_seat=statistics.median(deltas) if deltas else 0.0,
+            belief_deltas=tuple(deltas),
+        )
 
     @property
     def vote_change_rate(self) -> float:
@@ -68,9 +99,10 @@ class ReasoningQualityReport:
     def unexplained_vote_change_rate(self) -> float:
         return self.unexplained_vote_change_count / max(self.vote_count, 1)
 
-    def to_dict(self) -> dict[str, int | float]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             **asdict(self),
+            "belief_deltas": list(self.belief_deltas),
             "vote_change_rate": self.vote_change_rate,
             "unexplained_vote_change_rate": self.unexplained_vote_change_rate,
         }
@@ -179,6 +211,7 @@ class ReasoningTranscriptAnalyzer:
             ),
             mean_belief_delta_per_affected_seat=statistics.fmean(deltas) if deltas else 0.0,
             median_belief_delta_per_affected_seat=statistics.median(deltas) if deltas else 0.0,
+            belief_deltas=tuple(deltas),
         )
 
 

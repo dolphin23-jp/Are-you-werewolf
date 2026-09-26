@@ -63,6 +63,9 @@ answers yes to every checklist item before the gate can pass. A finished review 
 ## Gate
 
 Hard correctness failures immediately fail. Reliability and mock logical-call reduction thresholds
-live in `backend/config/reasoning_release_gate.toml`. Passing also requires the configured minimum
+live in `backend/config/reasoning_release_gate.toml`. The reduction threshold is applied only when
+the live runner is given the mock campaign's output (`--mock-campaign artifacts/mock-campaign.json`,
+run with `--engines legacy v2`); `aggregate.json` records the value used, or `null` when the check
+was skipped. Passing also requires the configured minimum
 number of live pairs. Behavioural diversity and faction win rates are reported for human review and
 are not one-directional gates.

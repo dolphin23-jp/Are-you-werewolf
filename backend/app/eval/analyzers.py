@@ -136,7 +136,9 @@ def _check_contradictions(t: GameTranscript, result: AnalysisResult) -> None:
         if claimed_role is None:
             continue
         previous = claimed_roles.get(u.player_id)
-        if previous is not None and previous[0] != claimed_role:
+        if previous is not None and previous[0] == claimed_role:
+            continue
+        if previous is not None:
             result.add(
                 Finding(
                     check="co_role_changed",
@@ -147,7 +149,9 @@ def _check_contradictions(t: GameTranscript, result: AnalysisResult) -> None:
                     text=u.text,
                 )
             )
-        claimed_roles.setdefault(u.player_id, (claimed_role, u.day))
+        # Compare later claims with the newest one: keeping the first claim
+        # flagged every utterance after a single slide as another change.
+        claimed_roles[u.player_id] = (claimed_role, u.day)
 
     # Only structured current targets count. Historical prose about a dead
     # player's execution, vote or medium result is legitimate analysis.

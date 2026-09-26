@@ -59,6 +59,7 @@ async def execute(args: argparse.Namespace) -> list[dict[str, Any]]:
         completion_tokens=int(budget_state.get("completion_tokens", 0)),
     )
     spent = budget.estimated_cost or 0.0
+    mock_reduction = _mock_reduction(args.mock_campaign)
     # Formal qualification order: v2 smoke, its legacy pair, then remaining pairs.
     schedule = [(args.seeds[0], "v2"), (args.seeds[0], "legacy")]
     schedule.extend(
@@ -92,7 +93,14 @@ async def execute(args: argparse.Namespace) -> list[dict[str, Any]]:
         rows.append(report)
         requests = budget.used_requests
         spent = budget.estimated_cost or 0.0
-        _save_aggregate(args.output_dir, rows, budget, args.review_dir)
+        _save_aggregate(
+            args.output_dir,
+            rows,
+            budget,
+            args.review_dir,
+            mock_llm_reduction=mock_reduction,
+            engines=tuple(args.engines),
+        )
         hard = report.get("reasoning_quality", {})
         # The gate's own list: a hand-kept copy here had drifted and kept paying
         # for games after a public fact flip or a duplicated result.
@@ -108,22 +116,16 @@ def _save_aggregate(
     rows: list[dict[str, Any]],
     budget: EvaluationBudget,
     review_dir: Path | None = None,
+    *,
+    mock_llm_reduction: float | None = None,
+    engines: tuple[str, ...] = ("legacy", "v2"),
 ) -> None:
     # Seeds, not rows: a resumed run that replays the same seed has not added
     # evidence, and the gate's bar is about coverage.
     v2_seeds = {row["seed"] for row in rows if row.get("engine") == "v2" and _qualifies(row)}
     live_games = len(v2_seeds)
     reports = [row.get("reasoning_quality", {}) for row in rows if row.get("engine") == "v2"]
-    combined = (
-        ReasoningQualityReport(
-            **{
-                field: sum(report.get(field, 0) for report in reports)
-                for field in ReasoningQualityReport.__dataclass_fields__
-            }
-        )
-        if reports
-        else ReasoningQualityReport()
-    )
+    combined = ReasoningQualityReport.combine(reports)
     v2_game_ids = {
         str(row["game_id"]) for row in rows if row.get("engine") == "v2" and row.get("game_id")
     }
@@ -147,6 +149,7 @@ def _save_aggregate(
         combined,
         _combined_operational(rows),
         live_games=live_games,
+        mock_llm_reduction=mock_llm_reduction,
         transcript_schema_version=_oldest_schema_version(rows),
         human_review_complete=review_complete,
         human_review_rejected=review_rejected,
@@ -154,7 +157,8 @@ def _save_aggregate(
     )
     payload = {
         "games": rows,
-        "stages": _stage_status(rows),
+        "stages": _stage_status(rows, engines),
+        "mock_logical_call_reduction": mock_llm_reduction,
         "http_requests": budget.used_requests,
         "estimated_cost": budget.estimated_cost,
         "budget": budget.snapshot(),
@@ -197,7 +201,18 @@ def _oldest_schema_version(rows: list[dict[str, Any]]) -> int:
     return min(versions, default=3)
 
 
-def _stage_status(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+def _mock_reduction(path: Path | None) -> float | None:
+    """Read `comparison.logical_call_reduction` from a mock campaign file."""
+    if path is None:
+        return None
+    campaign = json.loads(path.read_text(encoding="utf-8"))
+    value = campaign.get("comparison", {}).get("logical_call_reduction")
+    return float(value) if value is not None else None
+
+
+def _stage_status(
+    rows: list[dict[str, Any]], engines: tuple[str, ...] = ("legacy", "v2")
+) -> dict[str, dict[str, Any]]:
     first_seed = rows[0].get("seed") if rows else None
     stage_a = [r for r in rows if r.get("seed") == first_seed and r.get("engine") == "v2"]
     stage_b = [r for r in rows if r.get("seed") == first_seed]
@@ -212,9 +227,15 @@ def _stage_status(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
             "updated_at": datetime.now(UTC).isoformat(),
         }
 
+    # A v2-only run never schedules the legacy pair; "pending" forever misled.
+    paired = (
+        status(stage_b, 2)
+        if "legacy" in engines
+        else {"status": "skipped", "game_ids": [], "stop_reason": "v2-only run"}
+    )
     return {
         "stage_a_v2_smoke": status(stage_a, 1),
-        "stage_b_paired_smoke": status(stage_b, 2),
+        "stage_b_paired_smoke": paired,
         "stage_c_small_evaluation": status(stage_c, 2),
     }
 
@@ -243,6 +264,12 @@ def main() -> None:
     )
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--review-dir", type=Path, default=None)
+    parser.add_argument(
+        "--mock-campaign",
+        type=Path,
+        default=None,
+        help="evaluate_reasoning_campaign.py output (legacy and v2) for the efficiency gate",
+    )
     args = parser.parse_args()
     asyncio.run(execute(args))
 

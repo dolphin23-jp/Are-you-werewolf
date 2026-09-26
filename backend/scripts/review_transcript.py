@@ -193,17 +193,19 @@ def run_review(
     existing: HumanTranscriptReview | None = None,
     input_fn: InputFn = input,
     canned_answers: dict[str, bool] | None = None,
+    redo: bool = False,
 ) -> HumanTranscriptReview:
     """Fill in a HumanTranscriptReview, resuming from `existing` if given.
 
     Already-answered items are kept as-is unless `canned_answers` explicitly
     overrides them; unanswered items are taken from `canned_answers` when
-    present, otherwise asked interactively via `input_fn`.
+    present, otherwise asked interactively via `input_fn`. ``redo`` discards
+    the previous answers and notes so every item is reviewed again.
     """
     report = ReasoningTranscriptAnalyzer().analyze(transcript)
     base = existing if existing is not None else empty_review(transcript.game_id)
-    answers = dict(base.answers)
-    notes_lines = [base.notes] if base.notes else []
+    answers = {} if redo else dict(base.answers)
+    notes_lines = [base.notes] if base.notes and not redo else []
     for index, item in enumerate(REVIEW_ITEMS):
         if canned_answers is not None and item in canned_answers:
             answers[item] = canned_answers[item]
@@ -232,7 +234,9 @@ def main() -> None:
     parser.add_argument("--reviewer", required=True)
     parser.add_argument("--review-dir", type=Path, required=True)
     parser.add_argument(
-        "--force", action="store_true", help="already-complete レビューへの上書きを許可する"
+        "--force",
+        action="store_true",
+        help="完了済みレビューを破棄し、全項目を最初から再レビューする",
     )
     parser.add_argument(
         "--answers-file",
@@ -261,7 +265,12 @@ def main() -> None:
     if args.answers_file is not None:
         canned_answers = json.loads(args.answers_file.read_text(encoding="utf-8"))
 
-    review = run_review(transcript, args.reviewer, existing=existing, canned_answers=canned_answers)
+    # `--force` on a complete review used to ask nothing (every item was
+    # already answered) and only re-stamp the reviewer and time.
+    redo = args.force and existing is not None and existing.complete
+    review = run_review(
+        transcript, args.reviewer, existing=existing, canned_answers=canned_answers, redo=redo
+    )
     review.write_json(out_path)
     print(f"\n{out_path} に保存しました。complete={review.complete}")
 

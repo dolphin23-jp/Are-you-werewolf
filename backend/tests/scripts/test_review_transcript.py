@@ -1,3 +1,4 @@
+import io
 import json
 import sys
 
@@ -137,3 +138,41 @@ def test_resumes_incomplete_review_preserving_prior_answers(tmp_path, monkeypatc
         assert result.answers[item] is True
     for item in REVIEW_ITEMS[6:]:
         assert result.answers[item] is False
+
+
+def test_force_re_asks_every_item_of_a_complete_review(tmp_path, monkeypatch, capsys):
+    """`--force` used to re-stamp the reviewer without asking anything."""
+    transcript_path = tmp_path / "t.json"
+    _write_transcript(transcript_path, "live-9-v2")
+    review_dir = tmp_path / "reviews"
+    review_dir.mkdir()
+    HumanTranscriptReview(
+        game_id="live-9-v2",
+        reviewer="bob",
+        reviewed_at="2026-01-01T00:00:00Z",
+        answers={item: True for item in REVIEW_ITEMS},
+        notes="old note",
+    ).write_json(review_dir / "live-9-v2.json")
+    # One "n" plus an empty note per item, read by the real `input`.
+    monkeypatch.setattr(sys, "stdin", io.StringIO("n\n\n" * len(REVIEW_ITEMS)))
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "review_transcript.py",
+            "--transcript",
+            str(transcript_path),
+            "--reviewer",
+            "carol",
+            "--review-dir",
+            str(review_dir),
+            "--force",
+        ],
+    )
+    main()
+
+    redone = HumanTranscriptReview.from_json(review_dir / "live-9-v2.json")
+    assert capsys.readouterr().out.count("[y/n]: ") == len(REVIEW_ITEMS)
+    assert redone.reviewer == "carol"
+    assert all(answer is False for answer in redone.answers.values())
+    assert redone.notes == ""

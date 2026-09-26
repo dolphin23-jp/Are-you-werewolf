@@ -112,6 +112,12 @@ def _normalized_result_key(result_id: str) -> tuple[str, str]:
     return result_type, target_id
 
 
+def _public_claim_ids(state: GameState) -> tuple[str, ...]:
+    return tuple(
+        sorted(f"{claim.player_id}:{claim.claimed_role.value}" for claim in state.co_declarations)
+    )
+
+
 def _omitted_result_ids(
     required_ids: tuple[str, ...], published_ids: tuple[str, ...]
 ) -> tuple[str, ...]:
@@ -1050,6 +1056,7 @@ class AICoordinator:
                             }
                         )
                     ),
+                    public_claim_ids_at_decision=_public_claim_ids(state),
                     votable_ids_at_decision=tuple(state.votable_ids(player_id)),
                     target_alive=(
                         decision.execution_target is None
@@ -1431,6 +1438,19 @@ class AICoordinator:
         if state.phase == Phase.VOTE_RESULT:
             await self._generate_day_summary(controller, state)
 
+    def _holds_newer_public_evidence(
+        self, player_id: str, audited: DecisionAuditRecord
+    ) -> bool:
+        """True when this seat now holds public evidence it lacked when it spoke."""
+        if self.reasoning is None:
+            return False
+        known = set(audited.active_evidence_ids)
+        return any(
+            record.evidence_id not in known
+            and record.visibility is EvidenceVisibility.PUBLIC_ARGUMENT
+            for record in self.reasoning.seats[player_id].belief.active_evidence()
+        )
+
     async def _cast_vote(self, controller: object, state: GameState, player_id: str) -> None:
         # In a runoff this is narrowed to the tied players, so the AI is not
         # offered choices the engine would reject.
@@ -1506,6 +1526,20 @@ class AICoordinator:
                     ):
                         change_kind = "new_public_evidence"
                         change_reason = "発言後に能力結果が公開"
+                    elif audited and set(_public_claim_ids(state)) != set(
+                        audited.public_claim_ids_at_decision
+                    ):
+                        change_kind = "new_public_evidence"
+                        change_reason = "発言後にCOが変化"
+                    elif state.phase is Phase.RUNOFF:
+                        # The first-round ballots became public after the
+                        # seat spoke; a runoff re-decision is not a silent flip.
+                        change_kind = "new_public_evidence"
+                        change_reason = "決選投票前に初回投票が公開"
+                    elif audited and self._holds_newer_public_evidence(player_id, audited):
+                        # Later speech (an argument, a quote) moved the belief.
+                        change_kind = "new_public_evidence"
+                        change_reason = "発言後に公開の論拠が追加"
                     else:
                         change_kind = "unexplained"
                         change_reason = output.reason

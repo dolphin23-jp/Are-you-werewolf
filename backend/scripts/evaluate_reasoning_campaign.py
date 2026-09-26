@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from app.eval.reasoning_analyzer import ReasoningQualityReport  # noqa: E402
 from scripts.compare_engines import play  # noqa: E402
 
 
@@ -38,10 +39,10 @@ async def campaign(seeds: list[int], engines: list[str]) -> dict[str, Any]:
     aggregate: dict[str, Any] = {"games": rows, "game_count": len(rows), "engines": {}}
     for engine in engines:
         subset = [row for row in rows if row["engine"] == engine]
+        completed = [row for row in subset if row.get("winner") is not None]
         winner_counts: dict[str, int] = {}
-        for row in subset:
-            winner = row.get("winner") or "none"
-            winner_counts[winner] = winner_counts.get(winner, 0) + 1
+        for row in completed:
+            winner_counts[row["winner"]] = winner_counts.get(row["winner"], 0) + 1
         aggregate["engines"][engine] = {
             "games": len(subset),
             "completed_games": sum(row.get("winner") is not None for row in subset),
@@ -50,18 +51,19 @@ async def campaign(seeds: list[int], engines: list[str]) -> dict[str, Any]:
             "http_requests": sum(row["http_requests"] for row in subset),
             "public_utterances": sum(row.get("public_utterances", 0) for row in subset),
             "executions": [item for row in subset for item in row.get("executions", [])],
-            "reasoning_quality": {
-                key: sum(row.get("reasoning_quality", {}).get(key, 0) for row in subset)
-                for key in (subset[0].get("reasoning_quality", {}) if subset else {})
-            },
+            "reasoning_quality": ReasoningQualityReport.combine(
+                row.get("reasoning_quality", {}) for row in subset
+            ).to_dict(),
             "sample_size_warning": len(subset) < 100,
             "role_survival": _role_survival(subset),
+            # Aborted games have no winner; the documented denominator is the
+            # completed games, not every attempt.
             "wins_by_team": {
                 team: {
                     "wins": wins,
-                    "trials": len(subset),
-                    "ratio": wins / len(subset),
-                    "wilson_95": list(wilson_interval(wins, len(subset))),
+                    "trials": len(completed),
+                    "ratio": wins / len(completed),
+                    "wilson_95": list(wilson_interval(wins, len(completed))),
                 }
                 for team, wins in winner_counts.items()
             },

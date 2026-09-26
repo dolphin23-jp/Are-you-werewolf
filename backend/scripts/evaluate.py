@@ -133,7 +133,11 @@ async def main() -> int:
     parser.add_argument("--provider", choices=["mock", "scenario", "luna"], default=None)
     parser.add_argument("--seed", type=int, default=1, help="最初のゲームのシード")
     parser.add_argument("--out", type=Path, default=Path("eval-out"))
-    parser.add_argument("--judge", action="store_true", help="日本語/人格をLLMで採点する(追加費用)")
+    parser.add_argument(
+        "--judge",
+        action="store_true",
+        help="1局目の日本語/人格をLLMで採点する(追加費用。2局目以降は採点しない)",
+    )
     parser.add_argument("--judge-model", default=None, help="判定に使うモデル(既定: 本体と同じ)")
     parser.add_argument("--price-in", type=float, default=0.0, help="入力100万トークンあたり単価")
     parser.add_argument("--price-out", type=float, default=0.0, help="出力100万トークンあたり単価")
