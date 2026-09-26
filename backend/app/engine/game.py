@@ -76,16 +76,25 @@ class GameController:
         # villager without changing the overall 17-player composition. Partial
         # overrides are implemented as deterministic swaps, never by adding or
         # removing a role.
-        for player_id, role in (forced_roles or {}).items():
+        forced = dict(forced_roles or {})
+        for role in set(forced.values()):
+            wanted = sum(1 for forced_role in forced.values() if forced_role == role)
+            available = ROLE_DEFINITIONS[role].count if role in ROLE_DEFINITIONS else 0
+            if wanted > available:
+                raise GameError(f"cannot force {wanted} players to {role}; only {available} exist")
+        for player_id, role in forced.items():
             if player_id not in assignment:
                 raise GameError(f"cannot force role for unknown player {player_id}")
             if assignment[player_id] == role:
                 continue
+            # Never take the role from a seat that is forced to hold it: swapping
+            # with one silently undid its override (88 of 200 seeds for a four-seat
+            # force). The role counts checked above guarantee another holder.
             swap_id = next(
                 (
                     pid
                     for pid, assigned in assignment.items()
-                    if assigned == role and pid != player_id
+                    if assigned == role and pid != player_id and forced.get(pid) != role
                 ),
                 None,
             )
@@ -110,7 +119,12 @@ class GameController:
         }
         self.state = GameState(session_id=session_id, players=players)
 
-        wolf_ids = [pid for pid, role in assignment.items() if role == RoleName.WEREWOLF]
+        # An inactive seat can never submit the attack, so it must not be alpha.
+        wolf_ids = [
+            pid
+            for pid, role in assignment.items()
+            if role == RoleName.WEREWOLF and pid not in inactive_ids
+        ]
         self._alpha_tracker = AlphaWolfTracker(wolf_ids, seed=seed)
 
         self._night_resolver = NightResolver()
@@ -206,6 +220,10 @@ class GameController:
         self.state.day += 1
 
     def end_discussion(self) -> None:
+        # Validate before touching state: a refused call during a runoff used to
+        # clear the runoff candidates and the round counter anyway.
+        if next_phase(self.state.phase, PhaseEvent.END_DISCUSSION) is None:
+            raise GameError(f"cannot end discussion during phase {self.state.phase}")
         self.state.vote_round = 1
         self.state.runoff_candidates = []
         self._transition(PhaseEvent.END_DISCUSSION)
@@ -213,6 +231,10 @@ class GameController:
     def resolve_votes(self) -> None:
         if self.state.phase not in (Phase.VOTING, Phase.RUNOFF):
             raise GameError(f"cannot resolve votes during phase {self.state.phase}")
+        if not self.state.pending_votes:
+            # An empty tally used to count as a deadlocked vote and end the whole
+            # game as a draw ("投票が上限ラウンドに達した") in round one.
+            raise GameError("no votes have been cast")
 
         result = self._vote_manager.tally(self.state)
 
@@ -253,7 +275,7 @@ class GameController:
                 {
                     "executed_player_id": None,
                     "is_draw": False,
-                    "tied_player_ids": result.tied_player_ids,
+                    "tied_player_ids": sorted(result.tied_player_ids or []),
                 },
             )
         )
@@ -274,7 +296,10 @@ class GameController:
         references: list[str] | None = None,
     ) -> str:
         player = self._require_alive(author_id)
-        chat_channel = ChatChannel(channel)
+        try:
+            chat_channel = ChatChannel(channel)
+        except ValueError as exc:
+            raise GameError(f"unknown chat channel {channel}") from exc
         if chat_channel == ChatChannel.WOLF and player.role != RoleName.WEREWOLF:
             raise GameError("only werewolves may use the wolf channel")
         if chat_channel == ChatChannel.FREEMASON and player.role != RoleName.FREEMASON:
@@ -310,7 +335,7 @@ class GameController:
             day=self.state.day,
             reply_to=reply_to,
             quote=quote,
-            references=valid_references,
+            references=list(valid_references),
         )
         self.state.chat_log.append(message)
         answered_ids = {message_id for message_id in [reply_to, *valid_references] if message_id}
@@ -340,6 +365,9 @@ class GameController:
     def vote(self, voter_id: str, target_id: str) -> None:
         if self.state.phase not in (Phase.VOTING, Phase.RUNOFF):
             raise GameError(f"cannot vote during phase {self.state.phase}")
+        for player_id in (voter_id, target_id):
+            if player_id not in self.state.players:
+                raise GameError(f"unknown player {player_id}")
         try:
             self._vote_manager.record_vote(self.state, voter_id, target_id)
         except GameError:
@@ -356,7 +384,7 @@ class GameController:
         if self.state.phase != Phase.NIGHT:
             raise GameError(f"cannot submit night action during phase {self.state.phase}")
         player = self._require_alive(player_id)
-        self._require_alive(target_id)
+        target = self._require_alive(target_id)
 
         if self.state.day == 0 and action_type != "divine":
             raise GameError("only the seer may act on the Day-0 night")
@@ -364,6 +392,8 @@ class GameController:
         if action_type == "divine":
             if player.role != RoleName.SEER:
                 raise GameError("only the seer may divine")
+            if target_id == player_id:
+                raise GameError("the seer cannot divine themselves")
             if target_id == self.state.first_victim_id:
                 raise GameError("the first victim cannot be divined")
             self.state.pending_divine = (player_id, target_id)
@@ -378,6 +408,10 @@ class GameController:
                 raise GameError("only werewolves may attack")
             if player_id != self._alpha_tracker.alpha_id:
                 raise GameError("only the alpha werewolf may submit the attack")
+            # Only the UI hid wolves from the target list; the API accepted a bite
+            # on a teammate (or on oneself) and the wolf died.
+            if target.role == RoleName.WEREWOLF:
+                raise GameError("werewolves cannot attack a werewolf")
             self.state.pending_attack = (player_id, target_id)
         else:
             raise GameError(f"unknown action_type {action_type}")
