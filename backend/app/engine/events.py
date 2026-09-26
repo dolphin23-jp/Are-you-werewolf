@@ -24,7 +24,9 @@ class GameEventType(StrEnum):
 class GameEvent:
     type: GameEventType
     payload: dict[str, Any] = field(default_factory=dict)
-    recipient_id: str | None = None  # None means broadcast to all
+    # None means broadcast to every seat; otherwise only these seats (possibly
+    # none) may receive it.
+    recipient_ids: tuple[str, ...] | None = None
 
 
 Listener = Callable[[GameEvent], None]

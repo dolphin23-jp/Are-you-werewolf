@@ -143,7 +143,7 @@ def test_the_dead_seers_result_is_delivered_only_to_the_seer():
     controller.resolve_night()
 
     divine_events = [e for e in events if e.type is GameEventType.DIVINE_RESULT]
-    assert divine_events and all(e.recipient_id == seer for e in divine_events)
+    assert divine_events and all(e.recipient_ids == (seer,) for e in divine_events)
     # Nobody else can find it in the public record either.
     assert not state.public_result_claims
 
@@ -241,5 +241,6 @@ def test_the_broadcast_death_event_does_not_reveal_a_curse():
 
     died = [e for e in events if e.type is GameEventType.PLAYER_DIED]
     assert {e.payload["player_id"] for e in died} == {fox, seer}
-    assert all(e.recipient_id is None for e in died)  # still a broadcast
+    assert all(e.recipient_ids is None for e in died)  # still a broadcast
     assert {e.payload["cause"] for e in died} == {PublicDeathCause.NIGHT}
+

@@ -40,6 +40,11 @@ _RESULT_TYPES: dict[RoleName, str] = {
     RoleName.MEDIUM: MEDIUM_RESULT,
 }
 
+_PRIVATE_CHANNEL_ROLES: dict[ChatChannel, RoleName] = {
+    ChatChannel.WOLF: RoleName.WEREWOLF,
+    ChatChannel.FREEMASON: RoleName.FREEMASON,
+}
+
 
 @dataclass(frozen=True)
 class PlayerSpec:
@@ -177,7 +182,7 @@ class GameController:
                         "target_id": result.divine_result.target_id,
                         "is_werewolf": result.divine_result.is_werewolf,
                     },
-                    recipient_id=result.divine_result.seer_id,
+                    recipient_ids=(result.divine_result.seer_id,),
                 )
             )
         for medium_result in result.medium_results or []:
@@ -188,7 +193,7 @@ class GameController:
                         "target_id": medium_result.target_id,
                         "is_werewolf": medium_result.is_werewolf,
                     },
-                    recipient_id=medium_result.medium_id,
+                    recipient_ids=(medium_result.medium_id,),
                 )
             )
 
@@ -326,6 +331,7 @@ class GameController:
                     "quote": quote,
                     "references": valid_references,
                 },
+                recipient_ids=self._channel_audience(chat_channel),
             )
         )
         return message_id
@@ -590,10 +596,23 @@ class GameController:
             GameEvent(
                 GameEventType.TYPING_CHANGED,
                 {"player_id": player_id, "typing": typing, "channel": channel},
+                recipient_ids=self._channel_audience(ChatChannel(channel)),
             )
         )
 
     # -- internals --
+
+    def _channel_audience(self, channel: ChatChannel) -> tuple[str, ...] | None:
+        """Seats a live push on `channel` may reach; None for the public channel.
+
+        Mirrors the chat filtering in `GameState.get_player_view`. Broadcasting
+        private-channel events handed every client the wolves' identities and
+        plans, however carefully `/view` filtered the same messages.
+        """
+        role = _PRIVATE_CHANNEL_ROLES.get(channel)
+        if role is None:
+            return None
+        return tuple(player.player_id for player in self.state.players_by_role(role))
 
     def _require_alive(self, player_id: str) -> PlayerState:
         player = self.state.players.get(player_id)

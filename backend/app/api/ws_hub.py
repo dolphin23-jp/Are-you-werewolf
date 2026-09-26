@@ -47,7 +47,11 @@ class SessionWSHub:
             # up, and this must never crash the request that triggered it.
             return
 
-        recipients = [event.recipient_id] if event.recipient_id else list(self._connections.keys())
+        recipients = (
+            list(self._connections.keys())
+            if event.recipient_ids is None
+            else list(event.recipient_ids)
+        )
         payload = {"type": event.type.value, "payload": to_jsonable(event.payload)}
         for pid in recipients:
             for ws in self._connections.get(pid, []):
