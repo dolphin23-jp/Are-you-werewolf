@@ -184,7 +184,11 @@ def _change_drafts(
                     role=result_role(change.result_type),
                     target_id=change.target_id,
                     result_is_werewolf=existing.is_werewolf,
-                    referenced_day=change.referenced_day or existing.referenced_day,
+                    referenced_day=(
+                        change.referenced_day
+                        if change.referenced_day is not None
+                        else existing.source_night
+                    ),
                     fact_sentence=render_result_retraction_sentence(
                         ledger, change.result_type, change.target_id
                     ),
@@ -197,7 +201,11 @@ def _change_drafts(
                     role=result_role(change.result_type),
                     target_id=change.target_id,
                     result_is_werewolf=change.is_werewolf,
-                    referenced_day=change.referenced_day or existing.referenced_day,
+                    referenced_day=(
+                        change.referenced_day
+                        if change.referenced_day is not None
+                        else existing.source_night
+                    ),
                     fact_sentence=render_result_correction_sentence(
                         ledger, change.result_type, change.target_id, change.is_werewolf
                     ),

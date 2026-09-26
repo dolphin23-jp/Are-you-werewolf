@@ -113,6 +113,33 @@ def test_restating_the_same_co_is_a_reaffirmation_not_a_second_claim():
     assert history[-1].source_message_id == "m8"
 
 
+def test_a_restated_co_keeps_the_day_and_message_it_was_made_in():
+    controller = _started()
+    controller.co("p1", RoleName.SEER.value, source_message_id="m1")
+    controller.co("p2", RoleName.SEER.value, source_message_id="m2")
+
+    controller.state.day = 2
+    controller.co("p1", RoleName.SEER.value, source_message_id="m8")
+
+    standing = [(c.player_id, c.day, c.source_message_id) for c in controller.state.co_declarations]
+    assert standing == [("p1", 1, "m1"), ("p2", 1, "m2")]
+    assert current_role_claim(controller.state.speech_events, "p1").day == 1
+
+
+def test_a_slid_claim_moves_to_the_position_of_the_new_claim():
+    controller = _started()
+    controller.co("p1", RoleName.SEER.value, source_message_id="m1")
+    controller.co("p2", RoleName.SEER.value, source_message_id="m2")
+
+    controller.state.day = 2
+    controller.co("p1", RoleName.MEDIUM.value, source_message_id="m9")
+
+    assert [(c.player_id, c.claimed_role) for c in controller.state.co_declarations] == [
+        ("p2", RoleName.SEER),
+        ("p1", RoleName.MEDIUM),
+    ]
+
+
 def test_an_unknown_claimed_role_is_rejected():
     controller = _started()
 
@@ -194,6 +221,54 @@ def test_restating_the_same_verdict_the_same_day_adds_no_version():
     controller.public_result("p1", "seer", "p5", True, source_message_id="m2")
 
     assert len(result_versions(controller.state.speech_events, target_id="p5")) == 1
+
+
+def test_recapping_an_old_verdict_on_a_later_day_keeps_its_night():
+    """A day-3 recap of a night-1 result is not a night-2 result.
+
+    Only same-day repeats used to be redundant, so the recap became a new
+    version dated to day 3 -- moving p5 onto night 2, where the seer's real
+    night-2 result also sat, and making a truthful seer look impossible.
+    """
+    controller = _started(day=2)
+    controller.co("p1", RoleName.SEER.value, source_message_id="m1")
+    controller.public_result("p1", "seer", "p5", False, source_message_id="m1")
+
+    controller.state.day = 3
+    controller.public_result("p1", "seer", "p5", False, source_message_id="m9")
+    controller.public_result("p1", "seer", "p6", False, source_message_id="m9")
+
+    versions = result_versions(controller.state.speech_events, target_id="p5")
+    assert [(v.version, v.day, v.source_night) for v in versions] == [(1, 2, 1)]
+    nights = {c.target_id: c.referenced_day for c in controller.state.public_result_claims}
+    assert nights == {"p5": None, "p6": None}
+
+
+def test_naming_a_different_night_for_the_same_verdict_is_a_new_version():
+    controller = _started(day=2)
+    controller.co("p1", RoleName.SEER.value, source_message_id="m1")
+    controller.public_result("p1", "seer", "p5", False, source_message_id="m1")
+
+    controller.state.day = 3
+    controller.public_result("p1", "seer", "p5", False, source_message_id="m9", referenced_day=2)
+
+    versions = result_versions(controller.state.speech_events, target_id="p5")
+    assert [(v.status, v.source_night) for v in versions] == [
+        (ResultStatus.SUPERSEDED, 1),
+        (ResultStatus.ACTIVE, 2),
+    ]
+
+
+def test_a_correction_that_names_no_night_stays_on_the_original_night():
+    controller = _started(day=2)
+    controller.co("p1", RoleName.SEER.value, source_message_id="m1")
+    controller.public_result("p1", "seer", "p5", True, source_message_id="m1")
+
+    controller.state.day = 4
+    controller.correct_public_result("p1", "seer", "p5", False, source_message_id="m9")
+
+    versions = result_versions(controller.state.speech_events, target_id="p5")
+    assert [(v.is_werewolf, v.source_night) for v in versions] == [(True, 1), (False, 1)]
 
 
 def test_seer_and_medium_results_about_the_same_player_are_separate_subjects():

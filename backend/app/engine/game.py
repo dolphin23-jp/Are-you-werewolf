@@ -17,6 +17,7 @@ from app.engine.speech_events import (
     RESULT_EVENT_TYPES,
     RESULT_TYPES,
     SEER_RESULT,
+    ResultVersion,
     SpeechEvent,
     SpeechEventType,
     active_result,
@@ -409,10 +410,18 @@ class GameController:
                 raise GameError("a published result must name the seer or medium ability")
             if target_id not in self.state.players:
                 raise GameError("invalid public result claim")
+            existing = active_result(
+                self.state.speech_events, actor_id, _RESULT_TYPES[role], target_id
+            )
             if self._is_redundant_result(
-                actor_id, event_type, role, target_id, is_werewolf=result_is_werewolf
+                event_type, existing, is_werewolf=result_is_werewolf, referenced_day=referenced_day
             ):
                 return None
+            if referenced_day is None and existing is not None:
+                # A new version of a published verdict is about the same night
+                # unless it names another. Reading the night off the day it was
+                # re-said moved an old result onto a night it never came from.
+                referenced_day = existing.source_night
         if event_type is SpeechEventType.PARTNER_CLAIM:
             if target_id not in self.state.players or target_id == actor_id:
                 raise GameError("invalid freemason partner")
@@ -447,24 +456,28 @@ class GameController:
 
     def _is_redundant_result(
         self,
-        actor_id: str,
         event_type: SpeechEventType,
-        role: RoleName,
-        target_id: str,
+        existing: ResultVersion | None,
         *,
         is_werewolf: bool | None,
+        referenced_day: int | None,
     ) -> bool:
-        """Saying the same verdict twice in one day is emphasis, not a new
-        version. A correction or a retraction always counts."""
-        if event_type is not SpeechEventType.ABILITY_RESULT:
+        """Restating a verdict already on the record is emphasis, not a new
+        version -- on any day, unless it names a different night.
+
+        Only same-day repeats used to count, so a later recap ("p4 white") became
+        a new version dated to the recap day: the result moved to another night
+        and a truthful seer showed two results for one night. A correction or a
+        retraction always counts.
+        """
+        if event_type is not SpeechEventType.ABILITY_RESULT or existing is None:
             return False
-        existing = active_result(
-            self.state.speech_events, actor_id, _RESULT_TYPES[role], target_id
-        )
+        if existing.is_werewolf != bool(is_werewolf):
+            return False
         return (
-            existing is not None
-            and existing.day == self.state.day
-            and existing.is_werewolf == bool(is_werewolf)
+            existing.day == self.state.day
+            or referenced_day is None
+            or referenced_day == existing.source_night
         )
 
     def co(

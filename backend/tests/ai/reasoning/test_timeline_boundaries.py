@@ -25,6 +25,7 @@ from app.ai.reasoning.solver import (
     CompleteResultDisclosure,
     HonestResults,
     build_solver,
+    has_role,
 )
 from app.ai.reasoning.timeline import (
     ConflictKind,
@@ -35,6 +36,7 @@ from app.ai.reasoning.timeline import (
 )
 from app.engine.roles import RoleName
 from tests.ai.reasoning.solver import boards
+from tests.conftest import make_controller
 
 
 def _board(day: int = 3):  # type: ignore[no-untyped-def]
@@ -335,3 +337,27 @@ def test_a_contest_broken_then_restored_marks_both_claimants_again():
     _observe(engine, state)
     assert _active(engine, "contested_claim", "p4")
     assert _active(engine, "contested_claim", "p2")
+
+
+def test_a_seers_recap_through_the_engine_raises_no_timeline_conflict():
+    """Restating night 1's result alongside night 2's is a recap, not two results
+    for night 2. Driven through `GameController`, the only write path in play."""
+    controller = make_controller(seed=4)
+    state = controller.state
+    state.day = 2
+    controller.co("p1", RoleName.SEER.value, source_message_id="m1")
+    controller.public_result("p1", "seer", "p4", False, source_message_id="m1")
+    state.day = 3
+    controller.public_result("p1", "seer", "p4", False, source_message_id="m9")
+    controller.public_result("p1", "seer", "p5", False, source_message_id="m9")
+
+    observations = ObservationSet.from_state(state)
+    assert sorted((v.target_id, v.source_night) for v in observations.verdicts) == [
+        ("p4", 1),
+        ("p5", 2),
+    ]
+    assert find_timeline_conflicts(observations) == ()
+    solver = build_solver(
+        observations, CommonPublicPerspective(), assumptions=(AccurateTimeline("p1"),)
+    )
+    assert solver.is_possible(has_role("p1", RoleName.SEER))

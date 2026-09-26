@@ -175,20 +175,33 @@ def current_role_claim(
     events: Sequence[SpeechEvent], player_id: str
 ) -> RoleClaimState | None:
     """The claim standing right now, or None once retracted or never made."""
-    history = role_claim_history(events, player_id)
-    if not history:
-        return None
-    latest = history[-1]
-    return latest if latest.is_active else None
+    standing = _standing_claims(role_claim_history(events, player_id))
+    return standing.get(player_id)
 
 
 def current_role_claims(events: Sequence[SpeechEvent]) -> tuple[RoleClaimState, ...]:
     """Active claims only, ordered by when the standing claim was made -- a
     player who slid moves to the position of their new claim, not their old one."""
-    latest: dict[str, RoleClaimState] = {}
-    for state in role_claim_history(events):
-        latest[state.player_id] = state
-    return tuple(state for state in latest.values() if state.is_active)
+    return tuple(_standing_claims(role_claim_history(events)).values())
+
+
+def _standing_claims(history: Sequence[RoleClaimState]) -> dict[str, RoleClaimState]:
+    """Each player's active claim as first made, in the order those were made.
+
+    Repeating a CO is not a new CO, so a reaffirmation keeps the standing claim
+    -- its day, message and position. Taking the reaffirmation instead made a
+    day-1 seer claim read as one of "today's COs" on every day it was restated.
+    """
+    standing: dict[str, RoleClaimState] = {}
+    for state in history:
+        if state.reaffirmed and state.player_id in standing:
+            continue
+        # Re-inserting is what moves a new claim to the end; assigning to an
+        # existing key would keep the old claim's position.
+        standing.pop(state.player_id, None)
+        if state.is_active:
+            standing[state.player_id] = state
+    return standing
 
 
 # -- ability results --
@@ -217,6 +230,11 @@ class ResultVersion:
     @property
     def is_active(self) -> bool:
         return self.status is ResultStatus.ACTIVE
+
+    @property
+    def source_night(self) -> int:
+        """The night the claimant says this came from, not the day they said it."""
+        return self.referenced_day if self.referenced_day is not None else self.day - 1
 
 
 def result_versions(
