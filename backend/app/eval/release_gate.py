@@ -56,9 +56,14 @@ class ReleaseGate:
         mock_llm_reduction: float | None = None,
         transcript_schema_version: int = 3,
         human_review_complete: bool = False,
+        human_review_rejected: bool = False,
         operational_complete: bool = False,
     ) -> ReleaseGateResult:
+        """`human_review_complete` means every game has an *approving* review;
+        `human_review_rejected` that some finished review answered no."""
         failures = [field for field in HARD_FAILURE_FIELDS if getattr(report, field) > 0]
+        if human_review_rejected:
+            failures.append("human_review_rejected")
         reliability = self.config.get("reliability", {})
         if operational.get("complete_failure_rate", 0.0) > reliability.get(
             "max_complete_failure_rate", 0.01

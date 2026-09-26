@@ -34,10 +34,10 @@ from app.eval.reasoning_analyzer import (  # noqa: E402
     ReasoningQualityReport,
     ReasoningTranscriptAnalyzer,
 )
-from app.eval.release_gate import ReleaseGate  # noqa: E402
+from app.eval.release_gate import HARD_FAILURE_FIELDS, ReleaseGate  # noqa: E402
 from app.eval.release_report import HumanTranscriptReview  # noqa: E402
 from app.eval.transcript import GameTranscript  # noqa: E402
-from scripts.live_reasoning_check import run  # noqa: E402
+from scripts.live_reasoning_check import LIVE_PROVIDERS, run  # noqa: E402
 
 
 async def execute(args: argparse.Namespace) -> list[dict[str, Any]]:
@@ -94,20 +94,9 @@ async def execute(args: argparse.Namespace) -> list[dict[str, Any]]:
         spent = budget.estimated_cost or 0.0
         _save_aggregate(args.output_dir, rows, budget, args.review_dir)
         hard = report.get("reasoning_quality", {})
-        if engine == "v2" and any(
-            hard.get(field, 0)
-            for field in (
-                "private_evidence_exposed_count",
-                "team_private_evidence_exposed_count",
-                "dead_target_selection_count",
-                "missing_required_result_count",
-                "displayed_target_mismatch_count",
-                "stale_evidence_publicly_emitted_count",
-                "unexplained_vote_change_count",
-                "unplanned_wolf_ally_vote_count",
-                "duplicate_night_action_count",
-            )
-        ):
+        # The gate's own list: a hand-kept copy here had drifted and kept paying
+        # for games after a public fact flip or a duplicated result.
+        if engine == "v2" and any(hard.get(field, 0) for field in HARD_FAILURE_FIELDS):
             return rows
         if requests >= args.max_http_requests or spent >= args.max_estimated_cost:
             return rows
@@ -122,11 +111,7 @@ def _save_aggregate(
 ) -> None:
     # Seeds, not rows: a resumed run that replays the same seed has not added
     # evidence, and the gate's bar is about coverage.
-    v2_seeds = {
-        row["seed"]
-        for row in rows
-        if row.get("engine") == "v2" and row.get("status") not in ("budget_exhausted", "failed")
-    }
+    v2_seeds = {row["seed"] for row in rows if row.get("engine") == "v2" and _qualifies(row)}
     live_games = len(v2_seeds)
     reports = [row.get("reasoning_quality", {}) for row in rows if row.get("engine") == "v2"]
     combined = (
@@ -148,9 +133,11 @@ def _save_aggregate(
             path = review_dir / f"{game_id}.json"
             if path.exists():
                 reviews.append(HumanTranscriptReview.from_json(path))
+    # Approved, not merely filled in: a review answering "no" is a finding.
     review_complete = (
-        bool(v2_game_ids) and {r.game_id for r in reviews if r.complete} == v2_game_ids
+        bool(v2_game_ids) and {r.game_id for r in reviews if r.approved} == v2_game_ids
     )
+    review_rejected = any(review.rejected for review in reviews)
     operational_complete = (
         budget.pricing_supplied and bool(rows) and all("operational_metrics" in row for row in rows)
     )
@@ -160,7 +147,9 @@ def _save_aggregate(
         combined,
         _combined_operational(rows),
         live_games=live_games,
+        transcript_schema_version=_oldest_schema_version(rows),
         human_review_complete=review_complete,
+        human_review_rejected=review_rejected,
         operational_complete=operational_complete,
     )
     payload = {
@@ -183,6 +172,29 @@ def _save_aggregate(
         f"\nReasons: {', '.join(gate.reasons)}\n",
         encoding="utf-8",
     )
+
+
+def _qualifies(row: dict[str, Any]) -> bool:
+    """A finished game against a real model. Offline doubles, games cut off at
+    the loop limit and failed or budget-stopped runs are not live evidence."""
+    return (
+        row.get("status") not in ("budget_exhausted", "failed")
+        and row.get("provider") in LIVE_PROVIDERS
+        and row.get("game_over") is True
+    )
+
+
+def _oldest_schema_version(rows: list[dict[str, Any]]) -> int:
+    versions: list[int] = []
+    for row in rows:
+        path = row.get("transcript")
+        if row.get("engine") != "v2" or not path or not Path(path).exists():
+            continue
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+        versions.append(int(data.get("schema_version", 1)))
+    # No transcript on disk proves nothing either way; completeness is judged
+    # by the operational and review checks.
+    return min(versions, default=3)
 
 
 def _stage_status(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:

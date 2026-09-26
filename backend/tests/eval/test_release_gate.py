@@ -140,3 +140,11 @@ def test_release_gate_respects_custom_config_thresholds():
     assert lenient_reliability.decision is ReleaseDecision.INCONCLUSIVE
     assert "live_games=2; required=5" in lenient_reliability.reasons
     assert "complete_failure_rate" not in lenient_reliability.reasons
+
+
+def test_release_gate_fails_when_a_human_review_found_a_problem():
+    result = ReleaseGate.from_toml(CONFIG).evaluate(
+        ReasoningQualityReport(), {}, **QUALIFIED_KWARGS, human_review_rejected=True
+    )
+    assert result.decision is ReleaseDecision.FAIL
+    assert "human_review_rejected" in result.reasons

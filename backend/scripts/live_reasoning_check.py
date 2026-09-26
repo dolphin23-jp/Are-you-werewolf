@@ -32,6 +32,7 @@ import asyncio
 import json
 import random
 import sys
+import uuid
 from pathlib import Path
 from time import perf_counter
 from typing import Any
@@ -52,6 +53,9 @@ from app.eval.transcript import TranscriptRecorder  # noqa: E402
 
 MAX_LOOPS = 150
 HUMAN_ID = "p0"
+# Providers that actually call a model. `mock` and `scenario` are offline test
+# doubles; a game played against either is not live evidence.
+LIVE_PROVIDERS = frozenset({"luna"})
 AI_IDS = [f"p{i}" for i in range(1, 17)]
 
 
@@ -97,7 +101,7 @@ async def run(
 ) -> dict[str, Any]:
     started = perf_counter()
     settings = get_settings()
-    if settings.werewolf_llm_provider == "mock":
+    if settings.werewolf_llm_provider not in LIVE_PROVIDERS:
         raise SystemExit(
             "この確認は実プロバイダ用です。WEREWOLF_LLM_PROVIDER=luna を設定してください。"
         )
@@ -105,8 +109,12 @@ async def run(
     provider = build_llm_provider(settings, seed=seed, metrics=metrics)
     if request_budget is not None:
         provider = BudgetedProvider(provider, request_budget)
+    # Unique per run: a human review is filed under this id, and `live-11-v2`
+    # for every run of seed 11 let one review approve different games.
     controller = GameController(
-        session_id=f"live-{seed}-{engine}", player_specs=_specs(), seed=seed
+        session_id=f"live-{seed}-{engine}-{uuid.uuid4().hex[:8]}",
+        player_specs=_specs(),
+        seed=seed,
     )
     reasoning = (
         ReasoningRuntime(controller.state, AI_IDS, seed=seed, metrics=metrics)
@@ -172,6 +180,9 @@ async def run(
         "provider": settings.werewolf_llm_provider,
         "model": settings.luna_model,
         "days": controller.state.day,
+        # A game cut off at MAX_LOOPS is not a qualifying live game.
+        "game_over": controller.state.phase is Phase.GAME_OVER,
+        "winner": controller.state.winner,
         "llm_requests": metric_summary.get("total_calls", 0),
         "http_requests": metric_summary.get("http_requests", 0),
         "tokens": metric_summary.get("tokens", {}),

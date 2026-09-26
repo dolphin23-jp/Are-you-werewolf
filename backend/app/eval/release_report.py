@@ -38,6 +38,17 @@ class HumanTranscriptReview:
             self.answers.get(item) is not None for item in REVIEW_ITEMS
         )
 
+    @property
+    def approved(self) -> bool:
+        """Every item answered yes. `complete` only says every item was answered,
+        and a review that answered no to all ten used to count as approval."""
+        return self.complete and all(self.answers.get(item) is True for item in REVIEW_ITEMS)
+
+    @property
+    def rejected(self) -> bool:
+        """A finished review that found at least one problem."""
+        return self.complete and not self.approved
+
     @classmethod
     def from_json(cls, path: Path) -> HumanTranscriptReview:
         return cls(**json.loads(path.read_text(encoding="utf-8")))
