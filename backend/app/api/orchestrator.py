@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 
+from app.engine.phases import Phase
 from app.engine.roles import RoleName
 from app.sessions.models import GameSession
 
@@ -53,7 +54,8 @@ async def after_discussion_phase_entered(session: GameSession) -> None:
     else:
         # There may be more immediate COs than fit in one segment. Drain only
         # those opening segments, releasing the lock between each, then pause.
-        while True:
+        while session.controller.state.phase == Phase.DISCUSSION:
+            before = _discussion_progress(session)
             await session.coordinator.advance_discussion(session)
             round_state = session.discussion_round
             if (
@@ -63,6 +65,18 @@ async def after_discussion_phase_entered(session: GameSession) -> None:
                 or round_state.stage != "immediate"
             ):
                 break
+            # `advance_discussion` returns without awaiting anything when it has
+            # nothing to do (e.g. the phase moved on under it). Looping again
+            # would never yield, freezing the event loop for every session.
+            if _discussion_progress(session) == before:
+                break
+
+
+def _discussion_progress(session: GameSession) -> tuple[int, int, int] | None:
+    round_state = session.discussion_round
+    if round_state is None:
+        return None
+    return (round_state.cursor, len(round_state.outputs), len(round_state.reply_queue))
 
 
 async def after_human_private_chat(session: GameSession, channel: str) -> None:
