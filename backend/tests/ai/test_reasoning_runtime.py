@@ -238,6 +238,24 @@ def test_conflict_points_come_from_structured_events():
     assert any("p4→p9=黒" in point for point in points)
 
 
+def test_split_candidates_come_from_what_seats_said_today():
+    """The shared day summary used every seat's internal candidate, which for
+    a wolf is built on what only the wolves know."""
+    state = _played_board()
+    runtime = _runtime(state)
+    for seat in runtime.seats.values():
+        seat.belief.state.current_execution_target = "p9"
+    runtime.record_stated_target("p2", "p4", state.day)
+    runtime.record_stated_target("p3", "p5", state.day - 1)
+
+    split = [point for point in runtime.conflict_points(state) if "処刑候補が割れ" in point]
+
+    # Internal targets and yesterday's statement are not today's public split.
+    assert split == []
+    runtime.record_stated_target("p3", "p5", state.day)
+    assert any("p4、p5" in point for point in runtime.conflict_points(state))
+
+
 def test_hypotheses_are_reported_in_bands_not_percentages():
     state = _played_board()
     runtime = _runtime(state)

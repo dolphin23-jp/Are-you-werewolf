@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Shared by the field default below and by `_normalize_reasoning_engine`'s
@@ -26,7 +26,9 @@ class Settings(BaseSettings):
     werewolf_env: str = "development"
     werewolf_cors_origins: str = "http://localhost:5173"
     werewolf_log_level: str = "INFO"
-    werewolf_session_store: str = "memory"
+    # Only the in-memory store exists; anything else used to be accepted and
+    # silently ignored.
+    werewolf_session_store: Literal["memory"] = "memory"
     werewolf_rng_seed: int | None = None
     werewolf_access_password: str = ""
     werewolf_discussion_segment_size: int = 4
@@ -42,7 +44,9 @@ class Settings(BaseSettings):
     # manually playtested. Set WEREWOLF_REASONING_ENGINE=legacy to compare.
     werewolf_reasoning_engine: Literal["legacy", "v2"] = _DEFAULT_REASONING_ENGINE
 
-    luna_api_key: str = ""
+    # SecretStr: a repr of Settings (an error message, a debugger, a log line)
+    # shows "**********" instead of the key.
+    luna_api_key: SecretStr = SecretStr("")
     luna_base_url: str = "https://api.example.com/v1"
     luna_model: str = "gpt-5.6-luna"
     # 0 would make the provider's semaphore block every request forever.

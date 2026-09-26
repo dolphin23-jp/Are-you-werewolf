@@ -28,7 +28,7 @@ def test_env_file_is_actually_read(tmp_path: Path):
     )
     settings = Settings(_env_file=str(env_file))
     assert settings.werewolf_llm_provider == "luna"
-    assert settings.luna_api_key == "sk-from-env-file"
+    assert settings.luna_api_key.get_secret_value() == "sk-from-env-file"
     assert settings.luna_model == "gpt-5.6-luna"
 
 
@@ -36,7 +36,7 @@ def test_real_environment_variable_overrides_env_file(tmp_path: Path, monkeypatc
     env_file = _write_env(tmp_path, "LUNA_API_KEY=sk-from-env-file\n")
     monkeypatch.setenv("LUNA_API_KEY", "sk-from-real-envvar")
     settings = Settings(_env_file=str(env_file))
-    assert settings.luna_api_key == "sk-from-real-envvar"
+    assert settings.luna_api_key.get_secret_value() == "sk-from-real-envvar"
 
 
 def test_shipped_env_example_loads_without_error(monkeypatch):
@@ -85,7 +85,7 @@ def test_defaults_are_safe_when_no_env_file_exists(tmp_path: Path, monkeypatch):
     # Defaulting to the mock provider means a fresh checkout never attempts
     # a paid API call by accident.
     assert settings.werewolf_llm_provider == "mock"
-    assert settings.luna_api_key == ""
+    assert settings.luna_api_key.get_secret_value() == ""
 
 
 def test_explicit_kwarg_outranks_the_environment(monkeypatch):
@@ -101,3 +101,50 @@ def test_omitted_flag_leaves_the_environment_in_charge(monkeypatch):
     monkeypatch.setenv("WEREWOLF_LLM_PROVIDER", "luna")
     overrides: dict[str, str] = {}  # what the scripts build when --provider is absent
     assert Settings(**overrides).werewolf_llm_provider == "luna"
+
+
+def test_misconfigured_providers_fail_at_startup():
+    """The README promises a stop at startup; the error used to appear only
+    when the first game was created."""
+    import pytest
+
+    from app.ai.provider.factory import LLMProviderConfigError, validate_provider_settings
+
+    with pytest.raises(LLMProviderConfigError, match="LUNA_API_KEY"):
+        validate_provider_settings(Settings(werewolf_llm_provider="luna", luna_api_key=""))
+    with pytest.raises(LLMProviderConfigError) as unknown:
+        validate_provider_settings(Settings(werewolf_llm_provider="sk-secret-value"))
+    assert "sk-secret-value" not in str(unknown.value)
+    validate_provider_settings(Settings(werewolf_llm_provider="mock"))
+
+
+def test_an_unsupported_session_store_is_rejected():
+    import pytest
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        Settings(werewolf_session_store="sqlite")
+
+
+def test_swagger_is_only_served_in_development(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from app import main
+
+    monkeypatch.setattr(main, "get_settings", lambda: Settings(werewolf_env="production"))
+    production = TestClient(main.create_app())
+    # Without Swagger the path falls through to the SPA (or a 404 when unbuilt).
+    assert "swagger-ui" not in production.get("/docs").text
+    assert '"paths"' not in production.get("/openapi.json").text
+
+    monkeypatch.setattr(main, "get_settings", lambda: Settings(werewolf_env="development"))
+    development = TestClient(main.create_app())
+    assert "swagger-ui" in development.get("/docs").text
+    assert '"paths"' in development.get("/openapi.json").text
+
+
+def test_the_api_key_never_appears_in_a_settings_repr():
+    settings = Settings(luna_api_key="sk-live-secret")
+    assert "sk-live-secret" not in repr(settings)
+    assert "sk-live-secret" not in str(settings.model_dump())
+    assert settings.luna_api_key.get_secret_value() == "sk-live-secret"

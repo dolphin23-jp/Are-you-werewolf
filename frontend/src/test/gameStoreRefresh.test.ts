@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getView } from "../api/client";
 import type { GameView } from "../api/types";
-import { useGameStore } from "../state/gameStore";
+import { SESSION_LOST_NOTICE, useGameStore } from "../state/gameStore";
 import { makeView } from "./fixtures/gameView";
 
 vi.mock("../api/client", () => ({
@@ -65,5 +65,45 @@ describe("refreshView", () => {
     await useGameStore.getState().refreshView();
 
     expect(useGameStore.getState().error).toBe("投票に失敗しました");
+  });
+});
+
+describe("a game the server no longer has", () => {
+  afterEach(() => {
+    useGameStore.getState().reset();
+    vi.mocked(getView).mockReset();
+  });
+
+  it("returns to the welcome screen with a notice instead of polling forever", async () => {
+    vi.mocked(getView).mockRejectedValueOnce(
+      Object.assign(new Error("session not found"), { status: 404 }),
+    );
+    useGameStore.getState().setSession("s1", "p0", {});
+
+    await useGameStore.getState().refreshView();
+
+    const state = useGameStore.getState();
+    expect(state.screen).toBe("welcome");
+    expect(state.sessionId).toBeNull();
+    expect(state.notice).toBe(SESSION_LOST_NOTICE);
+    expect(state.connectionError).toBeNull();
+  });
+
+  it("keeps the game on a transient failure", async () => {
+    vi.mocked(getView).mockRejectedValueOnce(
+      Object.assign(new Error("HTTP 502"), { status: 502 }),
+    );
+    useGameStore.getState().setSession("s1", "p0", {});
+
+    await useGameStore.getState().refreshView();
+
+    expect(useGameStore.getState().sessionId).toBe("s1");
+    expect(useGameStore.getState().connectionError).toBe("HTTP 502");
+  });
+
+  it("clears the notice when a new game starts", () => {
+    useGameStore.getState().sessionLost();
+    useGameStore.getState().setSession("s2", "p0", {});
+    expect(useGameStore.getState().notice).toBeNull();
   });
 });

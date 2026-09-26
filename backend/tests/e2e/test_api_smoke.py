@@ -356,3 +356,19 @@ def test_analysis_transcript_is_available_only_after_game_over():
     assert len(body["names"]) == 17
     assert len(body["roles"]) == 17
     assert body["final_state"]["phase"] == "game_over"
+
+
+def test_health_never_echoes_a_raw_provider_value(monkeypatch):
+    """/api/health is unauthenticated; a secret pasted into the provider field
+    must not be read back from it."""
+    from fastapi.testclient import TestClient
+
+    from app import main
+    from app.config import Settings
+
+    settings = Settings()
+    monkeypatch.setattr(main, "get_settings", lambda: settings)
+    health = TestClient(main.create_app())
+    settings.werewolf_llm_provider = "sk-pasted-in-the-wrong-box"
+
+    assert health.get("/api/health").json()["llm_provider"] == "invalid"

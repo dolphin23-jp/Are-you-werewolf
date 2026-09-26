@@ -8,6 +8,7 @@ export function WelcomeScreen() {
   const [localError, setLocalError] = useState<string | null>(null);
   const setSession = useGameStore((s) => s.setSession);
   const refreshView = useGameStore((s) => s.refreshView);
+  const notice = useGameStore((s) => s.notice);
 
   const handleStart = async () => {
     setLoading(true);
@@ -28,6 +29,11 @@ export function WelcomeScreen() {
     <div className="screen screen--welcome">
       <h1>Are you werewolf?</h1>
       <p className="lead">AI 16人と挑む、本格チャット人狼。</p>
+      {notice && (
+        <p className="error-text" role="status">
+          {notice}
+        </p>
+      )}
       <label className="field">
         <span>あなたの名前</span>
         <input

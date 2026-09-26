@@ -16,6 +16,18 @@ function sameOriginWsBase(): string {
 
 export const WS_BASE = import.meta.env.VITE_WS_BASE_URL ?? sameOriginWsBase();
 
+/** A failed request, with its HTTP status so callers can tell "this game no
+ * longer exists" (404) from a passing network problem. */
+export class ApiError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     ...init,
@@ -23,7 +35,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (!response.ok) {
     const body = (await response.json().catch(() => ({}))) as { detail?: unknown };
-    throw new Error(describeError(body.detail) ?? `HTTP ${response.status}`);
+    throw new ApiError(describeError(body.detail) ?? `HTTP ${response.status}`, response.status);
   }
   if (response.status === 204) {
     return undefined as T;

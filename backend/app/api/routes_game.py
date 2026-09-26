@@ -107,10 +107,13 @@ def _run(fn: object, *args: object, **kwargs: object) -> Any:
 @router.post("", response_model=CreateGameResponse)
 async def create_game(req: CreateGameRequest) -> CreateGameResponse:
     settings = get_settings()
-    if req.human_name in AI_NAME_POOL:
-        # Speech parsing matches players by name; two seats with one name
-        # registered a verdict about one of them against both.
-        raise HTTPException(status_code=400, detail="その名前はAIプレイヤーが使っています")
+    if any(req.human_name in name or name in req.human_name for name in AI_NAME_POOL):
+        # Speech parsing matches players by name as a substring: a seat named
+        # like an AI (or containing one, "ユイカ" vs "ユイ") had a verdict about
+        # one of them registered against both.
+        raise HTTPException(
+            status_code=400, detail="AIプレイヤーの名前と重なる名前は使えません"
+        )
     session_id = _new_session_id()
     human_id = "p0"
     specs = [PlayerSpec(player_id=human_id, name=req.human_name, is_human=True)]

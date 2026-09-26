@@ -106,14 +106,15 @@ def quoted_speech(text: str) -> str:
 
 
 class DaySummaryManager:
-    """Bounded rolling-summary memory: full current-day log stays verbatim,
-    older days degrade to compressed summaries instead of ever-growing
-    transcript replay.
+    """Rolling-summary memory: full current-day log stays verbatim, older days
+    degrade to compressed summaries instead of ever-growing transcript replay.
 
     Facts and commentary are stored apart. The public-fact block is generated
     deterministically from the ledger and must survive compression intact --
     truncating it would leave the AI recalling half a vote history. Only the
-    generated commentary, which is opinion, gets shortened."""
+    generated commentary, which is opinion, gets shortened, so the total is
+    bounded per day of commentary but the facts grow with the game (one
+    block per day)."""
 
     def __init__(self) -> None:
         self.summaries: dict[int, str] = {}
@@ -314,16 +315,19 @@ class ContextBuilder:
         parts = [render_board_analysis(analysis, state)]
         # Night N deaths are announced after start_discussion increments the
         # public day to N+1; executions remain attached to their discussion day.
+        # The first victim is a public category of its own, and on day 1 it
+        # is part of the morning; it used to be left out of this list.
         todays_deaths = [
             death
             for death in state.death_records
-            if death.day == state.day - 1 and death.cause.value in ("attacked", "cursed")
+            if death.day == state.day - 1
+            and death.cause.value in ("attacked", "cursed", "first_victim")
         ]
         if todays_deaths:
             night_names = [
                 player_label(state, death.player_id)
+                + ("(初日犠牲者)" if death.cause.value == "first_victim" else "")
                 for death in todays_deaths
-                if death.cause.value in ("attacked", "cursed")
             ]
             if night_names:
                 parts.append(

@@ -1,16 +1,19 @@
 """AICoordinator: orchestrates all AI players through each game phase with
 a phase-appropriate concurrency policy:
 
-  - discussion: strictly sequential (each AI reads prior messages before
-    speaking, for coherence)
+  - discussion: a bounded, prioritised queue (morning COs and results first,
+    then opening views, directed questions, rebuttals and reassessments),
+    drained in segments so the human can speak between them
   - voting: parallel (independent judgments), looped across runoff rounds
   - night: independent actions (divine/guard/wolf-chat/freemason-chat) run
     in parallel, then the alpha werewolf's attack decision runs afterward,
     fed the wolf-chat transcript
 
-CO (role-claim) detection is always based on pattern-matching the AI's own
-generated public chat text -- never a scripted side-channel -- so bluffing
-stays emergent rather than scripted.
+An AI's CO and results are its structured declarations (`public_claim_role`,
+`public_results`); `ensure_fact_sentences` writes them into the public text so
+what the table reads and what the ledger holds cannot disagree. Pattern
+matching fills in only categories the structured output left empty, and
+human messages.
 """
 
 from __future__ import annotations
@@ -721,11 +724,10 @@ class AICoordinator:
         round_state.awaiting_since = time.time() if awaiting else None
 
     async def _morning_intent(self, state: GameState, player_id: str) -> MorningIntentOutput:
-        if self.reasoning is not None:
-            output = self._coded_morning_intent(state, player_id)
-        else:
-            system, messages = self._context.build_morning_intent_context(state, player_id)
-            output = await self._agents[player_id].generate_morning_intent(system, messages)
+        # Legacy engine only: with a reasoning runtime the opening order comes
+        # from `_coded_discussion_round` and this is never called.
+        system, messages = self._context.build_morning_intent_context(state, player_id)
+        output = await self._agents[player_id].generate_morning_intent(system, messages)
         player = state.players[player_id]
         if self._freemason_public_plan is not None and player.role == RoleName.FREEMASON:
             leader, partner, full_reveal = self._freemason_public_plan
@@ -761,35 +763,6 @@ class AICoordinator:
             output.intent = "publish_result"
             output.public_claim_role = player.role.value
         return output
-
-    def _coded_morning_intent(self, state: GameState, player_id: str) -> MorningIntentOutput:
-        """Who speaks first is a scheduling question, not a language one.
-
-        Holding an unpublished result outranks everything; the rest follows the
-        speech-value ranking the runtime already computes. One request per AI
-        per morning disappears.
-        """
-        assert self.reasoning is not None
-        player = state.players[player_id]
-        has_result = any(r.seer_id == player_id for r in state.divine_records) or any(
-            r.medium_id == player_id for r in state.medium_records
-        )
-        if has_result and player.role in (RoleName.SEER, RoleName.MEDIUM):
-            return MorningIntentOutput(
-                timing="immediate",
-                intent="publish_result",
-                public_claim_role=player.role.value,
-                priority_reason="未公開の能力結果を持つ",
-            )
-        candidates = {item.player_id: item for item in self.reasoning.speech_candidates(state)}
-        candidate = candidates.get(player_id)
-        if candidate is None or candidate.value <= 0:
-            return MorningIntentOutput(timing="hold", intent="normal")
-        return MorningIntentOutput(
-            timing="normal" if candidate.value < 2.5 else "after_results",
-            intent="lead" if candidate.value >= 2.5 else "normal",
-            priority_reason="、".join(candidate.reasons),
-        )
 
     async def _speak(
         self, controller: object, state: GameState, player_id: str, stage: str
@@ -835,6 +808,9 @@ class AICoordinator:
             # now would put a CO or a result into the vote.
             return None
         model_requested_target = output.reasoning_memo.execution_target
+        # Judged on the model's own text: the rewrites below (a forced target,
+        # fact sentences) changed it, so the canned line was never matched.
+        used_fallback = self._is_fallback(player_id, output.public_message)
         if freemason_opening is not None:
             output.public_message = freemason_opening
             output.public_claim_role = RoleName.FREEMASON.value
@@ -938,7 +914,6 @@ class AICoordinator:
             # Agreement with no new argument is a reaction, not an analysis. Cut at a
             # sentence boundary so the shortened line still reads as finished Japanese.
             output.public_message = truncate_at_sentence(output.public_message, _REACTION_MAX_CHARS)
-        self._context.set_reasoning_memo(player_id, output.reasoning_memo.model_dump())
         # The claims this turn publishes are decided before it is spoken, so the
         # message can be made to state them. Dropping a declared verdict because
         # the prose forgot to name its target is how a result silently vanishes.
@@ -959,23 +934,6 @@ class AICoordinator:
                 PublicFactLedger(state),
                 speaker_id=player_id,
             )
-        self._record(
-            state,
-            player_id,
-            "discussion",
-            text=output.public_message,
-            reasoning_memo=output.reasoning_memo,
-            used_fallback=self._is_fallback(player_id, output.public_message),
-            public_claim_role=output.public_claim_role,
-            public_results=[item.model_dump() for item in output.public_results],
-            directed_question_targets=[item.target_id for item in output.directed_questions],
-            ready_to_vote=output.ready_to_vote,
-            effective_length_limit=discussion_length_range(
-                self._personalities[player_id].verbosity
-            )[1],
-            key_point=output.key_point,
-            agrees_with=output.agrees_with,
-        )
         try:
             message_id = controller.chat(  # type: ignore[attr-defined]
                 player_id,
@@ -986,8 +944,27 @@ class AICoordinator:
             )
         except GameError:
             # The engine refused the message (the speaker died mid-round, say).
-            # Nothing was displayed, so nothing is recorded as said.
+            # Nothing was displayed, so nothing is recorded as said -- the memo
+            # and the transcript line used to be written before this check.
             return None
+        self._context.set_reasoning_memo(player_id, output.reasoning_memo.model_dump())
+        self._record(
+            state,
+            player_id,
+            "discussion",
+            text=output.public_message,
+            reasoning_memo=output.reasoning_memo,
+            used_fallback=used_fallback,
+            public_claim_role=output.public_claim_role,
+            public_results=[item.model_dump() for item in output.public_results],
+            directed_question_targets=[item.target_id for item in output.directed_questions],
+            ready_to_vote=output.ready_to_vote,
+            effective_length_limit=discussion_length_range(
+                self._personalities[player_id].verbosity
+            )[1],
+            key_point=output.key_point,
+            agrees_with=output.agrees_with,
+        )
         displayed_target: str | None = None
         if decision is not None and self.reasoning is not None:
             # Read back from the string the table saw, not copied from the
@@ -995,7 +972,7 @@ class AICoordinator:
             displayed_target = displayed_execution_target(
                 output.public_message, PublicFactLedger(state)
             )
-            self.reasoning.record_stated_target(player_id, displayed_target)
+            self.reasoning.record_stated_target(player_id, displayed_target, state.day)
         required_ids: tuple[str, ...] = ()
         if self._recorder is not None and decision is not None and self.reasoning is not None:
             belief = self.reasoning.seats[player_id].belief
@@ -1467,7 +1444,7 @@ class AICoordinator:
             # Compared against what this seat actually told the table, not
             # against another internal number -- otherwise the check is the
             # runtime marking its own homework.
-            stated_target = self.reasoning.stated_target(player_id)
+            stated_target = self.reasoning.stated_target(player_id, state.day)
             output = VoteOutput(
                 vote_target=target,
                 reason=reason,

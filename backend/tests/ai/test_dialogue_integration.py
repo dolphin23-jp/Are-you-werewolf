@@ -206,12 +206,22 @@ def test_a_changed_candidate_is_recorded_with_its_reason():
         "p1", [pid for pid in controller.state.alive_ids() if pid != "p1"]
     )
     stated = next(pid for pid in controller.state.alive_ids() if pid not in ("p1", ballot))
-    runtime.record_stated_target("p1", stated)
+    runtime.record_stated_target("p1", stated, controller.state.day)
 
     asyncio.run(coordinator._cast_vote(controller, controller.state, "p1"))
 
     assert coordinator.validation.vote_plan_mismatches
     assert "vote_change" in recorder_seen
+
+
+def test_yesterdays_statement_is_not_todays_plan():
+    """A seat silent today has not restated yesterday's candidate; comparing
+    today's ballot with it logged a change of mind nobody made."""
+    runtime = ReasoningRuntime(make_controller(seed=4).state, ["p1", "p2"], seed=4)
+    runtime.record_stated_target("p1", "p5", 1)
+
+    assert runtime.stated_target("p1", 1) == "p5"
+    assert runtime.stated_target("p1", 2) is None
 
 
 # -- the speaking order --

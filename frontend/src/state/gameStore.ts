@@ -17,6 +17,8 @@ interface GameStoreState {
   error: string | null;
   /** The latest view refresh failed; cleared by the next one that succeeds. */
   connectionError: string | null;
+  /** Shown on the welcome screen after a game was lost (e.g. server restart). */
+  notice: string | null;
   busy: boolean;
   selectedSpeakerId: string | null;
 
@@ -34,6 +36,17 @@ interface GameStoreState {
   refreshView: () => Promise<void>;
   refreshDebug: () => Promise<void>;
   reset: () => void;
+  /** The server no longer has this game: go back to the start with a notice. */
+  sessionLost: () => void;
+}
+
+export const SESSION_LOST_NOTICE =
+  "ゲームが見つかりません。サーバーが再起動した可能性があります。新しいゲームを始めてください。";
+
+/** A 404 for the game itself. Duck-typed rather than `instanceof ApiError`,
+ * so the check does not depend on how the client module is loaded. */
+function isSessionGone(error: unknown): boolean {
+  return typeof error === "object" && error !== null && (error as { status?: unknown }).status === 404;
 }
 
 const viewRefresh: { inFlight: Promise<void> | null; again: boolean } = {
@@ -52,6 +65,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
   connected: false,
   error: null,
   connectionError: null,
+  notice: null,
   busy: false,
   selectedSpeakerId: null,
 
@@ -69,6 +83,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
       debugMode: false,
       error: null,
       connectionError: null,
+      notice: null,
       screen: "role-reveal",
     }),
   setConnected: (connected) => set({ connected }),
@@ -99,6 +114,11 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
           set({ view, connectionError: null });
         } catch (e) {
           if (get().sessionId !== sessionId) return;
+          if (isSessionGone(e)) {
+            // Polling and reconnecting would go on forever behind a banner.
+            get().sessionLost();
+            return;
+          }
           set({ connectionError: e instanceof Error ? e.message : "通信エラーが発生しました" });
         }
       } while (viewRefresh.again);
@@ -131,7 +151,13 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
       connected: false,
       error: null,
       connectionError: null,
+      notice: null,
       busy: false,
       selectedSpeakerId: null,
     }),
+
+  sessionLost: () => {
+    get().reset();
+    set({ notice: SESSION_LOST_NOTICE });
+  },
 }));

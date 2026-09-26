@@ -27,3 +27,17 @@ def test_rope_count_is_the_misses_left_after_a_night_attack_each_day():
     assert StrategyAnalyzer()._rope_count(3, 16) == 4
     assert StrategyAnalyzer()._rope_count(1, 5) == 1
     assert StrategyAnalyzer()._rope_count(3, 6) == 0
+
+
+def test_a_publicly_divined_seat_is_no_longer_gray():
+    """The label says "無CO・未言及"; a seat with a public white stayed listed."""
+    controller = make_controller(seed=2)
+    ids = controller.state.alive_ids()
+    controller.state.day = 1
+    controller.co(ids[0], RoleName.SEER.value)
+    controller.public_result(ids[0], "seer", ids[1], False)
+
+    analysis = StrategyAnalyzer().analyze(controller.state)
+
+    assert ids[1] not in analysis.gray_player_ids
+    assert ids[2] in analysis.gray_player_ids

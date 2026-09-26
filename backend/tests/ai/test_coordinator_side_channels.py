@@ -88,3 +88,32 @@ def test_a_human_wolf_is_not_given_a_part_in_the_ai_wolves_plan():
         plan = coordinator._wolf_deception
         assert "p0" not in plan.fake_role_by_player
         assert "p0" not in plan.lurking_player_ids
+
+
+def test_a_refused_message_is_not_recorded_as_said():
+    """The memo and the transcript line used to be written before the engine
+    accepted the message, so a turn nobody heard showed up as spoken."""
+    from app.engine.game import GameError
+    from app.eval.transcript import TranscriptRecorder
+
+    controller = make_controller(seed=3)
+    recorder = TranscriptRecorder()
+    coordinator = AICoordinator(
+        controller.state, AI_IDS, MockProvider(seed=3), seed=3, recorder=recorder,
+        pacing_scale=0.0,
+    )
+    state = controller.state
+    controller.start_game()
+    controller.resolve_night()
+    controller.start_discussion()
+    speaker = next(pid for pid in AI_IDS if state.players[pid].alive)
+
+    def refuse(*args, **kwargs):  # type: ignore[no-untyped-def]
+        raise GameError("the speaker died mid-round")
+
+    controller.chat = refuse  # type: ignore[method-assign]
+    result = asyncio.run(coordinator._speak(controller, state, speaker, "initial_view"))
+
+    assert result is None
+    assert not [u for u in recorder.transcript.utterances if u.player_id == speaker]
+    assert coordinator._context.get_reasoning_memo(speaker) in (None, {})

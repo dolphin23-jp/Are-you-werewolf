@@ -44,3 +44,13 @@ def test_a_malformed_authorization_header_is_refused_not_a_crash():
     client = _protected_app()
     response = client.get("/", headers={"Authorization": "Basic ßßß".encode("latin-1")})
     assert response.status_code == 401
+
+
+def test_the_basic_scheme_is_case_insensitive():
+    import base64
+
+    token = base64.b64encode(b"werewolf:secret").decode()
+    client = _protected_app()
+    assert client.get("/", headers={"Authorization": f"basic {token}"}).status_code == 200
+    assert client.get("/", headers={"Authorization": f"BASIC {token}"}).status_code == 200
+    assert client.get("/", headers={"Authorization": f"Bearer {token}"}).status_code == 401

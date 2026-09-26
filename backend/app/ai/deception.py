@@ -75,7 +75,12 @@ def assign_madman_strategy(seed: int | None = None) -> tuple[str, RoleName | Non
 
 @dataclass
 class FakeClaimGuard:
-    """Consistency enforcement for the werewolf team's fabricated claims."""
+    """Consistency checks for the werewolf team's fabricated claims.
+
+    Not wired into the speech path: fake-result consistency is currently
+    enforced by the engine's redundant-result check and the validation layer.
+    Kept (and tested) for when the claim drafts consult it.
+    """
 
     wolf_team_ids: set[str]
     _claimed_targets_by_faker: dict[str, set[str]] = field(default_factory=dict)

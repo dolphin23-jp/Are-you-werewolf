@@ -12,6 +12,7 @@ export function useGameSocket(): void {
   const setConnected = useGameStore((s) => s.setConnected);
   const refreshView = useGameStore((s) => s.refreshView);
   const refreshDebug = useGameStore((s) => s.refreshDebug);
+  const sessionLost = useGameStore((s) => s.sessionLost);
 
   const onEventRef = useRef<() => void>(() => {});
   onEventRef.current = () => {
@@ -38,11 +39,16 @@ export function useGameSocket(): void {
       socket.onmessage = () => {
         onEventRef.current();
       };
-      socket.onclose = () => {
+      socket.onclose = (event) => {
         // A late close from the previous session's socket must not mark the
         // current, live connection as down.
         if (cancelled) return;
         setConnected(false);
+        if (event.code === 4404) {
+          // The server has no such game (it restarted): retrying cannot help.
+          sessionLost();
+          return;
+        }
         retryTimer = setTimeout(connect, retryDelay);
         retryDelay = Math.min(retryDelay * 2, 15000);
       };
@@ -58,5 +64,5 @@ export function useGameSocket(): void {
       if (retryTimer) clearTimeout(retryTimer);
       socket?.close();
     };
-  }, [sessionId, humanId, setConnected]);
+  }, [sessionId, humanId, setConnected, sessionLost]);
 }

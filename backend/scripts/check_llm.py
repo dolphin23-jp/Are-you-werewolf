@@ -111,10 +111,10 @@ async def main() -> int:
     print(f"{INFO}WEREWOLF_LLM_PROVIDER = {settings.werewolf_llm_provider}")
     print(f"{INFO}LUNA_BASE_URL         = {settings.luna_base_url}")
     print(f"{INFO}LUNA_MODEL            = {model}")
-    print(f"{INFO}LUNA_API_KEY          = {_mask(settings.luna_api_key)}")
+    print(f"{INFO}LUNA_API_KEY          = {_mask(settings.luna_api_key.get_secret_value())}")
 
     problems = []
-    if not settings.luna_api_key:
+    if not settings.luna_api_key.get_secret_value():
         problems.append(
             "LUNA_API_KEY が空です。Codespaces secrets に登録したあと、"
             "Codespace を再起動しないと反映されません。"
@@ -133,7 +133,7 @@ async def main() -> int:
     from openai import AsyncOpenAI  # imported late so the checks above run without it
 
     client = AsyncOpenAI(
-        api_key=settings.luna_api_key,
+        api_key=settings.luna_api_key.get_secret_value(),
         base_url=settings.luna_base_url,
         timeout=settings.luna_timeout_seconds,
     )

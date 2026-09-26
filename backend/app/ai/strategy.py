@@ -58,7 +58,12 @@ class StrategyAnalyzer:
         # Private divine/medium records must never influence a public board
         # analysis. A result only becomes public once its owner says it in the
         # public chat; until then every non-CO living player remains gray.
-        excluded = claimed_ids
+        # A public divination (white or black) does take a seat out of the
+        # gray, as the "無CO・未言及" label says -- it used to stay listed.
+        divined_ids = {
+            claim.target_id for claim in state.public_result_claims if claim.result_type == "seer"
+        }
+        excluded = claimed_ids | divined_ids
         gray_ids = [p.player_id for p in alive if p.player_id not in excluded]
 
         # From a village-side vantage point the true wolf count is hidden;

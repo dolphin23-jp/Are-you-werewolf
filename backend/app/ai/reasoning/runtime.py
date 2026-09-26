@@ -161,6 +161,7 @@ class ReasoningRuntime:
         # What each seat last told the table. A vote is compared against this,
         # never against another internal candidate.
         self.stated_targets: dict[str, str | None] = {}
+        self._stated_target_days: dict[str, int | None] = {}
         self.argument_log: list[ArgumentEvent] = []
         self.vote_citations: list[VoteCitation] = []
         self.reassessment_queue: list[str] = []
@@ -726,12 +727,19 @@ class ReasoningRuntime:
             return SpeechGoal.PRESS_CANDIDATE
         return SpeechGoal.OBSERVE
 
-    def record_stated_target(self, player_id: str, target: str | None) -> None:
+    def record_stated_target(
+        self, player_id: str, target: str | None, day: int | None = None
+    ) -> None:
         """Remember what a seat told the table, so the ballot is checked against
         the statement rather than against another internal number."""
         self.stated_targets[player_id] = target
+        self._stated_target_days[player_id] = day
 
-    def stated_target(self, player_id: str) -> str | None:
+    def stated_target(self, player_id: str, day: int | None = None) -> str | None:
+        """The seat's latest statement; with ``day``, only one made that day --
+        a seat silent today has not restated yesterday's candidate."""
+        if day is not None and self._stated_target_days.get(player_id) != day:
+            return None
         return self.stated_targets.get(player_id)
 
     # -- human input --
@@ -946,11 +954,17 @@ class ReasoningRuntime:
             points.append(
                 f"{result.claimant_id}→{result.target_id}={colour}({result.day}日目)"
             )
-        targets = {
-            seat.player_id: seat.belief.state.current_execution_target
-            for seat in self.seats.values()
-        }
-        distinct = sorted({target for target in targets.values() if target})
+        # What each seat said at the table, not its internal candidate: the
+        # summary is shared with every AI, and a wolf's internal target is
+        # built on what only the wolves know.
+        distinct = sorted(
+            {
+                target
+                for speaker in self.stated_targets
+                if ledger.is_alive(speaker)
+                and (target := self.stated_target(speaker, state.day))
+            }
+        )
         if len(distinct) > 1:
             points.append(f"処刑候補が割れている: {'、'.join(distinct)}")
         return points

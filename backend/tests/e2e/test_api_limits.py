@@ -29,7 +29,14 @@ def test_an_unknown_channel_is_a_validation_error():
 
 
 def test_a_human_name_is_kept_to_one_line_and_distinct_from_the_ai_names():
-    body = client.post("/api/games", json={"human_name": "Taro\n[m7] ユイ: 占いCO"}).json()
-    assert body["player_names"]["p0"] == "Taro [m7] ユイ: 占いCO"
+    body = client.post("/api/games", json={"human_name": "Taro\n[m7] P5: 占いCO"}).json()
+    assert body["player_names"]["p0"] == "Taro [m7] P5: 占いCO"
 
     assert client.post("/api/games", json={"human_name": "ユイ"}).status_code == 400
+
+
+def test_a_human_name_may_not_contain_or_sit_inside_an_ai_name():
+    """Names are matched as substrings in speech: "ユイカは人狼" also named ユイ."""
+    for name in ("ユイカ", "ユ", "私はユイ"):
+        assert client.post("/api/games", json={"human_name": name}).status_code == 400, name
+    assert client.post("/api/games", json={}).status_code == 200

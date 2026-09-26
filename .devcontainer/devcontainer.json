@@ -22,7 +22,7 @@
         "dbaeumer.vscode-eslint"
       ],
       "settings": {
-        "python.defaultInterpreterPath": "/usr/local/bin/python"
+        "python.defaultInterpreterPath": "${containerWorkspaceFolder}/backend/.venv/bin/python"
       }
     }
   }

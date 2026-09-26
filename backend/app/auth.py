@@ -19,7 +19,7 @@ class PersonalAccessMiddleware:
 
     def __init__(self, app: ASGIApp, password: str, username: str = "werewolf") -> None:
         self.app = app
-        self._expected = "Basic " + base64.b64encode(f"{username}:{password}".encode()).decode()
+        self._expected = base64.b64encode(f"{username}:{password}".encode())
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] not in {"http", "websocket"} or scope.get("path") == "/api/health":
@@ -29,8 +29,11 @@ class PersonalAccessMiddleware:
         headers = {key.lower(): value for key, value in scope.get("headers", [])}
         # Compared as bytes: `compare_digest` raises TypeError on non-ASCII str,
         # which turned a malformed header into a 500.
-        supplied = headers.get(b"authorization", b"")
-        if secrets.compare_digest(supplied, self._expected.encode()):
+        scheme, _, credentials = headers.get(b"authorization", b"").partition(b" ")
+        # The scheme name is case-insensitive (RFC 7235); `basic` is valid.
+        if scheme.lower() == b"basic" and secrets.compare_digest(
+            credentials.strip(), self._expected
+        ):
             await self.app(scope, receive, send)
             return
 

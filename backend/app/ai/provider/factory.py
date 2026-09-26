@@ -11,6 +11,8 @@ from app.ai.provider.mock import MockProvider
 from app.ai.provider.scenario import ScenarioProvider
 from app.config import Settings
 
+KNOWN_PROVIDERS = ("mock", "scenario", "luna")
+
 
 class LLMProviderConfigError(RuntimeError):
     pass
@@ -33,7 +35,7 @@ def build_llm_provider(
         return ScenarioProvider(seed=seed, metrics=metrics)
 
     if provider == "luna":
-        if not settings.luna_api_key:
+        if not settings.luna_api_key.get_secret_value():
             raise LLMProviderConfigError(
                 "WEREWOLF_LLM_PROVIDER=luna but LUNA_API_KEY is not set. "
                 "Set LUNA_API_KEY/LUNA_BASE_URL/LUNA_MODEL, or switch to "
@@ -42,7 +44,7 @@ def build_llm_provider(
         from app.ai.provider.luna_openai import LunaOpenAIProvider
 
         return LunaOpenAIProvider(
-            api_key=settings.luna_api_key,
+            api_key=settings.luna_api_key.get_secret_value(),
             base_url=settings.luna_base_url,
             model=settings.luna_model,
             max_concurrency=settings.luna_max_concurrency,
@@ -51,6 +53,24 @@ def build_llm_provider(
             metrics=metrics,
         )
 
+    # Not echoed: a secret pasted into the wrong variable would otherwise be
+    # returned in the 500 detail of every game creation.
     raise LLMProviderConfigError(
-        f"unknown WEREWOLF_LLM_PROVIDER={settings.werewolf_llm_provider!r}"
+        "unknown WEREWOLF_LLM_PROVIDER; expected one of: " + ", ".join(KNOWN_PROVIDERS)
     )
+
+
+def validate_provider_settings(settings: Settings) -> None:
+    """Raise at startup for the misconfigurations `build_llm_provider` would
+    only report when the first game is created."""
+    provider = settings.werewolf_llm_provider.lower()
+    if provider not in KNOWN_PROVIDERS:
+        raise LLMProviderConfigError(
+            "unknown WEREWOLF_LLM_PROVIDER; expected one of: " + ", ".join(KNOWN_PROVIDERS)
+        )
+    if provider == "luna" and not settings.luna_api_key.get_secret_value():
+        raise LLMProviderConfigError(
+            "WEREWOLF_LLM_PROVIDER=luna but LUNA_API_KEY is not set. "
+            "Set LUNA_API_KEY/LUNA_BASE_URL/LUNA_MODEL, or switch to "
+            "WEREWOLF_LLM_PROVIDER=mock for offline development."
+        )

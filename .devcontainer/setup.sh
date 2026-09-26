@@ -5,8 +5,11 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
-echo "==> Installing backend dependencies"
-pip install --no-cache-dir -e "./backend[dev]"
+echo "==> Installing backend dependencies into backend/.venv"
+# The Makefile, CLAUDE.md and start.sh all activate backend/.venv; installing
+# into the system interpreter left `make backend-test`/`lint` without pytest.
+python -m venv backend/.venv
+backend/.venv/bin/pip install --no-cache-dir -e "./backend[dev]"
 
 echo "==> Installing frontend dependencies"
 corepack enable
