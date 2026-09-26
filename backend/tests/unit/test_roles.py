@@ -5,6 +5,7 @@ from app.engine.roles import (
     RoleAssigner,
     RoleName,
 )
+from tests.conftest import make_controller
 
 
 def test_total_players_is_17():
@@ -54,3 +55,34 @@ def test_alpha_wolf_no_reassign_when_non_alpha_dies():
     other = next(w for w in ("w1", "w2", "w3") if w != alpha)
     tracker.on_wolf_death(other)
     assert tracker.alpha_id == alpha
+
+
+def test_alpha_wolf_successor_is_reproducible_from_the_seed():
+    """Replaying a seed must pick the same successor, or every later attack forks."""
+    for seed in range(30):
+        successors = []
+        for _ in range(2):
+            tracker = AlphaWolfTracker(["w1", "w2", "w3"], seed=seed)
+            tracker.on_wolf_death(tracker.alpha_id)
+            successors.append(tracker.alpha_id)
+        assert successors[0] == successors[1], f"seed {seed} diverged: {successors}"
+
+
+def test_executing_the_alpha_picks_the_same_successor_on_replay():
+    def successor(seed: int) -> str:
+        controller = make_controller(seed=seed)
+        controller.start_game()
+        controller.resolve_night()
+        controller.start_discussion()
+        controller.end_discussion()
+        alpha = controller.alpha_wolf_id
+        for voter in controller.state.alive_ids():
+            if voter != alpha:
+                controller.vote(voter, alpha)
+        controller.vote(alpha, next(p for p in controller.state.alive_ids() if p != alpha))
+        controller.resolve_votes()
+        assert not controller.state.players[alpha].alive
+        return controller.alpha_wolf_id
+
+    for seed in range(1, 21):
+        assert successor(seed) == successor(seed), f"seed {seed} diverged"
