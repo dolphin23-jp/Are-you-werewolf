@@ -113,3 +113,70 @@ def test_multiprocess_population_evaluation_validates_worker_limits(tmp_path: Pa
             (request,),
             inference_coalesce_seconds=-0.1,
         )
+
+
+# -- a worker that dies must fail the evaluation, not hang it --
+
+
+def _exit_without_result(sender) -> None:  # type: ignore[no-untyped-def]
+    import os
+
+    sender.close()
+    os._exit(7)
+
+
+def _die_mid_message(sender) -> None:  # type: ignore[no-untyped-def]
+    import os
+    import struct
+
+    # A length header promising more bytes than ever arrive: what a SIGKILL
+    # during a large send leaves in the pipe.
+    os.write(sender.fileno(), struct.pack("!i", 4096) + b"partial")
+    os._exit(9)
+
+
+def _stay_silent(sender) -> None:  # type: ignore[no-untyped-def]
+    import time
+
+    time.sleep(30)
+
+
+def _serve_one(target, **kwargs):  # type: ignore[no-untyped-def]
+    import multiprocessing as mp
+
+    context = mp.get_context("spawn")
+    receiver, sender = context.Pipe(duplex=False)
+    process = context.Process(target=target, args=(sender,), daemon=True)
+    process.start()
+    sender.close()
+    try:
+        return torch_multiprocess._serve_worker_jobs(
+            channels=[torch_multiprocess._WorkerChannel(0, process, receiver)],
+            job_id=0,
+            model_cache={},
+            response_queues=[],
+            max_inference_batch_size=None,
+            inference_coalesce_seconds=0.0,
+            inference_stats=torch_multiprocess.TorchRolloutInferenceStats(),
+            **kwargs,
+        )
+    finally:
+        if process.is_alive():
+            process.kill()
+        process.join(timeout=5.0)
+        receiver.close()
+
+
+def test_a_worker_that_exits_without_its_result_fails_the_evaluation():
+    with pytest.raises(RuntimeError, match=r"worker 0 exited \(exit code 7\)"):
+        _serve_one(_exit_without_result)
+
+
+def test_a_worker_killed_mid_message_does_not_hang_the_parent():
+    with pytest.raises(RuntimeError, match="worker 0 exited"):
+        _serve_one(_die_mid_message)
+
+
+def test_a_silent_live_worker_times_out_instead_of_hanging():
+    with pytest.raises(RuntimeError, match="received nothing"):
+        _serve_one(_stay_silent, idle_timeout_seconds=0.5)

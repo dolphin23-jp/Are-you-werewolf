@@ -5,7 +5,7 @@ from __future__ import annotations
 import multiprocessing as mp
 import traceback
 from dataclasses import dataclass
-from queue import Empty
+from multiprocessing.connection import Connection, wait
 from time import perf_counter
 from typing import Any, cast
 
@@ -100,14 +100,14 @@ class _RemoteInferenceCollector(TorchVectorizedEpisodeCollector):
         default_policy_id: str,
         *,
         worker_id: int,
-        inference_queue: Any,
+        upstream: Connection,
         response_queue: Any,
         max_discussion_ticks: int,
         max_inference_batch_size: int | None,
         temperature: float,
     ) -> None:
         self._worker_id = worker_id
-        self._inference_queue = inference_queue
+        self._upstream = upstream
         self._response_queue = response_queue
         self._next_request_id = 0
         self._proxies: dict[str, _PolicyProxy] = {}
@@ -153,7 +153,7 @@ class _RemoteInferenceCollector(TorchVectorizedEpisodeCollector):
                 request_id = self._next_request_id
                 self._next_request_id += 1
                 pending[request_id] = batch
-                self._inference_queue.put(
+                self._upstream.send(
                     _InferenceMessage(
                         worker_id=self._worker_id,
                         request_id=request_id,
@@ -197,6 +197,7 @@ def evaluate_torch_policy_profiles_multiprocess(
     max_inference_batch_size: int | None = None,
     temperature: float = 1.0,
     inference_coalesce_seconds: float = 0.002,
+    idle_timeout_seconds: float = 600.0,
 ) -> TorchPopulationEvaluationStats:
     """Evaluate CPU game workers while the parent exclusively owns Torch/CUDA.
 
@@ -217,6 +218,8 @@ def evaluate_torch_policy_profiles_multiprocess(
         raise ValueError("max_inference_batch_size must be positive")
     if inference_coalesce_seconds < 0:
         raise ValueError("inference_coalesce_seconds cannot be negative")
+    if idle_timeout_seconds <= 0:
+        raise ValueError("idle_timeout_seconds must be positive")
 
     games = tuple(
         _MultiprocessGame(index, request.profile, seed)
@@ -229,28 +232,31 @@ def evaluate_torch_policy_profiles_multiprocess(
     chunks = _chunk_unique_seeds(games, max_parallel_games=max_parallel_games)
     workers = min(worker_count, max_parallel_games, len(games))
     context = mp.get_context("spawn")
-    inference_queue = context.Queue()
-    result_queue = context.Queue()
     job_queues = [context.Queue() for _ in range(workers)]
     response_queues = [context.Queue() for _ in range(workers)]
-    processes = [
-        context.Process(
+    # Worker -> parent traffic travels on one pipe per worker, not a shared
+    # queue. A worker killed mid-write (OOM, SIGKILL) used to leave a partial
+    # message in the shared pipe, and the parent blocked reading it forever,
+    # since it held a write end of that queue itself. Here the parent keeps no
+    # write end, so the death surfaces as EOF on that worker's pipe alone.
+    channels: list[_WorkerChannel] = []
+    for worker_id in range(workers):
+        receiver, sender = context.Pipe(duplex=False)
+        process = context.Process(
             target=_worker_main,
             args=(
                 worker_id,
                 player_specs,
                 job_queues[worker_id],
-                inference_queue,
+                sender,
                 response_queues[worker_id],
-                result_queue,
             ),
             name=f"werewolf-rollout-{worker_id}",
             daemon=True,
         )
-        for worker_id in range(workers)
-    ]
-    for process in processes:
         process.start()
+        sender.close()
+        channels.append(_WorkerChannel(worker_id, process, receiver))
 
     checkpoint_loads = 0
     inference_stats = TorchRolloutInferenceStats()
@@ -290,15 +296,14 @@ def evaluate_torch_policy_profiles_multiprocess(
                 )
 
             worker_results = _serve_worker_jobs(
-                active_workers=active_workers,
+                channels=channels[:active_workers],
                 job_id=job_id,
                 model_cache=model_cache,
-                inference_queue=inference_queue,
                 response_queues=response_queues,
-                result_queue=result_queue,
                 max_inference_batch_size=max_inference_batch_size,
                 inference_coalesce_seconds=inference_coalesce_seconds,
                 inference_stats=inference_stats,
+                idle_timeout_seconds=idle_timeout_seconds,
             )
             by_index = {
                 game.index: game
@@ -318,7 +323,7 @@ def evaluate_torch_policy_profiles_multiprocess(
             )
             del model_cache
     finally:
-        _stop_workers(processes, job_queues)
+        _stop_workers(channels, job_queues, response_queues)
 
     return TorchPopulationEvaluationStats(
         games=len(games),
@@ -336,9 +341,8 @@ def _worker_main(
     worker_id: int,
     player_specs: list[PlayerSpec],
     job_queue: Any,
-    inference_queue: Any,
+    upstream: Connection,
     response_queue: Any,
-    result_queue: Any,
 ) -> None:
     torch.set_num_threads(1)
     while True:
@@ -346,7 +350,7 @@ def _worker_main(
         if job is None:
             return
         if not isinstance(job, _WorkerJob):
-            result_queue.put(
+            upstream.send(
                 _WorkerResult(
                     worker_id=worker_id,
                     job_id=-1,
@@ -362,7 +366,7 @@ def _worker_main(
                 player_specs,
                 job.games[0].profile.village,
                 worker_id=worker_id,
-                inference_queue=inference_queue,
+                upstream=upstream,
                 response_queue=response_queue,
                 max_discussion_ticks=job.max_discussion_ticks,
                 max_inference_batch_size=job.max_inference_batch_size,
@@ -380,7 +384,7 @@ def _worker_main(
                 tuple(game.seed for game in job.games),
                 team_models=team_models,
             )
-            result_queue.put(
+            upstream.send(
                 _WorkerResult(
                     worker_id=worker_id,
                     job_id=job.job_id,
@@ -397,7 +401,7 @@ def _worker_main(
                 )
             )
         except BaseException:
-            result_queue.put(
+            upstream.send(
                 _WorkerResult(
                     worker_id=worker_id,
                     job_id=job.job_id,
@@ -407,46 +411,49 @@ def _worker_main(
             )
 
 
+@dataclass(frozen=True)
+class _WorkerChannel:
+    worker_id: int
+    process: Any
+    upstream: Connection
+
+
 def _serve_worker_jobs(
     *,
-    active_workers: int,
+    channels: list[_WorkerChannel],
     job_id: int,
     model_cache: dict[str, TorchTransformerPolicy],
-    inference_queue: Any,
     response_queues: list[Any],
-    result_queue: Any,
     max_inference_batch_size: int | None,
     inference_coalesce_seconds: float,
     inference_stats: TorchRolloutInferenceStats,
+    idle_timeout_seconds: float = 600.0,
 ) -> tuple[_WorkerResult, ...]:
     completed: dict[int, _WorkerResult] = {}
-    while len(completed) < active_workers:
-        _drain_worker_results(result_queue, completed, job_id)
-        if len(completed) >= active_workers:
-            break
-        try:
-            first = inference_queue.get(timeout=0.01)
-        except Empty:
-            _assert_workers_not_failed(completed)
+    last_traffic = perf_counter()
+    while len(completed) < len(channels):
+        messages = _receive_worker_messages(channels, completed, job_id, timeout=0.01)
+        _assert_workers_not_failed(completed)
+        if not messages:
+            # Workers that are alive but silent this long are wedged, and waiting
+            # on them is exactly the unbounded hang this loop must not have.
+            if perf_counter() - last_traffic > idle_timeout_seconds:
+                raise RuntimeError(
+                    f"multiprocess rollout received nothing for {idle_timeout_seconds:.0f}s"
+                )
             continue
+        last_traffic = perf_counter()
 
-        messages = [first]
-        if inference_coalesce_seconds == 0:
-            while True:
-                try:
-                    messages.append(inference_queue.get_nowait())
-                except Empty:
-                    break
-        else:
-            deadline = perf_counter() + inference_coalesce_seconds
-            while True:
-                remaining = deadline - perf_counter()
-                if remaining <= 0:
-                    break
-                try:
-                    messages.append(inference_queue.get(timeout=remaining))
-                except Empty:
-                    break
+        deadline = perf_counter() + inference_coalesce_seconds
+        while True:
+            remaining = deadline - perf_counter()
+            more = _receive_worker_messages(
+                channels, completed, job_id, timeout=max(remaining, 0.0)
+            )
+            messages.extend(more)
+            if remaining <= 0 or not more:
+                break
+        _assert_workers_not_failed(completed)
 
         _serve_inference_messages(
             messages,
@@ -459,21 +466,60 @@ def _serve_worker_jobs(
     return tuple(completed[index] for index in sorted(completed))
 
 
-def _drain_worker_results(
-    result_queue: Any,
+def _receive_worker_messages(
+    channels: list[_WorkerChannel],
     completed: dict[int, _WorkerResult],
     job_id: int,
-) -> None:
-    while True:
-        try:
-            result = result_queue.get_nowait()
-        except Empty:
-            return
-        if not isinstance(result, _WorkerResult):
-            raise RuntimeError("multiprocess rollout returned an invalid worker result")
-        if result.job_id != job_id:
-            raise RuntimeError("multiprocess rollout returned a stale worker result")
-        completed[result.worker_id] = result
+    *,
+    timeout: float,
+) -> list[_InferenceMessage]:
+    """Everything the unfinished workers have sent, or a RuntimeError if one died.
+
+    A worker's pipe and its process sentinel are waited on together, so a
+    worker that exits without returning its result -- killed by the OOM
+    killer, a segfault, SIGKILL -- fails the evaluation instead of leaving the
+    parent waiting for a result that will never come.
+    """
+    pending = [channel for channel in channels if channel.worker_id not in completed]
+    if not pending:
+        return []
+    ready = set(
+        wait(
+            [channel.upstream for channel in pending]
+            + [channel.process.sentinel for channel in pending],
+            timeout,
+        )
+    )
+    messages: list[_InferenceMessage] = []
+    for channel in pending:
+        exited = channel.process.sentinel in ready
+        if channel.upstream not in ready and not exited:
+            continue
+        # Drain first: a worker may have sent its result and then exited.
+        while channel.worker_id not in completed and channel.upstream.poll():
+            try:
+                message = channel.upstream.recv()
+            except (EOFError, OSError):
+                raise _worker_died(channel) from None
+            if isinstance(message, _WorkerResult):
+                if message.job_id != job_id:
+                    raise RuntimeError("multiprocess rollout returned a stale worker result")
+                completed[message.worker_id] = message
+            elif isinstance(message, _InferenceMessage):
+                messages.append(message)
+            else:
+                raise RuntimeError("multiprocess rollout returned an invalid worker message")
+        if exited and channel.worker_id not in completed:
+            raise _worker_died(channel)
+    return messages
+
+
+def _worker_died(channel: _WorkerChannel) -> RuntimeError:
+    channel.process.join(timeout=1.0)
+    return RuntimeError(
+        f"multiprocess rollout worker {channel.worker_id} exited "
+        f"(exit code {channel.process.exitcode}) before returning its result"
+    )
 
 
 def _assert_workers_not_failed(completed: dict[int, _WorkerResult]) -> None:
@@ -535,14 +581,23 @@ def _serve_inference_messages(
             raise RuntimeError("multiprocess inference split was inconsistent")
 
 
-def _stop_workers(processes: list[Any], job_queues: list[Any]) -> None:
+def _stop_workers(
+    channels: list[_WorkerChannel], job_queues: list[Any], response_queues: list[Any]
+) -> None:
     for job_queue in job_queues:
         job_queue.put(None)
-    for process in processes:
-        process.join(timeout=5.0)
-        if process.is_alive():
-            process.terminate()
-            process.join(timeout=5.0)
+    for channel in channels:
+        channel.process.join(timeout=5.0)
+        if channel.process.is_alive():
+            channel.process.terminate()
+            channel.process.join(timeout=5.0)
+        channel.upstream.close()
+    # A reply or job still buffered for a worker that is gone would otherwise
+    # keep its queue's feeder thread blocked on a full pipe, and the interpreter
+    # would hang at exit waiting to flush it.
+    for queue in (*job_queues, *response_queues):
+        queue.cancel_join_thread()
+        queue.close()
 
 
 def _chunk_unique_seeds(
