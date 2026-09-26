@@ -405,3 +405,48 @@ async def test_learned_overhead_pads_a_later_turns_request_up_front():
     )
 
     assert budgets == [800 + 1400 + _REASONING_BUDGET_MARGIN]
+
+
+@pytest.mark.asyncio
+async def test_retries_wait_and_honour_retry_after(monkeypatch):
+    provider = LunaOpenAIProvider(
+        api_key="sk-test",
+        base_url="https://example.invalid/v1",
+        model="gpt-5.6-luna",
+        max_retries=2,
+        retry_backoff_seconds=0.5,
+    )
+    slept: list[float] = []
+
+    async def fake_sleep(seconds: float) -> None:
+        slept.append(seconds)
+
+    class Throttled(Exception):
+        response = SimpleNamespace(headers={"retry-after": "7"})
+
+    async def fake_create(**kwargs):
+        raise Throttled()
+
+    monkeypatch.setattr("app.ai.provider.luna_openai._is_retryable", lambda exc: True)
+    monkeypatch.setattr("app.ai.provider.luna_openai.asyncio.sleep", fake_sleep)
+    provider._client.chat.completions.create = fake_create  # type: ignore[method-assign]
+
+    await provider.generate_structured(system="sys", messages=[], response_schema=VoteOutput)
+
+    # Two waits per response mode, each the server's own Retry-After.
+    assert slept == [7.0, 7.0, 7.0, 7.0]
+
+
+def test_backoff_grows_when_the_server_gives_no_retry_after():
+    provider = LunaOpenAIProvider(
+        api_key="sk-test",
+        base_url="https://example.invalid/v1",
+        model="gpt-5.6-luna",
+        retry_backoff_seconds=1.0,
+    )
+    error = RuntimeError("503")
+
+    first, second = provider._retry_delay(1, error), provider._retry_delay(2, error)
+
+    assert 0.5 <= first <= 1.0
+    assert 1.0 <= second <= 2.0

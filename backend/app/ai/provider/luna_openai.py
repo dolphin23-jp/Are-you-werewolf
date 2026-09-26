@@ -40,6 +40,7 @@ latency, and token usage summed across all responses. See `app/ai/metrics.py`.
 from __future__ import annotations
 
 import asyncio
+import random
 import re
 from dataclasses import dataclass
 from typing import Any
@@ -58,6 +59,10 @@ _FENCED_JSON_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
 # overhead below -- the overhead alone covers only what the thinking used
 # last time, not the structural cost of the answer that has to follow it.
 _REASONING_BUDGET_MARGIN = 200
+
+# A server asking for longer than this is better answered with a failed turn
+# and the agent's fallback than with a discussion frozen behind one request.
+_MAX_RETRY_AFTER_SECONDS = 30.0
 
 
 @dataclass
@@ -92,6 +97,7 @@ class LunaOpenAIProvider:
         timeout_seconds: float = 30.0,
         max_retries: int = DEFAULT_MAX_HTTP_RETRIES,
         metrics: MetricsCollector | None = None,
+        retry_backoff_seconds: float = 0.5,
     ) -> None:
         # SDK retries are disabled: doing them here makes every actual request
         # countable and prevents a hidden second retry layer.
@@ -100,6 +106,7 @@ class LunaOpenAIProvider:
         )
         self._model = model
         self._max_retries = max_retries
+        self._retry_backoff_seconds = retry_backoff_seconds
         self._semaphore = asyncio.Semaphore(max_concurrency)
         self._metrics = metrics
         # Learned from the endpoint's own rejections on the first call, then
@@ -287,7 +294,11 @@ class LunaOpenAIProvider:
         """
         requests = 0
         last_error: Exception | None = None
-        for _ in range(self._max_retries + 1):
+        for attempt in range(self._max_retries + 1):
+            if attempt and last_error is not None and _is_retryable(last_error):
+                # Retrying a 429 or 5xx at once only repeats it; all six
+                # attempts used to land within a few milliseconds.
+                await asyncio.sleep(self._retry_delay(attempt, last_error))
             kwargs: dict[str, Any] = {
                 "model": self._model,
                 "messages": openai_messages,
@@ -306,6 +317,19 @@ class LunaOpenAIProvider:
                     raise _RequestFailure(exc, requests) from exc
         assert last_error is not None
         raise _RequestFailure(last_error, requests)
+
+    def _retry_delay(self, attempt: int, error: Exception) -> float:
+        """The server's Retry-After when it sent one, else jittered backoff."""
+        response = getattr(error, "response", None)
+        headers = getattr(response, "headers", None)
+        retry_after = headers.get("retry-after") if headers is not None else None
+        if retry_after is not None:
+            try:
+                return min(max(float(retry_after), 0.0), _MAX_RETRY_AFTER_SECONDS)
+            except ValueError:
+                pass  # an HTTP-date; fall back to backoff
+        backoff: float = self._retry_backoff_seconds * 2 ** (attempt - 1)
+        return backoff * random.uniform(0.5, 1.0)
 
     async def _try_strict_schema(
         self,
