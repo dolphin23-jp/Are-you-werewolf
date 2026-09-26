@@ -2,7 +2,8 @@
 
 Day-0 night (the scripted "first victim" night before Day 1 discussion):
   1. The scripted first victim dies unconditionally (never Wolf/Fox).
-  2. The Seer may optionally divine (result revealed at dawn).
+  2. The Seer may optionally divine (result revealed at dawn). A divined Fox
+     is *not* cursed on Day 0; it survives and reads as "not a werewolf".
 No guard/attack/medium activity happens on Day 0.
 
 Regular night (Day N >= 1):

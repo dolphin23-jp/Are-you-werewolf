@@ -141,6 +141,10 @@ class FoxCurseRuleModule(BaseRuleModule):
     A divined fox always dies that night. So the seat the seer looked at is not
     the fox if it survived, and any *other* seat that died that night is not the
     fox either -- nothing cursed it, and the attack cannot kill a fox.
+
+    Except on night 0: the engine resolves the Day-0 divination without a curse
+    (`NightResolver.resolve_day_zero`), so a fox divined then survives it. Reading
+    that survival as "not the fox" ruled the real world out for the seer.
     """
 
     module_id = "fox_curse"
@@ -155,6 +159,8 @@ class FoxCurseRuleModule(BaseRuleModule):
         if not divines:
             return
         for night, target_id in sorted(divines.items()):
+            if night == 0:
+                continue
             deaths = {death.player_id for death in observations.deaths_on(night)}
             if target_id not in deaths:
                 self._record(
