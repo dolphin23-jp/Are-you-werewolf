@@ -35,6 +35,9 @@ on:
         required: false
         default: "0"
 
+permissions:
+  contents: read
+
 jobs:
   evaluate:
     runs-on: ubuntu-latest
@@ -64,38 +67,47 @@ jobs:
         working-directory: backend
         env:
           WEREWOLF_LLM_PROVIDER: ${{ inputs.provider == 'luna' && 'luna' || 'mock' }}
-          LUNA_API_KEY: ${{ secrets.LUNA_API_KEY }}
-          LUNA_BASE_URL: ${{ secrets.LUNA_BASE_URL }}
+          # The baseline run makes no API call and gets no key.
+          LUNA_API_KEY: ${{ inputs.provider == 'luna' && secrets.LUNA_API_KEY || '' }}
+          LUNA_BASE_URL: ${{ inputs.provider == 'luna' && secrets.LUNA_BASE_URL || '' }}
           LUNA_MODEL: ${{ vars.LUNA_MODEL || 'gpt-5.6-luna' }}
+          # Inputs reach the shell as variables, never as interpolated script text.
+          BENCHMARK_VERSION: ${{ inputs.benchmark_version }}
+          PROVIDER: ${{ inputs.provider }}
+          SEED: ${{ inputs.seed }}
+          SCENARIO_ID: ${{ inputs.scenario_id }}
+          PRICE_IN: ${{ inputs.price_in }}
+          PRICE_OUT: ${{ inputs.price_out }}
         run: |
           extra=()
-          if [ -n "${{ inputs.scenario_id }}" ]; then
-            extra+=(--scenario-id "${{ inputs.scenario_id }}")
+          if [ -n "$SCENARIO_ID" ]; then
+            extra+=(--scenario-id "$SCENARIO_ID")
           fi
-          if [ "${{ inputs.benchmark_version }}" = "v2" ]; then
+          if [ "$BENCHMARK_VERSION" = "v2" ]; then
             script="scripts/evaluate_expert_scenarios_v2.py"
             output_dir="expert-eval-v2-out"
           else
             script="scripts/evaluate_expert_scenarios.py"
             output_dir="expert-eval-out"
           fi
+          # Recorded before running, so a failed benchmark still uploads its
+          # own directory instead of `backend//`, i.e. the whole backend tree.
+          echo "output_dir=$output_dir" >> "$GITHUB_OUTPUT"
           python "$script" \
-            --provider "${{ inputs.provider }}" \
-            --seed "${{ inputs.seed }}" \
-            --price-in "${{ inputs.price_in }}" \
-            --price-out "${{ inputs.price_out }}" \
+            --provider "$PROVIDER" \
+            --seed "$SEED" \
+            --price-in "$PRICE_IN" \
+            --price-out "$PRICE_OUT" \
             --out "$output_dir" \
             "${extra[@]}"
-          echo "output_dir=$output_dir" >> "$GITHUB_OUTPUT"
 
       - name: レポートを画面に表示
         if: always()
         working-directory: backend
+        env:
+          OUTPUT_DIR: ${{ steps.benchmark.outputs.output_dir || (inputs.benchmark_version == 'v2' && 'expert-eval-v2-out' || 'expert-eval-out') }}
         run: |
-          output_dir="${{ steps.benchmark.outputs.output_dir }}"
-          if [ -z "$output_dir" ]; then
-            output_dir="${{ inputs.benchmark_version == 'v2' && 'expert-eval-v2-out' || 'expert-eval-out' }}"
-          fi
+          output_dir="$OUTPUT_DIR"
           if [ -f "$output_dir/report.md" ]; then
             cat "$output_dir/report.md" >> "$GITHUB_STEP_SUMMARY"
           else
@@ -107,5 +119,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: expert-eval-${{ inputs.benchmark_version }}-out
-          path: backend/${{ steps.benchmark.outputs.output_dir }}/
+          path: backend/${{ steps.benchmark.outputs.output_dir || (inputs.benchmark_version == 'v2' && 'expert-eval-v2-out' || 'expert-eval-out') }}/
           retention-days: 30

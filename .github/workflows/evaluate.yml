@@ -25,6 +25,9 @@ on:
         required: false
         default: "0"
 
+permissions:
+  contents: read
+
 jobs:
   evaluate:
     runs-on: ubuntu-latest
@@ -60,15 +63,32 @@ jobs:
           LUNA_API_KEY: ${{ secrets.LUNA_API_KEY }}
           LUNA_BASE_URL: ${{ secrets.LUNA_BASE_URL }}
           LUNA_MODEL: ${{ vars.LUNA_MODEL || 'gpt-5.6-luna' }}
+          # Inputs reach the shell as variables, never as interpolated script
+          # text, so a crafted value cannot run commands next to the API key.
+          GAMES: ${{ inputs.games }}
+          SEED: ${{ inputs.seed }}
+          JUDGE: ${{ inputs.judge }}
+          PRICE_IN: ${{ inputs.price_in }}
+          PRICE_OUT: ${{ inputs.price_out }}
         run: |
+          # Each game is a few hundred paid calls; a typo like 100 should not
+          # be a three-hour bill.
+          if ! [[ "$GAMES" =~ ^[0-9]+$ ]] || (( GAMES < 1 || GAMES > 10 )); then
+            echo "games must be between 1 and 10 (got: $GAMES)" >&2
+            exit 1
+          fi
+          extra=()
+          if [ "$JUDGE" = "true" ]; then
+            extra+=(--judge)
+          fi
           python scripts/evaluate.py \
-            --games "${{ inputs.games }}" \
-            --seed "${{ inputs.seed }}" \
+            --games "$GAMES" \
+            --seed "$SEED" \
             --provider luna \
-            ${{ inputs.judge && '--judge' || '' }} \
-            --price-in "${{ inputs.price_in }}" \
-            --price-out "${{ inputs.price_out }}" \
-            --out eval-out
+            --price-in "$PRICE_IN" \
+            --price-out "$PRICE_OUT" \
+            --out eval-out \
+            "${extra[@]}"
 
       # Renders the report directly on the run page, so it is readable on a
       # phone without downloading the artifact.
