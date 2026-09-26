@@ -10,7 +10,7 @@ from app.ai.reasoning import (
     validate_public_result_claim,
     validate_reasoning_memo,
 )
-from app.ai.schemas import DiscussionOutput, PublicResultClaim, ReasoningMemo
+from app.ai.schemas import ClaimAction, DiscussionOutput, PublicResultClaim, ReasoningMemo
 from app.engine.roles import RoleName
 from tests.ai.reasoning.fixtures import (
     cast_vote,
@@ -333,3 +333,21 @@ def test_a_runoff_that_removed_the_stated_target_is_marked_as_such():
     )
 
     assert mismatch.stated_target_votable is False
+
+
+def test_a_result_given_with_a_slide_is_checked_against_the_new_role():
+    """Sliding seer -> medium and giving a medium result in one message is not
+    impossible; it used to be dropped as `result_role_mismatch`."""
+    state = make_state(day=2)
+    declare_co(state, "p5", RoleName.SEER)
+    execute(state, "p8", day=1)
+    output = DiscussionOutput(
+        public_message="霊媒COに変更します。p8は黒でした。",
+        claim_action=ClaimAction(action="switch", role="medium"),
+        public_results=[PublicResultClaim(result_type="medium", target_id="p8", is_werewolf=True)],
+    )
+
+    output, issues = validate_discussion_output(output, PublicFactLedger(state), speaker_id="p5")
+
+    assert [(r.result_type, r.target_id) for r in output.public_results] == [("medium", "p8")]
+    assert "result_role_mismatch" not in {issue.code for issue in issues}

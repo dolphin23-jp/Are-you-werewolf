@@ -53,6 +53,9 @@ def test_the_public_fact_summary_states_what_happened_and_nothing_else():
     assert "- 処刑結果: Player3(p3)" in summary
     assert "Player0(p0)[0日目初日犠牲者]" in summary
     assert "Player6(p6)[1日目夜死亡]" in summary
+    # The day-2 summary is written at its vote: this morning's body died on
+    # night 1, and used to be missing because night 2 had not happened yet.
+    assert "- 夜の死亡: Player6(p6)" in summary
 
 
 def test_no_private_role_leaks_into_the_public_fact_summary():

@@ -31,11 +31,15 @@ VILLAGERS = ("p2", "p5", "p7")
 
 
 def _board():  # type: ignore[no-untyped-def]
-    """Day 2. The seer (p4) privately knows p1 is a wolf; p2 voted for p1."""
+    """Day 2. The seer (p4) privately knows p1 is a wolf; p2 then voted for p1.
+
+    The ballots are cast on day 2, after the night-1 look: judging a day-1
+    ballot by a night-1 result would be hindsight, which the engine refuses.
+    """
     state = boards.deal({"p1": RoleName.WEREWOLF, "p4": RoleName.SEER}, day=2)
     boards.divine(state, "p4", "p1", night=1)
-    state.vote_records.append(VoteRecord(voter_id="p2", target_id="p1", day=1, round=1))
-    state.vote_records.append(VoteRecord(voter_id="p3", target_id="p5", day=1, round=1))
+    state.vote_records.append(VoteRecord(voter_id="p2", target_id="p1", day=2, round=1))
+    state.vote_records.append(VoteRecord(voter_id="p3", target_id="p5", day=2, round=1))
     return state
 
 
@@ -91,8 +95,20 @@ def test_private_certainty_is_still_used_internally():
         if r.visibility is EvidenceVisibility.PRIVATE_REASONING
     ]
     assert private and private[0].subject_id == "p2"
-    # And it still moves the seat's view of p2.
-    assert seer.state.public_suspicion_scores.get("p2", 0.0) != 0.0
+    # It moves the seat's own view of p2, but not what the table could argue.
+    assert seer.state.own_suspicion_scores.get("p2", 0.0) != 0.0
+    assert seer.state.public_suspicion_scores.get("p2", 0.0) == 0.0
+
+
+def test_a_ballot_is_not_judged_with_what_was_learned_afterwards():
+    """p2 voted for p1 on day 1; the seer only learned p1 was a wolf that night."""
+    state = boards.deal({"p1": RoleName.WEREWOLF, "p4": RoleName.SEER}, day=2)
+    boards.divine(state, "p4", "p1", night=1)
+    state.vote_records.append(VoteRecord(voter_id="p2", target_id="p1", day=1, round=1))
+    runtime = _runtime(state)
+
+    categories = {record.category for record in runtime.seats["p4"].belief.active_evidence()}
+    assert "voted_for_wolf" not in categories
 
 
 def test_a_conclusion_the_table_reaches_too_stays_public():

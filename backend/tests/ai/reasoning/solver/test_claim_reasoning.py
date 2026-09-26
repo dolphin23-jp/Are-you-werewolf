@@ -384,3 +384,18 @@ def test_the_table_only_knows_the_first_victim_was_not_wolf_or_fox():
     # Everything else about the victim is still open from the public view.
     assert solver.is_possible(has_role("p1", RoleName.SEER)) is True
     assert solver.is_possible(has_role("p1", RoleName.FREEMASON)) is True
+
+
+def test_a_contradiction_is_explained_by_the_constraints_that_clash_and_no_others():
+    state = boards.deal({"p1": RoleName.SEER}, day=2)
+    for pid in ("p2", "p5", "p6"):
+        boards.claim(state, pid, RoleName.SEER, day=1)
+    solver = build_solver(boards.observe(state), CommonPublicPerspective())
+
+    result = solver.explain_contradiction(
+        has_role("p2", RoleName.SEER), has_role("p5", RoleName.SEER), has_role("p6", RoleName.SEER)
+    )
+
+    # One seer card; any two of the three claims already contradict it.
+    assert result.is_contradictory
+    assert len([cid for cid in result.constraint_ids if cid.startswith("hypothesis")]) == 2

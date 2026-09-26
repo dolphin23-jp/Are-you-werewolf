@@ -152,7 +152,10 @@ class PlayerBeliefState:
     * `private_role_certainties` -- what this seat *knows*, from its own cards,
       its own ability results and the solver.
     * `public_suspicion_scores` -- what could be argued at the table. Soft
-      evidence only, and the only place traits apply.
+      evidence of public visibility only, and the only place traits apply.
+      `own_suspicion_scores` adds this seat's private soft reasons (a vote for
+      someone only it knows is cleared, the wolves' team knowledge); the seat
+      may act on them but the table cannot argue from them.
     * the per-action utility maps -- what this seat *wants*, which depends on
       its faction and differs from both of the above.
 
@@ -165,6 +168,7 @@ class PlayerBeliefState:
     perspective_id: str
     private_role_certainties: dict[str, RoleCertainty] = field(default_factory=dict)
     public_suspicion_scores: dict[str, float] = field(default_factory=dict)
+    own_suspicion_scores: dict[str, float] = field(default_factory=dict)
     execution_utility_scores: dict[str, float] = field(default_factory=dict)
     attack_utility_scores: dict[str, float] = field(default_factory=dict)
     guard_utility_scores: dict[str, float] = field(default_factory=dict)

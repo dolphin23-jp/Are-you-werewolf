@@ -90,7 +90,9 @@ def render_public_fact_summary(ledger: PublicFactLedger, day: int | None = None)
         )
         lines.append(f"- 処刑結果: {rendered}")
 
-    night_deaths = ledger.night_death_ids(target_day)
+    # The bodies found this morning died on the night before: the day's summary
+    # is written at its vote, before that day's own night has happened.
+    night_deaths = ledger.night_death_ids(target_day - 1)
     if night_deaths:
         lines.append(f"- 夜の死亡: {_labels(ledger, night_deaths)}")
 

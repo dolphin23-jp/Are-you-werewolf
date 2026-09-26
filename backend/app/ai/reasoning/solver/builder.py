@@ -7,6 +7,7 @@ declaration serves the encoder and the eventual "why is this impossible" answer.
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field
 
 from app.ai.reasoning.solver.backend import Constraint, LabelledConstraint
@@ -35,5 +36,11 @@ class ConstraintBuilder:
         return tuple(item.constraint_id for item in self.constraints)
 
     def signature(self) -> str:
-        """Identifies this exact constraint set for caching."""
-        return ";".join(sorted(self.constraint_ids()))
+        """Identifies this exact constraint set for caching, by content.
+
+        An answer depends on the constraints and nothing else, so a votes-only
+        or speech-only change to the board (a new `board_version`, the same
+        constraints) can reuse every cached answer.
+        """
+        content = sorted(f"{item.constraint_id}={item.constraint!r}" for item in self.constraints)
+        return hashlib.sha256("\n".join(content).encode()).hexdigest()

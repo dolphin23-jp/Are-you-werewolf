@@ -20,7 +20,9 @@ DEFAULT_CAPACITY = 2048
 
 @dataclass(frozen=True)
 class QueryKey:
-    board_version: str
+    # No board version: it changed with every vote and speech event, so across
+    # two refreshes 0 of 1,020 queries hit. The constraint signature is a
+    # content hash and already says everything an answer depends on.
     perspective_id: str
     constraint_signature: str
     query_kind: str

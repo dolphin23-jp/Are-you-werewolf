@@ -165,14 +165,18 @@ def _conflicts_for(
     verdicts = observations.verdicts_by(claimant_id)
     if not verdicts:
         return []
-    role = observations.claimed_role_of(claimant_id)
     conflicts: list[TimelineConflict] = []
     seer_nights: dict[int, str] = {}
+    # The role a conflict rules out is the ability the verdict claims, not the
+    # claimant's current CO: after a seer -> medium slide, a bad seer verdict
+    # used to exclude MEDIUM under AccurateTimeline.
     for verdict in sorted(verdicts, key=lambda v: (v.day, v.target_id)):
         if verdict.result_type == SEER_RESULT:
-            conflicts.extend(_seer_conflicts(observations, verdict, role, seer_nights))
+            conflicts.extend(
+                _seer_conflicts(observations, verdict, RoleName.SEER, seer_nights)
+            )
         elif verdict.result_type == MEDIUM_RESULT:
-            conflicts.extend(_medium_conflicts(observations, verdict, role))
+            conflicts.extend(_medium_conflicts(observations, verdict, RoleName.MEDIUM))
     return conflicts
 
 

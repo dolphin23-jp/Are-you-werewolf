@@ -54,7 +54,7 @@ from app.ai.reasoning.belief.utility import (
 )
 from app.ai.reasoning.facts import MEDIUM_RESULT, PublicFactLedger
 from app.ai.reasoning.observations import ObservationSet
-from app.ai.reasoning.perspectives import Perspective
+from app.ai.reasoning.perspectives import Perspective, require_in_game
 from app.ai.reasoning.solver.backend import Certainty, has_role
 from app.ai.reasoning.solver.queries import RoleSolver
 from app.ai.reasoning.timeline import find_timeline_conflicts
@@ -152,13 +152,17 @@ class BeliefEngine:
         self.state = PlayerBeliefState(
             player_id=player_id, perspective_id=perspective.perspective_id
         )
-        self._perspective = perspective
+        # The documented guard, now actually wired: a seat's beliefs must never
+        # be built on the omniscient debug view.
+        self._perspective = require_in_game(perspective)
         # Traits scale soft evidence only. Nothing here can move a hard verdict.
         self.traits = traits or CognitiveTraits()
         self._evidence: dict[str, EvidenceRecord] = {}
         self._hard: dict[str, Certainty] = {}
         # What the table can settle without any seat's private knowledge.
         self._public_hard: dict[str, Certainty] = {}
+        self._hard_by_day: dict[int, dict[str, Certainty]] = {}
+        self._public_hard_by_day: dict[int, dict[str, Certainty]] = {}
         self._ranked: tuple[RankedView, ...] = ()
         # Filled from the perspective, never from the observations directly.
         self._self_role: RoleName | None = None
@@ -257,6 +261,10 @@ class BeliefEngine:
             self._derive_timeline_evidence(observations)
         if solver is not None:
             self._derive_solver_facts(ledger, solver)
+            # What was settled by the end of each day, kept so that a ballot is
+            # judged by what could be known when it was cast.
+            self._hard_by_day[ledger.day] = dict(self._hard)
+            self._public_hard_by_day[ledger.day] = dict(self._public_hard)
             self._derive_vote_evidence(ledger)
         self.recompute(ledger)
 
@@ -465,7 +473,9 @@ class BeliefEngine:
             )
         )
 
-    def _visibility_of(self, target_id: str, certainty: Certainty) -> EvidenceVisibility:
+    def _visibility_of(
+        self, target_id: str, certainty: Certainty, day: int | None = None
+    ) -> EvidenceVisibility:
         """Whether a conclusion about `target_id` is one the table could reach too.
 
         The seat's certainty comes from its own solver, which may know things
@@ -474,23 +484,33 @@ class BeliefEngine:
         seat is not. Reasoning from that is fine. Saying "p2 voted for a
         confirmed wolf" out loud is not, when only this seat can confirm it.
         """
-        if self._public_hard.get(target_id) is certainty:
+        public = self._public_hard if day is None else self._public_hard_by_day.get(day, {})
+        if public.get(target_id) is certainty:
             return EvidenceVisibility.PUBLIC_ARGUMENT
         if self._self_role is RoleName.WEREWOLF:
             return EvidenceVisibility.TEAM_PRIVATE
         return EvidenceVisibility.PRIVATE_REASONING
 
     def _derive_vote_evidence(self, ledger: PublicFactLedger) -> None:
-        """Who someone voted for, read against what the solver has since settled."""
+        """Who someone voted for, read against what was settled that same day.
+
+        Not against what has been settled since: a day-1 ballot judged with a
+        night-1 divination blamed the voter for not knowing the result yet --
+        hindsight the reasoning contract rules out. A day this seat never
+        observed gives no verdict at all rather than today's.
+        """
         for vote in ledger.votes():
-            certainty = self._hard.get(vote.target_id)
+            known_then = self._hard_by_day.get(vote.day)
+            if known_then is None:
+                continue
+            certainty = known_then.get(vote.target_id)
             if certainty is Certainty.IMPOSSIBLE:
                 self.add_evidence(
                     EvidenceRecord(
                         evidence_id=f"vote_cleared:{vote.voter_id}:{vote.day}:{vote.round}",
                         subject_id=vote.voter_id,
                         category="voted_for_cleared",
-                        visibility=self._visibility_of(vote.target_id, certainty),
+                        visibility=self._visibility_of(vote.target_id, certainty, vote.day),
                         source_event_ids=(
                             vote_fact_id(
                                 vote.voter_id, vote.day, vote.round, vote.target_id
@@ -515,7 +535,7 @@ class BeliefEngine:
                         evidence_id=f"vote_wolf:{vote.voter_id}:{vote.day}:{vote.round}",
                         subject_id=vote.voter_id,
                         category="voted_for_wolf",
-                        visibility=self._visibility_of(vote.target_id, certainty),
+                        visibility=self._visibility_of(vote.target_id, certainty, vote.day),
                         source_event_ids=(
                             vote_fact_id(
                                 vote.voter_id, vote.day, vote.round, vote.target_id
@@ -601,6 +621,7 @@ class BeliefEngine:
         cannot.
         """
         wolf_scores: dict[str, float] = {}
+        own_scores: dict[str, float] = {}
         fox_scores: dict[str, float] = {}
         links: dict[str, list[str]] = {}
         for record in sorted(self.active_evidence(), key=lambda item: item.evidence_id):
@@ -608,9 +629,14 @@ class BeliefEngine:
                 continue
             weight = record.weight * self.traits.scale_for(record.category)
             if record.category in _WOLF_CATEGORIES:
-                wolf_scores[record.subject_id] = (
-                    wolf_scores.get(record.subject_id, 0.0) + weight
-                )
+                own_scores[record.subject_id] = own_scores.get(record.subject_id, 0.0) + weight
+                # Private reasons stay out of the table's number: they drove the
+                # wolves' "ride the wave" and the madman on knowledge the table
+                # does not have, and voiced shifts nobody else could explain.
+                if record.visibility is EvidenceVisibility.PUBLIC_ARGUMENT:
+                    wolf_scores[record.subject_id] = (
+                        wolf_scores.get(record.subject_id, 0.0) + weight
+                    )
             elif record.category.startswith("fox"):
                 fox_scores[record.subject_id] = (
                     fox_scores.get(record.subject_id, 0.0) + weight
@@ -623,6 +649,7 @@ class BeliefEngine:
         certainties: dict[str, RoleCertainty] = {}
         for player_id in ledger.known_player_ids():
             wolf_scores.setdefault(player_id, 0.0)
+            own_scores.setdefault(player_id, 0.0)
             certainty = self._hard.get(player_id)
             if certainty is Certainty.CERTAIN:
                 certainties[player_id] = RoleCertainty.CONFIRMED
@@ -632,6 +659,7 @@ class BeliefEngine:
                 certainties[player_id] = RoleCertainty.UNKNOWN
 
         self.state.public_suspicion_scores = wolf_scores
+        self.state.own_suspicion_scores = own_scores
         self.state.private_role_certainties = certainties
         self.state.fox_scores = fox_scores
         self.state.evidence_links = links
@@ -652,6 +680,7 @@ class BeliefEngine:
             ally_ids=self._ally_ids,
             wolf_certainty=self.state.private_role_certainties,
             public_suspicion=self.state.public_suspicion_scores,
+            own_suspicion=self.state.own_suspicion_scores,
             fox_suspicion=self.state.fox_scores,
             claim_trust=self.state.claim_trust,
             claimed_roles=self._claimed_roles,

@@ -1309,7 +1309,12 @@ class AICoordinator:
     ) -> None:
         state = controller.state  # type: ignore[attr-defined]
         checked: list[SpeechEventDraft] = []
+        # A claim or slide earlier in this same message is in force by the time
+        # its results are read (drafts come in that order).
+        pending_role: RoleName | None = None
         for draft in drafts:
+            if draft.event_type in (SpeechEventType.ROLE_CLAIM, SpeechEventType.ROLE_SWITCH):
+                pending_role = draft.role
             if draft.event_type not in (
                 SpeechEventType.ABILITY_RESULT,
                 # A correction states a verdict too, so it clears the same bar.
@@ -1331,6 +1336,7 @@ class AICoordinator:
                 PublicFactLedger(state),
                 claimant_id=player_id,
                 is_correction=(draft.event_type is SpeechEventType.RESULT_CORRECTION),
+                pending_role=pending_role,
             )
             self.validation.extend(validation.issues)
             if validation.claim is not None:

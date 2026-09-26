@@ -12,13 +12,17 @@ evidence coming back when a withdrawn claim is made again.
 
 from __future__ import annotations
 
+import pytest
+
 from app.ai.reasoning.belief import BeliefEngine
 from app.ai.reasoning.facts import PublicFactLedger
 from app.ai.reasoning.observations import ObservationSet
 from app.ai.reasoning.perspectives import (
     ClaimedStoryPerspective,
     CommonPublicPerspective,
+    PerspectiveLeakError,
     PlayerPrivatePerspective,
+    TrueWorldPerspective,
 )
 from app.ai.reasoning.solver import (
     AccurateTimeline,
@@ -361,3 +365,21 @@ def test_a_seers_recap_through_the_engine_raises_no_timeline_conflict():
         observations, CommonPublicPerspective(), assumptions=(AccurateTimeline("p1"),)
     )
     assert solver.is_possible(has_role("p1", RoleName.SEER))
+
+
+def test_a_slid_claimants_old_seer_verdict_rules_out_seer_not_medium():
+    state = _board(day=3)
+    boards.claim(state, "p5", RoleName.SEER, day=1)
+    # Published on day 1 about night 1: a result from the future.
+    boards.verdict(state, "p5", "seer", "p9", False, day=1, referenced_day=1)
+    boards.claim(state, "p5", RoleName.MEDIUM, day=2)
+
+    conflicts = [c for c in find_timeline_conflicts(boards.observe(state)) if c.claimant_id == "p5"]
+
+    assert conflicts
+    assert {c.claimed_role for c in conflicts} == {RoleName.SEER}
+
+
+def test_belief_engines_refuse_the_omniscient_debug_view():
+    with pytest.raises(PerspectiveLeakError):
+        BeliefEngine("p1", TrueWorldPerspective())

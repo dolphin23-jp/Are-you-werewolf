@@ -62,6 +62,9 @@ class Z3ConstraintBackend:
         self._vars = {pid: z3.Int(f"role_{pid}") for pid in self._player_ids}
         self._solver = z3.Solver()
         self._solver.set("random_seed", 0)
+        # Explanations quote the unsat core; unminimised it listed every claim
+        # in a three-seer contradiction plus `role_count`, not the two that clash.
+        self._solver.set("core.minimize", True)
         for var in self._vars.values():
             self._solver.add(var >= 0, var < len(ROLE_ORDER))
         # Each constraint hides behind its own literal, and every check asserts

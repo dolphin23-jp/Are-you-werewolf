@@ -204,7 +204,6 @@ class RoleSolver:
         self, kind: str, hypotheses: Sequence[Hypothesis], compute: Callable[[], _T]
     ) -> _T:
         key = QueryKey(
-            board_version=self.observations.board_version,
             perspective_id=(
                 f"{self.perspective.perspective_id}"
                 f"|{assumption_rules.signature(self.assumptions)}"

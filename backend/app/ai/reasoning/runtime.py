@@ -281,6 +281,15 @@ class ReasoningRuntime:
         eligible = [pid for pid in candidates if pid not in self._observers]
         if not eligible:
             eligible = list(candidates)
+        # The ballot follows the candidate this seat has been stating. It used
+        # to be re-derived here by raw utility, which ignores the switching cost
+        # the stated candidate carries: "p3" all day, then a ballot for p5 that
+        # led by 0.1 -- logged as a change of mind nobody made.
+        stated = seat.belief.state.current_execution_target
+        if stated in eligible and (
+            seat.deception is None or seat.deception.betrayal_cost(stated) == 0
+        ):
+            return stated, self._vote_reason(seat, stated)
         # The *same* salt the belief state uses to pick `current_execution_target`.
         # A different one here would let the stated candidate and the ballot
         # diverge purely from tie-breaking, which reads as a change of mind that
@@ -612,7 +621,7 @@ class ReasoningRuntime:
             for record in seat.belief.public_argument_evidence_for(target)
             if record.subject_id == target and record.weight < 0
         )[:2]
-        rank = self.top_rank(player_id)
+        rank = self.target_rank(player_id, target)
         speech_goal = self._speech_goal(
             state,
             seat,
@@ -903,6 +912,24 @@ class ReasoningRuntime:
     def top_rank(self, player_id: str) -> HypothesisRank | None:
         views = self.ranked_view(player_id)
         return views[0].rank if views else None
+
+    def target_rank(self, player_id: str, target_id: str | None) -> HypothesisRank | None:
+        """The band of *this* candidate being a wolf, not of the top hypothesis.
+
+        The top hypothesis is always MAIN, so every brief said "（確度: main）"
+        -- even for a madman's target that was only logically possible, or a
+        wolf's target known not to be a wolf at all (None: unranked).
+        """
+        if target_id is None:
+            return None
+        return next(
+            (
+                view.rank
+                for view in self.ranked_view(player_id)
+                if view.hypothesis.hypothesis_id == f"wolf:{target_id}"
+            ),
+            None,
+        )
 
     def conflict_points(self, state: GameState) -> list[str]:
         """The day's disagreements, from structured events rather than prose."""

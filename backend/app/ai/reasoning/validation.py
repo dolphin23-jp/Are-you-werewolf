@@ -217,8 +217,13 @@ def validate_public_result_claim(
     *,
     claimant_id: str,
     is_correction: bool = False,
+    pending_role: RoleName | None = None,
 ) -> ResultValidation:
     """Check one published verdict against the board.
+
+    `pending_role` is a role this same message claims or slides to. It is
+    applied before the result is judged: a seer who slides to medium and gives
+    a medium result in one message has not published anything impossible.
 
     Seer and medium are validated separately on purpose: they answer different
     questions and are only available about different people. Treating them as
@@ -247,7 +252,7 @@ def validate_public_result_claim(
         note("result_target_self", "a player cannot publish a result about themselves", "target_id")
         return ResultValidation(claim=None, issues=tuple(issues))
 
-    claimed_role = ledger.claimed_role_of(claimant_id)
+    claimed_role = pending_role or ledger.claimed_role_of(claimant_id)
     expected_role = RoleName.SEER if claim.result_type == SEER_RESULT else RoleName.MEDIUM
     # No CO yet is normal: the claim and the CO usually arrive in the same message.
     if claimed_role in (RoleName.SEER, RoleName.MEDIUM) and claimed_role != expected_role:
@@ -304,11 +309,14 @@ def validate_public_result_claims(
     ledger: PublicFactLedger,
     *,
     claimant_id: str,
+    pending_role: RoleName | None = None,
 ) -> tuple[list[PublicResultClaim], tuple[ValidationIssue, ...]]:
     kept: list[PublicResultClaim] = []
     issues: list[ValidationIssue] = []
     for claim in claims:
-        validation = validate_public_result_claim(claim, ledger, claimant_id=claimant_id)
+        validation = validate_public_result_claim(
+            claim, ledger, claimant_id=claimant_id, pending_role=pending_role
+        )
         issues.extend(validation.issues)
         if validation.claim is not None:
             kept.append(validation.claim)
@@ -364,7 +372,10 @@ def validate_discussion_output(
             output.alternative_execution_target = None
 
     kept_results, result_issues = validate_public_result_claims(
-        output.public_results, ledger, claimant_id=speaker_id
+        output.public_results,
+        ledger,
+        claimant_id=speaker_id,
+        pending_role=_role_claimed_in(output),
     )
     output.public_results = kept_results
     issues.extend(result_issues)
@@ -462,3 +473,18 @@ __all__ = [
 
 def _stable_index(key: str, size: int) -> int:
     return int.from_bytes(hashlib.sha256(key.encode()).digest()[:8], "big") % size
+
+
+def _role_claimed_in(output: DiscussionOutput) -> RoleName | None:
+    """The role this turn switches to or claims, if it names a valid one."""
+    action = output.claim_action
+    for value in (
+        action.role if action is not None and action.action == "switch" else None,
+        output.public_claim_role,
+    ):
+        if value:
+            try:
+                return RoleName(value)
+            except ValueError:
+                continue
+    return None

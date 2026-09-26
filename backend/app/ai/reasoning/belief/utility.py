@@ -77,12 +77,21 @@ class UtilityInputs:
     claimed_roles: Mapping[str, RoleName]
     alive_ids: frozenset[str]
     already_divined: frozenset[str] = frozenset()
+    # This seat's own soft belief, private reasons included. Village decisions
+    # use it; the "what does the table think" terms use `public_suspicion`.
+    # Defaults to the public map for callers that only have that.
+    own_suspicion: Mapping[str, float] | None = None
 
     @property
     def actor_team(self) -> Team | None:
         if self.actor_role is None:
             return None
         return ROLE_DEFINITIONS[self.actor_role].team
+
+    @property
+    def belief(self) -> Mapping[str, float]:
+        return self.own_suspicion if self.own_suspicion is not None else self.public_suspicion
+
 
 
 def execution_utility(inputs: UtilityInputs, target_id: str) -> float:
@@ -103,7 +112,7 @@ def execution_utility(inputs: UtilityInputs, target_id: str) -> float:
 
 def _village_execution_utility(inputs: UtilityInputs, target_id: str) -> float:
     certainty = inputs.wolf_certainty.get(target_id, RoleCertainty.UNKNOWN)
-    score = inputs.public_suspicion.get(target_id, 0.0)
+    score = inputs.belief.get(target_id, 0.0)
     score += FOX_SUSPICION_WEIGHT * inputs.fox_suspicion.get(target_id, 0.0)
     if certainty is RoleCertainty.CONFIRMED:
         score += KNOWN_WOLF_BONUS
@@ -179,7 +188,7 @@ def divine_utility(inputs: UtilityInputs, target_id: str) -> float:
     """
     if ALREADY_DIVINED_EXCLUSION and target_id in inputs.already_divined:
         return float("-inf")
-    score = inputs.public_suspicion.get(target_id, 0.0)
+    score = inputs.belief.get(target_id, 0.0)
     score += FOX_SUSPICION_WEIGHT * inputs.fox_suspicion.get(target_id, 0.0)
     claimed = inputs.claimed_roles.get(target_id)
     if claimed in (RoleName.SEER, RoleName.MEDIUM):
@@ -208,7 +217,7 @@ def guard_utility(inputs: UtilityInputs, target_id: str) -> float:
     score += GUARD_ATTACK_RISK_WEIGHT * _village_threat(inputs, target_id)
     if inputs.wolf_certainty.get(target_id) is RoleCertainty.CONFIRMED:
         score -= KNOWN_WOLF_BONUS
-    score -= inputs.public_suspicion.get(target_id, 0.0)
+    score -= inputs.belief.get(target_id, 0.0)
     return score
 
 

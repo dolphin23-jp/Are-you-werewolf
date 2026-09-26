@@ -12,6 +12,7 @@ import asyncio
 from app.ai.coordinator import AICoordinator
 from app.ai.provider.mock import MockProvider
 from app.ai.reasoning.belief import EvidenceRecord, vote_fact_id
+from app.ai.reasoning.facts import PublicFactLedger
 from app.ai.reasoning.runtime import (
     MAX_OPENING_SPEAKERS,
     MIN_OPENING_SPEAKERS,
@@ -343,3 +344,53 @@ def test_a_human_correction_splits_the_table_rather_than_resetting_it():
     assert runtime.seats["p8"].belief.state.reasons_for("p0") == ()
     # And the table still disagrees about who to execute.
     assert runtime.opinion_spread() > 0.0
+
+
+def test_the_ballot_follows_the_stated_candidate_through_a_small_swing():
+    """The stated target keeps its incumbent unless a rival clearly overtakes it;
+    the ballot used to take raw utility and flip on a 0.1 lead."""
+    state = boards.deal({"p1": RoleName.VILLAGER}, day=2)
+    boards.kill_first_victim(state, "p16")
+    runtime = ReasoningRuntime(state, [f"p{i}" for i in range(1, 16)], seed=1)
+    runtime.refresh(state)
+    seat = runtime.seats["p1"]
+    ledger = PublicFactLedger(state)
+    seat.belief.add_evidence(EvidenceRecord("e1", "p3", "accusation", ("m1",), 1.0, "p3"))
+    seat.belief.recompute(ledger)
+    seat.belief.add_evidence(EvidenceRecord("e2", "p5", "accusation", ("m2",), 1.1, "p5"))
+    seat.belief.recompute(ledger)
+
+    stated = seat.belief.state.current_execution_target
+    ballot, _ = runtime.vote_decision("p1", [p for p in ledger.alive_ids() if p != "p1"])
+
+    assert stated == "p3"
+    assert ballot == stated
+
+
+def test_the_confidence_band_is_the_one_for_the_stated_target():
+    state = _played_board()
+    runtime = _runtime(state)
+
+    for seat_id in AI_IDS:
+        if not state.players[seat_id].alive:
+            continue
+        decision = runtime.discussion_decision(state, seat_id)
+        target = decision.execution_target
+        expected = runtime.target_rank(seat_id, target)
+        assert decision.target_confidence_band == (
+            expected.value if expected is not None else "unranked"
+        )
+
+
+def test_a_vote_alone_reuses_every_cached_solver_answer():
+    """A ballot changes the board version, not a single solver constraint."""
+    state = _played_board()
+    runtime = _runtime(state)
+    misses = runtime._cache.misses
+    hits = runtime._cache.hits
+
+    state.vote_records.append(VoteRecord(voter_id="p2", target_id="p9", day=2, round=1))
+    runtime.refresh(state)
+
+    assert runtime._cache.misses == misses
+    assert runtime._cache.hits > hits
