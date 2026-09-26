@@ -164,6 +164,10 @@ class GameState:
     vote_round: int = 1
     chat_log: list[ChatMessage] = field(default_factory=list)
     next_message_number: int = 1
+    # Private channels count separately, under their own prefix. One shared
+    # counter left gaps in the public ids that told every seat how much the
+    # wolves and freemasons had said in between.
+    next_private_message_numbers: dict[str, int] = field(default_factory=dict)
     pending_questions: dict[str, list[PendingQuestion]] = field(default_factory=dict)
     divine_records: list[DivineRecord] = field(default_factory=list)
     medium_records: list[MediumRecord] = field(default_factory=list)

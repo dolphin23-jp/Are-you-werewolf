@@ -88,3 +88,20 @@ def test_hub_delivers_addressed_events_only_to_their_recipients():
     assert [m["payload"]["x"] for m in sockets["p5"].sent] == [1, 2]
     assert [m["payload"]["x"] for m in sockets["p0"].sent] == [2]
     assert [m["payload"]["x"] for m in sockets["p9"].sent] == [2]
+
+
+def test_public_message_ids_do_not_count_private_messages():
+    """Gaps in the public numbering used to reveal how much the wolves said."""
+    controller = _started_controller()
+    wolves = _seats(controller, RoleName.WEREWOLF)
+    masons = _seats(controller, RoleName.FREEMASON)
+
+    first = controller.chat("p0", "おはよう")
+    controller.chat(wolves[0], "今夜の相談", channel="wolf")
+    controller.chat(wolves[1], "了解", channel="wolf")
+    mason = controller.chat(masons[0], "相方です", channel="freemason")
+    second = controller.chat("p0", "議論しよう")
+
+    assert (first, second) == ("m1", "m2")
+    assert mason == "f1"
+    assert len({m.message_id for m in controller.state.chat_log}) == 5

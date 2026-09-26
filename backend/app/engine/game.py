@@ -41,6 +41,11 @@ _RESULT_TYPES: dict[RoleName, str] = {
     RoleName.MEDIUM: MEDIUM_RESULT,
 }
 
+_PRIVATE_MESSAGE_PREFIXES: dict[ChatChannel, str] = {
+    ChatChannel.WOLF: "w",
+    ChatChannel.FREEMASON: "f",
+}
+
 _PRIVATE_CHANNEL_ROLES: dict[ChatChannel, RoleName] = {
     ChatChannel.WOLF: RoleName.WEREWOLF,
     ChatChannel.FREEMASON: RoleName.FREEMASON,
@@ -325,8 +330,7 @@ class GameController:
                 for message in self.state.chat_log
             )
         ][:10]
-        message_id = f"m{self.state.next_message_number}"
-        self.state.next_message_number += 1
+        message_id = self._next_message_id(chat_channel)
         message = ChatMessage(
             message_id=message_id,
             author_id=author_id,
@@ -648,6 +652,16 @@ class GameController:
         )
 
     # -- internals --
+
+    def _next_message_id(self, channel: ChatChannel) -> str:
+        if channel is ChatChannel.PUBLIC:
+            message_id = f"m{self.state.next_message_number}"
+            self.state.next_message_number += 1
+            return message_id
+        numbers = self.state.next_private_message_numbers
+        number = numbers.get(channel.value, 1)
+        numbers[channel.value] = number + 1
+        return f"{_PRIVATE_MESSAGE_PREFIXES[channel]}{number}"
 
     def _channel_audience(self, channel: ChatChannel) -> tuple[str, ...] | None:
         """Seats a live push on `channel` may reach; None for the public channel.
