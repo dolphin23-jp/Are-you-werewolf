@@ -65,18 +65,18 @@ class NightResolver:
         medium_results = self._distribute_medium_results(state)
         divine_result = self._resolve_divine(state)
         guard_target = self._resolve_guard(state)
-        deaths: list[DeathRecord] = []
-
-        if divine_result is not None and divine_result.is_werewolf is False:
-            pass  # informational only; curse handled below via fox check
-
         curse_death = self._apply_curse(state, divine_result)
-        if curse_death is not None:
-            deaths.append(curse_death)
-
         attack_death = self._apply_attack(state, guard_target)
-        if attack_death is not None:
-            deaths.append(attack_death)
+        # Record (and so announce) the night's deaths in seat order. Resolution
+        # order always put the cursed fox before the attack victim, which told
+        # every seat -- and every prompt, summary and policy observation built
+        # from these records -- which of the two bodies was the fox.
+        seat_order = {player_id: index for index, player_id in enumerate(state.players)}
+        deaths = sorted(
+            (death for death in (curse_death, attack_death) if death is not None),
+            key=lambda death: seat_order[death.player_id],
+        )
+        state.death_records.extend(deaths)
 
         state.pending_divine = None
         state.pending_guard = None
@@ -140,9 +140,7 @@ class NightResolver:
         target.alive = False
         target.death_cause = DeathCause.CURSED
         target.death_day = state.day
-        record = DeathRecord(player_id=target.player_id, cause=DeathCause.CURSED, day=state.day)
-        state.death_records.append(record)
-        return record
+        return DeathRecord(player_id=target.player_id, cause=DeathCause.CURSED, day=state.day)
 
     def _apply_attack(self, state: GameState, guard_target: str | None) -> DeathRecord | None:
         if state.pending_attack is None:
@@ -159,6 +157,4 @@ class NightResolver:
         target.alive = False
         target.death_cause = DeathCause.ATTACKED
         target.death_day = state.day
-        record = DeathRecord(player_id=target_id, cause=DeathCause.ATTACKED, day=state.day)
-        state.death_records.append(record)
-        return record
+        return DeathRecord(player_id=target_id, cause=DeathCause.ATTACKED, day=state.day)

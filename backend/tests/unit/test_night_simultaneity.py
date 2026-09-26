@@ -244,3 +244,31 @@ def test_the_broadcast_death_event_does_not_reveal_a_curse():
     assert all(e.recipient_ids is None for e in died)  # still a broadcast
     assert {e.payload["cause"] for e in died} == {PublicDeathCause.NIGHT}
 
+
+def test_a_double_death_is_recorded_in_seat_order_not_resolution_order():
+    """The curse resolves before the attack, but must not be listed first.
+
+    With the cursed fox always first, the order of the morning's two bodies --
+    in the death records, the broadcast, every prompt and summary built from
+    them, and the policy observation -- said which body was the fox.
+    """
+    controller = _first_real_night()
+    state = controller.state
+    seer, fox = _seat(controller, RoleName.SEER), _seat(controller, RoleName.FOX)
+    seats = list(state.players)
+    victim = next(
+        pid
+        for pid in state.alive_ids()
+        if state.players[pid].role not in (RoleName.WEREWOLF, RoleName.SEER)
+        and seats.index(pid) < seats.index(fox)
+    )
+    events: list[GameEvent] = []
+    controller.events.subscribe(events.append)
+
+    controller.submit_night_action(seer, "divine", fox)
+    controller.submit_night_action(controller.alpha_wolf_id, "attack", victim)
+    controller.resolve_night()
+
+    assert [record.player_id for record in state.death_records[-2:]] == [victim, fox]
+    died = [e.payload["player_id"] for e in events if e.type is GameEventType.PLAYER_DIED]
+    assert died == [victim, fox]
