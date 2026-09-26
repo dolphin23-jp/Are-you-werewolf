@@ -7,12 +7,14 @@ loop works before a heavier Transformer implementation is introduced.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 from numpy.typing import NDArray
 
+from app.training.atomic_io import atomic_write
 from app.training.encoding import EncodedPolicyObservation
 from app.training.policy_contract import PolicyHeadSizes, PolicyLogits
 
@@ -171,6 +173,8 @@ class NumpyMLPPolicy:
                 + np.sum(np.square(grad_b2))
             )
         )
+        if not math.isfinite(norm):
+            raise FloatingPointError(f"non-finite policy gradient (norm={norm})")
         if max_grad_norm > 0 and norm > max_grad_norm:
             clip_scale = max_grad_norm / norm
             grad_w1 *= clip_scale
@@ -196,19 +200,23 @@ class NumpyMLPPolicy:
         """Persist an initialized policy without Python pickle objects."""
         if not self._initialized:
             raise RuntimeError("cannot save an uninitialized policy")
-        destination = Path(path)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        np.savez_compressed(
-            destination,
-            format_version=np.asarray([_CHECKPOINT_VERSION], dtype=np.int64),
-            hidden_size=np.asarray([self.hidden_size], dtype=np.int64),
-            input_size=np.asarray([self.w1.shape[0]], dtype=np.int64),
-            output_size=np.asarray([self.layout.output_size], dtype=np.int64),
-            w1=self.w1,
-            b1=self.b1,
-            w2=self.w2,
-            b2=self.b2,
-        )
+        if not all(np.isfinite(array).all() for array in (self.w1, self.b1, self.w2, self.b2)):
+            raise ValueError("refusing to save a policy with non-finite weights")
+        # Writing through a handle keeps the exact path: given a filename,
+        # `savez_compressed` appends `.npz`, so `save("policy.ckpt")` produced a
+        # file that `load("policy.ckpt")` could not find.
+        with atomic_write(path) as handle:
+            np.savez_compressed(
+                handle,
+                format_version=np.asarray([_CHECKPOINT_VERSION], dtype=np.int64),
+                hidden_size=np.asarray([self.hidden_size], dtype=np.int64),
+                input_size=np.asarray([self.w1.shape[0]], dtype=np.int64),
+                output_size=np.asarray([self.layout.output_size], dtype=np.int64),
+                w1=self.w1,
+                b1=self.b1,
+                w2=self.w2,
+                b2=self.b2,
+            )
 
     @classmethod
     def load(cls, path: str | Path) -> NumpyMLPPolicy:

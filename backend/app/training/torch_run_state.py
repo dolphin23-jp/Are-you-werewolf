@@ -19,6 +19,7 @@ import torch
 from torch import Tensor
 
 from app.engine.game import PlayerSpec
+from app.training.atomic_io import atomic_write
 from app.training.policy_contract import PolicyHeadSizes
 from app.training.torch_policy import TorchTransformerPolicy, TransformerPolicyConfig
 from app.training.torch_self_play import TorchSelfPlayTrainingLoop
@@ -98,10 +99,8 @@ def save_torch_run_state(
 
     destination = Path(path)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    temporary = destination.with_suffix(destination.suffix + ".tmp")
-    with temporary.open("wb") as handle:
+    with atomic_write(destination) as handle:
         np.savez_compressed(handle, **arrays)  # type: ignore[arg-type]
-    temporary.replace(destination)
 
 
 def load_torch_run_state(

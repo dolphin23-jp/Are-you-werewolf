@@ -94,3 +94,17 @@ def test_legacy_manifest_without_specialized_team_is_generalist(tmp_path: Path):
     assert pool.entries[0].specialized_team is None
     for team in Team:
         assert pool.policy_ids_for_team(team) == ("g000000",)
+
+
+def test_two_pool_handles_on_one_root_keep_each_others_generations(tmp_path: Path):
+    """Each handle used to rewrite the manifest from its own start-up copy, so
+    the second trainer's add erased the first trainer's generation."""
+    first_trainer = NumpyPolicyPool(tmp_path / "pool")
+    second_trainer = NumpyPolicyPool(tmp_path / "pool")
+
+    first = first_trainer.add(_initialized_model(201))
+    second = second_trainer.add(_initialized_model(202))
+
+    reloaded = NumpyPolicyPool(tmp_path / "pool")
+    assert (first.policy_id, second.policy_id) == ("g000000", "g000001")
+    assert [entry.policy_id for entry in reloaded.entries] == ["g000000", "g000001"]

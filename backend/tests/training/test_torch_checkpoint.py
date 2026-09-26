@@ -70,3 +70,13 @@ def test_transformer_checkpoint_contains_no_pickle_objects(tmp_path: Path):
         assert "__metadata__" in archive.files
         assert archive["__metadata__"].dtype == np.uint8
         assert all(archive[key].dtype != object for key in archive.files)
+
+
+def test_torch_checkpoint_refuses_non_finite_tensors(tmp_path: Path):
+    model = _model()
+    with torch.no_grad():
+        next(model.parameters()).view(-1)[0] = float("inf")
+
+    with pytest.raises(ValueError, match="non-finite"):
+        save_torch_policy(model, tmp_path / "policy.npz")
+    assert list(tmp_path.iterdir()) == []

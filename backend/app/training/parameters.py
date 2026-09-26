@@ -19,6 +19,7 @@ from app.training.actions import (
     TimingBucket,
     Topic,
 )
+from app.training.encoding import MAX_SEMANTIC_EVENTS
 from app.training.observation import PolicyObservation, SemanticEventObservation
 
 
@@ -240,7 +241,7 @@ def _build_semantic_parameter_mask(
     if action_type is ActionType.REACT:
         return SemanticParameterMask(
             stances=(Stance.SUPPORT, Stance.OPPOSE, Stance.NEUTRAL),
-            reference_event_ids=tuple(event.event_id for event in observation.semantic_events),
+            reference_event_ids=tuple(event.event_id for event in _referable_events(observation)),
         )
 
     if action_type is ActionType.RETRACT:
@@ -294,13 +295,21 @@ def _seer_claim_targets(
     )
 
 
+def _referable_events(
+    observation: PolicyObservation,
+) -> tuple[SemanticEventObservation, ...]:
+    """Events a policy can point at: the reference head only scores the
+    encoded window, so an older event would be legal but unselectable."""
+    return observation.semantic_events[-MAX_SEMANTIC_EVENTS:]
+
+
 def _own_reports_for_topic(
     observation: PolicyObservation,
     topic: Topic,
 ) -> tuple[SemanticEventObservation, ...]:
     return tuple(
         event
-        for event in observation.semantic_events
+        for event in _referable_events(observation)
         if event.actor_id == observation.viewer_id
         and event.action_type == ActionType.REPORT.value
         and event.topic == topic.value
@@ -313,6 +322,6 @@ def _own_retractable_events(
     retractable = {ActionType.CLAIM.value, ActionType.REPORT.value, ActionType.DECLARE.value}
     return tuple(
         event
-        for event in observation.semantic_events
+        for event in _referable_events(observation)
         if event.actor_id == observation.viewer_id and event.action_type in retractable
     )

@@ -7,7 +7,8 @@ independent from that choice.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import math
+from dataclasses import dataclass, fields
 from typing import Protocol
 
 from app.engine.roles import RoleName
@@ -93,6 +94,14 @@ class PolicyLogits:
                 raise ValueError(
                     f"{name} head has width {width}; expected {expected_width}"
                 )
+        # A NaN logit makes every softmax weight NaN: sampling then silently
+        # picks the last legal index with log_prob NaN, and training keeps going
+        # on poisoned ratios instead of stopping at the first bad forward pass.
+        for head in fields(self):
+            value = getattr(self, head.name)
+            values = value if isinstance(value, tuple) else (value,)
+            if not all(math.isfinite(item) for item in values):
+                raise ValueError(f"{head.name} head has a non-finite value")
 
 
 class LearnedPolicyModel(Protocol):

@@ -126,3 +126,58 @@ def test_public_claim_mask_does_not_depend_on_viewers_true_role():
     wolf = semantic_parameter_mask(env.observe("p1"), ActionType.CLAIM, topic=Topic.ROLE)
 
     assert fox.roles == wolf.roles == tuple(RoleName)
+
+
+def _event(event_id: str, actor_id: str, action_type: ActionType, topic: Topic | None = None):
+    from app.training.observation import SemanticEventObservation
+
+    return SemanticEventObservation(
+        event_id=event_id,
+        actor_id=actor_id,
+        day=1,
+        discussion_tick=0,
+        channel="public",
+        action_type=action_type.value,
+        topic=None if topic is None else topic.value,
+        target_id=None,
+        secondary_target_id=None,
+        role=None,
+        result=None,
+        quantity=None,
+        referenced_day=0,
+        scope=None,
+        stance=None,
+    )
+
+
+def test_reference_masks_only_offer_events_inside_the_encoded_window():
+    """The reference head scores the last MAX_SEMANTIC_EVENTS events only; an
+    older own claim used to make RETRACT legal, then the sampler found no
+    selectable index and raised mid-rollout."""
+    from dataclasses import replace
+
+    from app.training.encoding import MAX_SEMANTIC_EVENTS
+    from app.training.policy_sampling import _speech_action_is_materializable
+
+    env = _env()
+    env.controller.resolve_night()
+    env.controller.start_discussion()
+    observation = env.observe("p0")
+    old_claim = _event("old-claim", "p0", ActionType.CLAIM, Topic.ROLE)
+    old_report = _event("old-report", "p0", ActionType.REPORT, Topic.SEER_RESULT)
+    chatter = tuple(
+        _event(f"other-{index}", "p2", ActionType.EVALUATE)
+        for index in range(MAX_SEMANTIC_EVENTS)
+    )
+    observation = replace(observation, day=2, semantic_events=(old_claim, old_report, *chatter))
+
+    retract = semantic_parameter_mask(observation, ActionType.RETRACT)
+    correct = semantic_parameter_mask(observation, ActionType.CORRECT)
+    react = semantic_parameter_mask(observation, ActionType.REACT)
+
+    assert retract.reference_event_ids == ()
+    assert correct.topics == ()
+    assert "old-claim" not in react.reference_event_ids
+    assert len(react.reference_event_ids) == MAX_SEMANTIC_EVENTS
+    assert not _speech_action_is_materializable(observation, ActionType.RETRACT)
+    assert not _speech_action_is_materializable(observation, ActionType.CORRECT)

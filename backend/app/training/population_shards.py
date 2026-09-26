@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Iterable, Sequence
 from dataclasses import asdict
 from pathlib import Path
 
+from app.training.atomic_io import atomic_write_json
 from app.training.population_payoff import PolicyProfile, ProfilePayoff
 
 _TABLE_VERSION = 1
@@ -75,12 +75,7 @@ def write_payoff_records(path: str | Path, records: Iterable[ProfilePayoff]) -> 
         ],
     }
     destination.parent.mkdir(parents=True, exist_ok=True)
-    temporary = destination.with_suffix(destination.suffix + ".tmp")
-    temporary.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    temporary.replace(destination)
+    atomic_write_json(destination, payload)
 
 
 def _validate_record(record: ProfilePayoff) -> None:

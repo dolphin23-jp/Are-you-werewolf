@@ -13,6 +13,7 @@ from torch import Tensor
 
 from app.engine.game import PlayerSpec
 from app.engine.roles import Team
+from app.training.atomic_io import atomic_write
 from app.training.meta_strategy import PolicyWeight, PopulationMetaStrategy
 from app.training.policy_contract import PolicyHeadSizes
 from app.training.torch_historical import TorchHistoricalTrainingLoop
@@ -118,10 +119,8 @@ def save_torch_historical_run_state(
 
     destination = Path(path)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    temporary = destination.with_suffix(destination.suffix + ".tmp")
-    with temporary.open("wb") as handle:
+    with atomic_write(destination) as handle:
         np.savez_compressed(handle, **arrays)  # type: ignore[arg-type]
-    temporary.replace(destination)
 
 
 def load_torch_historical_run_state(

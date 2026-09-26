@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from app.engine.roles import Team
+from app.training.atomic_io import atomic_write_json
 from app.training.population_payoff import PopulationPayoffTable
 from app.training.strategic_retention import (
     StrategicRetentionSelection,
@@ -35,12 +36,7 @@ def _load_json(path: Path) -> dict[str, Any]:
 
 def _atomic_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    temporary.replace(path)
+    atomic_write_json(path, payload)
 
 
 def _team_string_tuple(raw: dict[str, Any], team: Team) -> tuple[str, ...]:

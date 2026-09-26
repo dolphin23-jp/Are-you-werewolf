@@ -88,3 +88,33 @@ def test_ppo_update_changes_parameters_from_sparse_terminal_reward():
     assert np.isfinite(stats.mean_value_loss)
     assert stats.gradient_norm > 0
     assert not np.allclose(before, after)
+
+
+def test_numpy_checkpoint_keeps_the_exact_path_and_leaves_no_temporary(tmp_path: Path):
+    """`savez_compressed(filename)` appends `.npz`; `save("policy.ckpt")` used to
+    write `policy.ckpt.npz`, which `load("policy.ckpt")` could not find."""
+    model = _initialized_numpy_model()
+    path = tmp_path / "policy.ckpt"
+
+    model.save(path)
+
+    assert sorted(item.name for item in tmp_path.iterdir()) == ["policy.ckpt"]
+    restored = NumpyMLPPolicy.load(path)
+    assert np.array_equal(restored.w1, model.w1)
+
+
+def test_numpy_checkpoint_refuses_non_finite_weights(tmp_path: Path):
+    import pytest
+
+    model = _initialized_numpy_model()
+    model.w2[0, 0] = np.nan
+
+    with pytest.raises(ValueError, match="non-finite"):
+        model.save(tmp_path / "policy.npz")
+    assert list(tmp_path.iterdir()) == []
+
+
+def _initialized_numpy_model() -> NumpyMLPPolicy:
+    model = NumpyMLPPolicy(seed=9, hidden_size=4)
+    model.forward(ObservationEncoder().encode(_env().observe("p0")))
+    return model

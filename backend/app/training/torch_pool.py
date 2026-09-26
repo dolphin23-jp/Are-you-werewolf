@@ -11,11 +11,13 @@ from typing import Any
 import torch
 
 from app.engine.roles import Team
+from app.training.atomic_io import atomic_write_json, exclusive_lock
 from app.training.policy_pool import PolicyPoolEntry
 from app.training.torch_checkpoint import load_torch_policy, save_torch_policy
 from app.training.torch_policy import TorchTransformerPolicy
 
 _MANIFEST_VERSION = 1
+_MANIFEST_LOCK = "manifest.lock"
 
 
 class TorchPolicyPool:
@@ -82,29 +84,33 @@ class TorchPolicyPool:
         parent_id: str | None = None,
         specialized_team: Team | None = None,
     ) -> PolicyPoolEntry:
-        generation = self.next_generation if generation is None else generation
-        if generation < 0:
-            raise ValueError("generation cannot be negative")
-        policy_id = f"g{generation:06d}"
-        if any(entry.policy_id == policy_id for entry in self._entries):
-            raise ValueError(f"policy generation {generation} already exists")
-        if parent_id is not None and not any(
-            entry.policy_id == parent_id for entry in self._entries
-        ):
-            raise ValueError(f"unknown parent policy {parent_id}")
+        # Several trainers may share one pool. Each used to rewrite the manifest
+        # from the copy it read at start-up, so the last writer dropped the
+        # others' generations; re-read and write under one lock instead.
+        with exclusive_lock(self.root / _MANIFEST_LOCK):
+            self._entries = self._read_manifest()
+            generation = self.next_generation if generation is None else generation
+            if generation < 0:
+                raise ValueError("generation cannot be negative")
+            policy_id = f"g{generation:06d}"
+            if any(entry.policy_id == policy_id for entry in self._entries):
+                raise ValueError(f"policy generation {generation} already exists")
+            if parent_id is not None and not any(
+                entry.policy_id == parent_id for entry in self._entries
+            ):
+                raise ValueError(f"unknown parent policy {parent_id}")
 
-        self.root.mkdir(parents=True, exist_ok=True)
-        checkpoint = f"{policy_id}.npz"
-        save_torch_policy(model, self.root / checkpoint)
-        entry = PolicyPoolEntry(
-            policy_id=policy_id,
-            generation=generation,
-            checkpoint=checkpoint,
-            parent_id=parent_id,
-            specialized_team=specialized_team,
-        )
-        self._entries.append(entry)
-        self._write_manifest()
+            checkpoint = f"{policy_id}.npz"
+            save_torch_policy(model, self.root / checkpoint)
+            entry = PolicyPoolEntry(
+                policy_id=policy_id,
+                generation=generation,
+                checkpoint=checkpoint,
+                parent_id=parent_id,
+                specialized_team=specialized_team,
+            )
+            self._entries.append(entry)
+            self._write_manifest()
         return entry
 
     def ensure_generation(
@@ -185,12 +191,7 @@ class TorchPolicyPool:
             "version": _MANIFEST_VERSION,
             "entries": [asdict(entry) for entry in self._entries],
         }
-        temporary = self.manifest_path.with_suffix(".json.tmp")
-        temporary.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-        )
-        temporary.replace(self.manifest_path)
+        atomic_write_json(self.manifest_path, payload)
 
 
 def _same_model_state(

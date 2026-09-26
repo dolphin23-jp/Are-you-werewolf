@@ -20,6 +20,7 @@ import torch
 
 from app.engine.game import PlayerSpec
 from app.engine.roles import Team
+from app.training.atomic_io import atomic_write_json
 from app.training.meta_strategy import (
     PolicyWeight,
     PopulationMetaDiagnostics,
@@ -714,13 +715,7 @@ class TorchPopulationResearchRun:
         }
         summary_path = self._summary_path(state.iteration_number)
         summary_path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = summary_path.with_suffix(summary_path.suffix + ".tmp")
-        temporary.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2, default=_json_default)
-            + "\n",
-            encoding="utf-8",
-        )
-        temporary.replace(summary_path)
+        atomic_write_json(summary_path, payload, default=_json_default)
 
     def _save_state(self) -> None:
         state = self._require_state()
@@ -784,12 +779,7 @@ def save_torch_population_research_state(
         "adaptive_pending": _pending_payload(state.adaptive_pending),
         "meta_strategy": _strategy_payload(state.meta_strategy),
     }
-    temporary = destination.with_suffix(destination.suffix + ".tmp")
-    temporary.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    temporary.replace(destination)
+    atomic_write_json(destination, payload)
 
 
 def load_torch_population_research_state(

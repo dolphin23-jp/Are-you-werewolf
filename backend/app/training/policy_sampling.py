@@ -79,7 +79,7 @@ class MaskedPolicySampler:
         *,
         temperature: float = 1.0,
     ) -> None:
-        if temperature <= 0:
+        if not math.isfinite(temperature) or temperature <= 0:
             raise ValueError("temperature must be positive")
         self._rng = random.Random(seed)
         self._temperature = temperature
@@ -423,6 +423,8 @@ class MaskedPolicySampler:
         if any(index < 0 or index >= len(logits) for index in valid_indices):
             raise ValueError(f"{head} legal index exceeds head width")
         scaled = tuple(logits[index] / self._temperature for index in valid_indices)
+        if not all(math.isfinite(value) for value in scaled):
+            raise ValueError(f"{head} has non-finite logits")
         peak = max(scaled)
         weights = tuple(math.exp(value - peak) for value in scaled)
         total = sum(weights)

@@ -231,3 +231,25 @@ def test_torch_ppo_rejects_dropout_until_trace_probability_tracks_it():
 
     with pytest.raises(ValueError, match="requires dropout=0"):
         TorchPPOTrainer(model)
+
+
+def test_torch_ppo_stops_before_a_non_finite_optimizer_step():
+    """A NaN minibatch used to be stepped: most weights became NaN and the pool
+    then stored that generation as immutable."""
+    torch.manual_seed(517)
+    model = _model()
+    trajectory = _vote_trajectory(model, reward=1.0, episode_id="non-finite")
+    with torch.no_grad():
+        next(model.parameters()).view(-1)[0] = float("nan")
+    before = _parameters(model).clone()
+
+    with pytest.raises(FloatingPointError, match="non-finite"):
+        TorchPPOTrainer(
+            model,
+            TorchPPOConfig(learning_rate=1e-3, epochs=1, minibatch_size=1),
+            seed=519,
+        ).update([trajectory])
+
+    after = _parameters(model)
+    assert torch.equal(before.isnan(), after.isnan())
+    assert torch.equal(before.nan_to_num(), after.nan_to_num())

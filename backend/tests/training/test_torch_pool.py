@@ -104,3 +104,14 @@ def test_torch_pool_ensure_generation_rejects_mismatched_replay(tmp_path: Path):
             parent_id=base.policy_id,
             specialized_team=Team.VILLAGE,
         )
+
+
+def test_two_torch_pool_handles_on_one_root_keep_each_others_generations(tmp_path: Path):
+    first_trainer = TorchPolicyPool(tmp_path / "pool")
+    second_trainer = TorchPolicyPool(tmp_path / "pool")
+
+    first_trainer.add(_model(911))
+    second_trainer.add(_model(912))
+
+    reloaded = TorchPolicyPool(tmp_path / "pool")
+    assert [entry.policy_id for entry in reloaded.entries] == ["g000000", "g000001"]

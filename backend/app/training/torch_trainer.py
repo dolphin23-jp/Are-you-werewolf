@@ -231,6 +231,13 @@ class TorchPPOTrainer:
             if self.config.max_grad_norm > 0
             else float("inf"),
         )
+        # One non-finite step turns most weights into NaN, and the pool then
+        # stores that generation as immutable. Stop before the optimizer runs.
+        if not bool(torch.isfinite(loss)) or not bool(torch.isfinite(raw_norm)):
+            raise FloatingPointError(
+                "PPO minibatch produced a non-finite loss or gradient "
+                f"(loss={float(loss.detach().cpu())}, grad_norm={float(raw_norm.detach().cpu())})"
+            )
         self.optimizer.step()
 
         active = torch.where(

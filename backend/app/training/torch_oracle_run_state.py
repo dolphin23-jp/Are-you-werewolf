@@ -13,6 +13,7 @@ import torch
 
 from app.engine.game import PlayerSpec
 from app.engine.roles import Team
+from app.training.atomic_io import atomic_write
 from app.training.torch_historical import TorchHistoricalTrainingLoop
 from app.training.torch_historical_run_state import (
     TorchHistoricalRunProgress,
@@ -79,10 +80,8 @@ def save_torch_oracle_run_state(
             dtype=np.uint8,
         ).copy()
 
-    temporary = destination.with_suffix(destination.suffix + ".tmp")
-    with temporary.open("wb") as handle:
+    with atomic_write(destination) as handle:
         np.savez_compressed(handle, **arrays)  # type: ignore[arg-type]
-    temporary.replace(destination)
 
 
 def load_torch_oracle_run_state(
@@ -182,7 +181,6 @@ def _serialize_historical_state(
         return inner_path.read_bytes()
     finally:
         inner_path.unlink(missing_ok=True)
-        inner_path.with_suffix(inner_path.suffix + ".tmp").unlink(missing_ok=True)
 
 
 def _deserialize_historical_state(

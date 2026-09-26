@@ -124,3 +124,26 @@ def test_vote_sampler_never_uses_non_masked_seat():
 
     assert sampled.target_id in {"p4", "p5"}
     assert set(sampled.trace.choices[0].valid_indices) == {4, 5}
+
+
+def test_non_finite_logits_are_rejected_instead_of_sampled():
+    """A NaN head made every weight NaN: the sampler silently returned the last
+    legal seat with log_prob NaN and PPO trained on it."""
+    import math
+    from dataclasses import replace
+
+    import pytest
+
+    observation = _env().observe("p0")
+    sampler = MaskedPolicySampler(seed=1)
+    mask = LegalActionMask((ActionType.VOTE,), vote_target_ids=("p1", "p2", "p3"))
+    logits = _logits()
+
+    for bad in (math.nan, math.inf, -math.inf):
+        poisoned = replace(logits, vote_target=tuple(bad for _ in logits.vote_target))
+        with pytest.raises(ValueError, match="non-finite"):
+            sampler.sample_vote(observation, mask, poisoned)
+    with pytest.raises(ValueError, match="non-finite"):
+        sampler.sample_vote(observation, mask, replace(logits, value=math.nan))
+    with pytest.raises(ValueError):
+        MaskedPolicySampler(seed=1, temperature=math.nan)

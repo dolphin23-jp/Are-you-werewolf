@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from app.engine.roles import Team
+from app.training.atomic_io import atomic_write_json
 from app.training.population_payoff import PolicyProfile, PopulationPayoffTable
 
 _STRATEGY_VERSION = 1
@@ -62,12 +63,7 @@ class PopulationMetaStrategy:
             "werewolf": [_weight_json(item) for item in self.werewolf],
             "fox": [_weight_json(item) for item in self.fox],
         }
-        temporary = destination.with_suffix(destination.suffix + ".tmp")
-        temporary.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-        )
-        temporary.replace(destination)
+        atomic_write_json(destination, payload)
 
     @classmethod
     def load(cls, path: str | Path) -> PopulationMetaStrategy:

@@ -15,6 +15,7 @@ from typing import Any
 
 from app.engine.game import PlayerSpec
 from app.engine.roles import Team
+from app.training.atomic_io import atomic_write_json
 from app.training.learned_runner import LearnedEpisodeRunner
 from app.training.policy_pool import NumpyPolicyPool
 
@@ -245,12 +246,7 @@ class PopulationPayoffTable:
                 for record in self.records
             ],
         }
-        temporary = self.path.with_suffix(self.path.suffix + ".tmp")
-        temporary.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-        )
-        temporary.replace(self.path)
+        atomic_write_json(self.path, payload)
 
 
 def evaluate_policy_profile(

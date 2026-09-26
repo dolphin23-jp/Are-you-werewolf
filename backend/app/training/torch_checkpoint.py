@@ -15,6 +15,7 @@ import numpy as np
 import torch
 from torch import Tensor
 
+from app.training.atomic_io import atomic_write
 from app.training.policy_contract import PolicyHeadSizes
 from app.training.torch_policy import TorchTransformerPolicy, TransformerPolicyConfig
 
@@ -36,14 +37,17 @@ def save_torch_policy(model: TorchTransformerPolicy, path: str | Path) -> None:
         _METADATA_KEY: np.frombuffer(encoded_metadata, dtype=np.uint8).copy(),
     }
     for name, tensor in model.state_dict().items():
-        arrays[f"{_TENSOR_PREFIX}{name}"] = tensor.detach().cpu().numpy().copy()
+        array = tensor.detach().cpu().numpy().copy()
+        if np.issubdtype(array.dtype, np.floating) and not np.isfinite(array).all():
+            # A pool generation is immutable once written; a NaN one would be
+            # sampled as an opponent for the rest of the run.
+            raise ValueError(f"refusing to save non-finite tensor {name}")
+        arrays[f"{_TENSOR_PREFIX}{name}"] = array
 
-    temporary = destination.with_suffix(destination.suffix + ".tmp")
-    with temporary.open("wb") as handle:
+    with atomic_write(destination) as handle:
         # NumPy 2.5's stub models arbitrary named arrays as the `allow_pickle`
         # keyword, while runtime `savez_compressed` accepts these tensor names.
         np.savez_compressed(handle, **arrays)  # type: ignore[arg-type]
-    temporary.replace(destination)
 
 
 def load_torch_policy(
