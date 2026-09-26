@@ -1,0 +1,946 @@
+{
+ "note": "Public messages from the recorded live games (backend/artifacts/live-ab*), labelled with the role the speaker claims for themselves. Only messages that mention a role word are kept.",
+ "names": {
+  "p0": "Player0",
+  "p1": "Player1",
+  "p2": "Player2",
+  "p3": "Player3",
+  "p4": "Player4",
+  "p5": "Player5",
+  "p6": "Player6",
+  "p7": "Player7",
+  "p8": "Player8",
+  "p9": "Player9",
+  "p10": "Player10",
+  "p11": "Player11",
+  "p12": "Player12",
+  "p13": "Player13",
+  "p14": "Player14",
+  "p15": "Player15",
+  "p16": "Player16"
+ },
+ "items": [
+  {
+   "source": "live-ab/m1",
+   "speaker": "p8",
+   "expected": "seer",
+   "text": "現時点の第一処刑候補はPlayer12(p12)です。えっと、占い師COです。0日目はPlayer12(p12)を占って、人狼判定でした。まずはPlayer12(p12)を第一処刑候補にしたいです。ただ、発言がまだないため、Player13(p13)の方が疑わしいという見方も残っており、そこは議論で確認したいです。対抗が出るなら、結果と内訳も比較させてください。"
+  },
+  {
+   "source": "live-ab/m2",
+   "speaker": "p3",
+   "expected": "freemason",
+   "text": "現時点の第一処刑候補はPlayer12(p12)です。共有者CO。相方はPlayer13(p13)です。"
+  },
+  {
+   "source": "live-ab/m3",
+   "speaker": "p1",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer12(p12)です。Player8(p8)の「0日目はPlayer12(p12)を占って、人狼判定でした」という結果は、現時点で最も具体的な処刑理由だと受け止めています。したがって第一処刑候補はPlayer12(p12)です。ただし、占い結果だけで即断はせず、Player12(p12)本人の反応や、Player8(p8)の判定と矛盾する発言がないかを確認したいです。Player13(p13)は共有相方として比較対象から外し、第二候補はPlayer14(p14)とします。Player14(p14)の方が疑わしいという見方も残っているため、処刑前に疑われている点への説明を聞いてから投票したいです。"
+  },
+  {
+   "source": "live-ab/m4",
+   "speaker": "p11",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer12(p12)です。ただし、占い結果だけで確定とは考えず、Player12(p12)本人の反論と、Player8(p8)を偽と見る場合の説明を確認したいです。現時点の第二候補はPlayer7(p7)で、こちらの方が疑わしいという見方も残っています。Player12(p12)には、黒判定への反論に加えて、今日Player8(p8)をどう評価し、誰を処刑したいかを示していただきたいです。"
+  },
+  {
+   "source": "live-ab/m6",
+   "speaker": "p13",
+   "expected": "freemason",
+   "text": "共有者CO。Player3(p3)の相方は私Player13(p13)で間違いありません。"
+  },
+  {
+   "source": "live-ab/m9",
+   "speaker": "p14",
+   "expected": "medium",
+   "text": "霊媒CO。現時点の第一処刑候補はPlayer12(p12)です。Player1(p1)への回答から言うと、Player14(p14)を疑う具体的な発言や行動は、今のログにはありません。Player1(p1)がm3で第二候補に置いたこと自体が根拠になっている程度で、私からはそこを強く見る理由はないです。Player12(p12)の「裏付けがない」という反論は、確かに一方的な判定だけでは真確定できないという点で妥当です。ただ、Player8(p8)偽の場合の内訳や投票先がまだ具体的でなく、順位は下げません。第二候補は、Player3(p3)です。Player13(p13)とフリーメイソンCOが2人いる形なら、少なくとも一方は偽なので、そこは確認したいです。"
+  },
+  {
+   "source": "live-ab/m10",
+   "speaker": "p11",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer12(p12)です。Player12(p12)の「一方的な黒主張で、真偽を裏付ける要素もない」という指摘自体は妥当です。ただ、現時点ではPlayer8(p8)を偽と見る具体的な内訳や、代わりの処刑希望が示されておらず、黒判定への反論としては不足しているように見えます。したがって第一処刑候補はPlayer12(p12)のままです。第二候補はPlayer3(p3)です。Player14(p14)が共有確定のPlayer3(p3)を疑う理由として、Player13(p13)とのCOを取り違えている点は気になります。まだ投票は確定せず、Player12(p12)の追加説明を待ちたいです。"
+  },
+  {
+   "source": "live-ab/m14",
+   "speaker": "p14",
+   "expected": "medium",
+   "text": "霊媒CO。現時点の第一処刑候補はPlayer12(p12)です。Player12(p12)の「0日目の一方的な主張で真を裏付ける材料もない」という指摘は、その通りで、黒判定だけでPlayer8(p8)真を確定はできないよぉ。ただ、偽なら狂狼特攻が本線という説明に留まり、狂人か人狼か、なぜPlayer8(p8)を偽と見るのかまではまだ具体化されていないかな。第二候補は、Player3(p3)の方が疑わしいという見方も残っているため、そこかな。"
+  },
+  {
+   "source": "live-ab/m15",
+   "speaker": "p16",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer8(p8)です。【Player14(p14)への回答】「黒判定だけでPlayer8(p8)真を確定はできない」点は同意します。したがって反論として妥当ですが、Player12(p12)が村側なら、現状は一方的な占い主張をしたPlayer8(p8)を第一処刑候補に置くのが自然です。第二候補はPlayer14(p14)。共有確定のPlayer3(p3)を疑う内訳説明の混乱があり、こちらの方が疑わしいという見方も残ります。"
+  },
+  {
+   "source": "live-ab/m21",
+   "speaker": "p8",
+   "expected": "seer",
+   "text": "占い結果、Player14(p14)は白(人狼ではない)です。現時点の第一処刑候補はPlayer0(p0)です。占い結果を公開します。Player14(p14)は人狼ではありません。Player0(p0)は、私がPlayer12(p12)を黒と出している状況で私に投票しており、第一処刑候補はPlayer0(p0)です。Player9(p9)もPlayer14(p14)へ投票しているため、第二候補として残ります。"
+  },
+  {
+   "source": "live-ab/m23",
+   "speaker": "p14",
+   "expected": "medium",
+   "text": "霊媒CO。現時点の第一処刑候補はPlayer3(p3)です。霊媒結果を出すねぇ。Player12(p12)は人狼でしたぁ。Player3(p3)は共有COの対抗位置にいて、少なくともPlayer3(p3)とPlayer13(p13)のどちらかは偽だから、第一処刑候補は変えずにPlayer3(p3)かなぁ。1日目にPlayer12(p12)へ投票しているのは反対材料だけど、身内切りや切り替えは残るよぉ。第二候補はPlayer9(p9)で、Player14(p14)投票がやっぱり気になるかなぁ。"
+  },
+  {
+   "source": "live-ab/m24",
+   "speaker": "p1",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer13(p13)です。Player13(p13)の「Player6(p6)とPlayer5(p5)の比較を優先する」という視点は理解できます。ただ、共有COがPlayer3(p3)とPlayer13(p13)で割れている以上、まず少なくとも一方が偽という大きな未解決点を処理したいです。1日目の投票はPlayer3(p3)もPlayer13(p13)もPlayer12(p12)投票で、ここだけでは差がつきません。Player8(p8)真ならPlayer12(p12)黒・Player14(p14)白は整合しますが、共有対抗の偽位置は残ります。現状はPlayer13(p13)を第一、Player3(p3)を第二に見ますが、Player13(p13)がPlayer6(p6)・Player5(p5)を優先する具体的な投票差をもう少し確認したいです。"
+  },
+  {
+   "source": "live-ab/m26",
+   "speaker": "p13",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer6(p6)です。Player8(p8)より疑わしいと見る根拠は、現時点ではありません。Player0(p0)の投票だけでは弱く、判定と霊媒結果も整合しています。"
+  },
+  {
+   "source": "live-ab/m27",
+   "speaker": "p9",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer8(p8)です。Player14(p14)へ。1日目は霊媒COの真偽を見たくて投票しました。"
+  },
+  {
+   "source": "live-ab/m28",
+   "speaker": "p6",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer3(p3)です。Player13(p13)の「判定と霊媒結果も整合しています」という指摘は妥当です。Player0(p0)のPlayer8(p8)投票だけで偽と見るのも弱く、Player8(p8)・Player14(p14)の結果整合性は認めます。ただし、それでもPlayer3(p3)とPlayer13(p13)のfreemasonCO対抗という構造問題は残ります。現時点でPlayer13(p13)は自分の見方を説明している一方、Player3(p3)からは、私が求めたCOに至った経緯とPlayer13(p13)との差の説明がまだありません。Player3(p3)はこの点に答えてください。"
+  },
+  {
+   "source": "live-ab/m29",
+   "speaker": "p3",
+   "expected": "freemason",
+   "text": "現時点の第一処刑候補はPlayer8(p8)です。Player14(p14)、Player6(p6)へ。私が先に共有COし、Player13(p13)が確認したため、Player13(p13)が相方です。CO経緯と差はこれで説明できます。"
+  },
+  {
+   "source": "live-ab/m30",
+   "speaker": "p6",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer3(p3)です。Player3(p3)の「私が先に共有COし、Player13(p13)が確認した」という説明は、COの順序としては受け取った。ただ、それでPlayer13(p13)が相方だと確定するわけではなく、2人のfreemasonCOのうち少なくとも1人が偽という構造問題は残る。Player3(p3)もPlayer13(p13)もPlayer12(p12)投票で、投票差はつかない。もっとも、Player13(p13)の方が疑わしいという見方も残っているため、そこは踏まえて投票する。",
+   "note": "Quotes another player's 「私が先に共有COし」."
+  },
+  {
+   "source": "live-ab/m31",
+   "speaker": "p3",
+   "expected": "freemason",
+   "text": "現時点の第一処刑候補はPlayer8(p8)です。Player14(p14)、Player6(p6)へ。Player13(p13)が私の共有CO直後に確認COしたため、相方はPlayer13(p13)です。",
+   "note": "「私の共有CO直後に…相方はPlayer13」."
+  },
+  {
+   "source": "live-ab/m34",
+   "speaker": "p8",
+   "expected": "seer",
+   "text": "占いCO。現時点の第一処刑候補はPlayer9(p9)です。占い結果を出します。Player9(p9)は人狼でした。1日目に人狼ではないPlayer14(p14)へ投票し、2日目には人狼ではない私Player8(p8)へ投票しており、投票先がかなり不自然です。本日の第一処刑候補はPlayer9(p9)、第二候補はPlayer16(p16)です。Player9(p9)はこの投票理由を教えてもらえますか。"
+  },
+  {
+   "source": "live-ab/m35",
+   "speaker": "p9",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer8(p8)です。1日目はPlayer14(p14)の霊媒COをまだ信用しきれず投票しました。2日目はPlayer8(p8)の判定と進行が不自然に見えて投票しています。"
+  },
+  {
+   "source": "live-ab/m36",
+   "speaker": "p13",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer9(p9)です。先に答えると、Player8(p8)がPlayer12(p12)より疑わしいとは見ていません。Player12(p12)黒はPlayer14(p14)の霊媒結果とも一致します。"
+  },
+  {
+   "source": "live-ab/m37",
+   "speaker": "p14",
+   "expected": "medium",
+   "text": "現時点の第一処刑候補はPlayer9(p9)です。霊媒結果を出すねぇ。2日目に処刑されたPlayer3(p3)は人狼ではなかったよぉ。共有者としての真偽まではこれだけで決まらないけれど、少なくとも人狼2連続処刑ではないねぇ。Player9(p9)の投票理由は一応筋が通る部分もあるけれど、1日目に人狼ではない私Player14(p14)へ投票し、2日目にはPlayer8(p8)へ投票したことに加えて、Player8(p8)から黒判定が出ている。第二候補はPlayer7(p7)で、こちらの方が疑わしいという見方もまだ残っているから、Player9(p9)を即断せず比較はしたいねぇ。",
+   "note": "Medium announcing a result: 「霊媒結果を出すねぇ」 + verdict."
+  },
+  {
+   "source": "live-ab/m38",
+   "speaker": "p1",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer9(p9)です。【第一処刑候補】Player9(p9)です。【第二候補】Player13(p13)です。Player14(p14)の「投票理由は一応筋が通る部分もある」という点は認めますが、Player9(p9)は占い黒判定を受けており、投票先も結果的に非人狼主張のPlayer14(p14)とPlayer8(p8)へ続いています。加えて、Player13(p13)は2日目にPlayer6(p6)へ投票しており、共有対抗のPlayer3(p3)処刑を避けた理由を確認したいです。"
+  },
+  {
+   "source": "live-ab/m39",
+   "speaker": "p8",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer9(p9)です。Player9(p9)の説明は、Player14(p14)の霊媒COを初日に疑った点や、私Player8(p8)の進行を不自然に感じた点は筋が通ると思います。ただ、それでも2日目に私Player8(p8)へ投票したことに加え、今回の黒判定が残っています。"
+  },
+  {
+   "source": "live-ab/m40",
+   "speaker": "p16",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer8(p8)です。【m35への回答】Player9(p9)の、Player14(p14)とPlayer8(p8)を疑って投票した説明には筋が通る部分があります。ただし、Player8(p8)の黒判定だけでなく、Player11(p11)がPlayer3(p3)処刑に投票した直後に噛まれている点も含め、現状はPlayer8(p8)を第一処刑候補とします。Player13(p13)は第二候補です。共有対抗が2人おり、Player3(p3)への疑いは下げますが、少なくとも一方は偽です。"
+  },
+  {
+   "source": "live-ab/m42",
+   "speaker": "p8",
+   "expected": "seer",
+   "text": "占いCO。占い結果、Player16(p16)は白(人狼ではない)です。現時点の第一処刑候補はPlayer7(p7)です。えっと、今朝の占い結果です。Player16(p16)さんは人狼ではありませんでした。死体が1つなので、狐かどうかはまだ断定できません。2日目、白確定のPlayer14(p14)さんへ投票し、3日目もPlayer14(p14)さんへ投票しています。1日目に人狼確定のPlayer9(p9)さんへ投票した点は反対材料ですが、投票の流れとして気になります。第二候補はPlayer0(p0)さんです。"
+  },
+  {
+   "source": "live-ab/m43",
+   "speaker": "p14",
+   "expected": "medium",
+   "text": "霊媒CO。現時点の第一処刑候補はPlayer7(p7)です。霊媒師として結果を出します。Player12(p12)は人狼、Player3(p3)は人狼ではなく、Player9(p9)は人狼でした。Player8(p8)のPlayer16(p16)白は確認しましたが、今朝の死体が一つなので狐判定まではできませんね。第一処刑候補はPlayer7(p7)です。2日目、3日目ともに白確定のPlayer14(p14)へ投票していて、ここはかなり重く見ています。1日目に人狼確定のPlayer9(p9)へ投票した点は反対材料ですが、それでも投票の偏りが気になります。Player7(p7)さん、この二日間の投票理由を説明してもらえますか。第二候補はPlayer6(p6)です。もっとも、Player6(p6)の方が疑わしいという見方も残っているので、回答を聞いてからでも遅くないよ。"
+  },
+  {
+   "source": "live-ab/m44",
+   "speaker": "p1",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer13(p13)です。Player14(p14)さんの「第一処刑候補はPlayer7(p7)です」という見方は、白判定への二日連続投票という点で理解できます。共有者COがPlayer13(p13)さんと、処刑済みのPlayer3(p3)さんで割れており、少なくとも一方は偽です。Player3(p3)さんの霊媒白は共有真を確定しないため、ここを残す損失も大きいと考えています。一方で、Player7(p7)さんの投票理由次第では順位を入れ替える余地はあります。なお、今朝のPlayer16(p16)さんの死体は、Player8(p8)さんの白判定と両立するため、狐の生死までは断定できません。",
+   "note": "Counts others' freemason COs."
+  },
+  {
+   "source": "live-ab/m45",
+   "speaker": "p2",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer13(p13)です。Player1(p1)の共有対抗への疑いには同意します。ただ、Player13(p13)は2日目に処刑候補のPlayer3(p3)ではなくPlayer6(p6)へ投票し、3日目はPlayer9(p9)黒吊りに乗っています。共有対抗として残り続けた理由と、この投票先の意図をPlayer13(p13)には説明してほしいですね。"
+  },
+  {
+   "source": "live-ab/m46",
+   "speaker": "p14",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer7(p7)です。Player1(p1)の「現時点の第一処刑候補はPlayer13(p13)です」という見方は、共有対抗を残す危険という点で妥当だと思うよ。ただ、Player13(p13)は1日目に人狼確定のPlayer12(p12)へ投票していて、そこは少し白く見える材料かな。"
+  },
+  {
+   "source": "live-ab/m47",
+   "speaker": "p1",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer13(p13)です。Player14(p14)さんの「Player13(p13)は1日目に人狼確定のPlayer12(p12)へ投票」という反証は妥当で、Player13(p13)が偽共有者と断定できるほどではない点は認めます。ただ、共有者COがPlayer13(p13)さんと処刑済みのPlayer3(p3)さんで割れている以上、少なくとも一方が偽という独立した問題は残ります。さらに2日目にPlayer3(p3)さんではなくPlayer6(p6)さんへ投票した意図も未解決です。Player8(p8)さんのPlayer9(p9)黒とPlayer14(p14)さんの霊媒黒一致は補強材料ですが、これだけで占い真確定とは見ません。Player13(p13)さんの説明を聞いてから最終判断したいです。"
+  },
+  {
+   "source": "live-ab/m48",
+   "speaker": "p7",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer14(p14)です。2日目は、Player8(p8)のPlayer14(p14)白を真結果と断定できず、霊媒COの真偽確認を優先しました。3日目もその疑念が解消されず、同じ投票です。"
+  },
+  {
+   "source": "live-ab/m51",
+   "speaker": "p8",
+   "expected": "seer",
+   "text": "占い結果、Player7(p7)は白(人狼ではない)です。現時点の第一処刑候補はPlayer0(p0)です。朝一で結果を出します。占い師として、Player7(p7)は人狼ではありませんでした。1日目に人狼ではない私へ投票し、2日目も人狼ではないPlayer16(p16)へ投票しています。3日目は人狼確定のPlayer9(p9)へ投票している点は反対材料ですが、第二候補のPlayer6(p6)も残っています。Player6(p6)の方が疑わしいという見方もあり、まだ不安ですが、現時点ではPlayer0(p0)を処刑したいです。"
+  },
+  {
+   "source": "live-ab/m52",
+   "speaker": "p14",
+   "expected": "medium",
+   "text": "霊媒結果、Player13(p13)は白(人狼ではない)です。現時点の第一処刑候補はPlayer6(p6)です。1日目に人狼確定のPlayer12(p12)へ投票した点は反対材料として残るものの、2日目は人狼ではないPlayer3(p3)、3日目は人狼ではないPlayer13(p13)へ投票していて、投票先の見え方がかなり気になるんだよねぇ。第二候補はPlayer2(p2)。Player7(p7)は、2日目に白確定の僕へ投票していた点からは少し疑いを下げているよ。Player6(p6)には、この投票の流れをどう考えているか聞いておきたいかなぁ。"
+  },
+  {
+   "source": "live-ab/m54",
+   "speaker": "p1",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer6(p6)です。加えて、Player0(p0)は1日目にPlayer8(p8)、2日目にPlayer16(p16)、4日目にPlayer5(p5)へ投票しており、投票先の一貫性が薄い点はかなり気になります。ただ、Player13(p13)については共有COが2人いて少なくとも一方が偽なので、Player13(p13)への疑いはいったん下げます。Player0(p0)には、この投票先の変化をどう説明するか聞きたいです。"
+  },
+  {
+   "source": "live-ab/m55",
+   "speaker": "p6",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer1(p1)です。まずPlayer14(p14)の質問に答える。2日目にPlayer3(p3)へ投票したのは、共有COが割れている中で、Player13(p13)との真贋比較より先に、Player3(p3)側の主張と投票の整合性を確認すべきだと見たため。狼候補はPlayer3(p3)またはその相方にあたるPlayer13(p13)だった。3日目はPlayer3(p3)が処刑され、霊媒結果前では対抗のPlayer13(p13)を残す意味が薄いと考え、Player13(p13)を狼候補として投票した。Player14(p14)の指摘どおり、結果的には非狼への投票が続いた点は認める。Player13(p13)への疑いは下げた。共有COが2人おり、少なくとも1人は偽だからだ。",
+   "note": "Talks about the freemason claims being split."
+  },
+  {
+   "source": "live-ab/m56",
+   "speaker": "p14",
+   "expected": "medium",
+   "text": "霊媒CO。霊媒結果、Player13(p13)は白(人狼ではない)です。現時点の第一処刑候補はPlayer6(p6)です。Player6(p6)の説明は、共有対抗の真贋を見て投票したという点では筋が通っているし、そこは妥当だと思うよぉ。ただ、結果として2日目に非狼のPlayer3(p3)、3日目に非狼のPlayer13(p13)へ投票し、さらに4日目もPlayer13(p13)へ投票している流れは独立して残るかなぁ。Player6(p6)を処刑しない最強の理由は、1日目に人狼確定のPlayer12(p12)へ投票していることだねぇ。"
+  },
+  {
+   "source": "live-ab/m57",
+   "speaker": "p1",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer6(p6)です。直接答えると、現在の狼位置はPlayer6(p6)を第一、Player0(p0)を第二に見ています。Player6(p6)の共有真贋を見ていた説明は理解できますが、Player3(p3)・Player13(p13)への投票が続き、4日目も新しい材料なくPlayer13(p13)へ投票した点は残ります。Player0(p0)も投票先の変化は気になりますが、こちらは判断の揺れでも説明でき、確定非狼への投票を重ねたPlayer6(p6)との差が決定的です。ただし、Player12(p12)投票はPlayer6(p6)を処刑しない最も強い理由として残します。"
+  },
+  {
+   "source": "live-ab/m58",
+   "speaker": "p6",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer1(p1)です。Player1(p1)の指摘は、Player13(p13)への投票が結果だけ見れば重なっているという点では妥当だ。ただし、「4日目も新しい材料なく」という評価には留保が要る。4日目の投票時点ではPlayer13(p13)の白判定はまだ出ておらず、Player6(p6)から見れば共有対抗として処理を継続する判断材料は残っていた。Player0(p0)の投票先の変化とPlayer8(p8)・Player5(p5)双方からの疑念を合わせると、Player0(p0)の方が疑わしいという見方も残っている。"
+  },
+  {
+   "source": "live-ab/m59",
+   "speaker": "p1",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer6(p6)です。Player6(p6)の説明について、4日目時点ではPlayer13(p13)の白判定が未公開だったという留保は妥当だと思います。今朝はPlayer4(p4)が死体となっており、Player4(p4)も4日目にPlayer13(p13)へ投票していたため、この投票だけを根拠にPlayer6(p6)へ集中しすぎる危険は少し意識したいです。第二候補はPlayer0(p0)。Player8(p8)真なら未占い灰の比較になり、Player0(p0)の投票先がPlayer8(p8)、Player16(p16)、Player5(p5)と揺れている点は独立した疑いです。Player6(p6)を処刑しない最強の理由は、1日目に人狼確定のPlayer12(p12)へ投票していることです。"
+  },
+  {
+   "source": "live-ab/m60",
+   "speaker": "p7",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer14(p14)です。Player14(p14)さんへの投票理由は、2日目はPlayer14(p14)さんがPlayer9(p9)さん投票で、霊媒COとの整合性に疑問を持ったためです。"
+  },
+  {
+   "source": "live-ab/m61",
+   "speaker": "p14",
+   "expected": "medium",
+   "text": "霊媒CO。霊媒結果、Player6(p6)は白(人狼ではない)です。現時点の第一処刑候補はPlayer7(p7)です。Player7(p7)さん、まず2日目のPlayer14(p14)投票理由は確認したよ。ただ、Player14(p14)はその日にPlayer9(p9)へ投票していても、霊媒結果を隠す動きとは限らないかな。第一処刑候補はやはりPlayer7(p7)さん。2日目と3日目に、白確定している私Player14(p14)へ投票している点が重いんだよね。Player8(p8)さんのPlayer7(p7)白と、1日目のPlayer9(p9)投票は反対材料として残るけれど、今朝Player8(p8)さんが噛まれたことも含めて、Player7(p7)さんには3日目の投票理由を聞きたい。第二候補はPlayer2(p2)さんで、こちらの方が疑わしいという見方もまだ残っているよ。なお、freemasonCOはPlayer3(p3)さんとPlayer13(p13)さんの2人で、少なくとも片方は偽だね。"
+  },
+  {
+   "source": "live-ab/m62",
+   "speaker": "p1",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer0(p0)です。Player14(p14)さんのPlayer6(p6)白を受け、5日目にPlayer6(p6)へ3票集まった点も踏まえて、Player6(p6)への疑いは下げます。現時点の第一処刑候補はPlayer0(p0)です。Player0(p0)は5日目に霊媒主張中のPlayer14(p14)へ投票しており、さらにPlayer8(p8)が噛まれる前にPlayer0(p0)へ投票していた点も気になります。Player8(p8)真視点をどこまで採るかは残りますが、Player2(p2)の方が疑わしいという見方もまだあるため、処刑しない最強の理由はPlayer2(p2)を優先すべき可能性です。Player0(p0)さんには、5日目にPlayer14(p14)へ投票した決め手を確認したいです。"
+  },
+  {
+   "source": "live-ab/m63",
+   "speaker": "p2",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer5(p5)です。Player6(p6)への疑いは下げます。5日目にPlayer6(p6)へ3票集まり、霊媒主張のPlayer14(p14)も白を出している以上、ここを軸にするのは雑です。第一処刑候補はPlayer5(p5)。5日目にPlayer0(p0)へ投票し、Player8(p8)も同じPlayer0(p0)へ投票して噛まれた流れをどう見ていたのか説明が足りません。便乗してPlayer0(p0)を吊らせたい投票にも見えます。第二候補はPlayer1(p1)です。"
+  },
+  {
+   "source": "live-ab/m65",
+   "speaker": "p14",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer7(p7)です。Player7(p7)さんの2日目の投票理由は、Player14(p14)がPlayer9(p9)へ投票した点を不自然に見た、という意味では理解できるよ。ただ、それでも3日目もPlayer14(p14)へ投票した理由はまだ残っているかな。さらに4日目もPlayer14(p14)投票で、霊媒結果と噛まれたPlayer8(p8)さんの白判定を踏まえると、継続した投票の説明が欲しいところ。"
+  },
+  {
+   "source": "live-ab/m68",
+   "speaker": "p7",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer14(p14)です。3日目も、p8のp9黒だけでp14さんを白置きせず、霊媒CO後の投票姿勢を継続して疑いました。妥当性は薄いですが、4日目にp14さんが白確定のPlayer7(p7)へ投票した点が独立した根拠です。",
+   "note": "「霊媒CO後の投票姿勢」 is a time reference to someone else's CO."
+  },
+  {
+   "source": "live-ab-postfix/m1",
+   "speaker": "p8",
+   "expected": "seer",
+   "text": "占い結果、Player12(p12)は黒(人狼)です。現時点の第一処刑候補はPlayer12(p12)です。占い師COです。0日目にPlayer12(p12)を占い、人狼判定でした。まずはPlayer12(p12)を第一処刑候補にしたいです。ただ、現時点では発言情報がなく、Player13(p13)の方が疑わしいという見方も残っているため、そこは慎重に見たいです。"
+  },
+  {
+   "source": "live-ab-postfix/m2",
+   "speaker": "p3",
+   "expected": "freemason",
+   "text": "現時点の第一処刑候補はPlayer12(p12)です。共有者CO。相方はPlayer13(p13)です。"
+  },
+  {
+   "source": "live-ab-postfix/m3",
+   "speaker": "p1",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer12(p12)です。Player8(p8)の「Player12(p12)は黒(人狼)です」という判定を、現時点では第一処刑候補として受け止めたいです。Player3(p3)から共有者COとPlayer13(p13)相方の提示が出ているため、Player8(p8)が偽でも直ちに破綻する形ではありませんが、少なくともPlayer12(p12)を処刑すれば霊結果と占い判定を照合でき、以後の視点整理が進みます。もちろん黒一致だけでPlayer8(p8)の真を確定させるのは危険なので、霊結果が黒でも身内切りや誤爆は残して考えたいです。第二候補はPlayer14(p14)です。Player14(p14)の方が疑わしいという見方も残っているため、Player12(p12)を処刑しない場合の有力候補として比較したいと思います。"
+  },
+  {
+   "source": "live-ab-postfix/m6",
+   "speaker": "p13",
+   "expected": "freemason",
+   "text": "共有者CO。Player3(p3)の相方は私Player13(p13)で間違いありません。"
+  },
+  {
+   "source": "live-ab-postfix/m9",
+   "speaker": "p10",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer12(p12)です。Player12(p12)の村人主張自体は自然だが、Player8(p8)の判定への具体的反証はない。第二候補はPlayer13(p13)。共有者COはPlayer3(p3)とPlayer13(p13)の2人で、少なくとも1人は偽。",
+   "note": "Counts others' freemason COs."
+  },
+  {
+   "source": "live-ab-postfix/m12",
+   "speaker": "p14",
+   "expected": "medium",
+   "text": "現時点の第一処刑候補はPlayer12(p12)です。reply_to m7で、Player12(p12)の「私は村人」という主張自体は、黒判定を受けた立場として自然かなぁと思います。ただ、それだけでPlayer8(p8)偽とは決められないので、第一処刑候補はやっぱりPlayer12(p12)です。私は霊媒師COです。Player12(p12)を処刑すれば判定を返せるため、Player8(p8)の視点を検証できます。第二候補はPlayer3(p3)で、Player3(p3)とPlayer13(p13)のフリーメイソンCOが並んでいる以上、少なくとも片方は偽です。Player3(p3)の方が疑わしいという見方も残るので、そこは比較しておきたいですねぇ。"
+  },
+  {
+   "source": "live-ab-postfix/m13",
+   "speaker": "p3",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer12(p12)です。先に答えます。偽寄りなのはPlayer14(p14)です。Player13(p13)は私との共有を確認済みで、対立は成立していません。Player14(p14)はこの認識をどう説明しますか。"
+  },
+  {
+   "source": "live-ab-postfix/m14",
+   "speaker": "p14",
+   "expected": "medium",
+   "text": "霊媒CO。現時点の第一処刑候補はPlayer12(p12)です。Player3(p3)さん、ご指摘の通りです。Player13(p13)さんが相方確認を出しているので、共有対立と見る根拠はありません。私の認識違いでした。共有対立要素はいったん撤回しますねぇ。それでも第一処刑候補は、黒判定が出ていて霊結果を取れるPlayer12(p12)です。第二候補はPlayer3(p3)さんのままですが、共有確認を踏まえて疑いは下げて比較します。"
+  },
+  {
+   "source": "live-ab-postfix/m19",
+   "speaker": "p8",
+   "expected": "seer",
+   "text": "占い結果、Player14(p14)は白(人狼ではない)です。現時点の第一処刑候補はPlayer0(p0)です。占い師COです。0日目のPlayer12(p12)さんは人狼、1日目にPlayer14(p14)さんを占って、人狼ではありませんでした。Player10(p10)さんの死体は1つなので、呪殺より噛みの可能性が高そうです。第一処刑候補はPlayer0(p0)さんです。人狼ではない私へ投票しており、理由を確認したいです。第二候補はPlayer9(p9)さんですが、こちらの方が疑わしいという見方も残っています。"
+  },
+  {
+   "source": "live-ab-postfix/m20",
+   "speaker": "p14",
+   "expected": "medium",
+   "text": "霊媒CO。現時点の第一処刑候補はPlayer3(p3)です。霊媒結果を出すよぉ。Player12(p12)は人狼だったぁ。なので、Player8(p8)の黒判定は少なくとも結果として一致しているねぇ。ただし、それだけで真確定ではなく、身内切りや誤爆はまだ残るかなぁ。第一処刑候補はPlayer3(p3)だよぉ。共有COがPlayer3(p3)とPlayer13(p13)の2人いて、少なくとも1人は偽だからねぇ。Player3(p3)は昨日Player12(p12)へ投票しているのが反対材料ではあるけれど、投票だけで白とは決めにくいかなぁ。第二候補はPlayer9(p9)で、こちらの方が疑わしいという見方も残っているよぉ。なお、Player10(p10)の死体は1つなので、呪殺より噛みと見るのが自然そうだねぇ。"
+  },
+  {
+   "source": "live-ab-postfix/m21",
+   "speaker": "p1",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer13(p13)です。Player14(p14)さんの「それだけで真確定ではなく、身内切りや誤爆はまだ残るかなぁ」という慎重な見方には同意します。そのうえで、共有COがPlayer3(p3)さんとPlayer13(p13)さんの2人いる以上、少なくとも一方は偽です。昨日のPlayer12(p12)さんへの投票はお二人とも同じで、ここだけでは真偽を分けられません。現時点の第一処刑候補はPlayer13(p13)さん、第二候補はPlayer3(p3)さんです。Player13(p13)さんには、Player3(p3)さんより自分の共有主張を信じるべき具体的な根拠を確認したいです。"
+  },
+  {
+   "source": "live-ab-postfix/m22",
+   "speaker": "p2",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer3(p3)です。Player14(p14)さんの「それだけで真確定ではない」はその通りです。Player3(p3)さんはPlayer12(p12)さんへ投票しているので、真共有なら説明できますが、身内投票でも説明できる。Player13(p13)さんも同じ投票で差がつかず、第二候補です。なお、Player12(p12)さん黒への疑いは上げています。"
+  },
+  {
+   "source": "live-ab-postfix/m23",
+   "speaker": "p11",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer3(p3)です。【結論】第一処刑候補はPlayer3(p3)さん、第二候補はPlayer13(p13)さんです。共有COが2人いるため少なくとも一方は偽で、昨日のPlayer12(p12)さんへの投票は両者同じなので真偽の独立材料になっていません。Player8(p8)さんの黒判定とPlayer14(p14)さんの霊結果は一致していますが、身内切りや誤爆は残るため、占い真確定とは分けて考えます。現状はPlayer3(p3)さんを先に見ますが、Player13(p13)さんの方が疑わしいという見方も残っています。Player3(p3)さんには、Player13(p13)さんより自分を信じるべき具体的な根拠を伺いたいです。",
+   "note": "Counts others' freemason COs."
+  },
+  {
+   "source": "live-ab-postfix/m24",
+   "speaker": "p14",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer3(p3)です。Player14(p14)の霊媒結果とPlayer8(p8)の黒判定が一致している点は、少なくともPlayer12(p12)が人狼だったという情報として重く見ているよぉ。ただ、それだけでPlayer8(p8)の真確定にはしないかなぁ。Player3(p3)のPlayer12(p12)投票は反対材料として認めるけれど、共有対抗が残る以上、まだ独立した真要素には届かないかなぁ。Player9(p9)は初日に霊媒COのPlayer14(p14)へ投票していて、共有問題とは別の疑いとして残っているよぉ。"
+  },
+  {
+   "source": "live-ab-postfix/m26",
+   "speaker": "p13",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer6(p6)です。Player1(p1)さんへ。Player3(p3)さんより私を信じる具体的根拠はありません。CO経緯と相互確認は共有として整合しますが、真偽を投票で分けられない点は認めます。"
+  },
+  {
+   "source": "live-ab-postfix/m27",
+   "speaker": "p3",
+   "expected": "freemason",
+   "text": "現時点の第一処刑候補はPlayer8(p8)です。Player13(p13)は私の相方で、偽共有はPlayer14(p14)の前提です。昨日はPlayer8(p8)の黒判定を受けPlayer12(p12)へ投票しました。",
+   "note": "「Player13は私の相方」."
+  },
+  {
+   "source": "live-ab-postfix/m30",
+   "speaker": "p8",
+   "expected": "seer",
+   "text": "現時点の第一処刑候補はPlayer9(p9)です。朝一で結果を出します。占い師CO、Player9(p9)は人狼でした。これまでPlayer9(p9)は、1日目に非狼のPlayer14(p14)へ、2日目に私Player8(p8)へ投票しています。判定と投票の両面から、第一処刑候補はPlayer9(p9)です。ただ、Player16(p16)の方が疑わしいという見方も残るため、第二候補はPlayer16(p16)でお願いします。Player9(p9)には投票理由を確認したいです。"
+  },
+  {
+   "source": "live-ab-postfix/m31",
+   "speaker": "p14",
+   "expected": "medium",
+   "text": "現時点の第一処刑候補はPlayer9(p9)です。Player8(p8)のPlayer9(p9)黒判定は確認したよぉ。私は霊媒師CO、2日目処刑のPlayer3(p3)は人狼ではなかったよ。第一処刑候補はPlayer9(p9)かなぁ。1日目、非狼と確定していた私へ投票していて、さらに3日目にPlayer8(p8)から黒判定が出ているからねぇ。Player8(p8)真ならかなり自然だけど、偽の黒や身内切りの可能性はまだ残るよぉ。とはいえ、Player7(p7)の方が疑わしいという見方も残っているので、Player9(p9)の投票理由と、Player7(p7)の1日目の投票意図は聞いてから決めたいかなぁ。"
+  },
+  {
+   "source": "live-ab-postfix/m33",
+   "speaker": "p2",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer9(p9)です。第一処刑候補はPlayer9(p9)です。Player8(p8)の黒判定に加え、Player9(p9)は1日目に非狼判定のPlayer14(p14)、2日目にPlayer8(p8)へ投票しており、投票の流れがかなり不自然です。ただし誤爆や身内切りは残るので、盲信はしません。第二候補はPlayer13(p13)。Player13(p13)は2日目にPlayer6(p6)へ投票した理由を説明してください。共有対抗の真偽判断として、その一票がまだ浮いています。"
+  },
+  {
+   "source": "live-ab-postfix/m34",
+   "speaker": "p9",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer13(p13)です。Player14(p14)さん投票は、当時はPlayer8(p8)さんの黒判定と霊媒COの真偽を比較したかったからです。"
+  },
+  {
+   "source": "live-ab-postfix/m35",
+   "speaker": "p14",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer9(p9)です。Player9(p9)さんのPlayer14(p14)さん投票の説明は、当時の状況としては分かるかなぁ。ただ、2日目にPlayer8(p8)さんへ投票した理由がまだ聞けていないよぉ。Player8(p8)さんのPlayer12(p12)さん黒を見たうえで、なぜ占い師側へ投票したのか、そこをもう一度だけ説明してほしいかなぁ。"
+  },
+  {
+   "source": "live-ab-postfix/m36",
+   "speaker": "p1",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer9(p9)です。Player9(p9)さんの「Player14(p14)さん投票は、当時の黒判定と霊媒COの真偽比較」という説明は、1日目の状況としては理解できます。ただし、今回の黒判定に直結する2日目のPlayer8(p8)さん投票理由はまだ説明されておらず、ここは独立した疑いとして残ります。したがって第一処刑候補はPlayer9(p9)さん、第二候補はPlayer13(p13)さんです。Player13(p13)さんへの疑いは、freemasonCOが2人いて少なくとも1人が偽である点から少し下げています。"
+  },
+  {
+   "source": "live-ab-postfix/m38",
+   "speaker": "p14",
+   "expected": "medium",
+   "text": "現時点の第一処刑候補はPlayer9(p9)です。Player9(p9)さんの「当時はPlayer8(p8)さんの黒判定と霊媒COの真偽を比較したかった」という1日目の説明自体は、状況としては分かるよぉ。そこは一度認めるかなぁ。ただ、2日目はPlayer12(p12)黒と私Player14(p14)の霊媒結果が一致した後に、なおPlayer8(p8)さんへ投票している理由が残っているよぉ。1日目、非狼と確定した私へ投票したことに加え、3日目のPlayer8(p8)さん黒判定もあるので、第一処刑候補はPlayer9(p9)を維持するねぇ。第二候補は、freemasonCOが2人いて少なくとも1人が偽のPlayer13(p13)さんかなぁ。",
+   "note": "「私Player14の霊媒結果」."
+  },
+  {
+   "source": "live-ab-postfix/m39",
+   "speaker": "p2",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer9(p9)です。Player14(p14)さんの整理に同意します。Player9(p9)の1日目投票は説明可能でも、Player12(p12)黒とPlayer14(p14)の霊媒黒が揃った2日目にPlayer8(p8)へ投票した理由は別問題です。ただし誤爆・身内切りの余地は残るため、Player13(p13)を第二候補に置きます。"
+  },
+  {
+   "source": "live-ab-postfix/m40",
+   "speaker": "p9",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer13(p13)です。Player14(p14)さん、1日目はPlayer8(p8)さんの黒判定と霊媒COの真偽を比べたくて投票しました。"
+  },
+  {
+   "source": "live-ab-postfix/m43",
+   "speaker": "p8",
+   "expected": "seer",
+   "text": "占いCO。占い結果、Player16(p16)は白(人狼ではない)です。現時点の第一処刑候補はPlayer7(p7)です。占い結果をお伝えします。Player16(p16)は人狼ではありませんでした。今朝はPlayer14(p14)とPlayer16(p16)の2死体ですが、Player14(p14)は私の白なので、呪殺の可能性も考えています。2日目・3日目に、白確定のPlayer14(p14)へ投票しています。1日目に黒確定のPlayer9(p9)へ投票した点は反対材料ですが、Player0(p0)の方が疑わしい見方も残ります。"
+  },
+  {
+   "source": "live-ab-postfix/m44",
+   "speaker": "p1",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer13(p13)です。Player8(p8)の「2死体ですが、Player14(p14)は私の白なので、呪殺の可能性も考えています」という見方は理解できます。Player16(p16)の白判定と合わせ、狐死亡の可能性はありますが、Player8(p8)真を確定する材料ではない点は残ります。私は現時点でも第一処刑候補をPlayer13(p13)とします。共有対抗が2人で少なくとも1人は偽であり、さらにPlayer2(p2)の提示どおり1日目にPlayer13(p13)がPlayer6(p6)へ投票した点も気になります。Player7(p7)の方が疑わしいという見方も残るため第二候補はPlayer7(p7)です。Player8(p8)には、Player13(p13)よりPlayer7(p7)を優先する具体的な差を確認したいです。"
+  },
+  {
+   "source": "live-ab-postfix/m45",
+   "speaker": "p2",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer13(p13)です。Player1(p1)の「共有対抗が2人で少なくとも1人は偽」という点はその通りです。特にPlayer13(p13)は対抗のPlayer3(p3)が生存していた2日目にPlayer6(p6)へ投票しており、共有対抗より先に灰を狙った理由が薄い。"
+  },
+  {
+   "source": "live-ab-postfix/m47",
+   "speaker": "p2",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer13(p13)です。Player8(p8)のPlayer7(p7)優先理由は理解しました。ただ、Player13(p13)が共有対抗のPlayer3(p3)存命中にPlayer6(p6)へ投票した不自然さは消えていません。Player13(p13)はこの投票理由を説明してください。"
+  },
+  {
+   "source": "live-ab-postfix/m48",
+   "speaker": "p2",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer13(p13)です。Player8(p8)のPlayer7(p7)優先理由、白のPlayer14(p14)への連続投票という点は妥当です。ただし、それでPlayer13(p13)の投票問題が消えるわけではない。共有対抗のPlayer3(p3)が生存中にPlayer6(p6)へ投票したのは、やはり優先順位として不自然です。"
+  },
+  {
+   "source": "live-ab-postfix/m49",
+   "speaker": "p2",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer13(p13)です。Player8(p8)の「2日目・3日目に、私の白であるPlayer14(p14)へ続けて投票」という差は妥当です。ただし、それはPlayer13(p13)の共有対抗存命中のPlayer6(p6)投票を説明しません。Player16(p16)白で疑いが下がった点は認めますが、2死体だけで呪殺やPlayer8(p8)真は確定しません。"
+  },
+  {
+   "source": "live-ab-postfix/m50",
+   "speaker": "p13",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer6(p6)です。回答します。2日目は共有対抗の真偽を即断せず、Player6(p6)の挙動を優先して投票しました。仮指定はPlayer6(p6)、期限は次発言まで。Player5(p5)も第二候補です。"
+  },
+  {
+   "source": "live-ab-adaptive/m1",
+   "speaker": "p8",
+   "expected": "seer",
+   "text": "占い結果、Player12(p12)は黒(人狼)です。現時点の第一処刑候補はPlayer12(p12)です。占い師COです。0日目にPlayer12(p12)を占い、人狼判定でした。したがって第一処刑候補はPlayer12(p12)です。まだ情報が少ないため、第二候補はPlayer13(p13)も見ています。ただ、Player13(p13)の方がより疑わしいという見方も残っているので、そこは慎重に確認したいです。"
+  },
+  {
+   "source": "live-ab-adaptive/m2",
+   "speaker": "p3",
+   "expected": "freemason",
+   "text": "現時点の第一処刑候補はPlayer12(p12)です。共有者CO。相方はPlayer13(p13)です。"
+  },
+  {
+   "source": "live-ab-adaptive/m3",
+   "speaker": "p1",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer12(p12)です。Player8(p8)の「Player12(p12)は黒」という判定を軸に、第一処刑候補はPlayer12(p12)で見ています。Player3(p3)の共有COとPlayer13(p13)の相方確認により、Player13(p13)を第二候補として扱う根拠は薄れました。したがって第二候補はPlayer14(p14)です。もっとも、Player8(p8)が偽でPlayer12(p12)が村側という視点も残るため、Player14(p14)の方が疑わしいという見方を十分に比べてから決めたいです。Player12(p12)には、判定への反論と、Player8(p8)偽を考える根拠を聞きたいです。"
+  },
+  {
+   "source": "live-ab-adaptive/m4",
+   "speaker": "p11",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer12(p12)です。Player8(p8)の「第二候補はPlayer13(p13)も見ています」という提示は、Player3(p3)の共有COと相方確認で成立しなくなっています。そのため、現時点では判定対象のPlayer12(p12)を第一処刑候補のまま見ます。ただし、Player8(p8)の真が確定したわけではなく、誤判定や騙りの可能性は残ります。Player12(p12)の反論を待ちつつ、別軸ではPlayer7(p7)の方が疑わしいという見方も捨てず、第二候補として比較したいです。"
+  },
+  {
+   "source": "live-ab-adaptive/m6",
+   "speaker": "p13",
+   "expected": "freemason",
+   "text": "共有者CO。Player3(p3)の相方は私Player13(p13)で間違いありません。"
+  },
+  {
+   "source": "live-ab-adaptive/m7",
+   "speaker": "p12",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer8(p8)です。反論する。Player8(p8)の黒判定を覆す決定打はないが、判定以外の裏付けがなく、Player13(p13)疑いも共有確認で崩れたため偽視は残る。"
+  },
+  {
+   "source": "live-ab-adaptive/m9",
+   "speaker": "p4",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer12(p12)です。Player10(p10)の質問に答えると、Player8(p8)偽・Player12(p12)村側を置くなら第一処刑候補はPlayer3(p3)。共有COの真偽が絡むけど、現状その視点で最も確認したい位置。Player12(p12)の「判定以外の裏付けがない」は妥当だけど、現時点で白の独立根拠もない。",
+   "note": "Talks about the freemason claims."
+  },
+  {
+   "source": "live-ab-adaptive/m11",
+   "speaker": "p13",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer12(p12)です。「Player12(p12)より自分の方が疑われる見方」は、共有確認で消えています。"
+  },
+  {
+   "source": "live-ab-adaptive/m12",
+   "speaker": "p14",
+   "expected": "medium",
+   "text": "現時点の第一処刑候補はPlayer12(p12)です。Player3(p3)さんへ、Player12(p12)吊りより優先する決定的な理由は、今のところないかなぁ。Player8(p8)偽の視点なら、Player8(p8)自身が狼または狐で、Player12(p12)は村側という形がまずありますねぇ。Player3(p3)さんは共有対抗の矛盾から第二候補には残るけれど、Player13(p13)さんの確認もあるので、そこはPlayer12(p12)より優先とはまだ言えないです。霊媒CO、まだ結果はありません。Player12(p12)を吊るなら、明日の霊結果で判定を検証できます。"
+  },
+  {
+   "source": "live-ab-adaptive/m13",
+   "speaker": "p6",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer12(p12)です。Player13(p13)への回答です。Player12(p12)より優先して疑う決定的な根拠は、現時点ではありません。ただし、Player8(p8)偽・Player12(p12)村側の内訳なら、Player8(p8)は狼・狂人・妖狐のいずれもあり得ます。その場合は黒誤爆や騙りの可能性を残しつつ、共有ラインを含めてPlayer3(p3)を第二候補として検証したいです。Player12(p12)の反論どおり、p8の判定以外の裏付けがない点は妥当ですが、白の独立根拠にもなっていません。"
+  },
+  {
+   "source": "live-ab-adaptive/m15",
+   "speaker": "p6",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer12(p12)です。Player12(p12)の反論には妥当な点があります。Player8(p8)の黒判定以外に、判定を補強する材料がまだないことは認めます。ただ、現時点で対抗占いCOはなく、Player12(p12)自身にも独立した白要素や能力結果は出ていません。したがって第一処刑候補はなおPlayer12(p12)です。もっとも、Player8(p8)が偽なら狼・狂人・妖狐のいずれも残り、その場合に共有ラインを再確認できるPlayer3(p3)の方が疑わしいという見方も捨てきれず、第二候補はPlayer3(p3)とします。急いで断定する場面ではありませんが、現状の材料差ではp12を先に見ます。"
+  },
+  {
+   "source": "live-ab-adaptive/m17",
+   "speaker": "p12",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer8(p8)です。Player13(p13)へ直接答える。Player8(p8)の黒判定を覆す決定打はない。ただし黒判定以外の補強はなく、Player13(p13)疑いも共有確認で崩れた。"
+  },
+  {
+   "source": "live-ab-adaptive/m19",
+   "speaker": "p3",
+   "expected": "freemason",
+   "text": "共有CO。現時点の第一処刑候補はPlayer12(p12)です。【m12へ】「Player12(p12)吊りより優先する決定的な理由は」ない点は確認。p8偽なら真占い処刑が最大損失だが、p12白の独立根拠もない。"
+  },
+  {
+   "source": "live-ab-adaptive/m23",
+   "speaker": "p8",
+   "expected": "seer",
+   "text": "占いCO。占い結果、Player14(p14)は白(人狼ではない)です。現時点の第一処刑候補はPlayer0(p0)です。占い結果を出します。Player14(p14)は人狼ではありません。現状の第一処刑候補はPlayer0(p0)です。1日目に、私が人狼ではないと確定している私へ投票しており、理由を確認したいです。第二候補はPlayer9(p9)で、霊媒師のPlayer14(p14)へ投票している点も気になります。ただ、Player9(p9)の方が疑わしいという見方も残っています。"
+  },
+  {
+   "source": "live-ab-adaptive/m24",
+   "speaker": "p14",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer3(p3)です。まず、p12吊りより優先して処刑すべき理由は、共有COが2人いて、Player3(p3)とPlayer13(p13)の少なくとも一方が偽だからです。私は霊媒結果でPlayer12(p12)が人狼だったと確認していますが、それでもPlayer8(p8)の真は確定しません。Player8(p8)偽なら、狼または狐の位置はPlayer8(p8)自身が中心で、共有騙りのPlayer3(p3)・Player13(p13)のどちらかが狼・狐の可能性も残ります。",
+   "note": "「私は霊媒結果で…」 is also how a villager says 'judging by the medium result'; not treated as a claim."
+  },
+  {
+   "source": "live-ab-adaptive/m25",
+   "speaker": "p1",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer13(p13)です。Player14(p14)の指摘どおり、Player8(p8)の真は霊媒結果の一致だけでは確定しません。その点は受け入れます。Player3(p3)も第二候補として残します。Player12(p12)への黒判定と霊媒結果は両方とも狼要素として見ていますが、身内切りや誤爆もあるため、それだけでPlayer8(p8)真と断定はしません。Player13(p13)には、共有相方としての主張をPlayer3(p3)とどう整合させるのか確認したいです。"
+  },
+  {
+   "source": "live-ab-adaptive/m26",
+   "speaker": "p2",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer3(p3)です。Player14(p14)の指摘どおり、共有COが2人いる以上、Player3(p3)とPlayer13(p13)の少なくとも一方は偽です。初日はPlayer3(p3)もPlayer13(p13)もPlayer12(p12)へ投票していますが、これは共有真偽の裏付けにはなりません。"
+  },
+  {
+   "source": "live-ab-adaptive/m27",
+   "speaker": "p11",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer3(p3)です。Player2(p2)の指摘どおり、初日の投票は共有真偽の裏付けになりません。現時点では、共有COが2人いる以上、Player3(p3)とPlayer13(p13)の少なくとも一方が偽である点を重く見て、第一処刑候補はPlayer3(p3)、第二候補はPlayer13(p13)です。加えて、Player8(p8)のPlayer12(p12)黒判定と、Player14(p14)の霊媒黒判定が一致しているため、Player12(p12)への疑いも上げています。ただし、身内切りや誤爆は残り、Player8(p8)真も確定ではありません。Player13(p13)の方が疑わしいという見方も残っているため、Player3(p3)を処刑しない最強の理由はそこです。"
+  },
+  {
+   "source": "live-ab-adaptive/m28",
+   "speaker": "p3",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer8(p8)です。p2(p2)へ。p13(p13)偽・私真を投票以外で断定する固有根拠はありません。相互確認済み共有で、少なくとも同一投票よりは強いが絶対証明ではない。仮指定はp8(p8)、第二候補p11(p11)。"
+  },
+  {
+   "source": "live-ab-adaptive/m29",
+   "speaker": "p2",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer3(p3)です。Player3(p3)の指摘どおり、初日の同一投票だけでPlayer13(p13)偽・Player3(p3)真とは断定できません。そこは認めます。ただ、Player3(p3)の「相互確認済み共有」は本人申告に留まり、Player8(p8)を第一にする具体的根拠も薄いです。Player12(p12)黒とPlayer14(p14)の霊媒黒が一致している以上、占い偽を急いで決め打つより、対抗共有の一方を処刑して整理したい。"
+  },
+  {
+   "source": "live-ab-adaptive/m30",
+   "speaker": "p11",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer3(p3)です。Player3(p3)の反論から、Player3(p3)とPlayer13(p13)の同一投票だけでは真偽を決められない点は認めます。ただ、「相互確認済み共有」は本人申告の域を出ず、Player8(p8)を第一処刑候補とする固有根拠もまだ弱いと見ています。Player12(p12)黒とPlayer14(p14)の霊媒黒は補強材料ですが、Player8(p8)真の確定ではありません。"
+  },
+  {
+   "source": "live-ab-adaptive/m31",
+   "speaker": "p13",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer6(p6)です。[m27]の共有真偽への指摘は妥当ですが、p3(p3)とは相互確認済みで、ここを処刑軸にはしません。共有ラインへの疑義を残したまま、独自の整理が見えません。"
+  },
+  {
+   "source": "live-ab-adaptive/m32",
+   "speaker": "p6",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer3(p3)です。先に直接答えます。Player3(p3)とPlayer13(p13)は、どちらか一方が真の共有者、もう一方が偽の共有者です。私は現時点ではPlayer3(p3)を偽共有、Player13(p13)を真共有寄りに見ますが、確定ではありません。Player3(p3)はPlayer8(p8)処刑を第一に置く独自根拠が薄く、共有の真証明も自己申告の域を出ていません。したがって第一処刑候補はPlayer3(p3)、第二候補はPlayer13(p13)です。Player13(p13)のPlayer6(p6)への疑いも、共有真偽の比較より先に置く理由としては弱い。ただし、Player13(p13)の方が疑わしいという見方も残っているため、今日の処刑をPlayer3(p3)に固定するにはなお慎重さが要ります。"
+  },
+  {
+   "source": "live-ab-adaptive/m34",
+   "speaker": "p6",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer3(p3)です。Player13(p13)の指摘には妥当な点があります。私がPlayer13(p13)を真共有寄りに見た積極的根拠はまだ弱く、Player3(p3)偽を確定できる状況でもありません。ただ、Player3(p3)はPlayer8(p8)処刑を第一に置き、さらにPlayer11(p11)を第二候補にした根拠が発言上ほとんど示されていません。加えて、死体はPlayer10(p10)一体で、Player8(p8)の占い先はPlayer14(p14)なので、呪殺による真証明にもなっていません。"
+  },
+  {
+   "source": "live-ab-adaptive/m37",
+   "speaker": "p8",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer0(p0)です。Player3(p3)さんへ、追加検証は、まずPlayer0(p0)を処刑してPlayer14(p14)の霊媒結果を確認し、その後は未占い灰を占って狐候補を狭める方針です。狐候補はPlayer9(p9)、Player0(p0)、白でも狐が残るPlayer14(p14)です。Player0(p0)第一、Player9(p9)第二で見ています。"
+  },
+  {
+   "source": "live-ab-adaptive/m39",
+   "speaker": "p3",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer8(p8)です。p8(p8)第一、p11(p11)第二は維持します。p8(p8)を吊らない最強の理由は真占いなら追加占いと呪殺機会を失う点。ただしp0(p0)優先はp16(p16)との差が未提示です。"
+  },
+  {
+   "source": "live-ab-adaptive/m42",
+   "speaker": "p6",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer13(p13)です。まず質問に答える。共有ラインを疑うなら、Player3(p3)とPlayer13(p13)のどちらが真かは、現時点では断定できない。片方が真フリーメイソン、もう片方が偽という関係だが、相互主張と投票だけでは決め手に欠ける。ただ、Player13(p13)は2日目に共有対抗の検証よりPlayer6(p6)投票を選んでおり、その根拠が弱い。第一処刑候補はPlayer13(p13)、第二候補はPlayer1(p1)で見る。Player13(p13)には、なぜ私を狼と見たのかを具体的に説明してほしい。"
+  },
+  {
+   "source": "live-ab-adaptive/m43",
+   "speaker": "p8",
+   "expected": "seer",
+   "text": "現時点の第一処刑候補はPlayer9(p9)です。まず、Player0(p0)とPlayer16(p16)を投票以外で比べて、Player0(p0)を優先する強い要素は今のところありません。ですので、Player16(p16)よりPlayer0(p0)を優先する判断は撤回します。占い結果を公開します。本日Player9(p9)は人狼でした。1日目に人狼ではないPlayer14(p14)へ投票し、2日目には人狼ではない私、Player8(p8)へ投票しており、投票も結果と一致します。",
+   "note": "Seer announcing a result: 「占い結果を公開します」 + verdict."
+  },
+  {
+   "source": "live-ab-adaptive/m44",
+   "speaker": "p14",
+   "expected": "medium",
+   "text": "霊媒CO。霊媒結果、Player3(p3)は白(人狼ではない)です。現時点の第一処刑候補はPlayer9(p9)です。Player3(p3)の質問に先に答えるねぇ。Player12(p12)はもう処刑済みで、霊媒結果は人狼だったから、今は処刑候補にはできないよぉ。Player9(p9)は、Player8(p8)から黒判定が出ていて、1日目には霊媒師のPlayer14(p14)へ投票している。Player8(p8)偽なら、狼ならPlayer9(p9)との身内切りか、逆にPlayer9(p9)を狼に見せる黒出しで、Player8(p8)・Player9(p9)・Player13(p13)らに狼が残る形はありそう。狐ならPlayer8(p8)自身、または共有騙り側のPlayer13(p13)が候補だねぇ。Player3(p3)の霊媒結果は人狼ではなかったよぉ。"
+  },
+  {
+   "source": "live-ab-adaptive/m45",
+   "speaker": "p1",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer9(p9)です。Player14(p14)の「Player8(p8)偽なら、Player9(p9)との身内切りか黒塗り」という整理は妥当で、Player9(p9)黒だけでPlayer8(p8)真確定とは見ません。ただ現状は、Player9(p9)が1日目にPlayer14(p14)、2日目にPlayer8(p8)へ投票しており、今回の黒判定と投票の流れが重なっています。加えて、Player11(p11)が2日目にPlayer3(p3)へ投票した後に噛まれている点は、共有対抗の争点を見ていた人物を消した可能性もありますが、単独では決め手にしません。"
+  },
+  {
+   "source": "live-ab-adaptive/m46",
+   "speaker": "p13",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer9(p9)です。根拠は強くなかったです。Player6(p6)が共有真偽の不確定を認めながら2日目にPlayer3(p3)へ投票し、対抗検証より私への投票を優先した点を狼視しました。仮指定はPlayer9(p9)。"
+  },
+  {
+   "source": "live-ab-adaptive/m47",
+   "speaker": "p13",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer9(p9)です。答えます。根拠は弱かったですが、Player6(p6)が共有真偽を決められないと言いながら、Player3(p3)へ投票した点です。仮指定はPlayer9(p9)、反論を待ちます。"
+  },
+  {
+   "source": "live-ab-adaptive/m48",
+   "speaker": "p9",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer8(p8)です。Player14(p14)へ投票したのは、初日のPlayer8(p8)の黒判定だけでは納得できず、霊媒COの真偽を先に見たかったからです。"
+  },
+  {
+   "source": "live-ab-adaptive/m49",
+   "speaker": "p8",
+   "expected": "seer",
+   "text": "占いCO。占い結果、Player12(p12)は黒(人狼)です。占い結果、Player14(p14)は白(人狼ではない)です。占い結果、Player9(p9)は黒(人狼)です。現時点の第一処刑候補はPlayer9(p9)です。Player3(p3)さん、Player0(p0)をPlayer16(p16)より優先する投票以外の強い要素は、今のところありません。したがって優先判断は撤回し、第二候補はPlayer16(p16)とします。Player14(p14)さんの質問には、Player8(p8)偽ならPlayer9(p9)への身内切りか黒塗りは残るので、黒判定だけで真確定とは見ていません。ただ、Player9(p9)の投票履歴は判定と重なり、第一処刑候補は変えません。妖狐は未占いの灰を中心に見ます。"
+  },
+  {
+   "source": "live-ab-adaptive/m56",
+   "speaker": "p14",
+   "expected": "medium",
+   "text": "霊媒CO。現時点の第一処刑候補はPlayer9(p9)です。霊媒結果を出すねえ。Player12(p12)は人狼、Player3(p3)は人狼ではなく、今回もPlayer8(p8)は人狼ではなかったよ。1日目、Player9(p9)は人狼ではないと確定したPlayer14(p14)へ投票していて、2日目には人狼ではないと確定したPlayer8(p8)へ投票している。さらに3日目、Player8(p8)からPlayer9(p9)黒が出ているねえ。Player8(p8)偽の可能性や狐位置は残るけれど、投票と判定が重なっているので気になるよ。Player9(p9)はこの二度の投票をどう説明するのかなあ。第二候補はPlayer16(p16)で、1日目に人狼ではないと確定したPlayer8(p8)へ投票している点が残るよ。"
+  },
+  {
+   "source": "live-ab-adaptive/m57",
+   "speaker": "p16",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer13(p13)です。二つの視点を分けて整理します。第一処刑候補はPlayer13(p13)です。共有者相当のfreemasonCOがPlayer3(p3)とPlayer13(p13)で割れており、少なくとも一方は偽です。Player14(p14)真ならp3白ですが、それだけでp13真は確定しません。第二候補はPlayer9(p9)で、投票履歴と黒判定の重なりは無視できません。なおPlayer8(p8)への疑いは下げます。"
+  },
+  {
+   "source": "live-ab-adaptive/m58",
+   "speaker": "p2",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer9(p9)です。Player8(p8)の黒判定に加え、Player9(p9)は初日にPlayer14(p14)、2日目にPlayer8(p8)へ投票しており、役職者を狙った形が重なっています。Player8(p8)への疑いは、Player12(p12)が1日目に死亡していて2日目夜の占い対象にはなれないため下げます。"
+  },
+  {
+   "source": "live-ab-adaptive/m59",
+   "speaker": "p1",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer9(p9)です。Player2(p2)の「Player8(p8)への疑いは、Player12(p12)が1日目に死亡していて2日目夜の占い対象にはなれないため下げます」は妥当だと思います。私もPlayer8(p8)への疑いは下げます。ただし、Player14(p14)の結果はPlayer8(p8)が非人狼という補強に留まり、真占い確定ではありません。Player8(p8)偽なら、Player9(p9)の二度の役職者投票を狼の役職探りと見るか、騙りへの抵抗と見るかが分岐します。現時点の第一処刑候補はPlayer9(p9)、第二候補はPlayer13(p13)です。"
+  },
+  {
+   "source": "live-ab-adaptive/m61",
+   "speaker": "p9",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer13(p13)です。まず投票理由です。1日目はPlayer14(p14)の霊媒COを真と決め打てず、Player8(p8)とのラインを疑って投票しました。"
+  },
+  {
+   "source": "live-ab-adaptive/m62",
+   "speaker": "p14",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer9(p9)です。Player9(p9)の1日目の投票理由は、霊媒CO同士のラインを疑ったという説明で、そこは一応わかるよお。ただ、2日目にPlayer8(p8)へ投票した理由まで同じ説明で十分かはまだ気になるかなあ。Player8(p8)偽を疑ったとして、どの結果や発言が決め手だったのか、もう少し聞きたいよ。"
+  },
+  {
+   "source": "live-ab-adaptive/m67",
+   "speaker": "p4",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer9(p9)です。Player2(p2)の反発投票という村側仮説は成立する点は認めるよ。ただ、2日目はPlayer8(p8)の判定後投票だから、偽占いを疑った決め手はやっぱり必要。現状はPlayer9(p9)第一、Player13(p13)第二で見る。"
+  },
+  {
+   "source": "live-ab-adaptive/m70",
+   "speaker": "p14",
+   "expected": "medium",
+   "text": "霊媒CO。現時点の第一処刑候補はPlayer16(p16)です。霊媒結果を出すねぇ。Player9(p9)は人狼だったよぉ。これで人狼判定はPlayer12(p12)とPlayer9(p9)の2回目だから、以後の霊媒結果は白になるねぇ。処刑候補の第一はPlayer16(p16)かなぁ。1日目、2日目、3日目と、いずれも人狼ではないと確定しているPlayer8(p8)へ投票しているのが気になるよぉ。第二候補はPlayer7(p7)で、こちらは投票先が一貫してPlayer14(p14)なのが、霊媒結果と対立する位置を狙っているようにも見えるかなぁ。逆に、1日目にPlayer14(p14)が人狼確定のPlayer12(p12)へ投票していること、Player8(p8)もPlayer12(p12)へ投票していることから、この2人への疑いは下げているよぉ。"
+  },
+  {
+   "source": "live-ab-adaptive/m71",
+   "speaker": "p16",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer13(p13)です。まず各日の判断を説明します。1日目は情報が乏しく、p8のp12黒が真か不明なため、黒判定を急がずp8を疑いました。2日目はp14白が出ても、p14の霊媒結果との整合性を見極める必要があると考え、継続しました。3日目はp9黒が出ましたが、占いの信頼性を確定できず投票しました。freemasonCO対抗の一人で、少なくとも一人が偽です。第二候補はPlayer0(p0)。"
+  },
+  {
+   "source": "live-ab-adaptive/m74",
+   "speaker": "p13",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer6(p6)です。まずPlayer1(p1)へ。2日目にPlayer3(p3)を偽視したのではなく、共有対抗の真偽を投票だけで決めずPlayer6(p6)を見たかった。ただ結果的に判断は誤りでした。"
+  },
+  {
+   "source": "live-ab-adaptive/m76",
+   "speaker": "p7",
+   "expected": "medium",
+   "text": "霊媒CO。霊媒結果、Player12(p12)は黒(人狼)です。霊媒結果、Player3(p3)は白(人狼ではない)です。霊媒結果、Player8(p8)は白(人狼ではない)です。霊媒結果、Player9(p9)は黒(人狼)です。現時点の第一処刑候補はPlayer14(p14)です。Player14(p14)への投票は、霊媒結果の信頼性を先に検証したかったためです。Player9(p9)はPlayer8(p8)の黒判定から人狼候補と見ていましたが、確定とは扱っていません。"
+  },
+  {
+   "source": "live-ab-adaptive/m77",
+   "speaker": "p14",
+   "expected": "medium",
+   "text": "霊媒CO。現時点の第一処刑候補はPlayer7(p7)です。Player7(p7)の「霊媒結果の信頼性を先に検証したかった」という説明は、投票理由としては一応筋が通っていると思うよぉ。ただ、Player14(p14)がPlayer8(p8)白、Player9(p9)黒を出した後も、3日目から5日目まで一貫してPlayer14(p14)へ投票している点は、まだ独立した疑いとして残るかなぁ。1日目に人狼確定のPlayer9(p9)へ投票しているのは反対材料として認めるけれど、今はPlayer7(p7)を第一、Player16(p16)を第二候補で見ているよぉ。Player7(p7)は、Player9(p9)黒を見た後もPlayer14(p14)偽を優先した理由をもう少し具体的に説明してほしいなぁ。"
+  },
+  {
+   "source": "live-ab-adaptive/m79",
+   "speaker": "p1",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer7(p7)です。Player13(p13)さんの指摘に同意します。Player7(p7)を第一処刑候補、Player13(p13)を第二候補で見ています。霊媒COが2人いる以上、少なくとも一方は偽ですし、4日目に処刑されたのはPlayer9(p9)で、Player7(p7)が主張するPlayer12(p12)やPlayer3(p3)ではありません。Player7(p7)が結果判明後もPlayer14(p14)投票を続けた理由を確認してから投票したいです。",
+   "note": "Counts others' medium COs."
+  },
+  {
+   "source": "live-ab-adaptive/m80",
+   "speaker": "p6",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer7(p7)です。まずPlayer13(p13)へ。記録上、2日目の私Player6(p6)の投票先はPlayer3(p3)であり、「p3へ投票せず」は事実と異なる。共有真偽の観点では、Player3(p3)を対抗として見て投票した。4日目にPlayer13(p13)へ投票したのは、共有COが二人のまま少なくとも一方が偽で、Player14(p14)の霊媒結果とPlayer8(p8)の黒判定を見ても共有偽の問題が未解決だったためだ。Player13(p13)の「Player6(p6)を見たかった」という判断自体はあり得る。Player9(p9)黒がPlayer14(p14)と一致しても、結果後までPlayer14(p14)投票を続けた理由は残る。Player7(p7)にはそこを具体的に答えてほしい。"
+  },
+  {
+   "source": "live-ab-adaptive/m81",
+   "speaker": "p7",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer14(p14)です。直接の理由は、Player9(p9)黒の一致はPlayer14(p14)真の補強材料ですが、霊媒対抗が残る以上、それだけで投票先を変える決定打にはならなかったためです。"
+  },
+  {
+   "source": "live-ab-adaptive/m82",
+   "speaker": "p14",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer7(p7)です。Player7(p7)の「霊媒対抗が残る以上、それだけで投票先を変える決定打にはならなかった」という説明が筋の通る点は認めるよぉ。とはいえ、Player14(p14)がPlayer8(p8)白を出した後、さらにPlayer9(p9)黒まで一致した後も、3日目から5日目までPlayer14(p14)投票を続けた違和感は残るかなぁ。第一処刑候補はPlayer7(p7)、第二候補はPlayer16(p16)で見るよぉ。Player7(p7)の1日目Player9(p9)投票は反対材料だけれど、Player8(p8)真なら狼2名の判定が整合するので、今は投票継続の方を重く見るねぇ。"
+  },
+  {
+   "source": "live-ab-adaptive/m84",
+   "speaker": "p6",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer7(p7)です。Player7(p7)の「霊媒対抗が残る以上、それだけで投票先を変える決定打にはならなかった」という説明は、対抗が残る状況で慎重になるという意味では筋が通っている。そこは認める。ただし、4日目に処刑されたのはPlayer9(p9)であり、Player7(p7)が主張するPlayer12(p12)黒・Player3(p3)白は直接検証されていない。さらにPlayer9(p9)黒はPlayer14(p14)と一致するが、両者の霊媒結果が同時に成立するため、それだけでは真贋を分けられない。mediumCOが2人いる以上、第一処刑候補はPlayer7(p7)から動かさない。第二候補は未解決の共有対抗Player13(p13)。"
+  },
+  {
+   "source": "live-ab-adaptive/m86",
+   "speaker": "p14",
+   "expected": "medium",
+   "text": "霊媒CO。霊媒結果、Player8(p8)は白(人狼ではない)です。現時点の第一処刑候補はPlayer16(p16)です。霊媒結果を出すねえ。Player7(p7)は人狼ではなかったよ。これまでの結果は、Player12(p12)とPlayer9(p9)が人狼、Player3(p3)・Player8(p8)・Player7(p7)は人狼ではない、で確定している。1日目、2日目、3日目と、いずれも人狼ではないと確定したPlayer8(p8)へ投票しているのが気になるんだよねえ。Player8(p8)偽を見ていたなら、その根拠を聞きたい。第二候補はPlayer6(p6)で、こちらの方が疑わしいという見方もまだ残っているから、Player16(p16)の説明を聞いてから決めたいよ。"
+  },
+  {
+   "source": "live-ab-adaptive/m87",
+   "speaker": "p16",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer13(p13)です。[m86]への回答です。1〜3日目は、Player8(p8)の初日黒が真結果か確信できず、Player14(p14)白も対抗関係を踏まえると偽占いの囲いを疑い、継続投票しました。後に非狼と判明しても狂人・妖狐の可能性は残ります。第二候補はPlayer0(p0)で、こちらがより疑わしい見方も残ります。"
+  },
+  {
+   "source": "live-ab-adaptive/m88",
+   "speaker": "p1",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer13(p13)です。Player16(p16)の説明は、「Player8(p8)の非狼判定だけでは真占い確定にならず、狂人・妖狐の可能性も残る」という点では妥当だと思います。ただ、共有CO対抗だったPlayer13(p13)が、Player3(p3)への投票を避け、2日目以降はPlayer6(p6)、Player8(p8)、Player9(p9)、Player7(p7)へ投票している流れは気になります。少なくとも共有対抗の決着を避けた理由を確認したいです。Player14(p14)はPlayer8(p8)から白判定を受けているため疑いを下げ、Player7(p7)も霊媒CO対抗の片方で少なくとも一人が偽なので、こちらも疑いを下げています。",
+   "note": "「共有CO対抗だったPlayer13」 is about p13; the misparse that registered p1 as freemason."
+  },
+  {
+   "source": "live-ab-adaptive/m89",
+   "speaker": "p2",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer13(p13)です。Player1(p1)の指摘には同意しますが、追加で見るべきは4日目の投票です。Player13(p13)は共有対抗の決着を避けた後、処刑が固まりつつあったPlayer9(p9)へ投票しており、流れに乗った形に見えます。"
+  },
+  {
+   "source": "live-ab-adaptive/m90",
+   "speaker": "p13",
+   "expected": "freemason",
+   "text": "現時点の第一処刑候補はPlayer1(p1)です。[m88]へ。Player3(p3)は相方として確認済みで、投票対象にしなかった。",
+   "note": "The freemason's own 「Player3は相方として確認済み」."
+  },
+  {
+   "source": "live-ab-adaptive/m91",
+   "speaker": "p16",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer0(p0)です。Player13(p13)の「Player3(p3)は相方として確認済みで、投票対象にしなかった」という説明は、共有視点では妥当です。ただし、それでPlayer0(p0)の疑いは下がりません。Player0(p0)は2日目と4日目の両方で、非狼と確定した私へ投票しています。特に4日目はPlayer9(p9)へ票が集まる中で私へ投票しており、処刑の流れから外れた投票を反復した点を重く見ます。"
+  },
+  {
+   "source": "live-ab-adaptive/m92",
+   "speaker": "p14",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer16(p16)です。Player16(p16)の「狂人・妖狐の可能性も残ります」という説明自体は、占い師の真偽が確定していない段階なら妥当だと思うよ。ただ、Player8(p8)が実際に白で、Player12(p12)とPlayer9(p9)の黒も霊媒結果と一致している今、3日連続投票の重さまでは消えないかなあ。Player6(p6)は、Player16(p16)との比較で自分の投票理由をもう少し聞かせてほしいねえ。"
+  },
+  {
+   "source": "live-ab-adaptive/m94",
+   "speaker": "p2",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer13(p13)です。Player13(p13)の「Player3(p3)は相方として確認済みで、投票対象にしなかった」は共有視点なら妥当です。ただし、それはPlayer3(p3)を避けた理由に留まり、3人のfreemasonCOのうち誰が偽かは説明していません。"
+  },
+  {
+   "source": "live-ab-adaptive/m95",
+   "speaker": "p1",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer13(p13)です。Player13(p13)への2日目投票は、当時Player13(p13)が確定非狼だと判断していたからではありません。Player3(p3)とPlayer13(p13)の共有COが対立しており、どちらが偽か未確定だったため、共有対抗の決着をつける候補として投票しました。Player13(p13)の「Player3(p3)は相方として確認済みで、投票対象にしなかった」という説明は、真共有視点なら妥当だと思います。ただし、現在はfreemasonCOが3人おり、Player13(p13)もその一人なので、少なくとも一人は偽です。Player4(p4)の方が疑わしいという見方も残るため、そこがPlayer13(p13)を処刑しない最強の理由です。"
+  },
+  {
+   "source": "live-ab-adaptive/m96",
+   "speaker": "p16",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer0(p0)です。[m95]への回答です。Player1(p1)の2日目投票が共有対抗の決着目的だった点は理解しました。そのため単独の決定打とはしません。ただし、freemasonCOが3人いる以上、Player1(p1)を含め少なくとも1人は偽です。"
+  },
+  {
+   "source": "live-ab-adaptive/m97",
+   "speaker": "p6",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer13(p13)です。Player14(p14)さんへの回答です。Player16(p16)と比べると、私の投票で最も重いのは、2日目にPlayer13(p13)が人狼ではないと確定したPlayer6(p6)へ投票している点です。共有対抗の判断としてPlayer13(p13)がPlayer3(p3)を避けた説明には妥当性がありますし、Player16(p16)のPlayer8(p8)投票にも占い真偽未確定という筋はあります。ただ、freemasonCOがPlayer3(p3)、Player13(p13)、Player1(p1)の3人おり、少なくとも1人は偽です。したがって第一処刑候補はPlayer13(p13)、第二候補はPlayer1(p1)。ただしPlayer1(p1)の方が疑わしいという見方も残っているため、Player13(p13)を処刑しない最強の理由にはなります。"
+  },
+  {
+   "source": "live-ab-adaptive/m99",
+   "speaker": "p13",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer1(p1)です。Player1(p1)の2日目投票が共有対抗の決着目的だった点は理解しました。ただ、3人のfreemasonCOの混在は残り、5日目のPlayer7(p7)投票も判断材料としては薄い。"
+  },
+  {
+   "source": "live-ab-adaptive/m100",
+   "speaker": "p1",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer2(p2)です。まず、Player13(p13)さんの質問に答えます。当時は共有対抗のPlayer13(p13)さんとPlayer3(p3)さんの真偽が確定しておらず、共有対抗を残したまま進めるより投票で整理したいと考え、Player13(p13)さんへ投票しました。結果的にPlayer13(p13)さんが非狼確定だったという前提での投票ではなく、その時点の判断でした。ただしPlayer4(p4)さんの方が疑わしいという見方も残るため、反論を聞いてから決めたいです。Player2(p2)さんには、私投票の根拠を具体的に説明してほしいです。"
+  },
+  {
+   "source": "live-ab-adaptive/m101",
+   "speaker": "p14",
+   "expected": "medium",
+   "text": "霊媒CO。現時点の第一処刑候補はPlayer16(p16)です。Player13(p13)さんは白だったよぉ。人狼判定はPlayer12(p12)さんとPlayer9(p9)さんで二回出ていて、残り狼はいない前提で見るねぇ。第一処刑候補はPlayer16(p16)さん。Player16(p16)さんは、非狼確定のPlayer8(p8)さんへ1日目、2日目、3日目と三日連続で投票しているのが、やっぱり気になるかなぁ。第二候補はPlayer1(p1)さんで、1日目に人狼確定のPlayer12(p12)さんへ投票している点を疑いとして残すよぉ。Player6(p6)さんも同じく1日目にPlayer12(p12)さんへ投票していて、狐候補としては比較したいところだねぇ。Player1(p1)さんのPlayer4(p4)さんの見方も聞いたけれど、現時点ではPlayer16(p16)さんを先に見たいかな。"
+  },
+  {
+   "source": "live-ab-adaptive/m102",
+   "speaker": "p2",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer1(p1)です。まず質問に答えます。6日目にPlayer1(p1)へ投票したのは、Player1(p1)、Player13(p13)、Player3(p3)のfreemasonCOが3人並び、当時はその内訳を整理しきれていなかったからです。Player4(p4)より、CO位置の矛盾を直接抱えるPlayer1(p1)を優先しました。とはいえ、Player1(p1)が非狼確定の共有者だという現在の情報を踏まえると、この投票理由は強くありません。"
+  },
+  {
+   "source": "live-ab-adaptive/m103",
+   "speaker": "p16",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer0(p0)です。Player14(p14)さん、三日とも同じ理由ではありません。1日目はPlayer8(p8)さんの黒判定を信じ切れず、2日目はPlayer14(p14)さん白を見ても偽占いの疑いを残し、3日目はPlayer9(p9)さん黒が出ても累積した疑念を優先しました。2日目・4日目とも非狼確定の私へ投票しており、第二候補はPlayer14(p14)さんです。Player13(p13)さんは共有対抗が3人いたため、疑いを下げています。"
+  },
+  {
+   "source": "live-ab-adaptive/m106",
+   "speaker": "p16",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer0(p0)です。Player2(p2)さん、ご質問への回答です。Player8(p8)さんへの三日間の投票理由は同じではなく、1日目は黒判定を信じ切れなかったため、2日目は白判定後も偽占いの疑いを残したため、3日目は黒判定が出ても累積した疑念を優先したためです。そのうえで、第一処刑候補はPlayer0(p0)さんです。2日目と4日目の双方で、非狼確定の私へ投票している点を重く見ます。第二候補はPlayer14(p14)さんです。"
+  },
+  {
+   "source": "live-ab-adaptive/m107",
+   "speaker": "p14",
+   "expected": "medium",
+   "text": "霊媒CO。霊媒結果、Player13(p13)は白(人狼ではない)です。現時点の第一処刑候補はPlayer16(p16)です。Player16(p16)さんの、三日とも投票理由が同じではないという説明は了解したよぉ。判定への不信を持つこと自体は妥当だと思うかなぁ。ただ、Player8(p8)さんの結果とPlayer14(p14)の霊媒結果が整合していく中でも、3日連続で投票を続けた事実は残るねぇ。Player6(p6)さんが今朝亡くなって比較対象から外れた以上、狐候補も含めてここを第一に見たいよぉ。Player1(p1)さんは共有確定なので、第二候補として残す程度かなぁ。"
+  },
+  {
+   "source": "live-ab-adaptive/m108",
+   "speaker": "p1",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer2(p2)です。Player13(p13)さんへの質問に直接お答えします。2日目はPlayer13(p13)さんとPlayer3(p3)さんの共有対抗が並び、真偽が未確定でした。そのため、共有対抗を残したまま進めるより、投票で一人を整理したいと考えてPlayer13(p13)さんへ投票しました。現在の確定情報から見れば誤った投票でしたが、当時はPlayer13(p13)さんが非狼確定ではなかった点をご理解ください。Player2(p2)さんは、当時のCO整理という説明自体は筋が通っています。Player4(p4)さんの方が疑わしい見方も残るため、比較のうえでPlayer2(p2)さんを第一、Player4(p4)さんを第二とします。"
+  },
+  {
+   "source": "live-ab-adaptive/m109",
+   "speaker": "p1",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer2(p2)です。Player13(p13)さんへの回答から述べます。2日目はPlayer13(p13)さんとPlayer3(p3)さんの共有対抗が並び、真偽が未確定だったため、対抗を残さず投票で整理する意図でPlayer13(p13)さんへ投票しました。現在はPlayer13(p13)さんが非狼確定なので、結果として誤りでしたが、当時の判断としてはCO整理です。処刑候補はPlayer2(p2)さんを第一、Player4(p4)さんを第二とします。Player2(p2)さんの説明はCO整理として理解できますが、共有確定後もPlayer1(p1)さんへ投票した点は本人も根拠が弱いと認めており、独立した疑いとして残ります。最強の反対材料はPlayer4(p4)さんの方が疑わしいという見方です。"
+  },
+  {
+   "source": "live-ab-adaptive/m110",
+   "speaker": "p14",
+   "expected": "medium",
+   "text": "霊媒CO。霊媒結果、Player1(p1)は白(人狼ではない)です。現時点の第一処刑候補はPlayer16(p16)です。Player13(p13)さんの霊媒結果は白だよぉ。なので、残っている中では第一処刑候補はPlayer16(p16)さんかなぁ。1日目から3日目まで、白確定したPlayer8(p8)さんへ連続して投票しているのがかなり気になるよぉ。次点はPlayer4(p4)さんで、1日目に人狼確定のPlayer12(p12)さんへ投票している点から、身内切りの可能性も残っているかなぁ。Player4(p4)さんの方が疑わしいという見方もあるので、そこだけはまだ比較したいよぉ。"
+  },
+  {
+   "source": "live-ab-adaptive/m112",
+   "speaker": "p16",
+   "expected": null,
+   "text": "現時点の第一処刑候補はPlayer14(p14)です。Player14(p14)さんへの回答です。1日目はPlayer8(p8)さんのPlayer12(p12)さん黒判定を、共有対抗などの盤面が固まる前から無条件には信用しませんでした。2日目はPlayer14(p14)さん白判定が出ても、偽占いが囲う可能性は残るため投票を継続しました。3日目もPlayer9(p9)さん黒を含め、結果の出し方から真占いと断定できず投票しました。したがって三日とも同じ理由ではなく、判定の信頼性を段階的に見ての投票です。"
+  }
+ ]
+}

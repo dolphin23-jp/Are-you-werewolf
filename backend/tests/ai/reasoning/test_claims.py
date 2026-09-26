@@ -70,7 +70,14 @@ def test_free_text_is_only_consulted_where_the_structured_output_is_silent():
 
     drafts = _drafts(output, state, "p3")
 
-    assert [d.target_id for d in drafts] == ["p5"]
+    # The declared result wins; the prose's p7 is never registered. Announcing a
+    # divination result is itself a seer claim, which the prose still supplies
+    # because the structured claim field was left empty.
+    results = [d for d in drafts if d.event_type is SpeechEventType.ABILITY_RESULT]
+    assert [d.target_id for d in results] == ["p5"]
+    assert [(d.event_type, d.role) for d in drafts if d not in results] == [
+        (SpeechEventType.ROLE_CLAIM, RoleName.SEER)
+    ]
 
 
 def test_a_spoken_co_still_registers_when_the_model_omits_the_field():
