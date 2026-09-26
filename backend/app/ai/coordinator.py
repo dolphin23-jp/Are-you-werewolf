@@ -19,7 +19,9 @@ import asyncio
 import random
 import time
 from collections import Counter
+from collections.abc import Callable, Coroutine
 from dataclasses import replace
+from typing import Any
 
 from app.ai.co_detection import detect_claimed_role
 from app.ai.context import ContextBuilder, DaySummaryManager
@@ -172,6 +174,8 @@ class AICoordinator:
             leader, partner = plan_rng.sample(freemasons, 2)
             self._freemason_public_plan = (leader, partner, plan_rng.random() < 0.5)
         self._metrics = getattr(provider, "_metrics", None)
+        # One vote round / one night run at a time; see `_single_flight`.
+        self._in_flight: dict[str, asyncio.Future[None]] = {}
         # Present only in v2. When it is, votes, night actions and the speaking
         # order are decided in code and the model is asked for wording alone.
         self.reasoning = reasoning
@@ -789,6 +793,10 @@ class AICoordinator:
             self._metrics.record_discussion_result(skipped=output is None)
         if output is None:
             return None
+        if state.phase != Phase.DISCUSSION:
+            # The discussion ended while this turn was generating. Posting it
+            # now would put a CO or a result into the vote.
+            return None
         model_requested_target = output.reasoning_memo.execution_target
         if freemason_opening is not None:
             output.public_message = freemason_opening
@@ -1320,7 +1328,27 @@ class AICoordinator:
 
     # -- voting (loops across runoff rounds) --
 
+    async def _single_flight(
+        self, key: str, run: Callable[[], Coroutine[Any, Any, None]]
+    ) -> None:
+        """Join the run already in progress instead of starting a second one.
+
+        A double-submitted vote or night action (a double click, a retried
+        request) used to start another full round of AI generation beside the
+        first: every AI voted twice at twice the LLM cost, and a runoff could
+        take first-round ballots. Shielded, so a caller that goes away does not
+        cancel the round for everyone else.
+        """
+        task = self._in_flight.get(key)
+        if task is None or task.done():
+            task = asyncio.ensure_future(run())
+            self._in_flight[key] = task
+        await asyncio.shield(task)
+
     async def generate_all_votes(self, session: object) -> None:
+        await self._single_flight("votes", lambda: self._generate_all_votes(session))
+
+    async def _generate_all_votes(self, session: object) -> None:
         controller = session.controller  # type: ignore[attr-defined]
         state = controller.state
         human_id = session.human_id  # type: ignore[attr-defined]
@@ -1516,6 +1544,9 @@ class AICoordinator:
     # -- night --
 
     async def run_night_phase(self, session: object) -> None:
+        await self._single_flight("night", lambda: self._run_night_phase(session))
+
+    async def _run_night_phase(self, session: object) -> None:
         controller = session.controller  # type: ignore[attr-defined]
         state = controller.state
 
