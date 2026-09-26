@@ -68,7 +68,12 @@ export function VotePanel() {
       {runoffOnly.size > 0 && (
         <p className="vote-panel__note">同数だったプレイヤーのみが投票先になります。</p>
       )}
-      <select value={target} onChange={(e) => setTarget(e.target.value)} disabled={submitting}>
+      <select
+        aria-label="投票先"
+        value={target}
+        onChange={(e) => setTarget(e.target.value)}
+        disabled={submitting}
+      >
         <option value="">投票先を選択...</option>
         {candidates.map((p) => (
           <option key={p.player_id} value={p.player_id}>

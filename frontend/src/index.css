@@ -300,6 +300,9 @@ button {
 .chat-panel__log {
   flex: 1;
   min-height: 0;
+  /* A bound is what makes it scroll: with none, the log grew with every
+     message and pushed the composer and the vote panel far below it. */
+  max-height: min(60vh, 640px);
   overflow-y: auto;
   display: flex;
   flex-direction: column;

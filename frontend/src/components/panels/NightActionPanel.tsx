@@ -81,7 +81,12 @@ export function NightActionPanel() {
   return (
     <div className="panel night-action-panel">
       <h3>夜の行動: {ACTION_LABELS[actionType]}</h3>
-      <select value={target} onChange={(e) => setTarget(e.target.value)} disabled={submitting}>
+      <select
+        aria-label="夜の行動の対象"
+        value={target}
+        onChange={(e) => setTarget(e.target.value)}
+        disabled={submitting}
+      >
         <option value="">対象を選択...</option>
         {candidates.map((p) => (
           <option key={p.player_id} value={p.player_id}>

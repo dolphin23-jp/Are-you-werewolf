@@ -13,7 +13,10 @@ interface GameStoreState {
   debug: DebugView | null;
   debugMode: boolean;
   connected: boolean;
+  /** An action the player took failed. Stays until dismissed or replaced. */
   error: string | null;
+  /** The latest view refresh failed; cleared by the next one that succeeds. */
+  connectionError: string | null;
   busy: boolean;
   selectedSpeakerId: string | null;
 
@@ -33,6 +36,11 @@ interface GameStoreState {
   reset: () => void;
 }
 
+const viewRefresh: { inFlight: Promise<void> | null; again: boolean } = {
+  inFlight: null,
+  again: false,
+};
+
 export const useGameStore = create<GameStoreState>((set, get) => ({
   screen: "welcome",
   sessionId: null,
@@ -43,6 +51,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
   debugMode: false,
   connected: false,
   error: null,
+  connectionError: null,
   busy: false,
   selectedSpeakerId: null,
 
@@ -58,6 +67,8 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
       view: null,
       debug: null,
       debugMode: false,
+      error: null,
+      connectionError: null,
       screen: "role-reveal",
     }),
   setConnected: (connected) => set({ connected }),
@@ -66,15 +77,35 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
   setSelectedSpeakerId: (selectedSpeakerId) => set({ selectedSpeakerId }),
   toggleDebug: () => set((s) => ({ debugMode: !s.debugMode })),
 
-  refreshView: async () => {
-    const { sessionId, humanId } = get();
-    if (!sessionId || !humanId) return;
-    try {
-      const view = await getView(sessionId, humanId);
-      set({ view, error: null });
-    } catch (e) {
-      set({ error: e instanceof Error ? e.message : "通信エラーが発生しました" });
+  // One request at a time, plus at most one more for whatever asked meanwhile.
+  // Every WebSocket event and every poll used to start its own GET: responses
+  // overlapped, an older one could land last and roll the phase back, and a
+  // poll from the previous game could land after "play again".
+  refreshView: () => {
+    if (viewRefresh.inFlight) {
+      viewRefresh.again = true;
+      return viewRefresh.inFlight;
     }
+    viewRefresh.inFlight = (async () => {
+      do {
+        viewRefresh.again = false;
+        const { sessionId, humanId } = get();
+        if (!sessionId || !humanId) return;
+        try {
+          const view = await getView(sessionId, humanId);
+          if (get().sessionId !== sessionId) return;
+          // Only the connection error: an action's error must outlive the next
+          // poll, which used to erase it within milliseconds.
+          set({ view, connectionError: null });
+        } catch (e) {
+          if (get().sessionId !== sessionId) return;
+          set({ connectionError: e instanceof Error ? e.message : "通信エラーが発生しました" });
+        }
+      } while (viewRefresh.again);
+    })().finally(() => {
+      viewRefresh.inFlight = null;
+    });
+    return viewRefresh.inFlight;
   },
 
   refreshDebug: async () => {
@@ -99,6 +130,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
       debugMode: false,
       connected: false,
       error: null,
+      connectionError: null,
       busy: false,
       selectedSpeakerId: null,
     }),

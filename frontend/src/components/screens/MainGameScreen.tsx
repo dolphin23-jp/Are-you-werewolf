@@ -15,6 +15,7 @@ export function MainGameScreen() {
   const sessionId = useGameStore((s) => s.sessionId);
   const connected = useGameStore((s) => s.connected);
   const error = useGameStore((s) => s.error);
+  const connectionError = useGameStore((s) => s.connectionError);
   const busy = useGameStore((s) => s.busy);
   const setBusy = useGameStore((s) => s.setBusy);
   const refreshView = useGameStore((s) => s.refreshView);
@@ -34,6 +35,7 @@ export function MainGameScreen() {
 
   const runAction = async (action: (id: string) => Promise<void>) => {
     setBusy(true);
+    setError(null);
     try {
       await action(sessionId);
       await refreshView();
@@ -47,7 +49,19 @@ export function MainGameScreen() {
   return (
     <div className="screen screen--main">
       <PhaseBanner phase={view.phase} day={view.day} connected={connected} />
-      {error && <p className="error-text">{error}</p>}
+      {error && (
+        <p className="error-text" role="alert">
+          {error}{" "}
+          <button className="btn btn--small" type="button" onClick={() => setError(null)}>
+            閉じる
+          </button>
+        </p>
+      )}
+      {connectionError && !error && (
+        <p className="error-text" role="status">
+          {connectionError}
+        </p>
+      )}
 
       <div className="main-game-layout">
         <div className="main-game-layout__sidebar">

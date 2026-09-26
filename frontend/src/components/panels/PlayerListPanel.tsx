@@ -1,5 +1,6 @@
 import { PlayerAvatar } from "../common/PlayerAvatar";
 import { useGameStore } from "../../state/gameStore";
+import { nameStanding } from "../../state/playerStanding";
 
 export function PlayerListPanel() {
   const view = useGameStore((s) => s.view);
@@ -8,13 +9,7 @@ export function PlayerListPanel() {
   if (!view) return null;
 
   const aliveCount = view.players.filter((p) => p.alive).length;
-  const colorClass = (playerId: string) => {
-    const role = view.co_declarations.find((claim) => claim.player_id === playerId)?.claimed_role;
-    const confirmedWhite = (view.public_result_claims ?? []).some(
-      (claim) => claim.target_id === playerId && !claim.is_werewolf,
-    );
-    return role ?? (confirmedWhite ? "white" : "gray");
-  };
+  const colorClass = (playerId: string) => nameStanding(view, playerId);
 
   return (
     <div className="panel player-list-panel">

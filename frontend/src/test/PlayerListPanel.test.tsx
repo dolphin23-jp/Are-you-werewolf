@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { PlayerListPanel } from "../components/panels/PlayerListPanel";
 import { useGameStore } from "../state/gameStore";
+import { nameStanding } from "../state/playerStanding";
 import { makeView } from "./fixtures/gameView";
 
 describe("PlayerListPanel", () => {
@@ -52,5 +53,22 @@ describe("PlayerListPanel", () => {
     });
     rerender(<PlayerListPanel />);
     expect(screen.getAllByText("共有相方確認済み")).toHaveLength(2);
+  });
+});
+
+describe("name standing", () => {
+  it("is white only when every published verdict is white", () => {
+    const white = {
+      claimant_id: "p4",
+      result_type: "seer" as const,
+      target_id: "p3",
+      is_werewolf: false,
+      day: 1,
+      source_message_id: "m1",
+    };
+    const black = { ...white, claimant_id: "p9", is_werewolf: true };
+
+    expect(nameStanding(makeView({ public_result_claims: [white] }), "p3")).toBe("white");
+    expect(nameStanding(makeView({ public_result_claims: [white, black] }), "p3")).toBe("gray");
   });
 });

@@ -39,8 +39,10 @@ export function useGameSocket(): void {
         onEventRef.current();
       };
       socket.onclose = () => {
-        setConnected(false);
+        // A late close from the previous session's socket must not mark the
+        // current, live connection as down.
         if (cancelled) return;
+        setConnected(false);
         retryTimer = setTimeout(connect, retryDelay);
         retryDelay = Math.min(retryDelay * 2, 15000);
       };

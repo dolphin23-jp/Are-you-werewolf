@@ -2,6 +2,7 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import { controlDiscussion, passDiscussionTurn, sendChat } from "../../api/client";
 import type { ChatChannel, ChatMessage } from "../../api/types";
 import { useGameStore } from "../../state/gameStore";
+import { nameStanding } from "../../state/playerStanding";
 import { TypingIndicator } from "../common/TypingIndicator";
 
 const MESSAGE_REFERENCE_RE = /(【m\d+(?:への回答)?】|\[m\d+\]|m\d+)/g;
@@ -45,6 +46,10 @@ export function ChatPanel() {
     remaining: 0,
   });
   const chatLogRef = useRef<HTMLDivElement>(null);
+  // Where the reader was *before* new messages arrived. Measured after they
+  // render, any batch taller than the threshold read as "scrolled up" and
+  // auto-scroll stopped exactly when a burst of AI messages came in.
+  const wasNearBottom = useRef(true);
   const previousMessageCount = useRef(0);
   const autoPassedToken = useRef<string | null>(null);
 
@@ -53,8 +58,7 @@ export function ChatPanel() {
     if (!log || !view) return;
     const count = view.public_chat.length + view.private_chat.length;
     const added = Math.max(0, count - previousMessageCount.current);
-    const nearBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 80;
-    if (nearBottom || previousMessageCount.current === 0) {
+    if (wasNearBottom.current || previousMessageCount.current === 0) {
       log.scrollTo?.({ top: log.scrollHeight, behavior: "smooth" });
       setNewMessageCount(0);
     } else if (added > 0) {
@@ -139,13 +143,8 @@ export function ChatPanel() {
       return { day, round, counts: [...counts.entries()].sort((a, b) => b[1].length - a[1].length) };
     },
   );
-  const nameClass = (playerId: string) => {
-    const role = view.co_declarations.find((claim) => claim.player_id === playerId)?.claimed_role;
-    const confirmedWhite = (view.public_result_claims ?? []).some(
-      (claim) => claim.target_id === playerId && !claim.is_werewolf,
-    );
-    return `chat-message__author player-name--${role ?? (confirmedWhite ? "white" : "gray")}`;
-  };
+  const nameClass = (playerId: string) =>
+    `chat-message__author player-name--${nameStanding(view, playerId)}`;
   const publicDeathDay = (player: (typeof view.players)[number]) =>
     player.death_day === null
       ? null
@@ -266,9 +265,14 @@ export function ChatPanel() {
       <div
         className="chat-panel__log"
         ref={chatLogRef}
+        role="log"
+        aria-live="polite"
+        aria-label="チャットログ"
         onScroll={(event) => {
           const element = event.currentTarget;
-          if (element.scrollHeight - element.scrollTop - element.clientHeight < 80) {
+          wasNearBottom.current =
+            element.scrollHeight - element.scrollTop - element.clientHeight < 80;
+          if (wasNearBottom.current) {
             setNewMessageCount(0);
           }
         }}

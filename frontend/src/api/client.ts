@@ -22,13 +22,26 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
   });
   if (!response.ok) {
-    const body = (await response.json().catch(() => ({}))) as { detail?: string };
-    throw new Error(body.detail ?? `HTTP ${response.status}`);
+    const body = (await response.json().catch(() => ({}))) as { detail?: unknown };
+    throw new Error(describeError(body.detail) ?? `HTTP ${response.status}`);
   }
   if (response.status === 204) {
     return undefined as T;
   }
   return (await response.json()) as T;
+}
+
+/** FastAPI sends a string for handled errors and a list for validation (422)
+ * errors; `new Error(list)` showed the player "[object Object]". */
+function describeError(detail: unknown): string | undefined {
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    const messages = detail
+      .map((item) => (item && typeof item === "object" && "msg" in item ? String(item.msg) : ""))
+      .filter(Boolean);
+    return messages.length ? `入力が正しくありません: ${messages.join(" / ")}` : undefined;
+  }
+  return undefined;
 }
 
 export function createGame(humanName: string, seed?: number): Promise<CreateGameResponse> {
