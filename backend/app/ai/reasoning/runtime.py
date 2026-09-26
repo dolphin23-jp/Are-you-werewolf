@@ -29,6 +29,7 @@ from app.ai.reasoning.belief import (
     RankedView,
     StoryStatus,
     assign_traits,
+    contested_roles,
     deception_state_for,
     profile_name,
     rank_hypotheses,
@@ -943,12 +944,9 @@ class ReasoningRuntime:
         """The day's disagreements, from structured events rather than prose."""
         ledger = PublicFactLedger(state)
         points: list[str] = []
-        by_role: dict[RoleName, list[str]] = {}
-        for claim in ledger.co_declarations():
-            by_role.setdefault(claim.claimed_role, []).append(claim.player_id)
-        for role, claimants in sorted(by_role.items()):
-            if len(claimants) > 1:
-                points.append(f"{role.value}CO対抗: {'、'.join(sorted(claimants))}")
+        # Past the role's seat count only: the freemason pair is not a contest.
+        for role, claimants in sorted(contested_roles(ledger).items()):
+            points.append(f"{role.value}CO対抗: {'、'.join(sorted(claimants))}")
         for result in ledger.public_results():
             colour = "黒" if result.is_werewolf else "白"
             points.append(

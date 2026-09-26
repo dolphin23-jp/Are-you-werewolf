@@ -238,6 +238,19 @@ def test_conflict_points_come_from_structured_events():
     assert any("p4→p9=黒" in point for point in points)
 
 
+def test_the_freemason_pair_is_not_listed_as_a_counter_claim():
+    state = _played_board()
+    boards.claim(state, "p10", RoleName.FREEMASON, day=2)
+    boards.claim(state, "p11", RoleName.FREEMASON, day=2)
+    runtime = _runtime(state)
+
+    assert not any("freemasonCO対抗" in point for point in runtime.conflict_points(state))
+
+    boards.claim(state, "p12", RoleName.FREEMASON, day=2)
+    runtime = _runtime(state)
+    assert any("freemasonCO対抗" in point for point in runtime.conflict_points(state))
+
+
 def test_split_candidates_come_from_what_seats_said_today():
     """The shared day summary used every seat's internal candidate, which for
     a wolf is built on what only the wolves know."""

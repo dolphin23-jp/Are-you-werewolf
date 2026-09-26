@@ -29,6 +29,8 @@ from app.ai.reasoning.belief.engine import (
     TRUST_STEP,
     BeliefEngine,
     CorrectionOutcome,
+    contested_roles,
+    surplus_claims,
 )
 from app.ai.reasoning.belief.ranking import (
     RANK_LABELS_JA,
@@ -76,6 +78,8 @@ __all__ = [
     "BETRAYAL_COST",
     "BeliefEngine",
     "CONTESTED_CLAIM_WEIGHT",
+    "contested_roles",
+    "surplus_claims",
     "CognitiveTraits",
     "CorrectionKind",
     "CorrectionOutcome",

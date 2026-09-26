@@ -109,6 +109,42 @@ def test_contested_claims_raise_suspicion_on_every_claimant():
     assert engine.state.reasons_for("p4") == ("contest:seer:p4|p8:p4",)
 
 
+def test_the_freemason_pair_is_not_a_contest():
+    """The setup has two freemasons. Counting every second claim as a contest
+    told the table "at least one is fake" about a consistent pair, and a live
+    game executed both."""
+    state = _board()
+    boards.claim(state, "p2", RoleName.FREEMASON)
+    boards.claim(state, "p3", RoleName.FREEMASON)
+    engine = _engine()
+
+    engine.observe(PublicFactLedger(state))
+
+    for pid in ("p2", "p3"):
+        assert engine.state.reasons_for(pid) == ()
+        assert engine.state.public_suspicion_scores.get(pid, 0.0) <= 0
+
+
+def test_a_third_freemason_claim_contests_all_three():
+    state = _board()
+    for pid in ("p2", "p3", "p5"):
+        boards.claim(state, pid, RoleName.FREEMASON)
+    engine = _engine()
+
+    engine.observe(PublicFactLedger(state))
+
+    contest = "contest:freemason:p2|p3|p5"
+    for pid in ("p2", "p3", "p5"):
+        assert engine.state.reasons_for(pid) == (f"{contest}:{pid}",)
+        assert engine.state.public_suspicion_scores[pid] > 0
+    explanation = next(
+        record.explanation
+        for record in engine.active_evidence()
+        if record.category == "contested_claim"
+    )
+    assert "少なくとも1人は偽" in explanation
+
+
 # -- corrections --
 
 

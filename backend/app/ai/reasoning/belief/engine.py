@@ -58,7 +58,7 @@ from app.ai.reasoning.perspectives import Perspective, require_in_game
 from app.ai.reasoning.solver.backend import Certainty, has_role
 from app.ai.reasoning.solver.queries import RoleSolver
 from app.ai.reasoning.timeline import find_timeline_conflicts
-from app.engine.roles import RoleName
+from app.engine.roles import ROLE_DEFINITIONS, RoleName
 
 # Default soft weights. Collected here rather than scattered through the
 # derivation so the whole scale can be read -- and later tuned -- in one place.
@@ -117,11 +117,27 @@ def contest_fact_id(role: RoleName, claimants: Sequence[str]) -> str:
     return f"contest:{role.value}:{'|'.join(sorted(claimants))}"
 
 
-def _contests(ledger: PublicFactLedger) -> dict[RoleName, list[str]]:
+def surplus_claims(role: RoleName, claimant_count: int) -> int:
+    """How many of `claimant_count` claims of `role` must be false.
+
+    A role is contested only past the number of seats the setup gives it. Two
+    freemason COs are the whole freemason pair, not a counter-claim: counting
+    every second claim as a contest told the table "at least one is fake"
+    about a pair that was consistent, and a live game executed both.
+    """
+    definition = ROLE_DEFINITIONS.get(role)
+    capacity = definition.count if definition is not None else 1
+    return max(0, claimant_count - capacity)
+
+
+def contested_roles(ledger: PublicFactLedger) -> dict[RoleName, list[str]]:
+    """Roles with more standing claims than seats, and who claims them."""
     by_role: dict[RoleName, list[str]] = {}
     for claim in ledger.co_declarations():
         by_role.setdefault(claim.claimed_role, []).append(claim.player_id)
-    return {role: names for role, names in by_role.items() if len(names) > 1}
+    return {
+        role: names for role, names in by_role.items() if surplus_claims(role, len(names)) > 0
+    }
 
 
 @dataclass(frozen=True)
@@ -314,7 +330,7 @@ class BeliefEngine:
         }
         ids |= {
             contest_fact_id(role, claimants)
-            for role, claimants in _contests(ledger).items()
+            for role, claimants in contested_roles(ledger).items()
         }
         return ids
 
@@ -412,7 +428,7 @@ class BeliefEngine:
             )
 
     def _derive_claim_evidence(self, ledger: PublicFactLedger) -> None:
-        for role, claimants in _contests(ledger).items():
+        for role, claimants in contested_roles(ledger).items():
             contest = contest_fact_id(role, claimants)
             for player_id in claimants:
                 self.add_evidence(
@@ -428,7 +444,8 @@ class BeliefEngine:
                         weight=CONTESTED_CLAIM_WEIGHT,
                         explanation=(
                             f"{role.value}COが{len(claimants)}人おり、"
-                            f"{player_id}はそのうちの1人。少なくとも1人は偽。"
+                            f"{player_id}はそのうちの1人。少なくとも"
+                            f"{surplus_claims(role, len(claimants))}人は偽。"
                         ),
                         origin=EvidenceOrigin(
                             kind=OriginKind.PUBLIC_CLAIM, fact_id=contest
@@ -710,12 +727,14 @@ class BeliefEngine:
         trust: dict[str, float] = {}
         for claim in ledger.co_declarations():
             base = self.state.source_trust.get(claim.player_id, 0.0)
-            contested = sum(
+            claimants = sum(
                 1
                 for other in ledger.co_declarations()
                 if other.claimed_role is claim.claimed_role
             )
-            trust[claim.player_id] = base - CONTESTED_CLAIM_WEIGHT * (contested - 1)
+            trust[claim.player_id] = base - CONTESTED_CLAIM_WEIGHT * surplus_claims(
+                claim.claimed_role, claimants
+            )
         return trust
 
     def _rank_hypotheses(self, ledger: PublicFactLedger) -> None:
