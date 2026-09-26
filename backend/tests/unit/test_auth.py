@@ -38,3 +38,9 @@ def test_personal_access_protects_websockets():
     headers = {"Authorization": "Basic d2VyZXdvbGY6c2VjcmV0"}
     with client.websocket_connect("/ws", headers=headers) as ws:
         assert ws.receive_text() == "ok"
+
+
+def test_a_malformed_authorization_header_is_refused_not_a_crash():
+    client = _protected_app()
+    response = client.get("/", headers={"Authorization": "Basic ßßß".encode("latin-1")})
+    assert response.status_code == 401

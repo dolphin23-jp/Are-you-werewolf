@@ -56,6 +56,10 @@ class GameSession:
     discussion_paused: bool = False
     discussion_pause_requested: bool = False
     discussion_step_budget: int | None = None
+    # Teammates answering the human's private chat, one run per channel at a
+    # time; a message arriving mid-run is answered by one more run afterwards.
+    private_reply_tasks: dict[str, asyncio.Task[Any]] = field(default_factory=dict)
+    private_reply_pending: set[str] = field(default_factory=set)
 
     def touch(self) -> None:
         self.last_active_at = time.time()

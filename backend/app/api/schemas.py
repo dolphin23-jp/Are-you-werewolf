@@ -2,12 +2,26 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from typing import Annotated, Literal
+
+from pydantic import BaseModel, Field, field_validator
+
+# Message ids are short ("m12", "w3"). Unbounded ids and quotes were stored in
+# the chat log and re-sent in every /view poll: a 5 MB quote made every
+# 2.5-second poll 5 MB.
+MessageId = Annotated[str, Field(max_length=32)]
 
 
 class CreateGameRequest(BaseModel):
     human_name: str = Field(default="あなた", max_length=32)
     seed: int | None = None
+
+    @field_validator("human_name")
+    @classmethod
+    def _single_line_name(cls, value: str) -> str:
+        # The name is interpolated into every AI prompt; a newline in it could
+        # start a line that reads like another player's message.
+        return " ".join(value.split()) or "あなた"
 
 
 class CreateGameResponse(BaseModel):
@@ -18,10 +32,10 @@ class CreateGameResponse(BaseModel):
 
 class ChatRequest(BaseModel):
     content: str = Field(min_length=1, max_length=1500)
-    channel: str = "public"
-    reply_to: str | None = None
-    quote: str | None = None
-    references: list[str] = Field(default_factory=list, max_length=10)
+    channel: Literal["public", "wolf", "freemason"] = "public"
+    reply_to: MessageId | None = None
+    quote: str | None = Field(default=None, max_length=300)
+    references: list[MessageId] = Field(default_factory=list, max_length=10)
 
 
 class VoteRequest(BaseModel):

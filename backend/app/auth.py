@@ -27,8 +27,10 @@ class PersonalAccessMiddleware:
             return
 
         headers = {key.lower(): value for key, value in scope.get("headers", [])}
-        supplied = headers.get(b"authorization", b"").decode("latin-1")
-        if secrets.compare_digest(supplied, self._expected):
+        # Compared as bytes: `compare_digest` raises TypeError on non-ASCII str,
+        # which turned a malformed header into a 500.
+        supplied = headers.get(b"authorization", b"")
+        if secrets.compare_digest(supplied, self._expected.encode()):
             await self.app(scope, receive, send)
             return
 

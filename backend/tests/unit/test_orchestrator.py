@@ -3,7 +3,11 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
-from app.api.orchestrator import after_discussion_phase_entered, after_human_chat
+from app.api.orchestrator import (
+    after_discussion_phase_entered,
+    after_human_chat,
+    after_human_private_chat,
+)
 from app.engine.phases import Phase
 from app.sessions.models import DiscussionRoundState
 from tests.conftest import make_controller
@@ -109,3 +113,32 @@ def test_immediate_drain_stops_when_a_segment_makes_no_progress():
 
     assert session.discussion_round.stage == "immediate"
     assert coordinator.calls == 2
+
+
+class _SlowPrivateReplies:
+    def __init__(self) -> None:
+        self.runs = 0
+        self.release = asyncio.Event()
+
+    async def respond_to_private_chat(self, session: object, channel: str) -> None:
+        del session, channel
+        self.runs += 1
+        await self.release.wait()
+
+
+def test_rapid_private_messages_are_answered_by_one_run_plus_one_catch_up():
+    async def scenario() -> _SlowPrivateReplies:
+        coordinator = _SlowPrivateReplies()
+        session = SimpleNamespace(
+            coordinator=coordinator, private_reply_tasks={}, private_reply_pending=set()
+        )
+        for _ in range(5):
+            await after_human_private_chat(session, "wolf")
+            await asyncio.sleep(0)
+        coordinator.release.set()
+        await session.private_reply_tasks["wolf"]
+        return coordinator
+
+    # Five messages during one reply run: that run, then exactly one more that
+    # reads everything that arrived meanwhile -- not five overlapping runs.
+    assert asyncio.run(scenario()).runs == 2

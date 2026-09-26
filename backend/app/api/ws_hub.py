@@ -26,6 +26,9 @@ class SessionWSHub:
 
     def __init__(self) -> None:
         self._connections: dict[str, list[WebSocket]] = {}
+        # The event loop keeps only weak references to tasks; an unreferenced
+        # send can be garbage-collected before it runs.
+        self._sends: set[asyncio.Task[None]] = set()
 
     async def connect(self, player_id: str, ws: WebSocket) -> None:
         await ws.accept()
@@ -55,7 +58,9 @@ class SessionWSHub:
         payload = {"type": event.type.value, "payload": to_jsonable(event.payload)}
         for pid in recipients:
             for ws in self._connections.get(pid, []):
-                loop.create_task(_safe_send(ws, payload))
+                task = loop.create_task(_safe_send(ws, payload))
+                self._sends.add(task)
+                task.add_done_callback(self._sends.discard)
 
 
 async def _safe_send(ws: WebSocket, payload: dict[str, Any]) -> None:

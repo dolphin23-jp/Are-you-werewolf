@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Shared by the field default below and by `_normalize_reasoning_engine`'s
@@ -45,7 +45,8 @@ class Settings(BaseSettings):
     luna_api_key: str = ""
     luna_base_url: str = "https://api.example.com/v1"
     luna_model: str = "gpt-5.6-luna"
-    luna_max_concurrency: int = 6
+    # 0 would make the provider's semaphore block every request forever.
+    luna_max_concurrency: int = Field(default=6, ge=1)
     luna_timeout_seconds: float = 30.0
     luna_max_retries: int = 2
 

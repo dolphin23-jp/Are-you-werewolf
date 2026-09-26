@@ -105,8 +105,12 @@ def _run(fn: object, *args: object, **kwargs: object) -> Any:
 
 
 @router.post("", response_model=CreateGameResponse)
-def create_game(req: CreateGameRequest) -> CreateGameResponse:
+async def create_game(req: CreateGameRequest) -> CreateGameResponse:
     settings = get_settings()
+    if req.human_name in AI_NAME_POOL:
+        # Speech parsing matches players by name; two seats with one name
+        # registered a verdict about one of them against both.
+        raise HTTPException(status_code=400, detail="その名前はAIプレイヤーが使っています")
     session_id = _new_session_id()
     human_id = "p0"
     specs = [PlayerSpec(player_id=human_id, name=req.human_name, is_human=True)]
@@ -168,7 +172,7 @@ def create_game(req: CreateGameRequest) -> CreateGameResponse:
 
 
 @router.get("/{session_id}/transcript")
-def get_transcript(session_id: str) -> dict[str, Any]:
+async def get_transcript(session_id: str) -> dict[str, Any]:
     """Return the complete analysis log, but only after secrets can no longer affect play."""
     session = _get_session(session_id)
     if session.controller.state.phase != Phase.GAME_OVER:
@@ -187,8 +191,10 @@ async def start_game(session_id: str) -> OkResponse:
     return OkResponse()
 
 
+# Async, like every route here: a plain `def` ran in the thread pool and read
+# state (typing indicators, pending questions) the event loop was mutating.
 @router.get("/{session_id}/view")
-def get_view(session_id: str, player_id: str | None = Query(default=None)) -> dict[str, Any]:
+async def get_view(session_id: str, player_id: str | None = Query(default=None)) -> dict[str, Any]:
     session = _get_session(session_id)
     viewer = _resolve_player_id(session, player_id)
     view = session.controller.get_player_view(viewer)
@@ -229,7 +235,7 @@ def get_view(session_id: str, player_id: str | None = Query(default=None)) -> di
 
 
 @router.get("/{session_id}/debug")
-def get_debug(session_id: str) -> dict[str, Any]:
+async def get_debug(session_id: str) -> dict[str, Any]:
     session = _get_session(session_id)
     if not _debug_available(session):
         raise HTTPException(status_code=409, detail="全員の役職はゲーム終了後に表示できます")

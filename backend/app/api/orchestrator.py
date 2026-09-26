@@ -15,10 +15,23 @@ awaited before resolving, matching what the human is already waiting on.
 from __future__ import annotations
 
 import asyncio
+import logging
 
 from app.engine.phases import Phase
 from app.engine.roles import RoleName
 from app.sessions.models import GameSession
+
+logger = logging.getLogger(__name__)
+
+
+def _log_failure(task: asyncio.Task[None]) -> None:
+    """Background AI turns have no caller to raise to; say when one fails,
+    instead of letting the discussion silently stall."""
+    if task.cancelled():
+        return
+    exception = task.exception()
+    if exception is not None:
+        logger.error("background AI task failed", exc_info=exception)
 
 
 async def after_human_chat(session: GameSession) -> None:
@@ -41,6 +54,7 @@ async def after_human_chat(session: GameSession) -> None:
             session.discussion_advance_task = None
 
     task.add_done_callback(clear_task)
+    task.add_done_callback(_log_failure)
 
 
 async def after_discussion_phase_entered(session: GameSession) -> None:
@@ -80,8 +94,29 @@ def _discussion_progress(session: GameSession) -> tuple[int, int, int] | None:
 
 
 async def after_human_private_chat(session: GameSession, channel: str) -> None:
-    if session.coordinator is not None:
-        asyncio.create_task(session.coordinator.respond_to_private_chat(session, channel))
+    """Let teammates answer, one run per channel at a time.
+
+    Every private message used to start its own untracked reply task, one LLM
+    call per teammate each: ten quick messages meant ten overlapping rounds.
+    """
+    if session.coordinator is None:
+        return
+    running = session.private_reply_tasks.get(channel)
+    if running is not None and not running.done():
+        session.private_reply_pending.add(channel)
+        return
+    task = asyncio.create_task(_reply_privately(session, channel))
+    session.private_reply_tasks[channel] = task
+    task.add_done_callback(_log_failure)
+
+
+async def _reply_privately(session: GameSession, channel: str) -> None:
+    assert session.coordinator is not None
+    while True:
+        await session.coordinator.respond_to_private_chat(session, channel)
+        if channel not in session.private_reply_pending:
+            return
+        session.private_reply_pending.discard(channel)
 
 
 async def after_human_vote(session: GameSession) -> None:

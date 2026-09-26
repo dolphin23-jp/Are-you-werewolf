@@ -72,8 +72,13 @@ def _mount_frontend(app: FastAPI) -> None:
         if full_path.startswith(("api/", "ws/")):
             raise HTTPException(status_code=404, detail="not found")
 
-        candidate = (FRONTEND_DIST / full_path).resolve()
-        if full_path and candidate.is_file() and candidate.is_relative_to(FRONTEND_DIST.resolve()):
+        try:
+            candidate = (FRONTEND_DIST / full_path).resolve()
+            is_file = candidate.is_file()
+        except (OSError, ValueError):
+            # e.g. an embedded NUL byte ("/%00"): not a file, so the SPA shell.
+            is_file = False
+        if full_path and is_file and candidate.is_relative_to(FRONTEND_DIST.resolve()):
             return FileResponse(candidate)
 
         # Any other path is a client-side route: hand back the SPA shell.
