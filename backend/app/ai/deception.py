@@ -66,7 +66,9 @@ def assign_wolf_deception(wolf_ids: list[str], seed: int | None = None) -> WolfD
 
 
 def assign_madman_strategy(seed: int | None = None) -> tuple[str, RoleName | None]:
-    rng = random.Random(seed)
+    # Its own stream: sharing the wolves' first draw tied the two choices
+    # together (wolves faking seer always came with a madman faking seer).
+    rng = random.Random(f"madman:{seed}") if seed is not None else random.Random()
     name, fake_role, _weight = _weighted_choice(MADMAN_STRATEGIES, rng)
     return name, fake_role
 

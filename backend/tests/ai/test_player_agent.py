@@ -1,8 +1,9 @@
 import pytest
 
 from app.ai.personalities import PERSONALITIES
-from app.ai.player_agent import AIPlayerAgent
+from app.ai.player_agent import AIPlayerAgent, truncate_at_sentence
 from app.ai.provider.base import Message
+from app.ai.provider.mock import MockProvider
 from app.ai.schemas import BriefDiscussionOutput, DiscussionOutput, VoteOutput
 
 
@@ -147,3 +148,16 @@ async def test_wordy_speakers_get_a_bigger_token_budget_than_terse_ones():
     # speaker, before the twelve-field envelope around it.
     assert wordy_provider.budgets[0] >= 2000
     assert "BriefDiscussionOutput" in wordy_provider.schemas
+
+
+def test_truncation_ends_at_the_last_sentence_of_any_kind():
+    text = "おはよう。今日は誰を吊る？私は灰を見たい"
+    assert truncate_at_sentence(text, 14) == "おはよう。今日は誰を吊る？"
+
+
+def test_the_meta_talk_filter_leaves_player_names_alone():
+    agent = AIPlayerAgent(MockProvider(), PERSONALITIES[0], protected_terms=("Claude",))
+
+    assert agent._sanitize("Claudeさんの意見に賛成。私はAIとして考えます。", 100) == (
+        "Claudeさんの意見に賛成。私は考えます。"
+    )

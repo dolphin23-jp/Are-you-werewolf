@@ -137,6 +137,26 @@ def test_an_invalid_target_never_resolves_to_a_random_seat():
     assert first.target == second.target == "p2"
 
 
+def test_failing_actors_do_not_all_fall_back_to_the_same_seat():
+    candidates = [f"p{i}" for i in range(17)]
+
+    picks = {
+        actor: resolve_target(
+            None, candidates=[c for c in candidates if c != actor], actor_id=actor
+        ).target
+        for actor in candidates[1:]
+    }
+
+    # Deterministic per actor, and spread: seat order sent all of them to p0.
+    assert picks == {
+        actor: resolve_target(
+            None, candidates=[c for c in candidates if c != actor], actor_id=actor
+        ).target
+        for actor in candidates[1:]
+    }
+    assert len(set(picks.values())) > 5
+
+
 # -- published results --
 
 

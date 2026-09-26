@@ -14,6 +14,7 @@ which is how an error used to turn into a vote nobody could explain.
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Collection, Iterable, Sequence
 from dataclasses import dataclass, field
 
@@ -392,9 +393,13 @@ def resolve_target(
         return None
     if proposed in candidates:
         return TargetResolution(target=str(proposed))
-    fallback = next(
-        (item for item in preferred if item is not None and item in candidates), candidates[0]
-    )
+    fallback = next((item for item in preferred if item is not None and item in candidates), None)
+    if fallback is None:
+        # Still deterministic, but per actor. Seat order gave every failing AI
+        # the same answer: with the provider down, all fifteen voted for (and
+        # the wolves attacked) the human in seat 0.
+        index = _stable_index(actor_id, len(candidates)) if actor_id else 0
+        fallback = candidates[index]
     return TargetResolution(
         target=fallback,
         issues=(
@@ -453,3 +458,7 @@ __all__ = [
     "validate_public_result_claims",
     "validate_reasoning_memo",
 ]
+
+
+def _stable_index(key: str, size: int) -> int:
+    return int.from_bytes(hashlib.sha256(key.encode()).digest()[:8], "big") % size

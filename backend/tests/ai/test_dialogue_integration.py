@@ -247,9 +247,28 @@ def test_a_seat_holding_a_result_is_never_left_out_of_the_opening():
 
     round_state = asyncio.run(coordinator._start_discussion_round(state))
 
-    # A duty speaker is never dropped by the value ranking, and goes first.
-    assert "p4" in round_state.order
-    assert round_state.order[0] == "p4"
+    # A duty speaker is never dropped by the value ranking, and opens the day.
+    assert "p4" in round_state.order[: round_state.immediate_count]
+
+
+def test_the_opening_does_not_single_out_the_seat_with_a_real_result():
+    state = _board()
+    state.phase = Phase.DISCUSSION
+    boards.divine(state, "p4", "p11", night=2)
+    # p9 counter-claims seer; only p4 privately holds a new result.
+    boards.claim(state, "p9", RoleName.SEER, day=1)
+    runtime = ReasoningRuntime(state, AI_IDS, seed=6)
+    coordinator = AICoordinator(
+        state, AI_IDS, DisobedientProvider(), seed=6, reasoning=runtime
+    )
+
+    round_state = asyncio.run(coordinator._start_discussion_round(state))
+
+    # Both claimants open the day: opening with only the real result holder
+    # told the table which claim was true.
+    opening = round_state.order[: round_state.immediate_count]
+    assert {"p4", "p9"} <= set(opening)
+    assert len(opening) == len(set(opening))
 
 
 # -- human arguments, parsed once --

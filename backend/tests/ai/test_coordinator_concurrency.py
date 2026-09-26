@@ -51,6 +51,7 @@ def test_two_vote_requests_share_one_round_of_ai_votes():
         await original(controller_, state_, player_id)
 
     coordinator._cast_vote = counting  # type: ignore[method-assign]
+    alive_ai = [pid for pid in AI_IDS if state.players[pid].alive]
 
     async def double_submit() -> None:
         await asyncio.gather(
@@ -59,7 +60,6 @@ def test_two_vote_requests_share_one_round_of_ai_votes():
 
     asyncio.run(double_submit())
 
-    alive_ai = [pid for pid in AI_IDS if state.players[pid].alive]
     # One ballot per AI per round, however many rounds the vote needed.
     rounds = {record.round for record in state.vote_records if record.day == state.day}
     assert len(casts) == len(alive_ai) * len(rounds)

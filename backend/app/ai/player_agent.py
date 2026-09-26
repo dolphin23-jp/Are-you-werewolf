@@ -74,9 +74,15 @@ class AIPlayerAgent:
         provider: LLMProvider,
         personality: Personality,
         max_retries: int = DEFAULT_MAX_RETRIES,
+        player_id: str = "",
+        protected_terms: tuple[str, ...] = (),
     ) -> None:
         self._provider = provider
         self._personality = personality
+        self._player_id = player_id
+        # Player names survive the meta-talk filter: a human called "Claude"
+        # used to be referred to as "さん".
+        self._protected_terms = tuple(term for term in protected_terms if term)
         # Kept as a source-compatible argument for existing integrations. HTTP
         # retries belong to the provider; an agent submits each contract once.
         self._max_retries = max_retries
@@ -128,6 +134,7 @@ class AIPlayerAgent:
                 None,
                 candidates=valid_targets,
                 preferred=preferred_targets,
+                actor_id=self._player_id,
                 code="vote_target_invalid",
             )
             return VoteOutput(vote_target=resolved.target if resolved else "")
@@ -140,6 +147,7 @@ class AIPlayerAgent:
                 result.vote_target,
                 candidates=valid_targets,
                 preferred=(result.alternative_target, *preferred_targets),
+                actor_id=self._player_id,
                 code="vote_target_invalid",
             )
             if resolved is not None:
@@ -162,6 +170,7 @@ class AIPlayerAgent:
             proposed,
             candidates=valid_targets,
             preferred=preferred_targets,
+            actor_id=self._player_id,
             code="night_target_invalid",
         )
         return NightActionOutput(
@@ -200,8 +209,13 @@ class AIPlayerAgent:
             return None
 
     def _sanitize(self, text: str, max_len: int) -> str:
+        masked = [term for term in self._protected_terms if term in text]
+        for index, term in enumerate(masked):
+            text = text.replace(term, f"\x00{index}\x00")
         for pattern in _META_PATTERNS:
             text = pattern.sub("", text)
+        for index, term in enumerate(masked):
+            text = text.replace(f"\x00{index}\x00", term)
         text = text.strip()
         if len(text) > max_len:
             text = self._truncate_at_sentence(text, max_len)
@@ -218,8 +232,9 @@ def truncate_at_sentence(text: str, max_len: int) -> str:
     if len(text) <= max_len:
         return text
     truncated = text[:max_len]
-    for boundary in _SENTENCE_BOUNDARIES:
-        idx = truncated.rfind(boundary)
-        if idx != -1:
-            return truncated[: idx + 1]
+    # The last boundary of any kind: looking for 。 first dropped a complete
+    # ！ or ？ sentence that came after the last 。.
+    idx = max(truncated.rfind(boundary) for boundary in _SENTENCE_BOUNDARIES)
+    if idx != -1:
+        return truncated[: idx + 1]
     return truncated

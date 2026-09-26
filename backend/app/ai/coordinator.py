@@ -16,7 +16,9 @@ stays emergent rather than scripted.
 from __future__ import annotations
 
 import asyncio
+import logging
 import random
+import re
 import time
 from collections import Counter
 from collections.abc import Callable, Coroutine
@@ -45,12 +47,14 @@ from app.ai.reasoning.claims import (
     ensure_fact_sentences,
     register_claim_drafts,
 )
+from app.ai.reasoning.facts import mentions_player
 from app.ai.reasoning.rendering import (
     displayed_execution_target,
     enforce_execution_target,
 )
 from app.ai.reasoning.runtime import ReasoningRuntime, SeatReasoning
 from app.ai.schemas import (
+    DirectedQuestion,
     DiscussionOutput,
     MorningIntentOutput,
     NightActionOutput,
@@ -72,6 +76,8 @@ from app.eval.transcript import (
     Utterance,
 )
 from app.sessions.models import DiscussionRoundState
+
+logger = logging.getLogger(__name__)
 
 
 def _night_utility(seat: SeatReasoning, action_type: str) -> dict[str, float]:
@@ -188,7 +194,12 @@ class AICoordinator:
 
         wolf_ids = [p.player_id for p in state.players_by_role(RoleName.WEREWOLF)]
         madman = state.players_by_role(RoleName.MADMAN)
-        wolf_deception = assign_wolf_deception(wolf_ids, seed=seed)
+        # Only AI wolves take a part in the team's plan. A human wolf was handed a
+        # fake-claim role nobody told them about, so the planned claim never came
+        # while the AI wolves played around it.
+        wolf_deception = assign_wolf_deception(
+            [pid for pid in wolf_ids if pid in self._ai_player_ids], seed=seed
+        )
         madman_strategy_name, madman_fake_role = assign_madman_strategy(seed=seed)
         fake_claim_guard = FakeClaimGuard(wolf_team_ids=set(wolf_ids))
         self._wolf_deception = wolf_deception
@@ -207,7 +218,13 @@ class AICoordinator:
         )
 
         self._agents: dict[str, AIPlayerAgent] = {
-            pid: AIPlayerAgent(provider, self._personalities[pid]) for pid in self._ai_player_ids
+            pid: AIPlayerAgent(
+                provider,
+                self._personalities[pid],
+                player_id=pid,
+                protected_terms=tuple(player.name for player in state.players.values()),
+            )
+            for pid in self._ai_player_ids
         }
 
         self._recorder = recorder
@@ -486,6 +503,20 @@ class AICoordinator:
             if pid in alive
         ]
         duty.extend(planned_claims)
+        # Who holds a real result is private. Opening each morning with exactly
+        # those seats let the table tell the real seer from a counter-claimant
+        # by speaking order alone, so every public seer/medium claimant opens,
+        # in a seeded random order.
+        ledger = PublicFactLedger(state)
+        duty.extend(
+            pid
+            for pid in alive
+            if ledger.claimed_role_of(pid) in (RoleName.SEER, RoleName.MEDIUM)
+        )
+        # A seer both holds a result and must claim; counted once, not twice,
+        # or the "immediate" stage outlasts its speakers.
+        duty = list(dict.fromkeys(duty))
+        self._rng.shuffle(duty)
         chosen = self.reasoning.select_opening_speakers(
             state,
             pending_question_targets=[pid for pid in alive if self._pending_questions.get(pid)],
@@ -804,10 +835,20 @@ class AICoordinator:
             output.contains_co_claim = True
             if "死亡" in freemason_opening:
                 self._freemason_death_announced.add(player_id)
-        elif freemason_must_hide and detect_claimed_role(output.public_message) is not None:
-            output.public_message = "現時点ではCOしません。既出の判定と灰の発言を比較します。"
-            output.public_claim_role = None
+        elif freemason_must_hide:
+            # The structured fields can claim too: a neutral message with
+            # `public_claim_role="freemason"` was registered and then had "共有CO"
+            # written into it by `ensure_fact_sentences`.
+            if output.public_claim_role == RoleName.FREEMASON.value:
+                output.public_claim_role = None
+            action = output.claim_action
+            if action is not None and action.role == RoleName.FREEMASON.value:
+                output.claim_action = None
             output.contains_co_claim = False
+            if detect_claimed_role(output.public_message) is not None:
+                # The personality's ordinary filler, not a fixed sentence that
+                # only the hidden partner ever said and so identified them.
+                output.public_message = self._personalities[player_id].get_fallback_message()
         valid_reassessments = [
             item
             for item in output.reassessments
@@ -1020,9 +1061,16 @@ class AICoordinator:
             base = 0.35 + len(output.public_message) * 0.012
             delay = min(3.0, base) * self._pacing_scale * self._rng.uniform(0.8, 1.2)
             await asyncio.sleep(delay)
+        # Only what the table heard may reach other seats' prompts (and the
+        # human's view). The structured question and key point were passed on
+        # verbatim, a channel between AIs outside the public text.
+        output.directed_questions = [
+            question.model_copy(update={"question": said})
+            for question in output.directed_questions
+            if question.target_id in state.players
+            and (said := _question_as_said(state, output.public_message, question))
+        ]
         for question in output.directed_questions:
-            if question.target_id not in state.players or not question.question.strip():
-                continue
             proposed_topic = question.topic.strip()
             topic = (
                 proposed_topic
@@ -1048,7 +1096,8 @@ class AICoordinator:
                     topic=topic,
                 )
             )
-        self._context.record_key_point(state.day, message_id, player_id, output.key_point)
+        key_point = _key_point_as_said(output.public_message, output.key_point)
+        self._context.record_key_point(state.day, message_id, player_id, key_point)
         self._register_claim_drafts(controller, player_id, drafts, message_id)
         if self._recorder is not None and required_ids:
             published_list = [
@@ -1366,7 +1415,7 @@ class AICoordinator:
                 return  # wait for the human's vote this round
 
             alive_ai = [pid for pid in self._ai_player_ids if state.players[pid].alive]
-            await asyncio.gather(*(self._cast_vote(controller, state, pid) for pid in alive_ai))
+            await _gather_turns(*(self._cast_vote(controller, state, pid) for pid in alive_ai))
 
             try:
                 controller.resolve_votes()
@@ -1576,7 +1625,7 @@ class AICoordinator:
         tasks.append(self._run_wolf_chat_round(controller, state))
         tasks.append(self._run_freemason_chat_round(controller, state))
         if tasks:
-            await asyncio.gather(*tasks)
+            await _gather_turns(*tasks)
 
         if state.pending_attack is None:
             alpha_id = controller.alpha_wolf_id
@@ -1807,3 +1856,53 @@ class AICoordinator:
                 controller.chat(pid, output.message, channel)
             except Exception:
                 pass
+
+
+def _normalized(text: str) -> str:
+    return "".join(text.split())
+
+
+def _sentences(text: str) -> list[str]:
+    return [part.strip() for part in re.split(r"(?<=[。！？!?])|\n", text) if part.strip()]
+
+
+def _question_as_said(state: GameState, public_message: str, question: DirectedQuestion) -> str:
+    """The question as it appears in the posted message, or "" if it does not.
+
+    The model's own wording is kept when the message contains it; otherwise
+    the posted sentence that names the target and asks something stands in.
+    A question the table never heard is not registered at all.
+    """
+    asked = question.question.strip()
+    if asked and _normalized(asked) in _normalized(public_message):
+        return asked
+    target = state.players[question.target_id]
+    for sentence in _sentences(public_message):
+        if mentions_player(sentence, target.player_id, target.name) and (
+            sentence.endswith(("？", "?", "か。", "か")) or "か？" in sentence
+        ):
+            return sentence
+    return ""
+
+
+def _key_point_as_said(public_message: str, key_point: str) -> str:
+    """A digest of the posted message, never content the message did not carry."""
+    point = key_point.strip()
+    if point and _normalized(point) in _normalized(public_message):
+        return point
+    sentences = _sentences(public_message)
+    return sentences[0][:60] if sentences else ""
+
+
+async def _gather_turns(*turns: Coroutine[Any, Any, None]) -> None:
+    """Run AI turns side by side without letting one failure drop the rest.
+
+    A plain gather re-raised the first error, and the vote or night it
+    belonged to was never resolved. Ordinary errors are logged. A
+    BaseException (a budget stop, a cancellation) still ends the phase.
+    """
+    for result in await asyncio.gather(*turns, return_exceptions=True):
+        if isinstance(result, BaseException):
+            if not isinstance(result, Exception):
+                raise result
+            logger.error("AI turn failed", exc_info=result)
