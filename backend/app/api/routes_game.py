@@ -177,8 +177,15 @@ def get_view(session_id: str, player_id: str | None = Query(default=None)) -> di
     view = session.controller.get_player_view(viewer)
     round_state = session.discussion_round
     settings = get_settings()
+    state = session.controller.state
     awaiting = bool(
-        round_state and round_state.awaiting_human and viewer == session.human_id
+        round_state
+        and round_state.awaiting_human
+        and viewer == session.human_id
+        # A round left awaiting when the discussion ended must not keep asking
+        # for a speech through voting and into the next dawn.
+        and state.phase == Phase.DISCUSSION
+        and round_state.day == state.day
     )
     view["awaiting_your_speech"] = awaiting
     view["discussion_paused"] = bool(

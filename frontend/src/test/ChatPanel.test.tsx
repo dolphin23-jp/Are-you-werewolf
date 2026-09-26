@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { controlDiscussion, passDiscussionTurn, sendChat } from "../api/client";
 import { ChatPanel } from "../components/panels/ChatPanel";
@@ -158,6 +158,74 @@ describe("ChatPanel", () => {
     render(<ChatPanel />);
 
     await waitFor(() => expect(passDiscussionTurn).toHaveBeenCalledWith("s1"));
+  });
+
+  it("does not pass the moment a new wait begins", async () => {
+    // Before the wait the server reports 0 seconds left; that stale 0 used to be
+    // read in the same commit as the new 60s wait and passed the turn at once.
+    useGameStore.setState({ view: makeView(), sessionId: "s1" });
+    render(<ChatPanel />);
+
+    act(() => {
+      useGameStore.setState({
+        view: makeView({
+          awaiting_your_speech: true,
+          speech_wait_remaining_seconds: 60,
+          speech_wait_token: "1:100",
+        }),
+      });
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(passDiscussionTurn).not.toHaveBeenCalled();
+    expect(screen.getByText(/あなたの発言を待っています/)).toHaveTextContent("残り 60 秒");
+  });
+
+  it("does not pass on mount while the wait still has time left", async () => {
+    useGameStore.setState({
+      view: makeView({
+        awaiting_your_speech: true,
+        speech_wait_remaining_seconds: 45,
+        speech_wait_token: "1:100",
+      }),
+      sessionId: "s1",
+    });
+    render(<ChatPanel />);
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(passDiscussionTurn).not.toHaveBeenCalled();
+  });
+
+  it("passes once this wait's countdown runs out", () => {
+    vi.useFakeTimers();
+    try {
+      useGameStore.setState({
+        view: makeView({
+          awaiting_your_speech: true,
+          speech_wait_remaining_seconds: 2,
+          speech_wait_token: "1:100",
+        }),
+        sessionId: "s1",
+      });
+      render(<ChatPanel />);
+
+      act(() => {
+        vi.advanceTimersByTime(1000);
+      });
+      expect(passDiscussionTurn).not.toHaveBeenCalled();
+
+      act(() => {
+        vi.advanceTimersByTime(1000);
+      });
+      expect(passDiscussionTurn).toHaveBeenCalledTimes(1);
+      expect(passDiscussionTurn).toHaveBeenCalledWith("s1");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("auto-passes only once while the same wait is still pending", async () => {

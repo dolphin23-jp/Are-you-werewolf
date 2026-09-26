@@ -36,7 +36,14 @@ export function ChatPanel() {
   const [replyingTo, setReplyingTo] = useState<ChatMessage[]>([]);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
   const [newMessageCount, setNewMessageCount] = useState(0);
-  const [waitRemaining, setWaitRemaining] = useState(0);
+  // The countdown belongs to one specific wait (see `speech_wait_token`). A
+  // plain number still held 0 -- the server's "not waiting" value -- in the same
+  // commit that a new 60s wait arrived, so the turn was auto-passed the instant
+  // it began.
+  const [countdown, setCountdown] = useState<{ token: string | null; remaining: number }>({
+    token: null,
+    remaining: 0,
+  });
   const chatLogRef = useRef<HTMLDivElement>(null);
   const previousMessageCount = useRef(0);
   const autoPassedToken = useRef<string | null>(null);
@@ -56,30 +63,45 @@ export function ChatPanel() {
     previousMessageCount.current = count;
   }, [view]);
 
+  const waitToken = view?.speech_wait_token ?? null;
+  const serverRemaining = view?.speech_wait_remaining_seconds ?? 0;
+  const waitRemaining = countdown.token === waitToken ? countdown.remaining : serverRemaining;
+
   useEffect(() => {
-    setWaitRemaining(view?.speech_wait_remaining_seconds ?? 0);
+    setCountdown({ token: waitToken, remaining: serverRemaining });
     if (!view?.awaiting_your_speech) return;
     const timer = window.setInterval(
-      () => setWaitRemaining((remaining) => Math.max(0, remaining - 1)),
+      () =>
+        setCountdown((current) => ({ ...current, remaining: Math.max(0, current.remaining - 1) })),
       1000,
     );
     return () => window.clearInterval(timer);
-  }, [view?.awaiting_your_speech, view?.speech_wait_remaining_seconds]);
+  }, [view?.awaiting_your_speech, serverRemaining, waitToken]);
 
   // Auto-pass at most once per wait. Keying off the server's token rather than a
   // boolean matters because the 2.5s poll re-runs this effect: a wait that stays at
   // zero would otherwise fire a pass request on every single poll.
-  const waitToken = view?.speech_wait_token ?? null;
   useEffect(() => {
-    if (!view?.awaiting_your_speech || view.discussion_paused || waitRemaining > 0 || !sessionId) return;
-    if (waitToken === null || autoPassedToken.current === waitToken) return;
+    if (!view?.awaiting_your_speech || view.discussion_paused || !sessionId) return;
+    // Only a countdown that has run out for *this* wait counts.
+    if (waitToken === null || countdown.token !== waitToken || countdown.remaining > 0) return;
+    if (autoPassedToken.current === waitToken) return;
     autoPassedToken.current = waitToken;
     void passDiscussionTurn(sessionId)
       .then(refreshView)
       .catch((error: unknown) => {
         setError(error instanceof Error ? error.message : "パスに失敗しました");
       });
-  }, [refreshView, sessionId, setError, view?.awaiting_your_speech, view?.discussion_paused, waitRemaining, waitToken]);
+  }, [
+    countdown.remaining,
+    countdown.token,
+    refreshView,
+    sessionId,
+    setError,
+    view?.awaiting_your_speech,
+    view?.discussion_paused,
+    waitToken,
+  ]);
 
   if (!view || !sessionId) return null;
 

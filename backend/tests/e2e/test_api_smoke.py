@@ -107,6 +107,8 @@ def test_view_reports_human_speech_deadline_countdown():
     session_id = response.json()["session_id"]
     session = get_session_store().get(session_id)
     assert session is not None
+    session.controller.state.phase = Phase.DISCUSSION
+    session.controller.state.day = 1
     session.discussion_round = DiscussionRoundState(
         day=1,
         order=[],
@@ -118,6 +120,30 @@ def test_view_reports_human_speech_deadline_countdown():
 
     assert view["awaiting_your_speech"] is True
     assert 34 <= view["speech_wait_remaining_seconds"] <= 35
+
+
+def test_view_stops_asking_for_a_speech_once_discussion_ends():
+    response = client.post("/api/games", json={"human_name": "Waiting", "seed": 8})
+    session_id = response.json()["session_id"]
+    session = get_session_store().get(session_id)
+    assert session is not None
+    session.controller.state.phase = Phase.DISCUSSION
+    session.controller.state.day = 1
+    session.discussion_round = DiscussionRoundState(
+        day=1,
+        order=[],
+        awaiting_human=True,
+        awaiting_since=time.time(),
+    )
+    assert client.get(f"/api/games/{session_id}/view").json()["awaiting_your_speech"] is True
+
+    session.controller.end_discussion()
+    view = client.get(f"/api/games/{session_id}/view").json()
+
+    # The round is still flagged as awaiting; the view must not pass that on,
+    # or the client shows the prompt through voting and auto-fires /pass-turn.
+    assert view["awaiting_your_speech"] is False
+    assert view["speech_wait_token"] is None
 
 
 def test_discussion_can_be_paused_without_an_active_generation_task():
