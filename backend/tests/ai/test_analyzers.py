@@ -435,3 +435,81 @@ def test_a_wolf_asserting_its_teammate_is_a_wolf_is_still_flagged():
     t = _transcript(utterances=[_say("p2", "ユイは黒だ。間違いない。", day=4)])
 
     assert analyze(t).count("wolf_named_teammate_with_wolf_word") == 1
+
+
+# -- listening: does the stated candidate move, and for what reason --
+
+
+def _turn(player_id: str, text: str, target: str | None, day: int, reply_to: str | None = None):
+    return _say(
+        player_id,
+        text,
+        day=day,
+        reasoning_memo={"execution_target": target},
+        reply_to=reply_to,
+    )
+
+
+def test_a_candidate_that_moved_of_the_seats_own_accord_is_counted_and_a_death_is_not():
+    t = _transcript(
+        utterances=[
+            _turn("p1", "p2が怪しい", "p2", 1),
+            _turn("p1", "確かに、その点は認める。p3に変える", "p3", 1, reply_to="m4"),
+            # p3 was executed on day 1, so moving off it later is no change of mind.
+            _turn("p1", "では今日はp0", "p0", 2),
+        ],
+        final_state={
+            "winner": "village",
+            "death_records": [{"player_id": "p3", "day": 1, "cause": "executed"}],
+        },
+    )
+
+    stance = analyze(t).stats["stance"]
+
+    assert stance["follow_up_turns"] == 2
+    assert stance["voluntary_changes"] == 1
+    assert stance["voluntary_changes_same_day"] == 1
+    assert stance["voluntary_changes_replying"] == 1
+    assert stance["voluntary_changes_acknowledged"] == 1
+    assert stance["forced_changes"] == 1
+
+
+def test_saying_one_has_been_persuaded_without_moving_is_counted_on_its_own():
+    t = _transcript(
+        utterances=[
+            _turn("p1", "p2が怪しい", "p2", 1),
+            _turn("p1", "根拠が弱いのは認めます。でもp2です", "p2", 1),
+        ]
+    )
+
+    stance = analyze(t).stats["stance"]
+
+    assert stance["voluntary_changes"] == 0
+    assert stance["acknowledged_without_change"] == 1
+
+
+def test_transcripts_from_before_replies_were_recorded_report_no_reply_count():
+    t = _transcript(
+        utterances=[_turn("p1", "p2が怪しい", "p2", 1), _turn("p1", "p3にする", "p3", 1)]
+    )
+
+    stance = analyze(t).stats["stance"]
+
+    assert stance["voluntary_changes"] == 1
+    assert stance["voluntary_changes_replying"] is None
+
+
+def test_the_report_shows_how_often_a_candidate_moved():
+    from app.eval.report import _render_speech_stats
+
+    t = _transcript(
+        utterances=[
+            _turn("p1", "p2が怪しい", "p2", 1),
+            _turn("p1", "確かに。p3に変える", "p3", 1, reply_to="m1"),
+        ]
+    )
+
+    table = _render_speech_stats([(t, analyze(t))])
+
+    assert "疑い先の自発的な変更(疑い先の死亡による変更を除く) | 1 / 1手番" in table
+    assert "うち相手の発言に返信しての変更 | 1" in table
