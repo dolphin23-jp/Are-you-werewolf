@@ -29,11 +29,17 @@ from app.ai.strategy import (
     render_board_analysis,
 )
 from app.engine.roles import ROLE_DEFINITIONS, RoleName
+from app.engine.speech_events import SpeechEventType
 from app.engine.state import ChatChannel, ChatMessage, GameState
 
 # Upper bound for the key-point digest layer. The same statements appear in full in
 # the current-day log, so an unbounded digest just doubles the prompt as a day runs on.
 _MAX_KEY_POINTS_SHOWN = 12
+
+# The "since your last turn" digest points at a few messages; it does not replay
+# the log, which the prompt already carries in full.
+_DIGEST_ITEMS = 3
+_DIGEST_QUOTE_CHARS = 70
 
 DISCUSSION_OUTPUT_INSTRUCTION = """以下のJSON形式で回答してください:
 {"public_message": "あなたの発言(人格に合った口調)", \
@@ -304,6 +310,17 @@ class ContextBuilder:
             "- 村で普通に使う言葉を使う(CO、対抗、真/偽、狂、内訳、グレー、グレラン、指定、"
             "ローラー、囲い、身内切り、噛み、呪殺、GJ、縄、PP、狐ケア など)\n"
             "- 「AIとして」「言語モデル」「プロンプト」などのメタ発言は絶対に禁止\n"
+            "【聞き入れ方】\n"
+            "- 【前回の発言のあとに出たこと】を読み、筋が通っている指摘や新しい事実があれば、"
+            "認めて考えを変える。認めたなら疑い先・吊り先も実際に変え、誰のどの指摘で変えたかを"
+            "一言で言い、その発言にreply_toを向ける\n"
+            "- 筋が通らない、根拠が薄いと思うときは、変えずに理由を短く言う。強く言われただけで"
+            "折れない。多数に合わせるだけで変えることもしない\n"
+            "- 「認める」「撤回する」と言ったなら、そのとおりに動く。認めたうえで変えないなら、"
+            "「そこは認めるけど、〜だから変えない」と理由を言う\n"
+            "- 一度答えたことは繰り返さない。同じ反論には「さっきの通り」と短く返す\n"
+            "- 人狼・狂人・妖狐は陣営の目的を優先する。聞き入れたふりをするか、変えないかは"
+            "戦術として選ぶ\n"
             "【考え方】\n"
             "- 【盤面メモ】の事実(CO・判定・投票・死亡)は正確に使う。メモにない判定や投票を"
             "作らない。思い込みで誰かのCOや結果を言い換えない\n"
@@ -539,6 +556,95 @@ class ContextBuilder:
             "これらの質問はこの発言のあとで片づく扱いなので、次の発言で同じ答えを繰り返さないでください。"
         )
 
+    def _layer_since_last_turn(self, state: GameState, player_id: str) -> str:
+        """Where this seat stood, and what has been said or shown since it spoke.
+
+        The day's log below is the whole table; a person at it reacts to three
+        things -- what was said to them, what was said about the player they were
+        pushing, and what newly came out. Left to find those in a long log, the
+        model mostly restates its own position, so they are pulled out here.
+        """
+        public = [m for m in state.chat_log if m.channel == ChatChannel.PUBLIC]
+        last_own = max((i for i, m in enumerate(public) if m.author_id == player_id), default=-1)
+        mine = {m.message_id for m in public if m.author_id == player_id}
+        heard = [
+            m
+            for m in public[last_own + 1 :]
+            if m.day == state.day and m.author_id != player_id
+        ]
+        me = state.players[player_id].name
+        previous = self._reasoning_memos.get(player_id) or {}
+        target_id = previous.get("execution_target")
+        target = state.players.get(target_id) if isinstance(target_id, str) else None
+        # Questions already shown to the seat in their own layer are not repeated.
+        asked = {q.source_message_id for q in state.pending_questions.get(player_id, [])}
+        addressed = [
+            m
+            for m in heard
+            if (m.reply_to in mine or me in m.content) and m.message_id not in asked
+        ]
+        about_target = (
+            [
+                m
+                for m in heard
+                if target.name in m.content and m not in addressed and m.message_id not in asked
+            ]
+            if target is not None and target.alive
+            else []
+        )
+        facts = self._new_public_facts(state, {m.message_id for m in heard})
+
+        if target is None:
+            stood = "まだありません"
+        elif target.alive:
+            stood = target.name
+        else:
+            stood = f"{target.name}(すでに死亡)"
+        lines = ["【前回の発言のあとに出たこと】", f"- あなたが推していた吊り先: {stood}"]
+        if addressed:
+            lines.append("- あなた宛ての発言:")
+            lines.extend(self._digest_line(state, m) for m in addressed[-_DIGEST_ITEMS:])
+        if about_target and target is not None:
+            lines.append(f"- {target.name}について出た発言:")
+            lines.extend(self._digest_line(state, m) for m in about_target[-_DIGEST_ITEMS:])
+        if facts:
+            lines.append("- 新しく公開された結果・CO: " + "、".join(facts))
+        if addressed or about_target or facts:
+            lines.append(
+                "これを読んで、考えを変えるか決めてから話す。筋が通っていれば認めて変え、"
+                "通らなければ変えずに理由を言う。"
+            )
+        elif heard:
+            lines.append("- あなた宛て・あなたの推し先に触れた発言・新しい結果は、まだありません。")
+        else:
+            lines.append("- まだ誰も話していません。")
+        return "\n".join(lines)
+
+    def _digest_line(self, state: GameState, message: ChatMessage) -> str:
+        flat = " ".join(message.content.split())
+        quote = flat if len(flat) <= _DIGEST_QUOTE_CHARS else flat[: _DIGEST_QUOTE_CHARS - 1] + "…"
+        return f"  - [{message.message_id}] {self._label(state, message.author_id)}: {quote}"
+
+    def _new_public_facts(self, state: GameState, message_ids: set[str]) -> list[str]:
+        ledger = PublicFactLedger(state)
+        facts: list[str] = []
+        for event in ledger.speech_events():
+            if event.source_message_id not in message_ids or not event.is_binding:
+                continue
+            who = ledger.name_of(event.actor_id)
+            if event.event_type is SpeechEventType.ROLE_CLAIM and event.role is not None:
+                facts.append(f"{who}が{ROLE_DEFINITIONS[event.role].label_ja}CO")
+            elif event.event_type is SpeechEventType.ABILITY_RESULT and event.target_id:
+                verdict = "黒" if event.result_is_werewolf else "白"
+                facts.append(f"{who}が{ledger.name_of(event.target_id)}={verdict}と結果を出した")
+            elif event.event_type in (
+                SpeechEventType.RESULT_RETRACTION,
+                SpeechEventType.RESULT_CORRECTION,
+                SpeechEventType.ROLE_RETRACTION,
+            ):
+                facts.append(f"{who}が自分の結果・COを取り消すか訂正した")
+        return facts[:5]
+
     def _layer_existing_key_points(self, state: GameState) -> str:
         points = self._key_points.get(state.day, [])
         if not points:
@@ -653,6 +759,7 @@ class ContextBuilder:
         user_layers = [
             self._layer_c_state(state, player_id, guides, board_memo=board_memo),
             self._layer_pending_questions(state, player_id),
+            self._layer_since_last_turn(state, player_id),
             self._layer_d_summaries(),
             self._layer_previous_memo(player_id),
             self._layer_e_current_log(state, ChatChannel.PUBLIC),

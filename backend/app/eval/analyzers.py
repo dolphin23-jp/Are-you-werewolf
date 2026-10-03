@@ -91,6 +91,7 @@ def analyze(transcript: GameTranscript) -> AnalysisResult:
     _check_identity_confusion(transcript, result)
     _check_true_role_result_accuracy(transcript, result)
     _check_ledger_results(transcript, result)
+    _collect_stance_stats(transcript, result)
     _collect_format_stats(transcript, result)
     return result
 
@@ -465,6 +466,64 @@ def _check_ledger_results(t: GameTranscript, result: AnalysisResult) -> None:
                     text=text,
                 )
             )
+
+
+# -- 聞き入れて考えを変えているか --------------------------------------------
+
+# Words a player uses to say they took a point or are dropping one. Counted next
+# to what they then did: saying it and not moving is the pattern worth seeing.
+_ACK_RE = re.compile(
+    r"確かに|なるほど|その通り|言う通り|言うとおり|納得|認め|撤回|考え直|見直|取り下げ"
+)
+
+
+def _stated_candidate(utterance: Utterance) -> str | None:
+    value = (utterance.reasoning_memo or {}).get("execution_target")
+    return value if isinstance(value, str) and value else None
+
+
+def _collect_stance_stats(t: GameTranscript, result: AnalysisResult) -> None:
+    """How often a seat's stated candidate really moved, and what went with it.
+
+    A change because the old candidate died is no change of mind, so those are
+    counted apart. What is left is what a person at the table would call
+    listening: the candidate moved while the old one was still alive.
+    """
+    deaths = {
+        record["player_id"]: record["day"] for record in t.final_state.get("death_records", [])
+    }
+    by_player: dict[str, list[Utterance]] = {}
+    for u in t.by_kind("discussion"):
+        by_player.setdefault(u.player_id, []).append(u)
+    # Transcripts from before the reply target was recorded cannot say.
+    replies_known = any(u.reply_to is not None for u in t.by_kind("discussion"))
+
+    follow_ups = forced = moved = same_day = replying = acknowledging = unmoved = 0
+    for turns in by_player.values():
+        for before, after in zip(turns, turns[1:], strict=False):
+            follow_ups += 1
+            was, now = _stated_candidate(before), _stated_candidate(after)
+            acknowledged = _ACK_RE.search(after.text) is not None
+            if was and now and was != now:
+                died_on = deaths.get(was)
+                if died_on is not None and before.day <= died_on < after.day:
+                    forced += 1
+                    continue
+                moved += 1
+                same_day += before.day == after.day
+                replying += after.reply_to is not None
+                acknowledging += acknowledged
+            elif acknowledged:
+                unmoved += 1
+    result.stats["stance"] = {
+        "follow_up_turns": follow_ups,
+        "forced_changes": forced,
+        "voluntary_changes": moved,
+        "voluntary_changes_same_day": same_day,
+        "voluntary_changes_replying": replying if replies_known else None,
+        "voluntary_changes_acknowledged": acknowledging,
+        "acknowledged_without_change": unmoved,
+    }
 
 
 # -- 形式・言語の客観指標 --------------------------------------------------

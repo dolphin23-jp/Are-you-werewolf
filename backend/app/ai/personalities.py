@@ -35,6 +35,9 @@ class Personality:
     # at a 17A table. Used by the v3 prompt; `sample_lines` keeps the structured
     # register the legacy and v2 prompts were measured on.
     chat_lines: tuple[str, ...] = ()
+    # How far a sound argument has to go before it moves this player: "open",
+    # "normal" or "firm". Used by the v3 prompt only.
+    openness: str = "normal"
 
     def to_prompt_section(self, *, chat: bool = False) -> str:
         section = (
@@ -49,6 +52,9 @@ class Personality:
         # Examples anchor the register far better than the abstract labels do, but a
         # preset without them must not emit a dangling empty bullet.
         lines = self.chat_lines or self.sample_lines if chat else self.sample_lines
+        if chat:
+            openness = OPENNESS_TEXT.get(self.openness, OPENNESS_TEXT["normal"])
+            section += f"\n- 意見の聞き方: {openness}"
         if lines:
             section += "\n- 口調の例:\n  - " + "\n  - ".join(lines)
         return section
@@ -56,6 +62,36 @@ class Personality:
     def get_fallback_message(self) -> str:
         return self.fallback_message
 
+
+# Every preset is asked to weigh what it hears; this is only how far an argument
+# has to go before it moves them. Without it the table is either players who
+# fold to the first objection or players who dig in whatever is said.
+OPENNESS_TEXT: dict[str, str] = {
+    "open": "人の話をよく聞く。筋の通った指摘には「確かに」とすぐ認めて、考えを変える",
+    "normal": "筋の通った指摘は認めて考えを変えるが、根拠の弱い指摘では動かない",
+    "firm": "一度決めた考えは簡単には変えない。結果や矛盾のような決定的な根拠が出たときだけ、"
+    "認めて変える",
+}
+
+_OPENNESS: dict[str, str] = {
+    "冷静な論客": "normal",
+    "元気なムードメーカー": "open",
+    "慎重な観察者": "normal",
+    "自信家のリーダー": "firm",
+    "疑り深い探偵": "firm",
+    "優しい世話役": "open",
+    "皮肉屋の理系": "normal",
+    "熱血な正義漢": "firm",
+    "のんびり屋": "open",
+    "策略家": "normal",
+    "新人風の初々しさ": "open",
+    "ベテランの古参": "firm",
+    "陽気なお調子者": "open",
+    "無口な実務家": "normal",
+    "情熱的な扇動家": "firm",
+    "素朴な聞き手": "open",
+    "長考する参謀": "normal",
+}
 
 PERSONALITIES: list[Personality] = [
     Personality(
@@ -238,49 +274,83 @@ _CHAT_LINES: dict[str, tuple[str, ...]] = {
     "冷静な論客": (
         "〇〇の票だけ昨日の理由と噛み合ってない。そこ説明ほしい。",
         "2-1。初手はグレランでいいと思う。",
+        "その点は認める。ただ〇〇の票の件は残るから、そこは説明ほしい。",
     ),
     "元気なムードメーカー": (
         "おはよー！占いCOは出揃った？",
         "えっ今の票替え何！？理由きかせて！",
+        "あ、そっか！〇〇の言う通りかも。じゃあ〇〇はいったん外すね！",
     ),
     "慎重な観察者": (
         "今は様子見。〇〇の発言の変化だけ追ってる。",
         "決め打ちはまだ早いかな。",
+        "…その指摘で見方が変わりました。〇〇さんは一旦保留にします。",
     ),
     "自信家のリーダー": (
         "今日は〇〇と〇〇の2択。反論聞いてから指定出す。",
         "異論あるなら今のうちに。",
+        "その反論は聞いた。でも〇〇の結果は動かない。指定は変えない。",
     ),
     "疑り深い探偵": (
         "その理由、昨日の票と合わないよね？",
         "で、なんで今になって意見変えたの。",
+        "言い分は分かった。けど票の食い違いは消えてないよね。",
     ),
-    "優しい世話役": ("まずは順番に意見聞きましょ。", "反対意見も一回聞いてみない？"),
+    "優しい世話役": (
+        "まずは順番に意見聞きましょ。",
+        "反対意見も一回聞いてみない？",
+        "なるほど、そう言われるともっともですね。〇〇さんへの見方、変えます。",
+    ),
     "皮肉屋の理系": (
         "前提が一個抜けてる。結果の整合を先に見て。",
         "印象論はいいから材料出して。",
+        "数字が出たなら考えを変える。出てないなら変えない。",
     ),
-    "熱血な正義漢": ("曖昧なまま吊るのは嫌だ！根拠言い切ろう！", "そこ怪しい！説明して！"),
+    "熱血な正義漢": (
+        "曖昧なまま吊るのは嫌だ！根拠言い切ろう！",
+        "そこ怪しい！説明して！",
+        "気持ちは分かる！でも根拠が出るまで引かないぞ！",
+    ),
     "のんびり屋": (
         "まあ回答待ってからでも遅くないよ〜",
         "うーん、今んとこ〇〇がちょっと気になるかな。",
+        "あ〜確かにそうかも。〇〇はいったん置いとくよ〜",
     ),
-    "策略家": ("あえてこの二人の反応を見たい。", "結論は伏せる。でもその質問は大事。"),
+    "策略家": (
+        "あえてこの二人の反応を見たい。",
+        "結論は伏せる。でもその質問は大事。",
+        "その線は面白い。いったん乗って、〇〇の反応を見よう。",
+    ),
     "新人風の初々しさ": (
         "えっと、投票理由を教えてもらえますか…？",
         "まだ迷ってます。ここが気になって。",
+        "あっ、そうなんですね…納得しました。〇〇さんは外します。",
     ),
-    "ベテランの古参": ("焦るな。昨日の票を順に見よう。", "急いで結論出す場面じゃない。"),
+    "ベテランの古参": (
+        "焦るな。昨日の票を順に見よう。",
+        "急いで結論出す場面じゃない。",
+        "言い分は聞いた。ただ経験上、そこは譲れん。結果が出たら考え直す。",
+    ),
     "陽気なお調子者": (
         "おっと、その票替えは見逃せないねぇ",
         "冗談はさておき、理由は聞きたいな。",
+        "おっと一本取られた！〇〇の指摘はもっともだ、考え直すわ。",
     ),
-    "無口な実務家": ("結論。今日は〇〇。", "理由は票と回答の不一致。"),
-    "情熱的な扇動家": ("ここで意見揃えよう！", "この矛盾は放置できない！"),
-    "素朴な聞き手": ("そこもう少し聞いていい？", "今の説明でちょっと納得した。"),
+    "無口な実務家": ("結論。今日は〇〇。", "理由は票と回答の不一致。", "了解。〇〇に変更。"),
+    "情熱的な扇動家": (
+        "ここで意見揃えよう！",
+        "この矛盾は放置できない！",
+        "その指摘は一理ある。でも流れは変えない、ここは押す！",
+    ),
+    "素朴な聞き手": (
+        "そこもう少し聞いていい？",
+        "今の説明でちょっと納得した。",
+        "ああ、そういうことか。〇〇は外す。",
+    ),
     "長考する参謀": (
         "二つの視点で分けて整理する。",
         "判定と投票を合わせると、この内訳が自然。",
+        "その視点は取り入れる。ただ結論は、判定と合わせてからにします。",
     ),
 }
 
@@ -298,6 +368,7 @@ PERSONALITIES = [
         # app down rather than just losing its examples.
         sample_lines=_SAMPLE_LINES.get(personality.name, ()),
         chat_lines=_CHAT_LINES.get(personality.name, ()),
+        openness=_OPENNESS.get(personality.name, "normal"),
     )
     for index, personality in enumerate(PERSONALITIES)
 ]

@@ -187,6 +187,7 @@ def _render_speech_stats(games: list[tuple[GameTranscript, AnalysisResult]]) -> 
     def weighted(key: str) -> float:
         return float(sum(s[key] * s["utterances"] for s in collected) / max(total, 1))
 
+    stance = _stance_rows(games)
     return "\n".join(
         [
             "| 指標 | 値 |",
@@ -206,8 +207,37 @@ def _render_speech_stats(games: list[tuple[GameTranscript, AnalysisResult]]) -> 
             f"| ID表記(pN)を含むAI発言率 | {weighted('id_mention_rate'):.1%} |",
             f"| 1日あたり公開発言数 | {weighted('public_messages_per_day'):.1f} |",
             f"| 公開発言の平均文字数 | {weighted('public_mean_length'):.1f} |",
+            *stance,
         ]
     )
+
+
+def _stance_rows(games: list[tuple[GameTranscript, AnalysisResult]]) -> list[str]:
+    """Rows for how often a seat moved its candidate, summed over the games."""
+    collected = [s for _t, a in games if (s := a.stats.get("stance")) is not None]
+    if not collected:
+        return []
+
+    def total(key: str) -> int:
+        return sum(s[key] or 0 for s in collected)
+
+    turns = total("follow_up_turns")
+    moved = total("voluntary_changes")
+    replying = (
+        "—"
+        if any(s["voluntary_changes_replying"] is None for s in collected)
+        else str(total("voluntary_changes_replying"))
+    )
+    return [
+        f"| 疑い先の自発的な変更(疑い先の死亡による変更を除く) | {moved} / {turns}手番 |",
+        f"| うち同じ日のうちの変更 | {total('voluntary_changes_same_day')} |",
+        f"| うち相手の発言に返信しての変更 | {replying} |",
+        f"| うち認める言葉(確かに・認める・撤回…)を伴う変更 | "
+        f"{total('voluntary_changes_acknowledged')} |",
+        f"| 疑い先の死亡による変更 | {total('forced_changes')} |",
+        f"| 認める・撤回すると言いながら疑い先が変わらない発言 | "
+        f"{total('acknowledged_without_change')} |",
+    ]
 
 
 def _render_judge(summary: dict[str, Any]) -> str:
