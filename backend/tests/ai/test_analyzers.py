@@ -345,3 +345,93 @@ def test_clean_transcript_produces_no_findings():
     )
     result = analyze(t)
     assert result.findings == [], [f.detail for f in result.findings]
+
+
+# -- the public record against what was said and seen --
+
+
+def _result_event(actor: str, target: str, *, confidence: float, wolf: bool = False) -> dict:
+    return {
+        "event_id": "e1",
+        "source_message_id": "m1",
+        "actor_id": actor,
+        "event_type": "ability_result",
+        "day": 2,
+        "target_id": target,
+        "role": "seer",
+        "result_is_werewolf": wolf,
+        "referenced_day": None,
+        "confidence": confidence,
+    }
+
+
+def _ledger_transcript(*events: dict, divined: tuple[str, ...] = ()) -> GameTranscript:
+    return _transcript(
+        final_state={
+            "winner": "village",
+            "death_records": [],
+            "divine_records": [
+                {"seer_id": "p1", "target_id": target, "day": 1, "is_werewolf": False}
+                for target in divined
+            ],
+            "speech_events": list(events),
+            "chat_log": [
+                {"message_id": "m1", "content": "アオイのソウタ白は信用できない。"},
+            ],
+        }
+    )
+
+
+def test_a_true_seer_credited_with_a_result_they_never_had_is_flagged():
+    # A quoted rival's verdict that the public record took for the seer's own.
+    t = _ledger_transcript(_result_event("p1", "p2", confidence=0.9), divined=("p3",))
+
+    analysis = analyze(t)
+
+    assert analysis.count("true_role_result_without_record") == 1
+    assert analysis.count("undeclared_spoken_result") == 1
+    flagged = next(f for f in analysis.findings if f.check == "true_role_result_without_record")
+    assert flagged.text == "アオイのソウタ白は信用できない。"
+
+
+def test_a_declared_result_the_seer_really_had_is_silent():
+    t = _ledger_transcript(_result_event("p1", "p3", confidence=1.0), divined=("p3",))
+
+    analysis = analyze(t)
+
+    assert analysis.count("true_role_result_without_record") == 0
+    assert analysis.count("undeclared_spoken_result") == 0
+
+
+def test_a_spoken_result_the_seer_really_had_is_only_noted_as_undeclared():
+    t = _ledger_transcript(_result_event("p1", "p3", confidence=0.9), divined=("p3",))
+
+    analysis = analyze(t)
+
+    assert analysis.count("true_role_result_without_record") == 0
+    assert analysis.count("undeclared_spoken_result") == 1
+
+
+def test_a_fake_seer_has_no_records_so_only_undeclared_results_are_noted():
+    declared = _ledger_transcript(_result_event("p2", "p3", confidence=1.0))
+    spoken = _ledger_transcript(_result_event("p2", "p3", confidence=0.9))
+
+    assert analyze(declared).count("true_role_result_without_record") == 0
+    assert analyze(declared).count("undeclared_spoken_result") == 0
+    assert analyze(spoken).count("true_role_result_without_record") == 0
+    assert analyze(spoken).count("undeclared_spoken_result") == 1
+
+
+def test_a_wolf_discussing_a_black_result_is_not_calling_its_teammate_a_wolf():
+    # "黒だけで" is the particle だけ, not "黒だ": nobody called anyone a wolf here.
+    t = _transcript(
+        utterances=[_say("p2", "ユイの黒だけで真を決め打つのは危険です。", day=4)]
+    )
+
+    assert analyze(t).count("wolf_named_teammate_with_wolf_word") == 0
+
+
+def test_a_wolf_asserting_its_teammate_is_a_wolf_is_still_flagged():
+    t = _transcript(utterances=[_say("p2", "ユイは黒だ。間違いない。", day=4)])
+
+    assert analyze(t).count("wolf_named_teammate_with_wolf_word") == 1
