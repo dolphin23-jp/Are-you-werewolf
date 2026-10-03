@@ -65,7 +65,7 @@ def test_health_endpoint():
     assert resp.status_code == 200
     body = resp.json()
     assert body["status"] == "ok"
-    assert body["reasoning_engine"] in ("legacy", "v2")
+    assert body["reasoning_engine"] in ("legacy", "v2", "v3")
 
 
 def test_discussion_runs_without_waiting_when_human_is_dead():

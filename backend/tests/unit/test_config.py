@@ -92,10 +92,12 @@ def test_explicit_kwarg_outranks_the_environment(monkeypatch):
     assert Settings(werewolf_llm_provider="mock").werewolf_llm_provider == "mock"
 
 
-def test_v3_is_an_accepted_engine_and_the_default_is_unchanged(monkeypatch):
-    monkeypatch.setenv("WEREWOLF_REASONING_ENGINE", " V3 ")
+def test_v3_is_the_default_engine_and_an_environment_value_still_wins(monkeypatch):
+    monkeypatch.delenv("WEREWOLF_REASONING_ENGINE", raising=False)
     assert Settings().werewolf_reasoning_engine == "v3"
-    monkeypatch.delenv("WEREWOLF_REASONING_ENGINE")
+    # A deployment that still carries the old value keeps running that engine
+    # until it is removed -- which is why the README says to remove it.
+    monkeypatch.setenv("WEREWOLF_REASONING_ENGINE", " V2 ")
     assert Settings().werewolf_reasoning_engine == "v2"
 
 
