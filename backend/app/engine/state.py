@@ -71,6 +71,12 @@ class PendingQuestion:
     source_message_id: str
     day: int
     topic: str = ""
+    # The target has had its turn to answer. An AI is shown a question once: it
+    # cannot reliably point `reply_to` at the right message when several people
+    # ask the same thing, and a question that stayed open was put to it again on
+    # every later turn -- the same answer, four days running. The entry is kept
+    # (not dropped) so "asked but never replied to" can still be counted.
+    served: bool = False
 
 
 @dataclass
@@ -510,6 +516,7 @@ def _pending_question_dict(question: PendingQuestion) -> dict[str, Any]:
         "source_message_id": question.source_message_id,
         "day": question.day,
         "topic": question.topic,
+        "served": question.served,
     }
 
 

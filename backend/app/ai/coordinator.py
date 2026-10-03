@@ -495,7 +495,7 @@ class AICoordinator:
             pid
             for pid in alive
             if self.reasoning.holds_unpublished_result(state, pid)
-            or self._pending_questions.get(pid)
+            or self._open_questions(pid)
         ]
         # Every seat with a claim to make, change or correct -- the freemason
         # leader, a result holder without its CO, a planned fake claimant, a
@@ -521,7 +521,7 @@ class AICoordinator:
         duty.extend(planned_claims)
         chosen = self.reasoning.select_opening_speakers(
             state,
-            pending_question_targets=[pid for pid in alive if self._pending_questions.get(pid)],
+            pending_question_targets=[pid for pid in alive if self._open_questions(pid)],
             planned_claims=planned_claims,
         )
         order = list(dict.fromkeys(duty + chosen))
@@ -699,6 +699,10 @@ class AICoordinator:
             if message and message.author_id in self._agents:
                 self._round_queue_reply(session.controller.state, round_state, message.author_id)  # type: ignore[attr-defined]
 
+    def _open_questions(self, player_id: str) -> list[PendingQuestion]:
+        """Questions this seat has not yet had its turn to answer."""
+        return [q for q in self._pending_questions.get(player_id, []) if not q.served]
+
     @staticmethod
     def _question_topic(question: str) -> str:
         if any(word in question for word in ("処刑", "吊り", "狼候補", "怪しい")):
@@ -792,12 +796,15 @@ class AICoordinator:
     ) -> DiscussionOutput | None:
         if state.phase != Phase.DISCUSSION:
             return None
+        # What this turn's prompt will put to the seat. Only these are served by
+        # it: a question asked while the model is generating has not been seen.
+        shown_questions = self._open_questions(player_id)
         decision = None
         if self.reasoning is not None:
             decision = self.reasoning.discussion_decision(
                 state,
                 player_id,
-                pending_question=bool(self._pending_questions.get(player_id)),
+                pending_question=bool(self._open_questions(player_id)),
                 under_pressure=stage.startswith("rebuttal") or stage.startswith("minority_review"),
             )
         if self.model_decides and self.reasoning is not None and decision is not None:
@@ -991,6 +998,8 @@ class AICoordinator:
             # The engine refused the message (the speaker died mid-round, say).
             # Nothing was displayed, so nothing is recorded as said.
             return None
+        for shown in shown_questions:
+            shown.served = True
         displayed_target: str | None = None
         decided_target = decision.execution_target if decision is not None else None
         if decision is not None and self.reasoning is not None:
