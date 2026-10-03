@@ -128,6 +128,24 @@ def test_quoting_someone_elses_co_does_not_claim_it_for_the_speaker():
     assert [(d.role, d.confidence) for d in quoted] == [(RoleName.SEER, 0.4)]
 
 
+def test_quoting_a_rivals_result_does_not_register_it_as_the_speakers_own():
+    state = make_state()
+    declare_co(state, "p3", RoleName.SEER)
+    # The seer's declared field is empty: this turn only argues against a rival.
+    output = DiscussionOutput(
+        public_message=(
+            "Player5、Player4のPlayer7白はPlayer6を占った結果ではない。"
+            "私のPlayer6黒を覆す根拠にはならない。"
+        )
+    )
+
+    drafts = _drafts(output, state, "p3")
+
+    assert [(d.event_type, d.target_id, d.result_is_werewolf) for d in drafts] == [
+        (SpeechEventType.ABILITY_RESULT, "p6", True)
+    ]
+
+
 def test_a_hedged_self_claim_is_recorded_but_not_promoted():
     controller = make_controller(seed=4)
     controller.state.day = 1

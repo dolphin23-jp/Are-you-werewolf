@@ -522,7 +522,7 @@ class ContextBuilder:
         )
 
     def _layer_pending_questions(self, state: GameState, player_id: str) -> str:
-        questions = state.pending_questions.get(player_id, [])
+        questions = [item for item in state.pending_questions.get(player_id, []) if not item.served]
         if not questions:
             return "【あなたへの未回答の質問】(ありません)"
         lines = [
@@ -534,6 +534,9 @@ class ContextBuilder:
             "【あなたへの未回答の質問】\n"
             + "\n".join(lines)
             + "\n最初にこれへ直接答えてください。答えられない場合は理由を述べてください。"
+            "同じことを何人かに聞かれているなら、1回の発言でまとめて答えます。"
+            "答えるときはreply_toにその発言ID(mN)を入れてください。"
+            "これらの質問はこの発言のあとで片づく扱いなので、次の発言で同じ答えを繰り返さないでください。"
         )
 
     def _layer_existing_key_points(self, state: GameState) -> str:

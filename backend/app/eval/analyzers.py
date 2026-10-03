@@ -32,6 +32,9 @@ def _claimed_role(utterance: Utterance, t: GameTranscript) -> str | None:
 
 
 _P0_IDENTITY_RE = re.compile(r"(?:私|俺|僕|自分)が(?:本物の)?p0(?:本人)?|p0本人")
+# An assertion that someone is a wolf. "黒だけで決められない" is the particle だけ, not
+# "黒だ": reading it that way flagged two wolves for merely discussing a black result.
+_WOLF_WORD_RE = re.compile(r"(?:人狼だ|狼だ|黒だ)(?!け)|黒い|狼で見る|人狼で見る")
 
 # Rough "is this actually Japanese" signal: share of CJK/kana characters.
 _JA_CHAR_RE = re.compile(r"[぀-ヿ一-鿿]")
@@ -87,6 +90,7 @@ def analyze(transcript: GameTranscript) -> AnalysisResult:
     _check_wolf_deception(transcript, result)
     _check_identity_confusion(transcript, result)
     _check_true_role_result_accuracy(transcript, result)
+    _check_ledger_results(transcript, result)
     _collect_format_stats(transcript, result)
     return result
 
@@ -234,7 +238,7 @@ def _check_wolf_deception(t: GameTranscript, result: AnalysisResult) -> None:
             teammate_name = name_by_id.get(teammate, teammate)
             explicit_text = any(
                 teammate_name in sentence
-                and re.search(r"(人狼だ|狼だ|黒だ|黒い|狼で見る|人狼で見る)", sentence)
+                and _WOLF_WORD_RE.search(sentence)
                 for sentence in re.split(r"[。！？!?\n]", u.text)
             )
             if explicit_text:
@@ -354,7 +358,8 @@ def _check_identity_confusion(t: GameTranscript, result: AnalysisResult) -> None
             )
 
 
-def _check_true_role_result_accuracy(t: GameTranscript, result: AnalysisResult) -> None:
+def _actual_result_records(t: GameTranscript) -> dict[str, dict[str, tuple[int, bool]]]:
+    """What each seer and medium really saw: owner -> target -> (day, is_werewolf)."""
     records_by_owner: dict[str, dict[str, tuple[int, bool]]] = {}
     for record in t.final_state.get("divine_records", []):
         records_by_owner.setdefault(record["seer_id"], {})[record["target_id"]] = (
@@ -366,6 +371,11 @@ def _check_true_role_result_accuracy(t: GameTranscript, result: AnalysisResult) 
             record["day"],
             record["is_werewolf"],
         )
+    return records_by_owner
+
+
+def _check_true_role_result_accuracy(t: GameTranscript, result: AnalysisResult) -> None:
+    records_by_owner = _actual_result_records(t)
 
     for u in t.by_kind("discussion"):
         if u.role not in ("seer", "medium"):
@@ -392,6 +402,67 @@ def _check_true_role_result_accuracy(t: GameTranscript, result: AnalysisResult) 
                         f"{'人狼' if actual_is_wolf else '人狼ではない'} だが逆の色を主張"
                     ),
                     text=u.text,
+                )
+            )
+
+
+def _check_ledger_results(t: GameTranscript, result: AnalysisResult) -> None:
+    """The results on the table's public record, against what was said and seen.
+
+    The public record is built from what players say. A seer who quotes a rival's
+    verdict ("アオイのソウタ白は…") was once recorded as having divined it, which put a
+    result the real seer never had on the record; the "two results in one night"
+    conflict that created discredited the one seer telling the truth for the rest
+    of the game. The declared `public_results` were empty in that case, so no check
+    that reads them could see it -- this reads the record itself.
+    """
+    events = [
+        event
+        for event in t.final_state.get("speech_events", [])
+        if event.get("event_type") == "ability_result"
+    ]
+    if not events:
+        return
+    records = _actual_result_records(t)
+    messages = {
+        message.get("message_id", ""): message.get("content", "")
+        for message in t.final_state.get("chat_log", [])
+    }
+    for event in events:
+        actor = event.get("actor_id", "")
+        target = event.get("target_id", "")
+        who = t.names.get(actor, actor)
+        whom = t.names.get(target, target)
+        color = "人狼" if event.get("result_is_werewolf") else "人狼ではない"
+        day = int(event.get("day", 0))
+        text = messages.get(event.get("source_message_id", ""), "")
+        if float(event.get("confidence", 1.0)) < 1.0:
+            result.add(
+                Finding(
+                    check="undeclared_spoken_result",
+                    severity="medium",
+                    player_id=actor,
+                    day=day,
+                    detail=(
+                        f"{who} が宣言していない {whom}={color} が、"
+                        "発言文から公開の結果として記録された"
+                    ),
+                    text=text,
+                )
+            )
+        role = t.roles.get(actor)
+        if role in ("seer", "medium") and target not in records.get(actor, {}):
+            result.add(
+                Finding(
+                    check="true_role_result_without_record",
+                    severity="high",
+                    player_id=actor,
+                    day=day,
+                    detail=(
+                        f"本物の{'占い師' if role == 'seer' else '霊媒師'}の {who} が、"
+                        f"実際には出していない {whom}={color} を公開した扱いになっている"
+                    ),
+                    text=text,
                 )
             )
 

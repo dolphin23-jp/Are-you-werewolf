@@ -31,6 +31,8 @@ _CHECK_LABELS = {
     "self_treated_as_other_player": "自分自身を他プレイヤーとして扱う",
     "claimed_p0_identity": "p0ではないプレイヤーがp0本人を主張",
     "true_role_result_conflict": "真役職が実際と逆の判定結果を主張",
+    "true_role_result_without_record": "本物の占い/霊媒が、実際には出していない結果を公開した扱い",
+    "undeclared_spoken_result": "宣言のない結果が発言文から公開の記録に載った",
 }
 
 

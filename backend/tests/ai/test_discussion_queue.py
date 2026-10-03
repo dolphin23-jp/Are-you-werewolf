@@ -440,3 +440,64 @@ def test_the_human_seat_is_never_scheduled_as_a_speaker():
         assert speaker != "p0"
         round_state.speech_counts[speaker] = round_state.speech_counts.get(speaker, 0) + 1
     assert "p0" not in round_state.major_targets
+
+
+class _RecordingProvider:
+    """Answers every turn the same way and keeps what it was shown."""
+
+    def __init__(self) -> None:
+        self.prompts: list[str] = []
+
+    async def generate_structured(
+        self, *, system: str, messages: list[Message], response_schema: type[SchemaT], **kwargs
+    ):  # type: ignore[no-untyped-def]
+        del kwargs, system
+        self.prompts.append("\n".join(m.content for m in messages))
+        if response_schema is DiscussionOutput:
+            return DiscussionOutput(public_message="さっき言った通り、材料が無かったです。")
+        return MorningIntentOutput()
+
+
+def test_a_question_is_put_to_the_target_once_and_then_counts_as_served():
+    controller = make_controller(seed=4)
+    state = controller.state
+    state.phase = Phase.DISCUSSION
+    state.day = 1
+    provider = _RecordingProvider()
+    coordinator = AICoordinator(state, ["p1", "p2"], provider, seed=1)
+    asked = controller.chat("p1", "理由を教えてください", "public")
+    state.pending_questions["p2"] = [
+        PendingQuestion("p1", "p2", "投票の理由は何ですか?", asked, 1)
+    ]
+
+    asyncio.run(coordinator._speak(controller, state, "p2", "initial"))
+    asyncio.run(coordinator._speak(controller, state, "p2", "initial"))
+
+    first, second = provider.prompts
+    assert "投票の理由は何ですか?" in first
+    # It answered without pointing reply_to at the question, so the engine never
+    # closed it -- the case that used to put the same question to the seat on
+    # every later turn, and every later day.
+    assert "投票の理由は何ですか?" not in second
+    assert coordinator._open_questions("p2") == []
+    # Kept, so that "asked but never replied to" can still be counted.
+    assert [question.served for question in state.pending_questions["p2"]] == [True]
+
+
+def test_a_question_asked_while_the_target_is_speaking_is_not_served_by_that_turn():
+    controller = make_controller(seed=4)
+    state = controller.state
+    state.phase = Phase.DISCUSSION
+    state.day = 1
+    late = PendingQuestion("p1", "p2", "あとから来た質問です", "m9", 1)
+
+    class AsksMidTurn(_RecordingProvider):
+        async def generate_structured(self, **kwargs):  # type: ignore[no-untyped-def]
+            state.pending_questions.setdefault("p2", []).append(late)
+            return await super().generate_structured(**kwargs)
+
+    coordinator = AICoordinator(state, ["p1", "p2"], AsksMidTurn(), seed=1)
+
+    asyncio.run(coordinator._speak(controller, state, "p2", "initial"))
+
+    assert coordinator._open_questions("p2") == [late]

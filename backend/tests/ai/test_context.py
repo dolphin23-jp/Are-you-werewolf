@@ -194,6 +194,43 @@ def test_pending_question_enters_target_prompt_and_reply_resolves_it():
     assert state.pending_questions["p2"] == []
 
 
+def test_a_served_question_is_not_put_to_the_target_again():
+    controller = make_controller(seed=4)
+    state = controller.state
+    state.day = 1
+    first = controller.chat("p1", "理由を教えてください", "public")
+    second = controller.chat("p3", "どうですか", "public")
+    state.pending_questions["p2"] = [
+        PendingQuestion("p1", "p2", "投票の理由は何ですか?", first, state.day, served=True),
+        PendingQuestion("p3", "p2", "狐候補は誰ですか?", second, state.day),
+    ]
+    builder = _builder(state)
+
+    _system, messages = builder.build_discussion_context(state, "p2")
+
+    assert "投票の理由は何ですか?" not in messages[0].content
+    assert "狐候補は誰ですか?" in messages[0].content
+    # The model is told how to close a question and that it will not be asked twice.
+    assert "reply_to" in messages[0].content
+    assert "繰り返さないでください" in messages[0].content
+
+
+def test_with_every_question_served_the_prompt_says_there_are_none():
+    controller = make_controller(seed=4)
+    state = controller.state
+    state.day = 1
+    source = controller.chat("p1", "理由を教えてください", "public")
+    state.pending_questions["p2"] = [
+        PendingQuestion("p1", "p2", "投票の理由は何ですか?", source, state.day, served=True)
+    ]
+    builder = _builder(state)
+
+    _system, messages = builder.build_discussion_context(state, "p2")
+
+    assert "投票の理由は何ですか?" not in messages[0].content
+    assert "【あなたへの未回答の質問】(ありません)" in messages[0].content
+
+
 def test_existing_key_points_are_rendered_with_message_ids():
     controller = make_controller(seed=4)
     state = controller.state
