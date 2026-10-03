@@ -13,12 +13,15 @@ keeps total summary size bounded instead of ever-growing transcript replay.
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable, Sequence
 from typing import Any
 
 from app.ai.deception import FakeClaimGuard, WolfDeceptionAssignment
 from app.ai.knowledge_base import KnowledgeBase, KnowledgeContext
 from app.ai.personalities import Personality, discussion_length_range
 from app.ai.provider.base import Message
+from app.ai.reasoning.board_memo import render_roster
+from app.ai.reasoning.facts import PublicFactLedger
 from app.ai.strategy import (
     StrategyAnalyzer,
     player_label,
@@ -93,6 +96,39 @@ WOLF_CHAT_OUTPUT_INSTRUCTION = """以下のJSON形式で回答してください
 SUMMARY_OUTPUT_INSTRUCTION = """以下のJSON形式で回答してください:
 {"summary": "その日の出来事の要約(500文字以内)"}"""
 
+# -- v3 (chat register) contracts --
+#
+# Deliberately a fraction of `DISCUSSION_OUTPUT_INSTRUCTION`. On the seed-11
+# live game the full contract plus a reasoning model's hidden thinking ran out
+# of completion budget on half of all turns; every field cut from here is a
+# field that cannot truncate the sentence the table was waiting for.
+CHAT_DISCUSSION_OUTPUT_INSTRUCTION = """次のJSONだけを返してください（前後に説明文を付けない）:
+{"public_message": "卓に送るチャット1通。相手は名前で呼び、player_idは書かない", \
+"reply_to": "直前の誰かの発言に返すならその発言ID(mN)、なければnull", \
+"reasoning_memo": {"execution_target": "今日吊りたい相手のplayer_idまたはnull", \
+"suspects": ["怪しいと思う順のplayer_id"], "trusted": ["信用しているplayer_id"], \
+"trusted_seer": "真と見ている占いCO者のplayer_idまたはnull", \
+"fox_candidates": ["妖狐候補のplayer_id"], \
+"overall_thought": "非公開の思考メモ。内訳の見立てと今日の方針を2〜3文", \
+"private_team_thought": "非公開。人狼・狂人は本当の陣営の狙いを隠さず書く"}, \
+"public_claim_role": "この発言でCOする役職(seer/medium/hunter/freemason)。しないならnull", \
+"public_results": [{"result_type": "seerまたはmedium", "target_id": "pN", \
+"is_werewolf": trueまたはfalse, "referenced_day": その結果の夜(霊媒は処刑日)の日数}], \
+"directed_questions": [{"target_id": "pN", "question": "名指しで聞く一つの質問"}], \
+"ready_to_vote": trueまたはfalse}
+player_idは【名簿】で引いてください。public_messageの中にはplayer_idを書きません。
+public_resultsは本当に自分が持っている結果（騙りなら騙りとして出す結果）だけを入れます。"""
+
+CHAT_VOTE_OUTPUT_INSTRUCTION = """次のJSONだけを返してください:
+{"vote_target": "投票する相手のplayer_id", "reason": "一言の理由（チャットで言う調子）", \
+"decisive_evidence": "決め手になった一つの根拠", \
+"countercase": "その相手が村側でも説明がつく最も強い見方", \
+"alternative_target": "次点のplayer_idまたはnull"}
+昼に言った吊り先と違う相手に入れるなら、reasonに変えた理由を書いてください。"""
+
+CHAT_PRIVATE_CHAT_INSTRUCTION = """次のJSONだけを返してください:
+{"message": "内輪チャットの1通。1〜2文、80文字以内。相手は名前で呼ぶ"}"""
+
 
 class DaySummaryManager:
     """Bounded rolling-summary memory: full current-day log stays verbatim,
@@ -151,10 +187,16 @@ class ContextBuilder:
         madman_fake_role: RoleName | None,
         fake_claim_guard: FakeClaimGuard,
         observer_player_ids: set[str] | None = None,
+        engine: str = "legacy",
     ) -> None:
         self._personalities = personalities
         self._day_summaries = day_summaries
         self._analyzer = StrategyAnalyzer()
+        # v3 speaks in the chat register: names only, short lines, the board
+        # handed over as a memo rather than as a brief. Everything else keeps
+        # the structured prompt that legacy and v2 were measured on.
+        self._engine = engine
+        self._chat = engine == "v3"
         self._wolf_deception = wolf_deception
         self._madman_fake_role = madman_fake_role
         self._fake_claim_guard = fake_claim_guard
@@ -184,9 +226,22 @@ class ContextBuilder:
             return "【前回の非公開思考メモ】(まだありません)"
         return "【前回の非公開思考メモ】\n" + json.dumps(memo, ensure_ascii=False)
 
+    def _label(self, state: GameState, player_id: str) -> str:
+        """How a player is written in the prompt: `名前(pN)` normally, the name
+        alone in the chat register, where the id form must never be modelled."""
+        if self._chat:
+            player = state.players.get(player_id)
+            return player.name if player is not None else player_id
+        return player_label(state, player_id)
+
+    def _labels(self, state: GameState, player_ids: Iterable[str]) -> str:
+        return "、".join(self._label(state, pid) for pid in player_ids) or "なし"
+
     # -- layer [A] --
 
     def _layer_a_system(self, state: GameState, player_id: str) -> str:
+        if self._chat:
+            return self._layer_a_chat(state, player_id)
         player = state.players[player_id]
         personality = self._personalities[player_id]
         return (
@@ -221,6 +276,45 @@ class ContextBuilder:
             "いずれかを具体化してください。既出のCO内訳や両視点で同じ成立条件は再掲せず、"
             "必要ならagrees_withで参照して新しい含意だけを述べてください\n"
             "- reasoning_memoは非公開です。人狼・狂人は本当の役職と陣営目的を隠さず考えてください"
+        )
+
+    def _layer_a_chat(self, state: GameState, player_id: str) -> str:
+        """The v3 system prompt: a person at a chat table, not a form to fill.
+
+        No fixed openers, no candidate declaration every turn, no ids. The
+        structured fields carry the private state; the message is just what the
+        player says. Everything about *what is true* arrives in the board memo,
+        so this layer is only about *how to be at the table*.
+        """
+        player = state.players[player_id]
+        personality = self._personalities[player_id]
+        minimum, maximum = discussion_length_range(personality.verbosity)
+        return (
+            f"あなたは17人村(17A)のチャット人狼に参加しているプレイヤー「{player.name}」です。"
+            "相手は人間のプレイヤーだと思って、人間のプレイヤーとして話してください。\n"
+            f"{personality.to_prompt_section(chat=True)}\n"
+            "【チャットの話し方】\n"
+            f"- 1発言は短く。ふだんは1〜3文、{minimum}〜{max(minimum + 20, maximum // 3)}字くらい。"
+            f"CO・結果発表・投票前の整理のときだけ長くてよい(最大{maximum}字)\n"
+            "- 相手は名前で呼ぶ。「(p3)」のようなIDは絶対に書かない\n"
+            "- 毎回同じ書き出しをしない。毎回「吊り候補は〇〇」と宣言しない。盤面の復唱をしない。"
+            "いま言いたいことを一つだけ言う\n"
+            "- 誰かの発言に反応するときは、その人の名前を出して具体的に反応する"
+            "(同意・反論・質問・回答)。名指しで聞かれたことには最初に答える\n"
+            "- 村で普通に使う言葉を使う(CO、対抗、真/偽、狂、内訳、グレー、グレラン、指定、"
+            "ローラー、囲い、身内切り、噛み、呪殺、GJ、縄、PP、狐ケア など)\n"
+            "- 「AIとして」「言語モデル」「プロンプト」などのメタ発言は絶対に禁止\n"
+            "【考え方】\n"
+            "- 【盤面メモ】の事実(CO・判定・投票・死亡)は正確に使う。メモにない判定や投票を"
+            "作らない。思い込みで誰かのCOや結果を言い換えない\n"
+            "- 思考はreasoning_memoに書く。発言はあなたの人格と、あなたの役職(騙っているなら"
+            "騙り役)として自然な範囲で選ぶ\n"
+            "- 発言で推した吊り先と投票先は原則そろえる。変えるときは一言理由を言う\n"
+            "- 自分の陣営の勝ちを目指す。人狼・狂人は本当の目的を発言で漏らさない。"
+            "妖狐は占われないこと・最後まで生き残ることを目指す\n"
+            "- 「もっとも狼らしい人」と「今日吊るべき人」は別。縄数、霊結果の価値、真役職を"
+            "失う損失、狐の生存を考えてから決める\n"
+            "- 自分自身を疑い先・吊り先・能力の対象にしない"
         )
 
     # -- layer [B] --
@@ -264,7 +358,7 @@ class ContextBuilder:
         divine_results = [r for r in state.divine_records if r.seer_id == player_id]
         if divine_results:
             rendered = [
-                f"{r.day}日目 {player_label(state, r.target_id)}="
+                f"{r.day}日目 {self._label(state, r.target_id)}="
                 f"{'人狼' if r.is_werewolf else '人狼ではない'}"
                 for r in divine_results
             ]
@@ -273,7 +367,7 @@ class ContextBuilder:
         medium_results = [r for r in state.medium_records if r.medium_id == player_id]
         if medium_results:
             rendered = [
-                f"{r.day}日目 {player_label(state, r.target_id)}="
+                f"{r.day}日目 {self._label(state, r.target_id)}="
                 f"{'人狼' if r.is_werewolf else '人狼ではない'}"
                 for r in medium_results
             ]
@@ -287,15 +381,22 @@ class ContextBuilder:
 
         return "\n".join(lines)
 
-    @staticmethod
-    def _status_label(state: GameState, player_id: str) -> str:
+    def _status_label(self, state: GameState, player_id: str) -> str:
         player = state.players[player_id]
         status = "生存" if player.alive else f"{player.death_day}日目死亡済み"
-        return f"{player_label(state, player_id)}[{status}]"
+        return f"{self._label(state, player_id)}[{status}]"
 
     # -- layer [C] --
 
-    def _layer_c_state(self, state: GameState, player_id: str, extra_guides: list[str]) -> str:
+    def _layer_c_state(
+        self,
+        state: GameState,
+        player_id: str,
+        extra_guides: list[str],
+        board_memo: str | None = None,
+    ) -> str:
+        if self._chat and board_memo is not None:
+            return self._layer_c_chat(state, board_memo, extra_guides)
         analysis = self._analyzer.analyze(state)
         parts = [render_board_analysis(analysis, state)]
         # Night N deaths are announced after start_discussion increments the
@@ -363,6 +464,34 @@ class ContextBuilder:
         parts.extend(extra_guides)
         return "\n\n".join(parts)
 
+    def _layer_c_chat(self, state: GameState, board_memo: str, extra_guides: list[str]) -> str:
+        """The board as a memo. Facts and hard logic only; the model weighs them."""
+        parts = [board_memo]
+        todays_deaths = [
+            death.player_id
+            for death in state.death_records
+            if death.day == state.day - 1 and death.cause.value in ("attacked", "cursed")
+        ]
+        if todays_deaths:
+            parts.append(
+                "【今朝の死体】"
+                + self._labels(state, todays_deaths)
+                + "。公開情報では噛みか呪殺かの区別はつかない。"
+            )
+        observers = [
+            self._label(state, pid)
+            for pid in sorted(self._observer_player_ids)
+            if pid in state.players
+        ]
+        if observers:
+            parts.append(
+                "【非参戦席】"
+                + "、".join(observers)
+                + "は評価用の無言席で、発言・投票をしない。沈黙を疑い理由にしない。"
+            )
+        parts.extend(extra_guides)
+        return "\n\n".join(parts)
+
     # -- layer [D] --
 
     def _layer_d_summaries(self) -> str:
@@ -384,13 +513,12 @@ class ContextBuilder:
         lines = [f"{m.day}日目 {self._format_chat_line(state, m)}" for m in messages[-30:]]
         return "【過去を含む内輪ログ】\n" + "\n".join(lines)
 
-    @staticmethod
-    def _format_chat_line(state: GameState, message: ChatMessage) -> str:
+    def _format_chat_line(self, state: GameState, message: ChatMessage) -> str:
         reply = f" →{message.reply_to}" if message.reply_to else ""
         references = f" refs={','.join(message.references)}" if message.references else ""
         return (
             f"[{message.message_id}{reply}{references}] "
-            f"{player_label(state, message.author_id)}: {message.content}"
+            f"{self._label(state, message.author_id)}: {message.content}"
         )
 
     def _layer_pending_questions(self, state: GameState, player_id: str) -> str:
@@ -398,7 +526,7 @@ class ContextBuilder:
         if not questions:
             return "【あなたへの未回答の質問】(ありません)"
         lines = [
-            f"[{item.source_message_id}] {player_label(state, item.asker)} →あなた:"
+            f"[{item.source_message_id}] {self._label(state, item.asker)} →あなた:"
             f"「{item.question}」"
             for item in questions
         ]
@@ -415,7 +543,7 @@ class ContextBuilder:
         # The full text of every one of these is already in the current-day log, so
         # this layer is a digest, not a second transcript. Keep the most recent ones.
         lines = [
-            f"[{message_id}] {player_label(state, player_id)}: {key_point}"
+            f"[{message_id}] {self._label(state, player_id)}: {key_point}"
             for message_id, player_id, key_point in points[-_MAX_KEY_POINTS_SHOWN:]
         ]
         return (
@@ -435,8 +563,18 @@ class ContextBuilder:
     # -- public, phase-specific builders --
 
     def build_discussion_context(
-        self, state: GameState, player_id: str, stage: str = "initial"
+        self,
+        state: GameState,
+        player_id: str,
+        stage: str = "initial",
+        *,
+        board_memo: str | None = None,
+        required_lines: Sequence[str] = (),
     ) -> tuple[str, list[Message]]:
+        if self._chat:
+            return self._build_chat_discussion_context(
+                state, player_id, stage, board_memo=board_memo, required_lines=required_lines
+            )
         guides = self._role_specific_guides(state, player_id)
         personality = self._personalities[player_id]
         minimum, maximum = discussion_length_range(personality.verbosity)
@@ -492,6 +630,73 @@ class ContextBuilder:
             ],
         )
 
+    def _build_chat_discussion_context(
+        self,
+        state: GameState,
+        player_id: str,
+        stage: str,
+        *,
+        board_memo: str | None,
+        required_lines: Sequence[str],
+    ) -> tuple[str, list[Message]]:
+        guides = self._role_specific_guides(state, player_id)
+        ledger = PublicFactLedger(state)
+        stage_instruction = self._chat_stage_instruction(state, stage)
+        duties = ""
+        if required_lines:
+            # Decided in code: a held result goes out, and a result needs its CO.
+            # Said once, plainly; how to say it is the model's.
+            duties = "【この発言で必ず言うこと】\n- " + "\n- ".join(required_lines)
+        user_layers = [
+            self._layer_c_state(state, player_id, guides, board_memo=board_memo),
+            self._layer_pending_questions(state, player_id),
+            self._layer_d_summaries(),
+            self._layer_previous_memo(player_id),
+            self._layer_e_current_log(state, ChatChannel.PUBLIC),
+            f"【いまの場面】{self._stage_label(stage)}。{stage_instruction}"
+            "当日のログは各行の先頭に[mN]の発言IDが付いている。誰かの発言を受けて話すなら"
+            "そのIDをreply_toに入れる。",
+        ]
+        if duties:
+            user_layers.append(duties)
+        user_layers.append(render_roster(ledger, player_id))
+        user_layers.append(CHAT_DISCUSSION_OUTPUT_INSTRUCTION)
+        return self._assemble(
+            [self._layer_a_system(state, player_id), self._layer_b_role(state, player_id)],
+            user_layers,
+        )
+
+    def _chat_stage_instruction(self, state: GameState, stage: str) -> str:
+        if stage == "immediate":
+            return "朝一。結果やCOがあるなら最初にそれを言い、必要なら一言添える。"
+        if stage == "reaction":
+            return "直前の発言への短い反応(同意・驚き・一言の反論・質問)。1〜2文でよい。"
+        if stage == "rebuttal_or_reassessment":
+            return (
+                "自分が疑われている、または反論を受けた場面。相手の言い分の妥当な点は認め、"
+                "それでも残る根拠か反論を短く返す。"
+            )
+        if stage == "freemason_confirmation":
+            return (
+                "共有の相方として名指しされた。本当の相方なら最初に確認COし、"
+                "違うなら明確に否定する。他の話は後。"
+            )
+        if stage.startswith("minority_review:"):
+            target_id = stage.split(":", 1)[1]
+            target = self._label(state, target_id) if target_id in state.players else target_id
+            return (
+                f"票や疑いが{target}に集中している。多数派の繰り返しではなく、"
+                f"{target}が村側である可能性と別の候補を一言で出す。"
+            )
+        if stage == "consensus_summary":
+            return "投票前の整理。今日の吊り先候補と理由、残る対立点を短くまとめる。"
+        if stage == "human_followup":
+            return "人間のプレイヤーの発言に応答する。"
+        return (
+            "今日の最初の発言。盤面を見て一番言いたいこと(内訳の見立て、吊り方針、"
+            "誰かへの質問のどれか)を一つ。"
+        )
+
     def build_morning_intent_context(
         self, state: GameState, player_id: str
     ) -> tuple[str, list[Message]]:
@@ -506,8 +711,18 @@ class ContextBuilder:
         )
 
     def build_vote_context(
-        self, state: GameState, player_id: str, candidate_ids: list[str]
+        self,
+        state: GameState,
+        player_id: str,
+        candidate_ids: list[str],
+        *,
+        board_memo: str | None = None,
+        stated_target: str | None = None,
     ) -> tuple[str, list[Message]]:
+        if self._chat:
+            return self._build_chat_vote_context(
+                state, player_id, candidate_ids, board_memo=board_memo, stated_target=stated_target
+            )
         candidates = player_labels(state, candidate_ids)
         # Without saying why the field shrank, a runoff looks to the model like
         # an arbitrarily truncated ballot.
@@ -533,52 +748,131 @@ class ContextBuilder:
             ],
         )
 
+    def _build_chat_vote_context(
+        self,
+        state: GameState,
+        player_id: str,
+        candidate_ids: list[str],
+        *,
+        board_memo: str | None,
+        stated_target: str | None,
+    ) -> tuple[str, list[Message]]:
+        ledger = PublicFactLedger(state)
+        header = (
+            f"【決選投票({state.vote_round}回目)】前回の投票が同数だったため、"
+            "候補は同数だったプレイヤーに限られる。次の中から選ぶ: "
+            if state.runoff_candidates
+            else "【投票候補】"
+        )
+        stated = (
+            f"【昼にあなたが推した吊り先】{self._label(state, stated_target)}"
+            if stated_target is not None and stated_target in state.players
+            else "【昼にあなたが推した吊り先】特に名指ししていない"
+        )
+        return self._assemble(
+            [self._layer_a_system(state, player_id), self._layer_b_role(state, player_id)],
+            [
+                self._layer_c_state(
+                    state,
+                    player_id,
+                    self._role_specific_guides(state, player_id),
+                    board_memo=board_memo,
+                ),
+                self._layer_d_summaries(),
+                self._layer_previous_memo(player_id),
+                self._layer_e_current_log(state, ChatChannel.PUBLIC),
+                stated,
+                f"{header}{self._labels(state, candidate_ids)}",
+                render_roster(ledger, player_id),
+                CHAT_VOTE_OUTPUT_INSTRUCTION,
+            ],
+        )
+
     def build_night_action_context(
-        self, state: GameState, player_id: str, action_type: str, candidate_ids: list[str]
+        self,
+        state: GameState,
+        player_id: str,
+        action_type: str,
+        candidate_ids: list[str],
+        *,
+        board_memo: str | None = None,
     ) -> tuple[str, list[Message]]:
         guides = self._role_specific_guides(state, player_id)
-        candidates = player_labels(state, candidate_ids)
+        candidates = self._labels(state, candidate_ids)
         extra = ""
         if action_type == "attack":
             wolf_log = self._layer_private_history(state, ChatChannel.WOLF)
             extra = f"\n\n{wolf_log}"
+        action_label = {"divine": "占い", "guard": "護衛", "attack": "襲撃"}.get(
+            action_type, action_type
+        )
+        user_layers = [
+            self._layer_c_state(state, player_id, guides, board_memo=board_memo),
+            self._layer_d_summaries(),
+            self._layer_previous_memo(player_id),
+            f"【夜行動: {action_label}({action_type})】候補: {candidates}{extra}",
+        ]
+        if self._chat:
+            user_layers.append(render_roster(PublicFactLedger(state), player_id))
+        user_layers.append(NIGHT_ACTION_OUTPUT_INSTRUCTION)
         return self._assemble(
             [self._layer_a_system(state, player_id), self._layer_b_role(state, player_id)],
-            [
-                self._layer_c_state(state, player_id, guides),
-                self._layer_d_summaries(),
-                self._layer_previous_memo(player_id),
-                f"【夜行動: {action_type}】候補: {candidates}{extra}",
-                NIGHT_ACTION_OUTPUT_INSTRUCTION,
-            ],
+            user_layers,
         )
 
     def build_wolf_chat_context(
-        self, state: GameState, player_id: str
+        self, state: GameState, player_id: str, *, board_memo: str | None = None
     ) -> tuple[str, list[Message]]:
-        return self._assemble(
-            [self._layer_a_system(state, player_id), self._layer_b_role(state, player_id)],
-            [
-                self._layer_c_state(state, player_id, self._role_specific_guides(state, player_id)),
-                self._layer_previous_memo(player_id),
-                self._layer_private_history(state, ChatChannel.WOLF),
-                "【指示】内輪チャットで襲撃先や騙り戦略、潜伏戦略を100文字以内で相談してください。",
-                WOLF_CHAT_OUTPUT_INSTRUCTION,
-            ],
+        return self._build_private_chat_context(
+            state,
+            player_id,
+            ChatChannel.WOLF,
+            "【指示】内輪チャットで襲撃先や騙り戦略、潜伏戦略を100文字以内で相談してください。",
+            board_memo=board_memo,
         )
 
     def build_freemason_chat_context(
-        self, state: GameState, player_id: str
+        self, state: GameState, player_id: str, *, board_memo: str | None = None
     ) -> tuple[str, list[Message]]:
+        return self._build_private_chat_context(
+            state,
+            player_id,
+            ChatChannel.FREEMASON,
+            "【指示】共有者チャットで方針を100文字以内で相談してください。",
+            board_memo=board_memo,
+        )
+
+    def _build_private_chat_context(
+        self,
+        state: GameState,
+        player_id: str,
+        channel: ChatChannel,
+        instruction: str,
+        *,
+        board_memo: str | None,
+    ) -> tuple[str, list[Message]]:
+        user_layers = [
+            self._layer_c_state(
+                state,
+                player_id,
+                self._role_specific_guides(state, player_id),
+                board_memo=board_memo,
+            ),
+            self._layer_previous_memo(player_id),
+            self._layer_private_history(state, channel),
+        ]
+        if self._chat:
+            user_layers.append(
+                "【指示】内輪チャットの1通。仲間と、今夜の行動と明日の方針を人間のチャットのように"
+                "短く相談する。"
+            )
+            user_layers.append(CHAT_PRIVATE_CHAT_INSTRUCTION)
+        else:
+            user_layers.append(instruction)
+            user_layers.append(WOLF_CHAT_OUTPUT_INSTRUCTION)
         return self._assemble(
             [self._layer_a_system(state, player_id), self._layer_b_role(state, player_id)],
-            [
-                self._layer_c_state(state, player_id, self._role_specific_guides(state, player_id)),
-                self._layer_previous_memo(player_id),
-                self._layer_private_history(state, ChatChannel.FREEMASON),
-                "【指示】共有者チャットで方針を100文字以内で相談してください。",
-                WOLF_CHAT_OUTPUT_INSTRUCTION,
-            ],
+            user_layers,
         )
 
     def build_summary_context(self, state: GameState, player_id: str) -> tuple[str, list[Message]]:
@@ -617,6 +911,7 @@ class ContextBuilder:
             player_id=player_id,
             fake_role=fake_role,
             perspective_needed=perspective_needed,
+            engine=self._engine,
         )
         return [doctrine.body for doctrine in self._knowledge.select(context)]
 

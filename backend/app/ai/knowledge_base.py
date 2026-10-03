@@ -28,6 +28,9 @@ class KnowledgeContext:
     player_id: str
     fake_role: RoleName | None = None
     perspective_needed: bool = False
+    # Which reasoning engine is asking. A doctrine may name the engines it is
+    # written for (`engines: v3`); one that names none applies to all of them.
+    engine: str = ""
 
 
 def parse_doctrine(text: str) -> Doctrine:
@@ -94,6 +97,9 @@ class KnowledgeBase:
             if count < int(threshold):
                 return False
         if _bool(meta.get("perspective_only")) and not context.perspective_needed:
+            return False
+        engines = _csv(meta.get("engines"))
+        if engines and context.engine not in engines:
             return False
         return True
 

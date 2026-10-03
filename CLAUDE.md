@@ -10,6 +10,10 @@
 - Run frontend tests: `cd frontend && pnpm test`. Lint/types: `pnpm exec eslint . && pnpm exec tsc -b --noEmit`.
 - See `docs/architecture.md` for the design philosophy carried over from the
   prior implementation and what was deliberately changed.
+- `docs/approach-reset-2026-10.md` decides the current priorities: the v3
+  engine (code guarantees facts and logic, the model reasons and speaks) is
+  the path to completion; the self-play RL path and the real-log training
+  pipeline are frozen, not deleted. Read it before adding to either.
 - Before changing external-log ingestion, possible-world reasoning, evidence
   weighting, vote evaluation, or expert-scenario data, read
   `docs/real_game_log_reasoning_plan.md`. It is the design contract for keeping

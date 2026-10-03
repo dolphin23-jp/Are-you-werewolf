@@ -355,3 +355,107 @@ def test_minority_review_requires_countercase_and_alternative():
     assert "Player0(p0)へ集中" in prompt
     assert "反対仮説" in prompt
     assert "別の処刑候補" in prompt
+
+
+# -- v3: the chat register --
+
+
+def _chat_builder(state) -> ContextBuilder:  # type: ignore[no-untyped-def]
+    wolf_ids = [p.player_id for p in state.players_by_role(RoleName.WEREWOLF)]
+    return ContextBuilder(
+        personalities=assign_personalities(list(state.players), seed=1),
+        day_summaries=DaySummaryManager(),
+        wolf_deception=WolfDeceptionAssignment(
+            pattern_name="all_lurk",
+            pattern_label="全潜伏",
+            fake_role_by_player={},
+            lurking_player_ids=wolf_ids,
+        ),
+        madman_fake_role=None,
+        fake_claim_guard=FakeClaimGuard(wolf_team_ids=set(wolf_ids)),
+        engine="v3",
+    )
+
+
+def test_chat_discussion_prompt_hands_over_the_memo_and_asks_for_names_only():
+    controller = make_controller(seed=4)
+    state = controller.state
+    state.day = 1
+    controller.chat("p2", "おはよう。", "public")
+    builder = _chat_builder(state)
+
+    system, messages = builder.build_discussion_context(
+        state,
+        "p1",
+        "initial_view",
+        board_memo="【盤面メモ】1日目 / あなた: Player1\n- 生存(16人): ...",
+        required_lines=["占い師CO"],
+    )
+    body = messages[0].content
+
+    assert "【盤面メモ】" in body
+    assert "【この発言で必ず言うこと】\n- 占い師CO" in body
+    assert "【名簿(JSONのplayer_id用)】" in body
+    assert "IDは絶対に書かない" in system
+    assert "17人村(17A)" in system
+    # The brief's wording and the structured contract's long form are gone.
+    assert "第一処刑候補" not in body
+    assert "role_hypotheses" not in body
+    assert "reassessments" not in body
+    # The log is written in names, not `名前(pN)`.
+    assert "] Player2: おはよう。" in body
+    assert "Player2(p2)" not in body
+
+
+def test_chat_prompt_carries_the_17a_doctrine_and_the_chat_register_lines():
+    state = make_controller(seed=4).state
+    state.day = 1
+    builder = _chat_builder(state)
+
+    system, messages = builder.build_discussion_context(
+        state, "p1", "initial_view", board_memo="【盤面メモ】"
+    )
+
+    assert "【17A村の進行の常識】" in messages[0].content
+    assert "口調の例" in system
+
+
+def test_structured_prompt_is_unchanged_by_the_chat_doctrine():
+    state = make_controller(seed=4).state
+    state.day = 1
+    builder = _builder(state)
+
+    _, messages = builder.build_discussion_context(state, "p1", "initial_view")
+
+    assert "【17A村の進行の常識】" not in messages[0].content
+    assert "Player2(p2)" in messages[0].content or "(p" in messages[0].content
+
+
+def test_chat_vote_prompt_states_what_the_seat_said_and_uses_names():
+    state = make_controller(seed=4).state
+    state.day = 2
+    builder = _chat_builder(state)
+
+    _, messages = builder.build_vote_context(
+        state, "p1", ["p2", "p3"], board_memo="【盤面メモ】", stated_target="p2"
+    )
+    body = messages[0].content
+
+    assert "【昼にあなたが推した吊り先】Player2" in body
+    assert "【投票候補】Player2、Player3" in body
+    assert "Player2(p2)" not in body
+    assert "昼に言った吊り先と違う相手に入れるなら" in body
+
+
+def test_chat_night_prompt_names_the_action_in_japanese_and_carries_the_roster():
+    state = make_controller(seed=4).state
+    state.day = 1
+    builder = _chat_builder(state)
+
+    _, messages = builder.build_night_action_context(
+        state, "p1", "divine", ["p2", "p3"], board_memo="【盤面メモ】"
+    )
+    body = messages[0].content
+
+    assert "【夜行動: 占い(divine)】候補: Player2、Player3" in body
+    assert "【名簿(JSONのplayer_id用)】" in body

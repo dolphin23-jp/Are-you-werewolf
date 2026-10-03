@@ -200,6 +200,10 @@ def _render_speech_stats(games: list[tuple[GameTranscript, AnalysisResult]]) -> 
             f"| 返信率 | {weighted('reply_rate'):.1%} |",
             f"| 未回答質問残存率 | {weighted('unanswered_question_rate'):.1%} |",
             f"| 発言長の分散 | {weighted('length_variance'):.1f} |",
+            f"| 定型句を含むAI発言率 | {weighted('template_phrase_rate'):.1%} |",
+            f"| ID表記(pN)を含むAI発言率 | {weighted('id_mention_rate'):.1%} |",
+            f"| 1日あたり公開発言数 | {weighted('public_messages_per_day'):.1f} |",
+            f"| 公開発言の平均文字数 | {weighted('public_mean_length'):.1f} |",
         ]
     )
 

@@ -8,7 +8,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # `WEREWOLF_REASONING_ENGINE=` line in a `.env` (the form `.env.example` uses
 # for every other optional setting) must resolve to whatever the real default
 # is, not to a value hardcoded independently of it.
-_DEFAULT_REASONING_ENGINE: Literal["legacy", "v2"] = "v2"
+_DEFAULT_REASONING_ENGINE: Literal["legacy", "v2", "v3"] = "v2"
 
 
 class Settings(BaseSettings):
@@ -34,13 +34,17 @@ class Settings(BaseSettings):
     werewolf_discussion_wait_seconds: float = 45.0
 
     werewolf_llm_provider: str = "mock"
-    # legacy: every decision goes through the model.
+    # legacy: every decision goes through the model, with no fact ledger.
     # v2: the reasoning layer decides votes, night actions and the speaking
     # order in code, and the model is left with wording. Defaulted to legacy
     # while v2 was only exercised through manual live-evaluation scripts;
     # now the default so real gameplay (not just those scripts) is what gets
     # manually playtested. Set WEREWOLF_REASONING_ENGINE=legacy to compare.
-    werewolf_reasoning_engine: Literal["legacy", "v2"] = _DEFAULT_REASONING_ENGINE
+    # v3: the reasoning layer keeps the facts, the solver, the validation and
+    # the speaking order, but the model decides whom to suspect, how to vote
+    # and what to do at night, and speaks in a chat register with no injected
+    # wording. See docs/approach-reset-2026-10.md for why.
+    werewolf_reasoning_engine: Literal["legacy", "v2", "v3"] = _DEFAULT_REASONING_ENGINE
 
     luna_api_key: str = ""
     luna_base_url: str = "https://api.example.com/v1"
@@ -48,6 +52,13 @@ class Settings(BaseSettings):
     luna_max_concurrency: int = 6
     luna_timeout_seconds: float = 30.0
     luna_max_retries: int = 2
+    # Reasoning-model effort hint (`low` / `medium` / `high`), sent as
+    # `reasoning_effort` when set. Empty means the parameter is not sent at
+    # all, so an endpoint that never heard of it sees no change. On the
+    # seed-11 live game 70% of every completion budget was spent on hidden
+    # reasoning and half of all calls were cut off before the JSON closed;
+    # this is the first knob to turn for that.
+    luna_reasoning_effort: str = ""
 
     @field_validator("werewolf_llm_provider", mode="before")
     @classmethod

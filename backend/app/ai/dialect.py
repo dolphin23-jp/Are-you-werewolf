@@ -57,13 +57,28 @@ class EndpointDialect:
 
     token_param: str = "max_completion_tokens"
     send_temperature: bool = True
+    # `reasoning_effort` is only ever sent when the operator asked for a value;
+    # an endpoint that rejects it is remembered, like the other two, so one
+    # 400 per process is the whole cost of asking.
+    send_reasoning_effort: bool = True
 
-    def apply(self, kwargs: dict[str, Any], *, max_tokens: int, temperature: float) -> None:
+    def apply(
+        self,
+        kwargs: dict[str, Any],
+        *,
+        max_tokens: int,
+        temperature: float,
+        reasoning_effort: str = "",
+    ) -> None:
         kwargs[self.token_param] = max_tokens
         if self.send_temperature:
             kwargs["temperature"] = temperature
         else:
             kwargs.pop("temperature", None)
+        if reasoning_effort and self.send_reasoning_effort:
+            kwargs["reasoning_effort"] = reasoning_effort
+        else:
+            kwargs.pop("reasoning_effort", None)
 
     def adapt(self, exc: Exception) -> bool:
         """Adjust to an API rejection. Returns True when something changed,
@@ -83,8 +98,16 @@ class EndpointDialect:
             self.send_temperature = False
             return True
 
+        if param == "reasoning_effort" and self.send_reasoning_effort:
+            self.send_reasoning_effort = False
+            return True
+
         return False
 
     def describe(self) -> str:
         temp = "送信する" if self.send_temperature else "送信しない(既定値のみ対応)"
-        return f"トークン上限パラメータ={self.token_param} / temperature={temp}"
+        effort = "送信する" if self.send_reasoning_effort else "送信しない(非対応)"
+        return (
+            f"トークン上限パラメータ={self.token_param} / temperature={temp}"
+            f" / reasoning_effort={effort}"
+        )

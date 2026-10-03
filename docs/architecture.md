@@ -611,6 +611,22 @@ legacy の固定シード3ゲームを main と本ブランチで完走させ比
 （UIは元から死亡としか表示しておらず、ビューも元から投影していた）と、
 `controller.chat` の `except Exception` を `except GameError` に絞ったことだけである。
 
+## v3: コードが事実と論理を保証し、LLMが考えて話す（2026-10）
+
+v2 の「コードが決め、LLMが言葉にする」は状態破損をゼロにしたが、ライブ対戦では
+全発言が同じ定型句で始まり、呼び出しの半数が途中切れし、1発言に28秒かかった。
+経緯と判断は `docs/approach-reset-2026-10.md` にある。
+
+`WEREWOLF_REASONING_ENGINE=v3` では、事実台帳・ソルバー・検証・発言順・公開義務は
+v2 と同じコードが担い、**誰を疑うか・投票・夜行動・発言内容はモデルが決める**。
+モデルにはブリーフの代わりに `reasoning/board_memo.py` の「盤面メモ」（名前のみ、
+公開事実→公開論理→その席だけが知ること）を渡す。`enforce_execution_target` は適用せず、
+投票は「昼に推した吊り先」を見せた上でモデルに任せ、ずれは従来どおり `vote_change` として
+監査に残す。狼は各自が夜チャットで話し、襲撃プロンプトはその履歴を読む。
+
+`model_decides` を持たない runtime 付きコーディネータは v2 のまま、runtime 無しは legacy の
+ままで、いずれも一字一句変わらない（`tests/ai/test_v3_coordinator.py::test_v2_still_overrules_the_model`）。
+
 ## LLMプロバイダ
 
 `backend/app/ai/provider/base.py` の `LLMProvider` プロトコルを介して

@@ -281,6 +281,49 @@ def test_discussion_quality_metrics_cover_overlap_balance_replies_and_questions(
     assert stats["length_variance"] > 0
 
 
+def test_human_likeness_stats_count_templates_ids_and_volume():
+    """The seed-11 live game had every AI line open with the injected candidate
+    sentence and name players as `Player12(p12)`. These rates are what the v3
+    engine is measured against; a human table scores zero on both."""
+    t = _transcript(
+        utterances=[
+            _say("p1", "現時点の第一処刑候補はユイ(p3)です。根拠は票です。"),
+            _say("p2", "ハルトの方が疑わしいという見方も残っています。", day=2),
+            _say("p1", "ユイ、昨日の票の理由は？", day=2),
+            _say("p0", "現時点の第一処刑候補はユイ(p3)です。"),
+        ],
+        final_state={
+            "chat_log": [
+                {"channel": "public", "day": 1, "content": "現時点の第一処刑候補はユイ(p3)です。"},
+                {"channel": "public", "day": 2, "content": "ハルトの方が疑わしい。"},
+                {"channel": "public", "day": 2, "content": "ユイ、昨日の票の理由は？"},
+                {"channel": "wolf", "day": 2, "content": "今夜はユイ。"},
+            ]
+        },
+    )
+
+    stats = analyze(t).stats["speech"]
+
+    assert stats["template_phrase_rate"] == 0.75
+    assert stats["id_mention_rate"] == 0.5
+    assert stats["public_messages_per_day"] == 1.5
+    assert stats["public_mean_length"] > 0
+
+
+def test_a_chat_register_table_scores_zero_on_templates_and_ids():
+    t = _transcript(
+        utterances=[
+            _say("p1", "2-1。グレランでいいと思う。"),
+            _say("p2", "ユイ、昨日の票の理由きかせて。"),
+        ]
+    )
+
+    stats = analyze(t).stats["speech"]
+
+    assert stats["template_phrase_rate"] == 0.0
+    assert stats["id_mention_rate"] == 0.0
+
+
 def test_length_limit_uses_each_recorded_personality_limit():
     t = _transcript(
         utterances=[

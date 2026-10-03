@@ -39,18 +39,25 @@ _DEATH_LABELS: dict[PublicDeathCause, str] = {
 }
 
 
-def render_public_fact_summary(ledger: PublicFactLedger, day: int | None = None) -> str:
-    """Render the day's established public facts. Pure function of the ledger."""
+def render_public_fact_summary(
+    ledger: PublicFactLedger, day: int | None = None, *, names_only: bool = False
+) -> str:
+    """Render the day's established public facts. Pure function of the ledger.
+
+    `names_only` drops the `(pN)` suffix from every label. The chat-register
+    prompt uses it so the model never sees the id form it is told not to speak.
+    """
     target_day = ledger.day if day is None else day
+    label = ledger.name_of if names_only else ledger.label_of
     lines = [f"{FACTS_HEADING}{target_day}日目"]
 
     alive = ledger.alive_ids()
-    lines.append(f"- 生存者({len(alive)}人): {_labels(ledger, alive)}")
+    lines.append(f"- 生存者({len(alive)}人): {_labels(ledger, alive, names_only=names_only)}")
 
     dead = [ledger.player(pid) for pid in ledger.dead_ids()]
     if dead:
         rendered = "、".join(
-            f"{player.label}[{player.death_day}日目{_death_label(player.death_cause)}]"
+            f"{label(player.player_id)}[{player.death_day}日目{_death_label(player.death_cause)}]"
             for player in dead
             if player is not None
         )
@@ -59,24 +66,23 @@ def render_public_fact_summary(ledger: PublicFactLedger, day: int | None = None)
     todays_co = [claim for claim in ledger.co_declarations() if claim.day == target_day]
     if todays_co:
         rendered = "、".join(
-            f"{ledger.label_of(claim.player_id)}={_role_label(claim.claimed_role)}"
-            for claim in todays_co
+            f"{label(claim.player_id)}={_role_label(claim.claimed_role)}" for claim in todays_co
         )
         lines.append(f"- 本日のCO: {rendered}")
 
     todays_results = [result for result in ledger.public_results() if result.day == target_day]
     if todays_results:
         rendered = "、".join(
-            f"{ledger.label_of(result.claimant_id)}の"
+            f"{label(result.claimant_id)}の"
             f"{'霊媒' if result.result_type == MEDIUM_RESULT else '占い'}: "
-            f"{ledger.label_of(result.target_id)}={'黒' if result.is_werewolf else '白'}"
+            f"{label(result.target_id)}={'黒' if result.is_werewolf else '白'}"
             for result in todays_results
         )
         lines.append(f"- 本日公開された判定: {rendered}")
 
     for round_number in sorted({vote.round for vote in ledger.votes_on(target_day)}):
         rendered = "、".join(
-            f"{ledger.label_of(vote.voter_id)}→{ledger.label_of(vote.target_id)}"
+            f"{label(vote.voter_id)}→{label(vote.target_id)}"
             for vote in ledger.votes_on(target_day, round_number)
         )
         lines.append(f"- 投票R{round_number}: {rendered}")
@@ -85,14 +91,12 @@ def render_public_fact_summary(ledger: PublicFactLedger, day: int | None = None)
         execution for execution in ledger.executions() if execution.day == target_day
     ]
     if executed_today:
-        rendered = "、".join(
-            ledger.label_of(execution.player_id) for execution in executed_today
-        )
+        rendered = "、".join(label(execution.player_id) for execution in executed_today)
         lines.append(f"- 処刑結果: {rendered}")
 
     night_deaths = ledger.night_death_ids(target_day)
     if night_deaths:
-        lines.append(f"- 夜の死亡: {_labels(ledger, night_deaths)}")
+        lines.append(f"- 夜の死亡: {_labels(ledger, night_deaths, names_only=names_only)}")
 
     return "\n".join(lines)
 
@@ -114,8 +118,11 @@ def split_day_summary(summary: str) -> tuple[str, str]:
     return head, tail
 
 
-def _labels(ledger: PublicFactLedger, player_ids: tuple[str, ...]) -> str:
-    return "、".join(ledger.label_of(pid) for pid in player_ids) or "なし"
+def _labels(
+    ledger: PublicFactLedger, player_ids: tuple[str, ...], *, names_only: bool = False
+) -> str:
+    label = ledger.name_of if names_only else ledger.label_of
+    return "、".join(label(pid) for pid in player_ids) or "なし"
 
 
 def _death_label(cause: PublicDeathCause | None) -> str:

@@ -20,8 +20,8 @@ from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.ai.coordinator import AICoordinator  # noqa: E402
+from app.ai.engine_mode import build_reasoning_runtime, model_decides  # noqa: E402
 from app.ai.provider.factory import build_llm_provider  # noqa: E402
-from app.ai.reasoning.runtime import ReasoningRuntime  # noqa: E402
 from app.config import Settings  # noqa: E402
 from app.engine.game import GameController, PlayerSpec  # noqa: E402
 from app.engine.phases import Phase  # noqa: E402
@@ -84,20 +84,17 @@ async def main() -> None:
     specs = [PlayerSpec(player_id=f"p{i}", name=f"P{i}", is_human=(i == 0)) for i in range(17)]
     controller = GameController(session_id="dry-run", player_specs=specs, seed=args.seed)
     ai_ids = [s.player_id for s in specs if not s.is_human]
-    # Same branch as app/api/routes_game.py: this tool exists to eyeball what
-    # real gameplay does, so it has to honor the same config flag real
+    # Same resolution as app/api/routes_game.py: this tool exists to eyeball
+    # what real gameplay does, so it has to honor the same config flag real
     # gameplay does rather than always running legacy underneath it.
-    reasoning = (
-        ReasoningRuntime(controller.state, ai_ids, seed=args.seed)
-        if settings.werewolf_reasoning_engine == "v2"
-        else None
-    )
+    engine = settings.werewolf_reasoning_engine
     coordinator = AICoordinator(
         controller.state,
         ai_ids,
         provider,
         seed=args.seed,
-        reasoning=reasoning,
+        reasoning=build_reasoning_runtime(engine, controller.state, ai_ids, seed=args.seed),
+        model_decides=model_decides(engine),
         pacing_scale=0.0,
     )
     session = SimpleNamespace(

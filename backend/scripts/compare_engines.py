@@ -20,10 +20,10 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.ai.coordinator import AICoordinator
+from app.ai.engine_mode import build_reasoning_runtime, model_decides
 from app.ai.metrics import MetricsCollector
 from app.ai.provider.mock import MockProvider
 from app.ai.reasoning.facts import PublicFactLedger
-from app.ai.reasoning.runtime import ReasoningRuntime
 from app.ai.schemas import DiscussionOutput
 from app.engine.game import GameController, PlayerSpec
 from app.engine.phases import Phase
@@ -102,10 +102,8 @@ async def play(engine: str, seed: int) -> EngineRun:
     # for a turn the human stub was also supposed to take, and put the human's
     # own sentences into the count of messages the AIs "considered".
     ai_ids = [f"p{i}" for i in range(1, 17)]
-    reasoning = (
-        ReasoningRuntime(controller.state, ai_ids, seed=seed, metrics=metrics)
-        if engine == "v2"
-        else None
+    reasoning = build_reasoning_runtime(
+        engine, controller.state, ai_ids, seed=seed, metrics=metrics
     )
     recorder = TranscriptRecorder()
     coordinator = AICoordinator(
@@ -115,6 +113,7 @@ async def play(engine: str, seed: int) -> EngineRun:
         seed=seed,
         recorder=recorder,
         reasoning=reasoning,
+        model_decides=model_decides(engine),
         pacing_scale=0.0,
     )
     session = _Session(controller, coordinator)
@@ -290,7 +289,7 @@ def main() -> None:
 
     rows = []
     for seed in args.seeds:
-        for engine in ("legacy", "v2"):
+        for engine in ("legacy", "v2", "v3"):
             rows.append(asyncio.run(play(engine, seed)).as_dict())
 
     if args.json:
