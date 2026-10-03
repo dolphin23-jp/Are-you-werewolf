@@ -17,8 +17,8 @@ GitHubのリポジトリページ → **Settings → Secrets and variables → A
 | 種別 | 名前 | 値 |
 |---|---|---|
 | Secret | `LUNA_API_KEY` | 発行された実際のキー |
-| Secret | `LUNA_BASE_URL` | gpt-6.0-luna のエンドポイントURL |
-| Variable | `LUNA_MODEL` | `gpt-6.0-luna`(既定値なので省略可) |
+| Secret | `LUNA_BASE_URL` | gpt-6-luna のエンドポイントURL |
+| Variable | `LUNA_MODEL` | `gpt-6-luna`(既定値なので省略可) |
 
 > Codespaces secrets とは別枠です。Codespacesに登録済みでも、Actions用に改めて
 > 登録が必要です。
@@ -59,7 +59,7 @@ cd backend
 # 1) ハーネスの動作確認(通信なし・費用ゼロ)
 python scripts/evaluate.py --games 2 --provider mock --out eval-out
 
-# 2) 実際の gpt-6.0-luna で評価(まず1戦から)
+# 2) 実際の gpt-6-luna で評価(まず1戦から)
 python scripts/evaluate.py --games 1 --provider luna --out eval-out
 
 # 3) 日本語/人格のLLM判定も行う(追加費用)

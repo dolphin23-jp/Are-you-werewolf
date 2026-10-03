@@ -32,7 +32,9 @@ def test_luna_provider_builds_when_key_present():
 def test_luna_provider_asks_for_the_current_model_when_none_is_configured():
     """The default is what a fresh checkout, the Actions fallback and any
     deployment that never set LUNA_MODEL will call. It moved from gpt-5.6-luna
-    to gpt-6.0-luna, so a rename that missed one place shows up here."""
+    to gpt-6-luna, so a rename that missed one place shows up here. The exact
+    spelling matters: the dotted guess gpt-6.0-luna is refused by the endpoint
+    with model_not_found."""
     settings = Settings(
         werewolf_llm_provider="luna",
         luna_api_key="sk-test",
@@ -40,8 +42,8 @@ def test_luna_provider_asks_for_the_current_model_when_none_is_configured():
     )
     provider = build_llm_provider(settings)
     assert isinstance(provider, LunaOpenAIProvider)
-    assert settings.luna_model == "gpt-6.0-luna"
-    assert provider._model == "gpt-6.0-luna"
+    assert settings.luna_model == "gpt-6-luna"
+    assert provider._model == "gpt-6-luna"
 
 
 def test_an_explicit_luna_model_still_wins_over_the_default():
@@ -66,8 +68,8 @@ def test_an_explicit_luna_model_still_wins_over_the_default():
         # The model name typed into the provider field, old and new generation,
         # in any case -- matched by shape, so the next one needs no code change.
         "gpt-5.6-luna",
-        "gpt-6.0-luna",
-        " GPT-6.0-Luna ",
+        "gpt-6-luna",
+        " GPT-6-Luna ",
         '"gpt-6.1-luna"',
     ],
 )
@@ -85,7 +87,7 @@ def test_unknown_provider_raises():
 
 
 @pytest.mark.parametrize(
-    "configured", ["gpt-6.0-terra", "gpt-luna", "gpt-6.0-luna-mini", "6.0-luna"]
+    "configured", ["gpt-6-terra", "gpt-luna", "gpt-6-luna-mini", "6-luna"]
 )
 def test_only_luna_shaped_model_names_are_aliased(configured: str):
     """The alias must not swallow a typo: anything else stays an unknown provider."""

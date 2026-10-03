@@ -1,7 +1,7 @@
 # Are you werewolf?
 
 AI 16人と挑む、本格チャット人狼ゲーム。人間1人 + 生成AI16人の17人人狼を、
-低コスト・高性能な LLM である **gpt-6.0-luna**(OpenAI互換API経由)で動かします。
+低コスト・高性能な LLM である **gpt-6-luna**(OpenAI互換API経由)で動かします。
 
 過去の実装(Claude Haiku ベース)の設計思想 —
 エンジン/AI分離、5層プロンプト構成、人格システム、人狼陣営の欺瞞パターン
@@ -44,7 +44,7 @@ are-you-werewolf/
 4. 下部の **ポート** タブに出る **8000番** のURLを開くと遊べます
 
 APIキーを設定しなくても、**モックAI相手にそのまま遊べます**(通信費ゼロ)。
-実際の gpt-6.0-luna を使う場合は次項へ。
+実際の gpt-6-luna を使う場合は次項へ。
 
 ## APIキーの入力手順(GitHub の設定画面)
 
@@ -59,10 +59,10 @@ APIキーを設定しなくても、**モックAI相手にそのまま遊べま�
    |---|---|
    | `WEREWOLF_LLM_PROVIDER` | `luna` |
    | `LUNA_API_KEY` | 発行された実際のキー |
-   | `LUNA_BASE_URL` | gpt-6.0-luna のOpenAI互換エンドポイントURL |
+   | `LUNA_BASE_URL` | gpt-6-luna のOpenAI互換エンドポイントURL |
 
    `WEREWOLF_LLM_PROVIDER` はモデル名ではなくプロバイダ種別です。値には
-   `gpt-6.0-luna` や `WEREWOLF_LLM_PROVIDER=luna` ではなく、`luna` だけを入力します。
+   `gpt-6-luna` や `WEREWOLF_LLM_PROVIDER=luna` ではなく、`luna` だけを入力します。
 
 3. **Codespace を再起動**(または作り直す)と反映されます
 4. 反映確認は `/api/health` を開き、`"llm_provider": "luna"` になっていればOK
@@ -145,7 +145,7 @@ Codespaceを毎回起動せず、スマートフォンなどから同じURLで�
 WEREWOLF_LLM_PROVIDER=luna
 LUNA_API_KEY=<実際のキー>
 LUNA_BASE_URL=<OpenAI互換エンドポイントURL>
-LUNA_MODEL=gpt-6.0-luna
+LUNA_MODEL=gpt-6-luna
 WEREWOLF_ACCESS_PASSWORD=<長いランダムなパスワード>
 ```
 
