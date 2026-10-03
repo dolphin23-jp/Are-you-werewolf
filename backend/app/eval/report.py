@@ -228,10 +228,19 @@ def _render_judge(summary: dict[str, Any]) -> str:
     )
 
 
-def render_transcript(transcript: GameTranscript) -> str:
+def render_transcript(transcript: GameTranscript, *, partial: bool = False) -> str:
     """Readable per-game log, with each speaker's hidden role and persona
-    shown inline so Japanese quality and persona drift can be eyeballed."""
+    shown inline so Japanese quality and persona drift can be eyeballed.
+
+    `partial` marks a snapshot taken while the game is still being played, so a
+    run that was cancelled or timed out leaves a file that says what it is
+    instead of announcing a winner of None."""
     lines = [f"# 対戦記録 (seed={transcript.seed})\n"]
+    if partial:
+        lines.append(
+            "> **途中経過です。** 対戦はまだ終わっていません。"
+            "実行が止まった場合は、ここまでが残った分です。\n"
+        )
     lines.append("## 配役\n")
     lines.append("| プレイヤー | 役職 | 人格 | 騙り役 |")
     lines.append("|---|---|---|---|")
@@ -286,6 +295,9 @@ def render_transcript(transcript: GameTranscript) -> str:
             f"{names.get(target, target)}({target})を襲撃 → {outcome}"
         )
 
+    if partial:
+        lines.append("\n## 結果\n\n(対戦は未完了)")
+        return "\n".join(lines) + "\n"
     winner = transcript.final_state.get("winner")
     reason = transcript.final_state.get("victory_reason", "")
     lines.append(f"\n## 結果\n\n勝者: {winner} / {reason}")

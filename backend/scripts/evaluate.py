@@ -14,6 +14,11 @@ Writes to --out (default `eval-out/`):
   transcript-seedN.md    目視確認用の対戦記録
   transcript-seedN.json  生データ
 
+While a game is running the log prints each utterance, a marker per phase with
+the call health so far, and a "生成中" line after two quiet minutes. A partial
+transcript-seedN.md/.json is rewritten at every phase, so a run that is
+cancelled or times out still leaves what the table said.
+
 Cost warning: one 17-player game is on the order of a few hundred LLM
 calls, so start with --games 1 against a real endpoint and read the
 reported token counts before scaling up.
@@ -23,8 +28,10 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import json
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -40,7 +47,13 @@ from app.engine.game import GameController, PlayerSpec  # noqa: E402
 from app.engine.phases import Phase  # noqa: E402
 from app.eval.analyzers import AnalysisResult, analyze  # noqa: E402
 from app.eval.judge import judge_transcript  # noqa: E402
-from app.eval.report import render_report, render_transcript  # noqa: E402
+from app.eval.progress import (  # noqa: E402
+    HEARTBEAT_SECONDS,
+    LiveTranscriptRecorder,
+    RunProgress,
+    write_transcript_files,
+)
+from app.eval.report import render_report  # noqa: E402
 from app.eval.transcript import GameTranscript, TranscriptRecorder  # noqa: E402
 
 HUMAN_ID = "p0"
@@ -73,12 +86,23 @@ def _make_specs() -> list[PlayerSpec]:
     ]
 
 
-async def play_one_game(seed: int, settings: Settings, metrics: MetricsCollector) -> GameTranscript:
+async def play_one_game(
+    seed: int,
+    settings: Settings,
+    metrics: MetricsCollector,
+    *,
+    emit: Callable[[str], None] | None = None,
+    out_dir: Path | None = None,
+    heartbeat_seconds: float = HEARTBEAT_SECONDS,
+) -> GameTranscript:
+    """Plays one all-AI game. `emit` turns on the live log; `out_dir` also keeps a
+    partial transcript there. Neither changes how the game is played."""
     provider = build_llm_provider(settings, seed=seed, metrics=metrics)
     specs = _make_specs()
     controller = GameController(session_id=f"eval-{seed}", player_specs=specs, seed=seed)
     ai_ids = [s.player_id for s in specs]
-    recorder = TranscriptRecorder()
+    live = LiveTranscriptRecorder(emit) if emit is not None else None
+    recorder = live if live is not None else TranscriptRecorder()
     # The engine flag was never read here, so every "AI評価" run -- including
     # the GitHub Action -- measured the legacy engine whatever the deployment
     # was configured to play. Resolve it the same way the API does.
@@ -99,26 +123,48 @@ async def play_one_game(seed: int, settings: Settings, metrics: MetricsCollector
         coordinator=coordinator,
         discussion_lock=asyncio.Lock(),
     )
-    controller.start_game()
-    for _ in range(MAX_LOOPS):
-        phase = controller.state.phase
-        if phase == Phase.GAME_OVER:
-            break
-        if phase == Phase.NIGHT:
-            await coordinator.run_night_phase(session)
-        elif phase == Phase.DAWN:
-            controller.start_discussion()
-        elif phase == Phase.DISCUSSION:
-            await coordinator.run_discussion_round(session)
-            controller.end_discussion()
-        elif phase in (Phase.VOTING, Phase.RUNOFF):
-            await coordinator.generate_all_votes(session)
-        elif phase == Phase.VOTE_RESULT:
-            controller.start_night()
-        else:
-            raise RuntimeError(f"unexpected phase {phase}")
+    progress = (
+        RunProgress(live, metrics, seed=seed, out_dir=out_dir, heartbeat_seconds=heartbeat_seconds)
+        if live is not None
+        else None
+    )
+    heartbeat = asyncio.create_task(progress.heartbeat()) if progress is not None else None
+    try:
+        controller.start_game()
+        for _ in range(MAX_LOOPS):
+            phase = controller.state.phase
+            if progress is not None:
+                progress.phase(controller.state.day, phase, controller.get_debug_view)
+            if phase == Phase.GAME_OVER:
+                break
+            if phase == Phase.NIGHT:
+                await coordinator.run_night_phase(session)
+            elif phase == Phase.DAWN:
+                controller.start_discussion()
+            elif phase == Phase.DISCUSSION:
+                await coordinator.run_discussion_round(session)
+                controller.end_discussion()
+            elif phase in (Phase.VOTING, Phase.RUNOFF):
+                await coordinator.generate_all_votes(session)
+            elif phase == Phase.VOTE_RESULT:
+                controller.start_night()
+            else:
+                raise RuntimeError(f"unexpected phase {phase}")
+    finally:
+        if heartbeat is not None:
+            heartbeat.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await heartbeat
+        if progress is not None and controller.state.phase != Phase.GAME_OVER:
+            progress.interrupted(controller.get_debug_view)
 
     return recorder.finalize(controller.get_debug_view())
+
+
+def _print_line(line: str) -> None:
+    # Flushed on purpose: stdout is a pipe under Actions, so Python would hold
+    # these back in a block buffer and the live log would stay empty.
+    print(line, flush=True)
 
 
 async def main() -> int:
@@ -149,16 +195,13 @@ async def main() -> int:
     for offset in range(args.games):
         seed = args.seed + offset
         print(f"==> game {offset + 1}/{args.games} (seed={seed})", flush=True)
-        transcript = await play_one_game(seed, settings, metrics)
+        transcript = await play_one_game(
+            seed, settings, metrics, emit=_print_line, out_dir=args.out
+        )
         analysis = analyze(transcript)
         games.append((transcript, analysis))
 
-        (args.out / f"transcript-seed{seed}.json").write_text(
-            json.dumps(transcript.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8"
-        )
-        (args.out / f"transcript-seed{seed}.md").write_text(
-            render_transcript(transcript), encoding="utf-8"
-        )
+        write_transcript_files(transcript, args.out, seed, partial=False)
         winner = transcript.final_state.get("winner")
         print(f"    winner={winner} findings={len(analysis.findings)}", flush=True)
 
