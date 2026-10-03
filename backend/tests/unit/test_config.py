@@ -71,7 +71,7 @@ def test_defaults_are_safe_when_no_env_file_exists(tmp_path: Path, monkeypatch):
     assert settings.werewolf_llm_provider == "mock"
     assert settings.luna_api_key == ""
     # What the luna provider asks for when LUNA_MODEL is not set anywhere.
-    assert settings.luna_model == "gpt-6.0-luna"
+    assert settings.luna_model == "gpt-6-luna"
 
 
 def test_shipped_env_example_names_the_same_model_as_the_default():

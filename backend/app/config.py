@@ -14,7 +14,10 @@ _DEFAULT_REASONING_ENGINE: Literal["legacy", "v2", "v3"] = "v2"
 # The OpenAI-compatible model the `luna` provider asks for when `LUNA_MODEL` is
 # not set. One constant, so a model upgrade is a one-line change here and the
 # alias matcher below never has to be taught the new name.
-DEFAULT_LUNA_MODEL = "gpt-6.0-luna"
+#
+# Exactly `gpt-6-luna`. The dotted `gpt-6.0-luna`, guessed from the previous
+# model's `gpt-5.6-luna`, is refused by the endpoint with `model_not_found`.
+DEFAULT_LUNA_MODEL = "gpt-6-luna"
 
 # A `gpt-<version>-luna` model name typed into the *provider* field. Matching the
 # shape rather than one literal means the next model generation, and the one

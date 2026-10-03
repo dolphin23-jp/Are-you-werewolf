@@ -56,7 +56,7 @@ jobs:
           WEREWOLF_LLM_PROVIDER: luna
           LUNA_API_KEY: ${{ secrets.LUNA_API_KEY }}
           LUNA_BASE_URL: ${{ secrets.LUNA_BASE_URL }}
-          LUNA_MODEL: ${{ vars.LUNA_MODEL || 'gpt-6.0-luna' }}
+          LUNA_MODEL: ${{ vars.LUNA_MODEL || 'gpt-6-luna' }}
         run: python scripts/check_llm.py
 
       - name: Cutoff評価を実行
@@ -66,7 +66,7 @@ jobs:
           WEREWOLF_LLM_PROVIDER: ${{ inputs.provider == 'luna' && 'luna' || 'mock' }}
           LUNA_API_KEY: ${{ secrets.LUNA_API_KEY }}
           LUNA_BASE_URL: ${{ secrets.LUNA_BASE_URL }}
-          LUNA_MODEL: ${{ vars.LUNA_MODEL || 'gpt-6.0-luna' }}
+          LUNA_MODEL: ${{ vars.LUNA_MODEL || 'gpt-6-luna' }}
         run: |
           extra=()
           if [ -n "${{ inputs.scenario_id }}" ]; then
