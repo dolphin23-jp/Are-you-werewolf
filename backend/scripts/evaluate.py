@@ -4,7 +4,7 @@
     # ハーネスの動作確認(通信なし・費用ゼロ)
     python scripts/evaluate.py --games 2 --provider mock
 
-    # 実際の gpt-5.6-luna で評価
+    # 実際の gpt-6.0-luna で評価
     python scripts/evaluate.py --games 3 --provider luna --judge \
         --price-in 0.15 --price-out 0.60
 

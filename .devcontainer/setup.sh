@@ -31,7 +31,7 @@ cat <<'EOF'
   ブラウザで遊べます。
 
   API キーは未設定でもモックAI相手に遊べます。
-  実際の gpt-5.6-luna を使うには、GitHub の
+  実際の gpt-6.0-luna を使うには、GitHub の
   Settings → Codespaces → Secrets に次を登録してください:
 
       WEREWOLF_LLM_PROVIDER = luna

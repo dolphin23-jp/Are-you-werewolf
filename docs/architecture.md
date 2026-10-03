@@ -3,7 +3,7 @@
 ## 背景
 
 本プロジェクトは、過去に作られた人狼AIプレイヤー実装(Claude Haiku ベース)の
-「理念」を抽出し、LLMプロバイダを **gpt-5.6-luna**(OpenAI互換API)に差し替えた
+「理念」を抽出し、LLMプロバイダを **gpt-luna 系**(OpenAI互換API。現行は gpt-6.0-luna)に差し替えた
 上で、コードは一から新規に設計・実装したものです。
 
 引き継いだ設計思想:
@@ -633,7 +633,7 @@ v2 と同じコードが担い、**誰を疑うか・投票・夜行動・発言
 プロバイダを抽象化。実装は2つ:
 
 - `mock.py`: 決定的・シード可能なテスト用ダブル。
-- `luna_openai.py`: `openai.AsyncOpenAI` を使った gpt-5.6-luna 実装。
+- `luna_openai.py`: `openai.AsyncOpenAI` を使った gpt-luna 系(現行は gpt-6.0-luna)の実装。
   strict JSON-schema structured output を第一経路とし、失敗時は
   `json_object` モード + 寛容パーサー(生パース→フェンス付きJSON抽出→
   最初の`{`〜最後の`}`)にフォールバックする。

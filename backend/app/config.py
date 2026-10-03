@@ -1,3 +1,4 @@
+import re
 from typing import Literal
 
 from pydantic import field_validator
@@ -9,6 +10,16 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # for every other optional setting) must resolve to whatever the real default
 # is, not to a value hardcoded independently of it.
 _DEFAULT_REASONING_ENGINE: Literal["legacy", "v2", "v3"] = "v2"
+
+# The OpenAI-compatible model the `luna` provider asks for when `LUNA_MODEL` is
+# not set. One constant, so a model upgrade is a one-line change here and the
+# alias matcher below never has to be taught the new name.
+DEFAULT_LUNA_MODEL = "gpt-6.0-luna"
+
+# A `gpt-<version>-luna` model name typed into the *provider* field. Matching the
+# shape rather than one literal means the next model generation, and the one
+# already deployed in somebody's Codespaces secret, both keep working.
+_LUNA_MODEL_NAME_RE = re.compile(r"gpt-[0-9]+(?:\.[0-9]+)*-luna")
 
 
 class Settings(BaseSettings):
@@ -48,7 +59,7 @@ class Settings(BaseSettings):
 
     luna_api_key: str = ""
     luna_base_url: str = "https://api.example.com/v1"
-    luna_model: str = "gpt-5.6-luna"
+    luna_model: str = DEFAULT_LUNA_MODEL
     luna_max_concurrency: int = 6
     luna_timeout_seconds: float = 30.0
     luna_max_retries: int = 2
@@ -69,7 +80,7 @@ class Settings(BaseSettings):
         normalized = value.strip().strip('"\'').lower()
         # The model name is frequently entered in the provider field. There is
         # currently only one real provider, so this unambiguous alias is safe.
-        if normalized == "gpt-5.6-luna":
+        if _LUNA_MODEL_NAME_RE.fullmatch(normalized):
             return "luna"
         return normalized
 
