@@ -13,8 +13,8 @@ from types import SimpleNamespace
 import pytest
 
 from app.ai.coordinator import AICoordinator
+from app.ai.engine_mode import build_reasoning_runtime, model_decides
 from app.ai.provider.mock import MockProvider
-from app.ai.reasoning.runtime import ReasoningRuntime
 from app.engine.game import GameController, PlayerSpec
 from app.engine.phases import Phase
 from app.engine.roles import RoleName
@@ -28,9 +28,16 @@ def _make_session(seed: int, engine: str = "legacy") -> SimpleNamespace:
     controller = GameController(session_id=f"s{seed}", player_specs=specs, seed=seed)
     ai_ids = [s.player_id for s in specs if not s.is_human]
     provider = MockProvider(seed=seed)
-    reasoning = ReasoningRuntime(controller.state, ai_ids, seed=seed) if engine == "v2" else None
+    # The same resolution the API and the scripts use, so this file cannot keep
+    # exercising an engine selection nobody ships.
     coordinator = AICoordinator(
-        controller.state, ai_ids, provider, seed=seed, reasoning=reasoning, pacing_scale=0.0
+        controller.state,
+        ai_ids,
+        provider,
+        seed=seed,
+        reasoning=build_reasoning_runtime(engine, controller.state, ai_ids, seed=seed),
+        model_decides=model_decides(engine),
+        pacing_scale=0.0,
     )
     return SimpleNamespace(
         controller=controller,
@@ -142,3 +149,25 @@ async def test_full_mock_ai_games_terminate_under_v2_too():
             assert controller.state.winner is not None
         assert len(controller.state.chat_log) > 0
         assert len(controller.state.vote_records) > 0
+
+
+@pytest.mark.asyncio
+async def test_full_mock_ai_games_terminate_under_v3_too():
+    """v3 keeps the runtime for facts and scheduling but hands every decision to
+    the model. With the mock that model names nobody, so this is the integration
+    check that a table of undecided seats still votes, acts at night and reaches
+    a result -- and that nothing in the code path writes the injected candidate
+    sentence or a `(pN)` id into what the table reads."""
+    for seed in range(4):
+        controller = await _play(seed, engine="v3")
+        assert controller.state.phase == Phase.GAME_OVER
+        if controller.state.is_draw:
+            assert controller.state.winner is None
+        else:
+            assert controller.state.winner is not None
+        assert len(controller.state.chat_log) > 0
+        assert len(controller.state.vote_records) > 0
+        for message in controller.state.chat_log:
+            if message.author_id != HUMAN_ID and message.channel.value == "public":
+                assert "現時点の第一処刑候補は" not in message.content, message.content
+                assert "(p" not in message.content, message.content
