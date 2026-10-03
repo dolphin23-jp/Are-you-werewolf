@@ -272,10 +272,11 @@ def test_v2_casts_a_vote_without_calling_the_model():
     assert controller.state.pending_votes["p1"] in controller.state.alive_ids()
 
 
-def test_v2_is_now_the_default_and_legacy_remains_selectable():
+def test_v3_is_the_default_and_the_older_engines_remain_selectable():
     from app.config import Settings
 
-    assert Settings().werewolf_reasoning_engine == "v2"
+    assert Settings().werewolf_reasoning_engine == "v3"
+    assert Settings(werewolf_reasoning_engine="v2").werewolf_reasoning_engine == "v2"
     assert Settings(werewolf_reasoning_engine="legacy").werewolf_reasoning_engine == "legacy"
     # AICoordinator itself doesn't read Settings -- app/api/routes_game.py is
     # what bridges the config flag to `reasoning=`, so what stays true here is
