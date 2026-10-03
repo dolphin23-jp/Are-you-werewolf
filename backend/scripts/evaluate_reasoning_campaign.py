@@ -108,7 +108,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--provider", choices=("mock",), default="mock")
     parser.add_argument("--seeds", default="1:10")
-    parser.add_argument("--engines", nargs="+", choices=("legacy", "v2"), default=["legacy", "v2"])
+    parser.add_argument(
+        "--engines", nargs="+", choices=("legacy", "v2", "v3"), default=["legacy", "v2"]
+    )
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     result = asyncio.run(campaign(parse_seeds(args.seeds), args.engines))

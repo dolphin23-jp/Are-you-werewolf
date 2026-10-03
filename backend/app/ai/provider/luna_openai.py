@@ -92,6 +92,7 @@ class LunaOpenAIProvider:
         timeout_seconds: float = 30.0,
         max_retries: int = DEFAULT_MAX_HTTP_RETRIES,
         metrics: MetricsCollector | None = None,
+        reasoning_effort: str = "",
     ) -> None:
         # SDK retries are disabled: doing them here makes every actual request
         # countable and prevents a hidden second retry layer.
@@ -100,6 +101,8 @@ class LunaOpenAIProvider:
         )
         self._model = model
         self._max_retries = max_retries
+        # Sent as `reasoning_effort` only when non-empty; see `Settings`.
+        self._reasoning_effort = reasoning_effort.strip().lower()
         self._semaphore = asyncio.Semaphore(max_concurrency)
         self._metrics = metrics
         # Learned from the endpoint's own rejections on the first call, then
@@ -293,7 +296,12 @@ class LunaOpenAIProvider:
                 "messages": openai_messages,
                 "response_format": response_format,
             }
-            self._dialect.apply(kwargs, max_tokens=max_tokens, temperature=temperature)
+            self._dialect.apply(
+                kwargs,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                reasoning_effort=self._reasoning_effort,
+            )
             try:
                 if self._request_budget is not None:
                     self._request_budget.claim_request()

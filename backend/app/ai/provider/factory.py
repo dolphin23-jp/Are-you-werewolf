@@ -49,6 +49,7 @@ def build_llm_provider(
             timeout_seconds=settings.luna_timeout_seconds,
             max_retries=settings.luna_max_retries,
             metrics=metrics,
+            reasoning_effort=settings.luna_reasoning_effort,
         )
 
     raise LLMProviderConfigError(

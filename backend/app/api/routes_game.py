@@ -17,10 +17,10 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query
 
 from app.ai.coordinator import AICoordinator
+from app.ai.engine_mode import build_reasoning_runtime, model_decides
 from app.ai.provider.factory import LLMProviderConfigError, build_llm_provider
 from app.ai.reasoning import PublicFactLedger
 from app.ai.reasoning.claims import build_claim_drafts, register_claim_drafts
-from app.ai.reasoning.runtime import ReasoningRuntime
 from app.ai.schemas import DiscussionOutput
 from app.api import orchestrator
 from app.api.schemas import (
@@ -111,11 +111,8 @@ def create_game(req: CreateGameRequest) -> CreateGameResponse:
     try:
         provider = build_llm_provider(settings, seed=seed)
         transcript_recorder = TranscriptRecorder()
-        reasoning = (
-            ReasoningRuntime(controller.state, ai_ids, seed=seed)
-            if settings.werewolf_reasoning_engine == "v2"
-            else None
-        )
+        engine = settings.werewolf_reasoning_engine
+        reasoning = build_reasoning_runtime(engine, controller.state, ai_ids, seed=seed)
         coordinator: AICoordinator | None = AICoordinator(
             controller.state,
             ai_ids,
@@ -123,6 +120,7 @@ def create_game(req: CreateGameRequest) -> CreateGameResponse:
             seed=seed,
             recorder=transcript_recorder,
             reasoning=reasoning,
+            model_decides=model_decides(engine),
             discussion_segment_size=settings.werewolf_discussion_segment_size,
             pacing_scale=(
                 0.0

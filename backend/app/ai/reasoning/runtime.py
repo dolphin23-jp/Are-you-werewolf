@@ -36,6 +36,7 @@ from app.ai.reasoning.belief import (
     summarise,
 )
 from app.ai.reasoning.belief.state import EvidenceRecord, tiebreak
+from app.ai.reasoning.board_memo import render_board_memo
 from app.ai.reasoning.citations import VoteCitation, parse_vote_citations
 from app.ai.reasoning.dialogue import (
     ArgumentEvent,
@@ -713,6 +714,28 @@ class ReasoningRuntime:
         if seat.belief.state.current_execution_target is not None:
             return SpeechGoal.PRESS_CANDIDATE
         return SpeechGoal.OBSERVE
+
+    def board_memo(self, state: GameState, player_id: str) -> str:
+        """The board as this seat's notes, for the engine that lets the model decide.
+
+        Public facts and public logic come from the ledger and a solver with no
+        private knowledge; the final section is the seat's own card, results and
+        allies, read through its perspective. The seat's private solver adds
+        only hard conclusions. Nothing here is a conclusion about whom to
+        suspect -- that is what the model is being asked for.
+        """
+        self.refresh(state)
+        seat = self.seats[player_id]
+        public_solver = build_solver(
+            self.observations, CommonPublicPerspective(), cache=self._cache
+        )
+        return render_board_memo(
+            state,
+            player_id,
+            observations=self.observations,
+            public_solver=public_solver,
+            seat_solver=seat.solver,
+        )
 
     def record_stated_target(self, player_id: str, target: str | None) -> None:
         """Remember what a seat told the table, so the ballot is checked against

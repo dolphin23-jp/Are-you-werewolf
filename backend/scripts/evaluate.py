@@ -32,6 +32,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.ai.coordinator import AICoordinator  # noqa: E402
+from app.ai.engine_mode import build_reasoning_runtime, model_decides  # noqa: E402
 from app.ai.metrics import MetricsCollector  # noqa: E402
 from app.ai.provider.factory import build_llm_provider  # noqa: E402
 from app.config import Settings  # noqa: E402
@@ -78,12 +79,18 @@ async def play_one_game(seed: int, settings: Settings, metrics: MetricsCollector
     controller = GameController(session_id=f"eval-{seed}", player_specs=specs, seed=seed)
     ai_ids = [s.player_id for s in specs]
     recorder = TranscriptRecorder()
+    # The engine flag was never read here, so every "AI評価" run -- including
+    # the GitHub Action -- measured the legacy engine whatever the deployment
+    # was configured to play. Resolve it the same way the API does.
+    engine = settings.werewolf_reasoning_engine
     coordinator = AICoordinator(
         controller.state,
         ai_ids,
         provider,
         seed=seed,
         recorder=recorder,
+        reasoning=build_reasoning_runtime(engine, controller.state, ai_ids, seed=seed),
+        model_decides=model_decides(engine),
         pacing_scale=0.0,
     )
     session = SimpleNamespace(
@@ -134,6 +141,7 @@ async def main() -> int:
     settings = Settings(**overrides)
     provider_name = settings.werewolf_llm_provider
     print(f"==> LLM プロバイダ: {provider_name}", flush=True)
+    print(f"==> 推理エンジン: {settings.werewolf_reasoning_engine}", flush=True)
     metrics = MetricsCollector()
     args.out.mkdir(parents=True, exist_ok=True)
 

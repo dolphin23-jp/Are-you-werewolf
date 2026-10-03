@@ -109,6 +109,38 @@ def test_contested_claims_raise_suspicion_on_every_claimant():
     assert engine.state.reasons_for("p4") == ("contest:seer:p4|p8:p4",)
 
 
+def test_two_freemason_claims_fill_the_composition_and_are_not_a_contest():
+    """The live seed-11 game hanged a real freemason on day 2 because every
+    villager was handed "two freemason COs, at least one is fake". There are
+    two freemason seats; two claims are the expected shape."""
+    state = _board()
+    boards.claim(state, "p7", RoleName.FREEMASON)
+    boards.claim(state, "p8", RoleName.FREEMASON)
+    engine = _engine()
+
+    engine.observe(PublicFactLedger(state))
+
+    assert engine.state.public_suspicion_scores.get("p7", 0.0) == 0.0
+    assert engine.state.public_suspicion_scores.get("p8", 0.0) == 0.0
+    assert not any(
+        record.category == "contested_claim" for record in engine.active_evidence()
+    )
+
+
+def test_a_third_freemason_claim_is_a_contest_and_names_the_overflow():
+    state = _board()
+    boards.claim(state, "p7", RoleName.FREEMASON)
+    boards.claim(state, "p8", RoleName.FREEMASON)
+    boards.claim(state, "p10", RoleName.FREEMASON)
+    engine = _engine()
+
+    engine.observe(PublicFactLedger(state))
+
+    contested = [r for r in engine.active_evidence() if r.category == "contested_claim"]
+    assert {r.subject_id for r in contested} == {"p7", "p8", "p10"}
+    assert "少なくとも1人は偽" in contested[0].explanation
+
+
 # -- corrections --
 
 

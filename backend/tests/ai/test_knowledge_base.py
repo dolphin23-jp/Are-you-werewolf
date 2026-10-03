@@ -49,6 +49,33 @@ def test_conditions_and_priority_are_deterministic(tmp_path: Path):
     assert [item.metadata["id"] for item in selected] == ["high", "low"]
 
 
+def test_a_doctrine_can_name_the_engines_it_is_written_for(tmp_path: Path):
+    (tmp_path / "chat.md").write_text(
+        "---\nid: chat\nengines: v3\n---\nchat register", encoding="utf-8"
+    )
+    (tmp_path / "all.md").write_text("---\nid: all\n---\nfor everyone", encoding="utf-8")
+    state = make_controller(seed=4).state
+    knowledge = KnowledgeBase(tmp_path)
+
+    legacy = [d.metadata["id"] for d in knowledge.select(KnowledgeContext(state, "p1"))]
+    v3 = [d.metadata["id"] for d in knowledge.select(KnowledgeContext(state, "p1", engine="v3"))]
+
+    assert legacy == ["all"]
+    assert v3 == ["all", "chat"]
+
+
+def test_the_shipped_chat_doctrine_is_v3_only():
+    state = make_controller(seed=4).state
+    knowledge = KnowledgeBase()
+    v2_context = KnowledgeContext(state, "p1", engine="v2")
+    v3_context = KnowledgeContext(state, "p1", engine="v3")
+    ids_v2 = {d.metadata["id"] for d in knowledge.select(v2_context)}
+    ids_v3 = {d.metadata["id"] for d in knowledge.select(v3_context)}
+
+    assert "jinro-17a-chat-register" not in ids_v2
+    assert "jinro-17a-chat-register" in ids_v3
+
+
 def test_false_fake_only_selects_only_non_fakers(tmp_path: Path):
     (tmp_path / "lurker.md").write_text(
         "---\nid: lurker\nplayer_roles: werewolf\nfake_only: false\n---\nlurk",

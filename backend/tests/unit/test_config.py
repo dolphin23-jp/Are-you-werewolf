@@ -81,6 +81,19 @@ def test_explicit_kwarg_outranks_the_environment(monkeypatch):
     assert Settings(werewolf_llm_provider="mock").werewolf_llm_provider == "mock"
 
 
+def test_v3_is_an_accepted_engine_and_the_default_is_unchanged(monkeypatch):
+    monkeypatch.setenv("WEREWOLF_REASONING_ENGINE", " V3 ")
+    assert Settings().werewolf_reasoning_engine == "v3"
+    monkeypatch.delenv("WEREWOLF_REASONING_ENGINE")
+    assert Settings().werewolf_reasoning_engine == "v2"
+
+
+def test_reasoning_effort_is_off_unless_set(monkeypatch):
+    assert Settings().luna_reasoning_effort == ""
+    monkeypatch.setenv("LUNA_REASONING_EFFORT", "low")
+    assert Settings().luna_reasoning_effort == "low"
+
+
 def test_omitted_flag_leaves_the_environment_in_charge(monkeypatch):
     monkeypatch.setenv("WEREWOLF_LLM_PROVIDER", "luna")
     overrides: dict[str, str] = {}  # what the scripts build when --provider is absent

@@ -39,10 +39,10 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.ai.coordinator import AICoordinator  # noqa: E402
+from app.ai.engine_mode import build_reasoning_runtime, model_decides  # noqa: E402
 from app.ai.metrics import MetricsCollector  # noqa: E402
 from app.ai.provider.budget import BudgetedProvider, EvaluationBudget  # noqa: E402
 from app.ai.provider.factory import build_llm_provider  # noqa: E402
-from app.ai.reasoning.runtime import ReasoningRuntime  # noqa: E402
 from app.ai.reasoning.timeline import find_timeline_conflicts  # noqa: E402
 from app.config import get_settings  # noqa: E402
 from app.engine.game import GameController, PlayerSpec  # noqa: E402
@@ -108,10 +108,8 @@ async def run(
     controller = GameController(
         session_id=f"live-{seed}-{engine}", player_specs=_specs(), seed=seed
     )
-    reasoning = (
-        ReasoningRuntime(controller.state, AI_IDS, seed=seed, metrics=metrics)
-        if engine == "v2"
-        else None
+    reasoning = build_reasoning_runtime(
+        engine, controller.state, AI_IDS, seed=seed, metrics=metrics
     )
     recorder = TranscriptRecorder()
     coordinator = AICoordinator(
@@ -121,6 +119,7 @@ async def run(
         seed=seed,
         recorder=recorder,
         reasoning=reasoning,
+        model_decides=model_decides(engine),
         pacing_scale=0.0,
     )
     session = _Session(controller, coordinator)
@@ -204,7 +203,7 @@ async def run(
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--seed", type=int, default=11)
-    parser.add_argument("--engine", choices=("legacy", "v2"), default="v2")
+    parser.add_argument("--engine", choices=("legacy", "v2", "v3"), default="v2")
     parser.add_argument(
         "--transcript",
         type=Path,

@@ -82,9 +82,14 @@ def build_claim_drafts(
     ledger: PublicFactLedger,
     *,
     speaker_id: str,
+    names_only: bool = False,
 ) -> list[SpeechEventDraft]:
-    """Structured declarations first; free text only fills what they left out."""
-    structured = _structured_drafts(output, ledger, speaker_id=speaker_id)
+    """Structured declarations first; free text only fills what they left out.
+
+    `names_only` writes the canonical fact sentences without the `(pN)` suffix,
+    for the chat-register engine where the table never sees ids.
+    """
+    structured = _structured_drafts(output, ledger, speaker_id=speaker_id, names_only=names_only)
     claimed_categories = {_category(draft) for draft in structured}
     spoken = _spoken_drafts(output.public_message, ledger, speaker_id=speaker_id)
     return structured + [
@@ -101,12 +106,16 @@ def _category(draft: SpeechEventDraft) -> str:
 
 
 def _structured_drafts(
-    output: DiscussionOutput, ledger: PublicFactLedger, *, speaker_id: str
+    output: DiscussionOutput,
+    ledger: PublicFactLedger,
+    *,
+    speaker_id: str,
+    names_only: bool = False,
 ) -> list[SpeechEventDraft]:
     # Changes to standing claims come first: a message that both withdraws the
     # old verdict and states the new one has to be read in that order, or the
     # correction lands before there is anything to correct.
-    drafts = _change_drafts(output, ledger, speaker_id=speaker_id)
+    drafts = _change_drafts(output, ledger, speaker_id=speaker_id, names_only=names_only)
     role = _parse_role(output.public_claim_role)
     if role is not None:
         drafts.append(
@@ -130,7 +139,11 @@ def _structured_drafts(
                 result_is_werewolf=result.is_werewolf,
                 referenced_day=result.referenced_day,
                 fact_sentence=render_result_sentence(
-                    ledger, result_type, result.target_id, result.is_werewolf
+                    ledger,
+                    result_type,
+                    result.target_id,
+                    result.is_werewolf,
+                    names_only=names_only,
                 ),
             )
         )
@@ -138,7 +151,11 @@ def _structured_drafts(
 
 
 def _change_drafts(
-    output: DiscussionOutput, ledger: PublicFactLedger, *, speaker_id: str
+    output: DiscussionOutput,
+    ledger: PublicFactLedger,
+    *,
+    speaker_id: str,
+    names_only: bool = False,
 ) -> list[SpeechEventDraft]:
     """Retractions, slides and corrections, from declared fields only.
 
@@ -186,7 +203,7 @@ def _change_drafts(
                     result_is_werewolf=existing.is_werewolf,
                     referenced_day=change.referenced_day or existing.referenced_day,
                     fact_sentence=render_result_retraction_sentence(
-                        ledger, change.result_type, change.target_id
+                        ledger, change.result_type, change.target_id, names_only=names_only
                     ),
                 )
             )
@@ -199,7 +216,11 @@ def _change_drafts(
                     result_is_werewolf=change.is_werewolf,
                     referenced_day=change.referenced_day or existing.referenced_day,
                     fact_sentence=render_result_correction_sentence(
-                        ledger, change.result_type, change.target_id, change.is_werewolf
+                        ledger,
+                        change.result_type,
+                        change.target_id,
+                        change.is_werewolf,
+                        names_only=names_only,
                     ),
                 )
             )
@@ -338,11 +359,17 @@ def render_role_claim_sentence(role: RoleName) -> str:
 
 
 def render_result_sentence(
-    ledger: PublicFactLedger, result_type: str, target_id: str, is_werewolf: bool
+    ledger: PublicFactLedger,
+    result_type: str,
+    target_id: str,
+    is_werewolf: bool,
+    *,
+    names_only: bool = False,
 ) -> str:
     ability = "霊媒" if result_type == MEDIUM_RESULT else "占い"
     verdict = "黒(人狼)" if is_werewolf else "白(人狼ではない)"
-    return f"{ability}結果、{ledger.label_of(target_id)}は{verdict}です。"
+    target = ledger.name_of(target_id) if names_only else ledger.label_of(target_id)
+    return f"{ability}結果、{target}は{verdict}です。"
 
 
 def render_retraction_sentence(role: RoleName) -> str:
@@ -358,18 +385,25 @@ def render_switch_sentence(previous: RoleName | None, new_role: RoleName) -> str
 
 
 def render_result_retraction_sentence(
-    ledger: PublicFactLedger, result_type: str, target_id: str
+    ledger: PublicFactLedger, result_type: str, target_id: str, *, names_only: bool = False
 ) -> str:
     ability = "霊媒" if result_type == MEDIUM_RESULT else "占い"
-    return f"{ledger.label_of(target_id)}への{ability}結果を撤回します。"
+    target = ledger.name_of(target_id) if names_only else ledger.label_of(target_id)
+    return f"{target}への{ability}結果を撤回します。"
 
 
 def render_result_correction_sentence(
-    ledger: PublicFactLedger, result_type: str, target_id: str, is_werewolf: bool
+    ledger: PublicFactLedger,
+    result_type: str,
+    target_id: str,
+    is_werewolf: bool,
+    *,
+    names_only: bool = False,
 ) -> str:
     ability = "霊媒" if result_type == MEDIUM_RESULT else "占い"
     verdict = "黒(人狼)" if is_werewolf else "白(人狼ではない)"
-    return f"訂正します。{ledger.label_of(target_id)}への{ability}結果は{verdict}です。"
+    target = ledger.name_of(target_id) if names_only else ledger.label_of(target_id)
+    return f"訂正します。{target}への{ability}結果は{verdict}です。"
 
 
 def ensure_fact_sentences(

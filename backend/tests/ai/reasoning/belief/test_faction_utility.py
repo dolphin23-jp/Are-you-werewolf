@@ -354,5 +354,5 @@ def test_an_unknown_engine_value_fails_at_startup():
     # Falling through to legacy in silence meant a deployment that asked for v2
     # quietly ran the old engine and looked like v2 had changed nothing.
     with pytest.raises(pydantic.ValidationError):
-        Settings(werewolf_reasoning_engine="v3")
+        Settings(werewolf_reasoning_engine="v9")
     assert Settings(werewolf_reasoning_engine="").werewolf_reasoning_engine == "v2"

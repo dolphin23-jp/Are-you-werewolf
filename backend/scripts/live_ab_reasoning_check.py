@@ -214,7 +214,7 @@ def main() -> None:
     # served its purpose, and every legacy game is a full game's spend and about
     # 25 minutes of wall time to re-measure an engine nobody is shipping. The
     # path is kept, not deleted: pass `--engines legacy v2` for a paired run.
-    parser.add_argument("--engines", nargs="+", choices=("legacy", "v2"), default=["v2"])
+    parser.add_argument("--engines", nargs="+", choices=("legacy", "v2", "v3"), default=["v2"])
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--max-http-requests", type=int, default=4000)
     parser.add_argument("--max-estimated-cost", type=float, default=20.0)

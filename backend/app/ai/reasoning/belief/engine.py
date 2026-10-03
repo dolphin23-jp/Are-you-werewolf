@@ -58,7 +58,7 @@ from app.ai.reasoning.perspectives import Perspective
 from app.ai.reasoning.solver.backend import Certainty, has_role
 from app.ai.reasoning.solver.queries import RoleSolver
 from app.ai.reasoning.timeline import find_timeline_conflicts
-from app.engine.roles import RoleName
+from app.engine.roles import ROLE_DEFINITIONS, RoleName
 
 # Default soft weights. Collected here rather than scattered through the
 # derivation so the whole scale can be read -- and later tuned -- in one place.
@@ -118,10 +118,21 @@ def contest_fact_id(role: RoleName, claimants: Sequence[str]) -> str:
 
 
 def _contests(ledger: PublicFactLedger) -> dict[RoleName, list[str]]:
+    """Roles claimed by more seats than the composition holds.
+
+    Measured against the role's seat count, not against "more than one": the
+    village has two freemasons, so a confirmed pair is the expected shape, not
+    a contest. Treating it as one is what had every villager at a live table
+    repeating "one of the two freemasons is fake" until a real one was hanged.
+    """
     by_role: dict[RoleName, list[str]] = {}
     for claim in ledger.co_declarations():
         by_role.setdefault(claim.claimed_role, []).append(claim.player_id)
-    return {role: names for role, names in by_role.items() if len(names) > 1}
+    return {
+        role: names
+        for role, names in by_role.items()
+        if len(names) > ROLE_DEFINITIONS[role].count
+    }
 
 
 @dataclass(frozen=True)
@@ -420,7 +431,8 @@ class BeliefEngine:
                         weight=CONTESTED_CLAIM_WEIGHT,
                         explanation=(
                             f"{role.value}COが{len(claimants)}人おり、"
-                            f"{player_id}はそのうちの1人。少なくとも1人は偽。"
+                            f"{player_id}はそのうちの1人。少なくとも"
+                            f"{len(claimants) - ROLE_DEFINITIONS[role].count}人は偽。"
                         ),
                         origin=EvidenceOrigin(
                             kind=OriginKind.PUBLIC_CLAIM, fact_id=contest

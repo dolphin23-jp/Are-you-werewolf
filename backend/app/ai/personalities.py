@@ -31,8 +31,12 @@ class Personality:
     talkativeness: float = 1.0
     verbosity: str = "normal"
     sample_lines: tuple[str, ...] = ()
+    # The same voice in the chat register: what this player would actually type
+    # at a 17A table. Used by the v3 prompt; `sample_lines` keeps the structured
+    # register the legacy and v2 prompts were measured on.
+    chat_lines: tuple[str, ...] = ()
 
-    def to_prompt_section(self) -> str:
+    def to_prompt_section(self, *, chat: bool = False) -> str:
         section = (
             f"【あなたの人格】\n"
             f"- 口調: {self.tone}\n"
@@ -44,8 +48,9 @@ class Personality:
         )
         # Examples anchor the register far better than the abstract labels do, but a
         # preset without them must not emit a dangling empty bullet.
-        if self.sample_lines:
-            section += "\n- 口調の例:\n  - " + "\n  - ".join(self.sample_lines)
+        lines = self.chat_lines or self.sample_lines if chat else self.sample_lines
+        if lines:
+            section += "\n- 口調の例:\n  - " + "\n  - ".join(lines)
         return section
 
     def get_fallback_message(self) -> str:
@@ -226,6 +231,59 @@ _SAMPLE_LINES: dict[str, tuple[str, ...]] = {
     ),
 }
 
+# How the same people type at a chat table: short, reactive, in the words a
+# 17A village actually uses. `〇〇` stands for whichever player the line is
+# about -- a real name here would be copied into games it does not belong to.
+_CHAT_LINES: dict[str, tuple[str, ...]] = {
+    "冷静な論客": (
+        "〇〇の票だけ昨日の理由と噛み合ってない。そこ説明ほしい。",
+        "2-1。初手はグレランでいいと思う。",
+    ),
+    "元気なムードメーカー": (
+        "おはよー！占いCOは出揃った？",
+        "えっ今の票替え何！？理由きかせて！",
+    ),
+    "慎重な観察者": (
+        "今は様子見。〇〇の発言の変化だけ追ってる。",
+        "決め打ちはまだ早いかな。",
+    ),
+    "自信家のリーダー": (
+        "今日は〇〇と〇〇の2択。反論聞いてから指定出す。",
+        "異論あるなら今のうちに。",
+    ),
+    "疑り深い探偵": (
+        "その理由、昨日の票と合わないよね？",
+        "で、なんで今になって意見変えたの。",
+    ),
+    "優しい世話役": ("まずは順番に意見聞きましょ。", "反対意見も一回聞いてみない？"),
+    "皮肉屋の理系": (
+        "前提が一個抜けてる。結果の整合を先に見て。",
+        "印象論はいいから材料出して。",
+    ),
+    "熱血な正義漢": ("曖昧なまま吊るのは嫌だ！根拠言い切ろう！", "そこ怪しい！説明して！"),
+    "のんびり屋": (
+        "まあ回答待ってからでも遅くないよ〜",
+        "うーん、今んとこ〇〇がちょっと気になるかな。",
+    ),
+    "策略家": ("あえてこの二人の反応を見たい。", "結論は伏せる。でもその質問は大事。"),
+    "新人風の初々しさ": (
+        "えっと、投票理由を教えてもらえますか…？",
+        "まだ迷ってます。ここが気になって。",
+    ),
+    "ベテランの古参": ("焦るな。昨日の票を順に見よう。", "急いで結論出す場面じゃない。"),
+    "陽気なお調子者": (
+        "おっと、その票替えは見逃せないねぇ",
+        "冗談はさておき、理由は聞きたいな。",
+    ),
+    "無口な実務家": ("結論。今日は〇〇。", "理由は票と回答の不一致。"),
+    "情熱的な扇動家": ("ここで意見揃えよう！", "この矛盾は放置できない！"),
+    "素朴な聞き手": ("そこもう少し聞いていい？", "今の説明でちょっと納得した。"),
+    "長考する参謀": (
+        "二つの視点で分けて整理する。",
+        "判定と投票を合わせると、この内訳が自然。",
+    ),
+}
+
 # The cadence axes are part of the presets (rather than assigned per game),
 # so a seeded assignment still returns one of the canonical personalities.
 _VERBOSITY = ("terse", "normal", "wordy")
@@ -239,6 +297,7 @@ PERSONALITIES = [
         # `_SAMPLE_LINES` would otherwise raise at import time and take the whole
         # app down rather than just losing its examples.
         sample_lines=_SAMPLE_LINES.get(personality.name, ()),
+        chat_lines=_CHAT_LINES.get(personality.name, ()),
     )
     for index, personality in enumerate(PERSONALITIES)
 ]

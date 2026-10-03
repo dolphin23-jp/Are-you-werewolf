@@ -6,6 +6,8 @@ below, so these cases are regressions, not hypotheticals.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from app.ai.dialect import EndpointDialect, rejected_parameter
@@ -63,6 +65,63 @@ def test_falls_back_to_the_message_when_no_structured_body():
 def test_unrelated_errors_yield_no_parameter():
     assert rejected_parameter(FakeAPIError("Error code: 401 - invalid api key")) is None
     assert rejected_parameter(FakeAPIError("Connection error.")) is None
+
+
+def test_reasoning_effort_is_sent_only_when_configured_and_dropped_on_rejection():
+    dialect = EndpointDialect()
+    kwargs: dict = {}
+
+    dialect.apply(kwargs, max_tokens=10, temperature=0.9)
+    assert "reasoning_effort" not in kwargs
+
+    dialect.apply(kwargs, max_tokens=10, temperature=0.9, reasoning_effort="low")
+    assert kwargs["reasoning_effort"] == "low"
+
+    assert dialect.adapt(_unsupported_param_error("reasoning_effort")) is True
+    dialect.apply(kwargs, max_tokens=10, temperature=0.9, reasoning_effort="low")
+    assert "reasoning_effort" not in kwargs
+    # Already learned: nothing left to change, so no second retry.
+    assert dialect.adapt(_unsupported_param_error("reasoning_effort")) is False
+    assert "reasoning_effort=送信しない" in dialect.describe()
+
+
+@pytest.mark.asyncio
+async def test_provider_sends_reasoning_effort_and_learns_a_rejection():
+    from app.ai.provider.base import Message
+    from app.ai.provider.luna_openai import LunaOpenAIProvider
+    from app.ai.schemas import VoteOutput
+
+    provider = LunaOpenAIProvider(
+        api_key="sk-test",
+        base_url="https://example.invalid/v1",
+        model="gpt-5.6-luna",
+        reasoning_effort="low",
+    )
+    seen: list[dict] = []
+
+    async def fake_create(**kwargs):
+        seen.append(dict(kwargs))
+        if "reasoning_effort" in kwargs:
+            raise _unsupported_param_error("reasoning_effort")
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content='{"vote_target": "p1", "reason": "ok"}'),
+                    finish_reason="stop",
+                )
+            ],
+            usage=SimpleNamespace(prompt_tokens=10, completion_tokens=5),
+        )
+
+    provider._client.chat.completions.create = fake_create  # type: ignore[method-assign]
+
+    result = await provider.generate_structured(
+        system="sys", messages=[Message(role="user", content="hi")], response_schema=VoteOutput
+    )
+    assert result == VoteOutput(vote_target="p1", reason="ok")
+    assert seen[0]["reasoning_effort"] == "low"
+    assert "reasoning_effort" not in seen[1]
+    assert provider.dialect.send_reasoning_effort is False
 
 
 def test_defaults_to_the_modern_token_parameter():

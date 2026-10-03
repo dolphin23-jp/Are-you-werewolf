@@ -36,6 +36,23 @@ _P0_IDENTITY_RE = re.compile(r"(?:私|俺|僕|自分)が(?:本物の)?p0(?:本�
 # Rough "is this actually Japanese" signal: share of CJK/kana characters.
 _JA_CHAR_RE = re.compile(r"[぀-ヿ一-鿿]")
 
+# Wording the v2 runtime injects or hands the model as fixed phrasing. A human
+# at a chat table never opens every line with "現時点の第一処刑候補は", so the
+# share of lines carrying any of these is the most direct measure of how much
+# of what the table hears was written by code rather than said by a player.
+_TEMPLATE_PHRASE_RE = re.compile(
+    r"現時点の第一処刑候補は"
+    r"|という見方も残"
+    r"|処刑しない最強の理由"
+    r"|独立した根拠"
+    r"|反対材料"
+    r"|第二候補は"
+)
+# `名前(pN)` in public speech. Humans say names; the id form is a prompt
+# convention that leaked into what the table reads.
+_ID_MENTION_RE = re.compile(r"\(p\d+\)")
+
+
 _META_LEAK_RE = re.compile(
     r"(AIとして|言語モデル|アシスタントとして|as an AI|システムプロンプト)", re.IGNORECASE
 )
@@ -453,6 +470,10 @@ def _collect_format_stats(t: GameTranscript, result: AnalysisResult) -> None:
         for message in t.final_state.get("chat_log", [])
         if message.get("channel") == "public"
     ]
+    # AI public lines only: the human seat's wording is not the AI layer's to
+    # answer for, and the id/template rates are claims about the AI layer.
+    ai_public = [u.text for u in discussions]
+    public_days = {int(message.get("day", 0)) for message in public_chat}
     question_count = sum(len(u.directed_question_targets) for u in discussions)
     pending_count = sum(
         len(questions) for questions in t.final_state.get("pending_questions", {}).values()
@@ -480,6 +501,23 @@ def _collect_format_stats(t: GameTranscript, result: AnalysisResult) -> None:
         ),
         "cross_player_mean_jaccard": round(
             sum(cross_pairs) / max(len(cross_pairs), 1), 4
+        ),
+        # -- how much the table reads like a chat between people --
+        "template_phrase_rate": round(
+            sum(bool(_TEMPLATE_PHRASE_RE.search(text)) for text in ai_public)
+            / max(len(ai_public), 1),
+            4,
+        ),
+        "id_mention_rate": round(
+            sum(bool(_ID_MENTION_RE.search(text)) for text in ai_public)
+            / max(len(ai_public), 1),
+            4,
+        ),
+        "public_messages_per_day": round(len(public_chat) / max(len(public_days), 1), 1),
+        "public_mean_length": round(
+            sum(len(str(message.get("content", ""))) for message in public_chat)
+            / max(len(public_chat), 1),
+            1,
         ),
     }
 
