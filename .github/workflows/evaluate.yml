@@ -90,7 +90,7 @@ jobs:
           if [ -f eval-out/report.md ]; then
             cat eval-out/report.md >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "レポートが生成されませんでした。上のログを確認してください。" >> "$GITHUB_STEP_SUMMARY"
+            echo "レポートが生成されませんでした(接続確認で失敗した、対戦の途中で止めた、または時間切れ)。上のログを確認してください。途中まで進んでいれば、対戦記録が下と Artifacts の eval-out に残っています。" >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: 対戦記録も表示(先頭のみ)
