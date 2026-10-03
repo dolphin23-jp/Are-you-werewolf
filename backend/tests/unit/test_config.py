@@ -63,13 +63,24 @@ def test_blank_optional_int_is_treated_as_none(tmp_path: Path, monkeypatch):
 
 
 def test_defaults_are_safe_when_no_env_file_exists(tmp_path: Path, monkeypatch):
-    for var in ("WEREWOLF_LLM_PROVIDER", "LUNA_API_KEY"):
+    for var in ("WEREWOLF_LLM_PROVIDER", "LUNA_API_KEY", "LUNA_MODEL"):
         monkeypatch.delenv(var, raising=False)
     settings = Settings(_env_file=str(tmp_path / "does-not-exist.env"))
     # Defaulting to the mock provider means a fresh checkout never attempts
     # a paid API call by accident.
     assert settings.werewolf_llm_provider == "mock"
     assert settings.luna_api_key == ""
+    # What the luna provider asks for when LUNA_MODEL is not set anywhere.
+    assert settings.luna_model == "gpt-6.0-luna"
+
+
+def test_shipped_env_example_names_the_same_model_as_the_default():
+    """`.env.example` is what people copy. If it names a different model than
+    the code default, a fresh `cp .env.example .env` silently pins the old one."""
+    from app.config import DEFAULT_LUNA_MODEL
+
+    text = (Path(__file__).resolve().parents[2] / ".env.example").read_text(encoding="utf-8")
+    assert f"LUNA_MODEL={DEFAULT_LUNA_MODEL}" in text
 
 
 def test_explicit_kwarg_outranks_the_environment(monkeypatch):

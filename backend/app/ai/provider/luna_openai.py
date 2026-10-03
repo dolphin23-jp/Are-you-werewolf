@@ -1,4 +1,4 @@
-"""OpenAI-compatible client for gpt-5.6-luna.
+"""OpenAI-compatible client for the gpt-*-luna models (default: see `Settings`).
 
 "OpenAI-compatible" is a weaker promise than it sounds: the first real
 call to gpt-5.6-luna was rejected outright for sending `max_tokens`

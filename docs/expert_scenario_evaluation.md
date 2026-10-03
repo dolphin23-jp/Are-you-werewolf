@@ -37,7 +37,7 @@ python scripts/evaluate_expert_scenarios_v2.py \
 WEREWOLF_LLM_PROVIDER=luna \
 LUNA_API_KEY=... \
 LUNA_BASE_URL=... \
-LUNA_MODEL=gpt-5.6-luna \
+LUNA_MODEL=gpt-6.0-luna \
 python scripts/evaluate_expert_scenarios_v2.py \
   --provider luna \
   --out expert-eval-v2-out
