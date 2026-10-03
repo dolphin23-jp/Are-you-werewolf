@@ -302,6 +302,7 @@ class AICoordinator:
         decision_evidence: str = "",
         countercase: str = "",
         alternative_target: str | None = None,
+        reply_to: str | None = None,
     ) -> None:
         if self._recorder is None:
             return
@@ -332,6 +333,7 @@ class AICoordinator:
                 decision_evidence=decision_evidence,
                 countercase=countercase,
                 alternative_target=alternative_target,
+                reply_to=reply_to,
             )
         )
 
@@ -985,6 +987,7 @@ class AICoordinator:
             )[1],
             key_point=output.key_point,
             agrees_with=output.agrees_with,
+            reply_to=output.reply_to,
         )
         try:
             message_id = controller.chat(  # type: ignore[attr-defined]

@@ -118,6 +118,9 @@ class Utterance:
     decision_evidence: str = ""
     countercase: str = ""
     alternative_target: str | None = None
+    # The message this turn answered, by the id the model gave. With the stated
+    # candidate it shows whether a change of mind was a reply to someone.
+    reply_to: str | None = None
 
 
 @dataclass
