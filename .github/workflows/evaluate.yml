@@ -13,10 +13,10 @@ on:
         required: true
         default: "1"
       reasoning_engine:
-        description: "推理エンジン(legacy / v2 / v3)。v3 はモデルが疑い・投票・夜行動を決める"
+        description: "推理エンジン(v3 / v2 / legacy)。v3(既定)はモデルが疑い・投票・夜行動を決める"
         type: choice
-        options: ["v2", "v3", "legacy"]
-        default: "v2"
+        options: ["v3", "v2", "legacy"]
+        default: "v3"
       reasoning_effort:
         description: "推論モデルの思考量(空=送らない / low / medium / high)。途中切れが多いなら low"
         required: false

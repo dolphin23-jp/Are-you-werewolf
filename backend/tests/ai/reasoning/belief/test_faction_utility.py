@@ -336,13 +336,14 @@ def test_ordinary_soft_evidence_cannot_make_a_wolf_nominate_a_partner():
     assert engine.state.current_execution_target != "p2"
 
 
-@pytest.mark.parametrize("engine_value", ["legacy", "v2", " V2 "])
-def test_the_engine_setting_accepts_only_the_two_real_values(engine_value: str):
+@pytest.mark.parametrize("engine_value", ["legacy", "v2", " V2 ", "v3"])
+def test_the_engine_setting_accepts_only_the_real_values(engine_value: str):
     from app.config import Settings
 
     assert Settings(werewolf_reasoning_engine=engine_value).werewolf_reasoning_engine in (
         "legacy",
         "v2",
+        "v3",
     )
 
 
@@ -351,8 +352,9 @@ def test_an_unknown_engine_value_fails_at_startup():
 
     from app.config import Settings
 
-    # Falling through to legacy in silence meant a deployment that asked for v2
-    # quietly ran the old engine and looked like v2 had changed nothing.
+    # Falling through to another engine in silence meant a deployment that asked
+    # for one quietly ran a different one and looked like nothing had changed.
     with pytest.raises(pydantic.ValidationError):
         Settings(werewolf_reasoning_engine="v9")
-    assert Settings(werewolf_reasoning_engine="").werewolf_reasoning_engine == "v2"
+    # A blank value (the form .env.example uses for "unset") is the real default.
+    assert Settings(werewolf_reasoning_engine="").werewolf_reasoning_engine == "v3"

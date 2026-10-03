@@ -9,7 +9,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # `WEREWOLF_REASONING_ENGINE=` line in a `.env` (the form `.env.example` uses
 # for every other optional setting) must resolve to whatever the real default
 # is, not to a value hardcoded independently of it.
-_DEFAULT_REASONING_ENGINE: Literal["legacy", "v2", "v3"] = "v2"
+_DEFAULT_REASONING_ENGINE: Literal["legacy", "v2", "v3"] = "v3"
 
 # The OpenAI-compatible model the `luna` provider asks for when `LUNA_MODEL` is
 # not set. One constant, so a model upgrade is a one-line change here and the
@@ -50,14 +50,14 @@ class Settings(BaseSettings):
     werewolf_llm_provider: str = "mock"
     # legacy: every decision goes through the model, with no fact ledger.
     # v2: the reasoning layer decides votes, night actions and the speaking
-    # order in code, and the model is left with wording. Defaulted to legacy
-    # while v2 was only exercised through manual live-evaluation scripts;
-    # now the default so real gameplay (not just those scripts) is what gets
-    # manually playtested. Set WEREWOLF_REASONING_ENGINE=legacy to compare.
-    # v3: the reasoning layer keeps the facts, the solver, the validation and
-    # the speaking order, but the model decides whom to suspect, how to vote
-    # and what to do at night, and speaks in a chat register with no injected
-    # wording. See docs/approach-reset-2026-10.md for why.
+    # order in code, and the model is left with wording. Kept for comparison
+    # and maintained, not improved.
+    # v3 (the default): the reasoning layer keeps the facts, the solver, the
+    # validation and the speaking order, but the model decides whom to suspect,
+    # how to vote and what to do at night, and speaks in a chat register with
+    # no injected wording. On the same model and seed it ran about four times
+    # faster than v2 with no failed calls (docs/approach-reset-2026-10.md,
+    # sections 2.1b and 6.1).
     werewolf_reasoning_engine: Literal["legacy", "v2", "v3"] = _DEFAULT_REASONING_ENGINE
 
     luna_api_key: str = ""
