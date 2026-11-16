@@ -200,7 +200,7 @@ def test_a_changed_candidate_is_recorded_with_its_reason():
         "p1", [pid for pid in controller.state.alive_ids() if pid != "p1"]
     )
     stated = next(pid for pid in controller.state.alive_ids() if pid not in ("p1", ballot))
-    runtime.record_stated_target("p1", stated)
+    runtime.record_stated_target("p1", stated, controller.state.day)
 
     asyncio.run(coordinator._cast_vote(controller, controller.state, "p1"))
 
