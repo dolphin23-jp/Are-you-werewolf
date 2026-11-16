@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from types import SimpleNamespace
 from typing import Any
 
 import anthropic
@@ -169,6 +170,62 @@ def test_luna_never_prints_its_key_or_base_url_path() -> None:
     assert "sk-l" not in text and "xyz" not in text and "tenant-secret" not in text
 
 
+PRIVATE_LUNA_URL = "https://my-private-endpoint.internal.example/v1"
+PRIVATE_LUNA_HOST = "my-private-endpoint.internal.example"
+
+
+def test_luna_prints_only_whether_its_base_url_is_set() -> None:
+    """LUNA_BASE_URL is an Actions secret, and Actions masks only the whole
+    value: its host alone is a substring and went into the public log as is."""
+    lines: list[str] = []
+    settings = Settings(
+        werewolf_llm_provider="luna", luna_api_key="", luna_base_url=PRIVATE_LUNA_URL
+    )
+
+    # No key stops it before any network access.
+    assert asyncio.run(check_llm.run_luna(settings, out=lines.append)) == 1
+
+    text = "\n".join(lines)
+    assert "my-private-endpoint" not in text and "internal.example" not in text
+    assert any("LUNA_BASE_URL" in line and "設定済み" in line for line in lines)
+
+    lines.clear()
+    asyncio.run(check_llm.run_luna(Settings(werewolf_llm_provider="luna"), out=lines.append))
+    assert any("LUNA_BASE_URL" in line and "プレースホルダー" in line for line in lines)
+
+
+class _FailingOpenAI:
+    """Stands in for `openai.AsyncOpenAI`: every call fails, and the error
+    repeats the endpoint and the key, as client errors can."""
+
+    def __init__(self, *, api_key: str, base_url: str, timeout: float) -> None:
+        self._detail = f"cannot reach {base_url} ({PRIVATE_LUNA_HOST}) with key {api_key}"
+        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
+
+    async def _create(self, **kwargs: Any) -> Any:
+        raise RuntimeError(self._detail)
+
+
+def test_a_luna_error_never_carries_the_base_url_or_key_into_the_log(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import openai
+
+    monkeypatch.setattr(openai, "AsyncOpenAI", _FailingOpenAI)
+    key = "sk-luna-SECRETVALUE-xyz"
+    settings = Settings(
+        werewolf_llm_provider="luna", luna_api_key=key, luna_base_url=PRIVATE_LUNA_URL
+    )
+    lines: list[str] = []
+
+    assert asyncio.run(check_llm.run_luna(settings, out=lines.append)) == 1
+
+    text = "\n".join(lines)
+    assert "接続に失敗しました" in text and "RuntimeError" in text
+    assert PRIVATE_LUNA_HOST not in text and "my-private-endpoint" not in text
+    assert key not in text
+
+
 # --- offline checks ------------------------------------------------------------
 
 
@@ -313,6 +370,95 @@ def test_a_transient_error_that_needs_a_retry_stays_within_the_request_cap() -> 
     messages = [path for path in server.paths if not path.endswith("/count_tokens")]
     assert len(messages) <= check_llm.MAX_PROBE_REQUESTS
     assert any("要求数の上限" in line for line in lines)
+
+
+def _reject_fallbacks(body: dict[str, Any]) -> Any:
+    """A key without the server-side fallback beta: any request that asks for
+    it is a 400 naming it, as `_is_fallback_rejection` expects."""
+    if "fallbacks" in body:
+        return httpx2.Response(
+            400,
+            json={
+                "type": "error",
+                "error": {
+                    "type": "invalid_request_error",
+                    "message": "fallbacks: 'default' is not available for this organization",
+                },
+            },
+        )
+    return None
+
+
+def test_a_key_without_the_fallback_beta_passes_with_one_negotiation_request() -> None:
+    """The provider drops the beta and resends; a game works the same way, so
+    the preflight must pass, count that one request, and say what it was --
+    not run out of requests and blame a 429."""
+    server = _Server(_reject_fallbacks)
+
+    code, lines = _run(server)
+
+    assert code == 0, "\n".join(lines)
+    messages = [path for path in server.paths if not path.endswith("/count_tokens")]
+    assert len(messages) == len(check_llm.GAME_SCHEMAS) + 1
+    assert check_llm.FALLBACK_NEGOTIATION_REQUESTS == 1
+    text = "\n".join(lines)
+    assert "フォールバック(beta)はこのキーでは使えません" in text
+    assert "fallback beta unavailable for this key" in text
+    assert "要求数の上限" not in text and "429" not in text
+    assert f"HTTP要求 {len(messages)}回" in text
+    _assert_nothing_secret(lines)
+
+
+def test_after_the_fallback_negotiation_a_retry_still_fails_within_a_fixed_cap() -> None:
+    overloaded_once: list[bool] = []
+
+    def reject_fallbacks_then_overload_a_vote(body: dict[str, Any]) -> Any:
+        rejected = _reject_fallbacks(body)
+        if rejected is not None:
+            return rejected
+        properties = body["output_config"]["format"]["schema"]["properties"]
+        if "vote_target" in properties and not overloaded_once:
+            overloaded_once.append(True)
+            return httpx2.Response(
+                529,
+                json={"type": "error", "error": {"type": "overloaded_error", "message": "busy"}},
+            )
+        return None
+
+    server = _Server(reject_fallbacks_then_overload_a_vote)
+    code, lines = _run(server)
+
+    assert code == 1
+    messages = [path for path in server.paths if not path.endswith("/count_tokens")]
+    assert (
+        len(messages)
+        == check_llm.MAX_PROBE_REQUESTS + check_llm.FALLBACK_NEGOTIATION_REQUESTS
+    )
+    assert any("要求数の上限" in line for line in lines)
+
+
+def test_without_a_fallback_rejection_no_extra_request_is_allowed() -> None:
+    """The negotiation allowance is for the beta alone: a retry on a key that
+    has the beta still exhausts the plain five."""
+    overloaded_once: list[bool] = []
+
+    def overload_the_first_call(body: dict[str, Any]) -> Any:
+        if not overloaded_once:
+            overloaded_once.append(True)
+            return httpx2.Response(
+                529,
+                json={"type": "error", "error": {"type": "overloaded_error", "message": "busy"}},
+            )
+        return None
+
+    server = _Server(overload_the_first_call)
+    code, lines = _run(server)
+
+    assert code == 1
+    messages = [path for path in server.paths if not path.endswith("/count_tokens")]
+    assert len(messages) == check_llm.MAX_PROBE_REQUESTS
+    assert any("要求数の上限(5)" in line for line in lines)
+    assert not any("フォールバック(beta)" in line for line in lines)
 
 
 def test_no_key_means_no_request() -> None:

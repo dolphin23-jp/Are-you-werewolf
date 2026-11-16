@@ -17,9 +17,11 @@ of a whole game's spend.
      structured-output limits (`app/ai/schema_limits.py`). A schema over them
      is a 400 no retry fixes, and in a game it degrades silently.
   3. One real call per schema through the same provider the game builds, at
-     most five requests: success, parse path, latency, stop reason, the model
-     that answered, tokens and cost. Any failure, refusal, degraded parse
-     path or schema rejection fails the preflight.
+     most five requests, plus one when the key turns out not to have the
+     server-side fallback beta (reported, not a failure): success, parse
+     path, latency, stop reason, the model that answered, tokens and cost.
+     Any failure, refusal, degraded parse path or schema rejection fails the
+     preflight.
   4. `count_tokens` (free, not a generation) on one real v3 discussion prompt,
      rendered offline by playing a ScenarioProvider game in-process, and a
      per-game projection of the input tokens from it.
@@ -29,6 +31,8 @@ schema or only JSON-object mode works.
 
 The key is never printed, not even in part -- a fragment of one once reached
 a public Actions log -- and neither is any prompt: only lengths and counts.
+`LUNA_BASE_URL` is an Actions secret too, and Actions masks only a secret's
+whole value, so not even its host is printed: only whether it is set.
 Exits 0 when everything passed, 1 otherwise.
 """
 
@@ -106,6 +110,12 @@ GAME_SCHEMAS: tuple[type[BaseModel], ...] = (
 # game on.
 MAX_PROBE_REQUESTS = len(GAME_SCHEMAS)
 
+# Added to that cap only when the key rejects the server-side fallback beta:
+# the provider then drops the beta and resends the same call once, exactly as
+# in a game (see `ProbeBudget`). So the preflight never sends more than
+# MAX_PROBE_REQUESTS + 1 generations and one `count_tokens`.
+FALLBACK_NEGOTIATION_REQUESTS = 1
+
 # Logical LLM calls in one v3 game, from the only complete live v3 game on
 # record (run #11, gpt-6-luna, 2026-10-03: 197 calls; see
 # `backend/artifacts/live-v3-luna-run11/report.md`). A projection, not a
@@ -146,6 +156,38 @@ def mask_secret(value: str) -> str:
 def host_of(url: str) -> str:
     """The host alone: a base URL's path or query can carry more than it should."""
     return urlparse(url).hostname or "(URLとして読めません)"
+
+
+def secret_url_state(url: str, placeholder_marker: str = "example.com") -> str:
+    """Whether a secret URL is set. Never any part of it.
+
+    Not even the host: Actions masks only a secret's whole value, so a host
+    cut out of a secret URL is printed in clear in a public log.
+    """
+    if not url:
+        return "<空>"
+    if placeholder_marker in url:
+        return "プレースホルダーのまま"
+    return "設定済み"
+
+
+def redact(text: str, secrets: Sequence[str]) -> str:
+    """`text` with every secret, and every secret URL's host, replaced by ***.
+
+    For messages this script did not write -- a client's exception text can
+    repeat the endpoint it failed to reach, or the key it sent.
+    """
+    fragments = set()
+    for secret in secrets:
+        if not secret:
+            continue
+        fragments.add(secret)
+        host = urlparse(secret).hostname
+        if host:
+            fragments.add(host)
+    for fragment in sorted(fragments, key=len, reverse=True):
+        text = text.replace(fragment, "***")
+    return text
 
 
 # --- offline: schema limits -----------------------------------------------
@@ -304,13 +346,52 @@ def probe_problems(
     return problems
 
 
+class ProbeBudget(EvaluationBudget):
+    """The preflight's request cap, with room for the fallback-beta negotiation.
+
+    A key without the server-side fallback beta answers the first request
+    that asks for it with a 400. The provider then drops the beta for good
+    and resends the same call, as it does in a game, so that resend is a
+    negotiation and not a retry. Without room for it the last schema ran out
+    of requests and the preflight failed, blaming a 429/529, on a key a game
+    works with -- and the evaluate workflows, which need the preflight, could
+    not start at all.
+
+    The extra request is granted only when the provider is seen to have
+    dropped the beta, at the reservation for the resend itself, so any other
+    retry still exhausts the plain cap.
+    """
+
+    def __init__(self, max_requests: int, fallbacks_enabled: Callable[[], bool]) -> None:
+        super().__init__(max_requests=max_requests)
+        self._fallbacks_enabled = fallbacks_enabled
+        self._fallbacks_offered = fallbacks_enabled()
+        self.fallback_rejected = False
+
+    def reserve(self, worst_case_cost: float) -> None:
+        if (
+            self._fallbacks_offered
+            and not self.fallback_rejected
+            and not self._fallbacks_enabled()
+        ):
+            self.fallback_rejected = True
+            self.max_requests += FALLBACK_NEGOTIATION_REQUESTS
+        super().reserve(worst_case_cost)
+
+
 async def probe_schemas(
     provider: LLMProvider,
     collector: MetricsCollector,
     rejected: Callable[[], frozenset[str]],
     schemas: Sequence[type[BaseModel]] = GAME_SCHEMAS,
+    *,
+    request_limit: Callable[[], int] = lambda: MAX_PROBE_REQUESTS,
 ) -> list[ProbeResult]:
-    """One call per schema, in order, each judged by its own `CallRecord`."""
+    """One call per schema, in order, each judged by its own `CallRecord`.
+
+    `request_limit` reads the cap when it is hit, since a fallback-beta
+    negotiation can raise it during the run.
+    """
     results: list[ProbeResult] = []
     for schema in schemas:
         name = schema.__name__
@@ -328,7 +409,7 @@ async def probe_schemas(
                     name,
                     collector.records[-1] if len(collector.records) > before else None,
                     [
-                        f"要求数の上限({MAX_PROBE_REQUESTS})に達しました。"
+                        f"要求数の上限({request_limit()})に達しました。"
                         "再試行が必要だった呼び出しがあります(429・529・接続エラーなど)"
                     ],
                 )
@@ -424,20 +505,34 @@ async def run_anthropic(
         out(f"{NG}上限を超えるスキーマは API が400で拒否します。実呼び出しの前に止めます。")
         return 1
 
-    out(f"\n=== 3. スキーマごとに1回ずつ実呼び出し(最大{MAX_PROBE_REQUESTS}要求) ===")
+    out(
+        f"\n=== 3. スキーマごとに1回ずつ実呼び出し(最大{MAX_PROBE_REQUESTS}要求、"
+        f"フォールバックbetaが使えないキーなら+{FALLBACK_NEGOTIATION_REQUESTS}) ==="
+    )
     collector = MetricsCollector()
     try:
         inner = build(settings, collector)
     except (LLMProviderConfigError, ValueError) as exc:
         out(f"{NG}プロバイダを作れませんでした: {exc}")
         return 1
-    budget = EvaluationBudget(max_requests=MAX_PROBE_REQUESTS)
+    budget = ProbeBudget(
+        MAX_PROBE_REQUESTS, lambda: bool(getattr(inner, "fallbacks_enabled", False))
+    )
     provider = BudgetedProvider(inner, budget)
 
     def rejected() -> frozenset[str]:
         return frozenset(getattr(inner, "grammar_rejected_schemas", frozenset()))
 
-    results = await probe_schemas(provider, collector, rejected)
+    results = await probe_schemas(
+        provider, collector, rejected, request_limit=lambda: budget.max_requests
+    )
+    if budget.fallback_rejected:
+        out(
+            f"{INFO}サーバー側フォールバック(beta)はこのキーでは使えません。"
+            "フォールバックなしで続けます(fallback beta unavailable for this key"
+            " — continuing without it)。試合でも同じく1要求で切り替わります。"
+            "その1要求も省くなら WEREWOLF_ANTHROPIC_FALLBACKS=off を設定してください。"
+        )
     for result in results:
         mark = OK if result.ok else NG
         out(f"{mark}{result.schema}: {describe_record(result.record)}")
@@ -445,7 +540,8 @@ async def run_anthropic(
             out(f"{NG}    {problem}")
     probes_ok = len(results) == len(GAME_SCHEMAS) and all(result.ok for result in results)
     spent = sum(r.record.estimated_cost or 0.0 for r in results if r.record is not None)
-    out(f"{INFO}HTTP要求 {budget.used_requests}回・推定費用 ${spent:.4f}")
+    negotiation = "(うちフォールバックbetaの切り替え1回)" if budget.fallback_rejected else ""
+    out(f"{INFO}HTTP要求 {budget.used_requests}回{negotiation}・推定費用 ${spent:.4f}")
 
     out("\n=== 4. 議論プロンプトのトークン数(count_tokens) ===")
     tokens_ok = True
@@ -506,9 +602,11 @@ async def _one_call(
     model: str,
     response_format: dict[str, Any] | None,
     dialect: EndpointDialect,
+    secrets: Sequence[str] = (),
 ) -> dict[str, Any]:
     """Same parameter negotiation the real provider uses, so what this
-    reports is what the game will actually send."""
+    reports is what the game will actually send. A failure's text has
+    `secrets` redacted, since it is printed."""
     started = perf_counter()
     while True:
         kwargs: dict[str, Any] = {
@@ -525,7 +623,7 @@ async def _one_call(
             if dialect.adapt(exc):
                 print(f"{INFO}このエンドポイント向けに調整: {dialect.describe()}")
                 continue
-            return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+            return {"ok": False, "error": redact(f"{type(exc).__name__}: {exc}", secrets)}
     elapsed = perf_counter() - started
 
     content = response.choices[0].message.content if response.choices else None
@@ -553,7 +651,7 @@ async def run_luna(settings: Settings, *, out: Callable[[str], None] = print) ->
     model = settings.luna_model
     out("=== 1. 設定の確認 ===")
     out(f"{INFO}WEREWOLF_LLM_PROVIDER = {settings.werewolf_llm_provider}")
-    out(f"{INFO}LUNA_BASE_URL         = {host_of(settings.luna_base_url)}")
+    out(f"{INFO}LUNA_BASE_URL         = {secret_url_state(settings.luna_base_url)}")
     out(f"{INFO}LUNA_MODEL            = {model}")
     out(f"{INFO}LUNA_API_KEY          = {mask_secret(settings.luna_api_key)}")
 
@@ -583,9 +681,10 @@ async def run_luna(settings: Settings, *, out: Callable[[str], None] = print) ->
     )
 
     dialect = EndpointDialect()
+    secrets = (settings.luna_api_key, settings.luna_base_url)
 
     out("\n=== 2. 疎通と認証 ===")
-    plain = await _one_call(client, model, None, dialect)
+    plain = await _one_call(client, model, None, dialect, secrets)
     if not plain["ok"]:
         out(f"{NG}接続に失敗しました: {plain['error']}")
         out("\n確認してください:")
@@ -618,6 +717,7 @@ async def run_luna(settings: Settings, *, out: Callable[[str], None] = print) ->
             },
         },
         dialect,
+        secrets,
     )
     strict_ok = strict["ok"] and _validates(strict.get("content"))
     if strict_ok:
@@ -627,7 +727,7 @@ async def run_luna(settings: Settings, *, out: Callable[[str], None] = print) ->
     else:
         out(f"{NG}strict JSON-schema 非対応: {strict['error'][:160]}")
 
-    loose = await _one_call(client, model, {"type": "json_object"}, dialect)
+    loose = await _one_call(client, model, {"type": "json_object"}, dialect, secrets)
     loose_ok = loose["ok"] and _validates(loose.get("content"))
     if loose_ok:
         out(f"{OK}json_object モードに対応 ({loose['latency']:.2f} 秒)")
