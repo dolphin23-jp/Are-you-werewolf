@@ -1,8 +1,10 @@
-"""The close after the summary is a turn of its own, told once and truthfully.
+"""The close after the summary is a turn of its own, and every turn is counted.
 
 The summariser's 本指定 was built as a second summary, whose text invited a
 new question that nobody would answer: the round closes on that turn. A note
 in the system prompt added that every named seat had been given its turn.
+And the progress counter could read 31/29: owed replies and closing turns
+were never counted in the total.
 """
 
 from __future__ import annotations
@@ -11,6 +13,9 @@ import asyncio
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
+from fastapi.testclient import TestClient
+
 from app.ai.context import ContextBuilder, DaySummaryManager
 from app.ai.coordinator import _FINAL_DESIGNATION_STAGE, AICoordinator
 from app.ai.deception import FakeClaimGuard, WolfDeceptionAssignment
@@ -18,10 +23,15 @@ from app.ai.metrics import MetricsCollector
 from app.ai.personalities import assign_personalities, chat_stage_max_chars
 from app.ai.reasoning.runtime import ReasoningRuntime
 from app.ai.schemas import DirectedQuestion, DiscussionOutput, MorningIntentOutput
+from app.config import Settings
 from app.engine.phases import Phase
 from app.engine.roles import RoleName
 from app.engine.state import GameState
 from app.eval.transcript import TranscriptRecorder
+from app.main import app
+from app.sessions.models import DiscussionRoundState
+from app.sessions.store import get_session_store
+from scripts import evaluate
 from tests.ai.test_turn_structure import _spy, _StagedProvider, _summary_asking
 from tests.conftest import make_controller
 
@@ -72,6 +82,101 @@ async def _drive(coordinator: AICoordinator, session: SimpleNamespace, mode: str
 
 def _after_summary(turns: list[tuple[str, str]]) -> list[tuple[str, str]]:
     return turns[[stage for _seat, stage in turns].index(SUMMARY) :]
+
+
+# -- (3) the progress counter never reads past its total --
+
+
+def test_answers_and_the_close_after_a_summary_at_the_budget_are_counted_in_the_total():
+    provider = _StagedProvider({SUMMARY: _summary_asking("p2", "p3")})
+    controller, coordinator, turns = _table(provider)
+    session = _human_session(controller)
+    # The opening fills the budget but one, so the summary is its last slot.
+    session.discussion_round = DiscussionRoundState(
+        day=controller.state.day, order=["p1", "p2", "p3"], stage="initial_view", max_total=4
+    )
+
+    asyncio.run(asyncio.wait_for(coordinator.run_discussion_round(session), timeout=10))
+
+    round_state = session.discussion_round
+    assert _after_summary(turns) == [
+        ("p1", SUMMARY),
+        ("p2", "reaction"),
+        ("p3", "reaction"),
+        ("p1", _FINAL_DESIGNATION_STAGE),
+    ]
+    assert len(round_state.outputs) == 7
+    assert round_state.max_total == 7
+
+
+def test_an_owed_reply_is_counted_in_the_total():
+    controller = make_controller(seed=4)
+    state = controller.state
+    state.phase = Phase.DISCUSSION
+    state.day = 2
+    coordinator = AICoordinator(state, ["p1", "p2", "p3", "p4"], _StagedProvider(), seed=1)
+    black = controller.chat("p1", "占いCO。p2は黒。")
+    controller.public_result("p1", "seer", "p2", True, source_message_id=black)
+    round_state = DiscussionRoundState(
+        day=2,
+        order=["p1", "p3"],
+        cursor=2,
+        stage="initial_view",
+        outputs=[
+            ("p1", DiscussionOutput(public_message="p2は黒。")),
+            ("p3", DiscussionOutput(public_message="見解")),
+        ],
+        speech_counts={"p1": 1, "p3": 1},
+        major_targets_ready=True,
+        max_total=2,
+    )
+
+    speaker, stage = coordinator._next_discussion_speaker(state, round_state)
+
+    assert (speaker, stage) == ("p2", "rebuttal_or_reassessment")
+    assert round_state.max_total == 3
+
+
+def test_the_view_never_reads_more_spoken_than_total():
+    client = TestClient(app)
+    session_id = client.post("/api/games", json={"human_name": "Tester", "seed": 5}).json()[
+        "session_id"
+    ]
+    session = get_session_store().get(session_id)
+    assert session is not None
+    # A round whose total missed a turn somewhere: the counter still reads sanely.
+    session.discussion_round = DiscussionRoundState(
+        day=session.controller.state.day,
+        order=[],
+        outputs=[("p1", DiscussionOutput(public_message="見解"))] * 3,
+        max_total=2,
+    )
+
+    progress = client.get(f"/api/games/{session_id}/view").json()["discussion_progress"]
+
+    assert progress == {"spoken": 3, "total": 3}
+
+
+def test_seed_3_scenario_game_never_shows_more_spoken_than_total(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The reviewer's overflow.py: v3, scenario provider, seed 3 read 31/29 on day 1."""
+    seen: list[tuple[int, int, int]] = []
+    original = AICoordinator.run_discussion_round
+
+    async def checked(self: AICoordinator, session: Any) -> None:
+        await original(self, session)
+        round_state = session.discussion_round
+        seen.append((round_state.day, len(round_state.outputs), round_state.max_total))
+
+    monkeypatch.setattr(AICoordinator, "run_discussion_round", checked)
+    settings = Settings(werewolf_llm_provider="scenario", werewolf_reasoning_engine="v3")
+
+    run = asyncio.run(evaluate.play_game(3, settings, MetricsCollector()))
+
+    assert run.finished
+    assert seen and seen[0][0] == 1
+    assert all(spoken <= total for _day, spoken, total in seen), seen
 
 
 # -- (4) the designation is a stage of its own, told once and truthfully --

@@ -1031,6 +1031,18 @@ class AICoordinator:
             if target not in book.owed_replies:
                 book.owed_replies.append(target)
 
+    @staticmethod
+    def _grant_extra_turn(round_state: DiscussionRoundState) -> None:
+        """Count a turn given outside the follow-up budget in the round's total.
+
+        The total is what the human's progress counter reads against. An owed
+        answer or a closing turn is handed out whatever the budget says, so
+        leaving it uncounted let the counter read past its total (31/29), and
+        an owed answer used to eat one of the replies the day would otherwise
+        have had -- the roll call grows the total for the same reason.
+        """
+        round_state.max_total += 1
+
     def _take_owed_reply(
         self, state: GameState, round_state: DiscussionRoundState, book: _RoundBook
     ) -> str | None:
@@ -1043,6 +1055,7 @@ class AICoordinator:
                 if pid in round_state.queued:
                     round_state.queued.discard(pid)
                     round_state.reply_queue.remove(pid)
+                self._grant_extra_turn(round_state)
                 return pid
         return None
 
@@ -1089,11 +1102,13 @@ class AICoordinator:
                 book.owed_replies.remove(pid)
             if pid in self._agents and state.players[pid].alive:
                 pressed = pid in round_state.major_targets
+                self._grant_extra_turn(round_state)
                 return pid, "rebuttal_or_reassessment" if pressed else "reaction"
         if book.designation_pending:
             book.designation_pending = False
             speaker = book.summary_speaker
             if speaker is not None and speaker in self._agents and state.players[speaker].alive:
+                self._grant_extra_turn(round_state)
                 return speaker, _FINAL_DESIGNATION_STAGE
         return None, "consensus_summary"
 
