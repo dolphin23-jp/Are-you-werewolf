@@ -1,9 +1,21 @@
 """Night action resolution, in explicit, documented order.
 
 Day-0 night (the scripted "first victim" night before Day 1 discussion):
-  1. The scripted first victim dies unconditionally (never Wolf/Fox).
-  2. The Seer may optionally divine (result revealed at dawn).
+  1. The Seer may optionally divine (result revealed at dawn).
+  2. If the divined target is the Fox, it is curse-killed, exactly as on a
+     regular night: same cause (`CURSED`), same night numbering (dated 0, found
+     at dawn of Day 1), applied before the night's other death.
+  3. The scripted first victim dies unconditionally (never Wolf/Fox). It stands
+     where a regular night's attack stands, so it is applied after the curse.
 No guard/attack/medium activity happens on Day 0.
+
+The night-0 curse is a rule, not a detail: the table reasons from it ("the
+seer's night-0 target did not die, so if that seer is real it is not the fox"),
+the solver assumes it on every night, and an engine that skipped it on night 0
+made a real seer who happened to divine the fox look fake to their own logic.
+With no attack on night 0, a night-0 death other than the first victim can only
+be the curse, which is why the public death cause still reads as an ordinary
+night death and the deduction is left to the table.
 
 Regular night (Day N >= 1):
   1. Medium result: if a player was executed at the end of Day N, every
@@ -44,6 +56,14 @@ class NightResult:
 class NightResolver:
     def resolve_day_zero(self, state: GameState, first_victim_id: str) -> NightResult:
         deaths: list[DeathRecord] = []
+        divine_result = self._resolve_divine(state)
+        # The same curse as every other night. The first victim cannot be
+        # divined (the controller refuses it), so the order below changes no
+        # outcome -- it only keeps the death records in regular-night order.
+        curse_death = self._apply_curse(state, divine_result)
+        if curse_death is not None:
+            deaths.append(curse_death)
+
         victim = state.players[first_victim_id]
         victim.alive = False
         victim.death_cause = DeathCause.FIRST_VICTIM
@@ -53,8 +73,6 @@ class NightResolver:
         )
         state.death_records.append(record)
         deaths.append(record)
-
-        divine_result = self._resolve_divine(state)
 
         state.pending_divine = None
         state.pending_guard = None
