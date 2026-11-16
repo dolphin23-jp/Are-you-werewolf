@@ -482,10 +482,12 @@ def test_chat_vote_prompt_states_what_the_seat_said_and_uses_names():
     )
     body = messages[0].content
 
-    assert "【昼にあなたが推した吊り先】Player2" in body
+    # The note's target, labelled as the note, and flagged: p1 never named
+    # Player2 at the table today.
+    assert "【今日のメモの吊り先】Player2(卓ではまだ名指ししていない)" in body
     assert "【投票候補】Player2、Player3" in body
     assert "Player2(p2)" not in body
-    assert "昼に言った吊り先と違う相手に入れるなら" in body
+    assert "卓で名指しした吊り先と違う相手に入れるなら" in body
 
 
 def test_chat_night_prompt_names_the_action_in_japanese_and_carries_the_roster():

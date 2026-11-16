@@ -9,15 +9,53 @@ from __future__ import annotations
 import random
 from dataclasses import dataclass, replace
 
+# The structured register (legacy, v2): per-speaker ranges those prompts were
+# measured with. The v3 chat register does not use them; see below.
 DISCUSSION_LENGTH_RANGES: dict[str, tuple[int, int]] = {
     "terse": (30, 100),
     "normal": (80, 240),
     "wordy": (180, 400),
 }
 
+# The chat register (v3). The first Claude game asked normal speakers for
+# 80-100 characters and wordy ones for 180-200, and got a table mean of 130:
+# the model overshoots whatever it is told by about 1.25-1.6x. So every
+# persona gets the same short band for an ordinary turn -- a persona's cadence
+# is said in words (`chat_cadence_text`), not as a longer allowance -- and only the
+# stages that carry a CO, a result or the day's closing line may run longer.
+CHAT_TURN_CHARS: tuple[int, int] = (15, 60)
+CHAT_STAGE_MAX_CHARS: dict[str, int] = {
+    "reaction": 30,
+    "initial_view": 60,
+    "rebuttal_or_reassessment": 60,
+    "minority_review": 60,
+    "freemason_confirmation": 60,
+    "human_followup": 60,
+    "immediate": 120,
+    "consensus_summary": 120,
+}
+# The hard cap: what the agent truncates to and budgets tokens for. Above the
+# longest stage so an overshoot is not cut mid-thought; the code-written fact
+# sentences are added after the cut, so a result can never be truncated away.
+CHAT_MESSAGE_MAX_CHARS = 160
 
-def discussion_length_range(verbosity: str) -> tuple[int, int]:
+
+def discussion_length_range(verbosity: str, *, chat: bool = False) -> tuple[int, int]:
+    """(minimum, hard cap) for one discussion message.
+
+    `chat` selects the v3 register, where the band is the same for every
+    persona; otherwise the per-verbosity range the structured prompts use."""
+    if chat:
+        return CHAT_TURN_CHARS[0], CHAT_MESSAGE_MAX_CHARS
     return DISCUSSION_LENGTH_RANGES.get(verbosity, DISCUSSION_LENGTH_RANGES["normal"])
+
+
+def chat_stage_max_chars(stage: str) -> int:
+    """The character cap the v3 prompt names for a discussion stage. A stage
+    with a parameter (`minority_review:pN`) shares its family's cap; one the
+    table does not know gets the ordinary turn's."""
+    family = stage.split(":", 1)[0]
+    return CHAT_STAGE_MAX_CHARS.get(family, CHAT_TURN_CHARS[1])
 
 
 @dataclass(frozen=True)
@@ -48,16 +86,20 @@ class Personality:
         if chat:
             style = CHAT_THINKING_STYLE.get(self.thinking_style, self.thinking_style)
             style_line = f"- 考え方の癖: {style}\n"
+            # The cadence in words. Printed as "発言頻度: 1.0 / 発言量: normal"
+            # the values meant nothing to the model, and the length it did
+            # follow came from the per-verbosity character range instead.
+            cadence_line = f"- 話す量: {chat_cadence_text(self.talkativeness, self.verbosity)}"
         else:
             style_line = f"- 思考スタイル: {self.thinking_style}\n"
+            cadence_line = f"- 発言頻度: {self.talkativeness:.1f}\n- 発言量: {self.verbosity}"
         section = (
             f"【あなたの人格】\n"
             f"- 口調: {self.tone}\n"
             f"{style_line}"
             f"- 議論スタイル: {self.discussion_style}\n"
             f"- 感情傾向: {self.emotional_tendency}\n"
-            f"- 発言頻度: {self.talkativeness:.1f}\n"
-            f"- 発言量: {self.verbosity}"
+            f"{cadence_line}"
         )
         # Examples anchor the register far better than the abstract labels do, but a
         # preset without them must not emit a dangling empty bullet.
@@ -65,7 +107,11 @@ class Personality:
         if chat:
             openness = OPENNESS_TEXT.get(self.openness, OPENNESS_TEXT["normal"])
             section += f"\n- 意見の聞き方: {openness}"
-        if lines:
+        if lines and chat:
+            # An example is copied whole when nothing says not to: one seat
+            # opened 6 of 6 lines with its example's "経験上".
+            section += "\n- 口調の例(言い回しを毎回は使わない):\n  - " + "\n  - ".join(lines)
+        elif lines:
             section += "\n- 口調の例:\n  - " + "\n  - ".join(lines)
         return section
 
@@ -82,8 +128,10 @@ CHAT_THINKING_STYLE: dict[str, str] = {
 # Every preset is asked to weigh what it hears; this is only how far an argument
 # has to go before it moves them. Without it the table is either players who
 # fold to the first objection or players who dig in whatever is said.
+# No stock acknowledgement in here: the open text once quoted 「確かに」, and one
+# open seat opened 7 of its 14 lines with an acknowledgement word.
 OPENNESS_TEXT: dict[str, str] = {
-    "open": "人の話をよく聞く。筋の通った指摘には「確かに」とすぐ認めて、考えを変える",
+    "open": "人の話をよく聞く。筋の通った指摘はすぐ認めて、考えを変える",
     "normal": "筋の通った指摘は認めて考えを変えるが、根拠の弱い指摘では動かない",
     "firm": "一度決めた考えは簡単には変えない。結果や矛盾のような決定的な根拠が出たときだけ、"
     "認めて変える",
@@ -286,11 +334,14 @@ _SAMPLE_LINES: dict[str, tuple[str, ...]] = {
 # How the same people type at a chat table: short, reactive, in the words a
 # 17A village actually uses. `〇〇` stands for whichever player the line is
 # about -- a real name here would be copied into games it does not belong to.
+# The third line shows how the persona takes an objection. None of them opens
+# with an acknowledgement before holding its view ("その点は認める。ただ…"): that
+# shape came back as a ritual in 17 of 77 lines of the first Claude game.
 _CHAT_LINES: dict[str, tuple[str, ...]] = {
     "冷静な論客": (
         "〇〇の票だけ昨日の理由と噛み合ってない。そこ説明ほしい。",
         "2-1。初手はグレランでいいと思う。",
-        "その点は認める。ただ〇〇の票の件は残るから、そこは説明ほしい。",
+        "その説明なら筋は通る。〇〇は一旦下げる。",
     ),
     "元気なムードメーカー": (
         "おはよー！占いCOは出揃った？",
@@ -305,12 +356,12 @@ _CHAT_LINES: dict[str, tuple[str, ...]] = {
     "自信家のリーダー": (
         "今日は〇〇と〇〇の2択。反論聞いてから指定出す。",
         "異論あるなら今のうちに。",
-        "その反論は聞いた。でも〇〇の結果は動かない。指定は変えない。",
+        "〇〇の結果は動かない。指定は変えない。",
     ),
     "疑り深い探偵": (
         "その理由、昨日の票と合わないよね？",
         "で、なんで今になって意見変えたの。",
-        "言い分は分かった。けど票の食い違いは消えてないよね。",
+        "票の食い違いは？そこはまだ消えてないよね。",
     ),
     "優しい世話役": (
         "まずは順番に意見聞きましょ。",
@@ -325,12 +376,12 @@ _CHAT_LINES: dict[str, tuple[str, ...]] = {
     "熱血な正義漢": (
         "曖昧なまま吊るのは嫌だ！根拠言い切ろう！",
         "そこ怪しい！説明して！",
-        "気持ちは分かる！でも根拠が出るまで引かないぞ！",
+        "根拠が出るまでは引かないぞ！",
     ),
     "のんびり屋": (
         "まあ回答待ってからでも遅くないよ〜",
         "うーん、今んとこ〇〇がちょっと気になるかな。",
-        "あ〜確かにそうかも。〇〇はいったん置いとくよ〜",
+        "あ〜そっか、そうかも。〇〇はいったん置いとくよ〜",
     ),
     "策略家": (
         "あえてこの二人の反応を見たい。",
@@ -345,7 +396,7 @@ _CHAT_LINES: dict[str, tuple[str, ...]] = {
     "ベテランの古参": (
         "焦るな。昨日の票を順に見よう。",
         "急いで結論出す場面じゃない。",
-        "言い分は聞いた。ただ経験上、そこは譲れん。結果が出たら考え直す。",
+        "そこは譲れん。結果が出たら考え直す。",
     ),
     "陽気なお調子者": (
         "おっと、その票替えは見逃せないねぇ",
@@ -356,7 +407,7 @@ _CHAT_LINES: dict[str, tuple[str, ...]] = {
     "情熱的な扇動家": (
         "ここで意見揃えよう！",
         "この矛盾は放置できない！",
-        "その指摘は一理ある。でも流れは変えない、ここは押す！",
+        "〇〇の票の説明がまだ！ここは押す！",
     ),
     "素朴な聞き手": (
         "そこもう少し聞いていい？",
@@ -366,19 +417,67 @@ _CHAT_LINES: dict[str, tuple[str, ...]] = {
     "長考する参謀": (
         "二つの視点で分けて整理する。",
         "判定と投票を合わせると、この内訳が自然。",
-        "その視点は取り入れる。ただ結論は、判定と合わせてからにします。",
+        "その視点も並べて、判定と合わせてから決めます。",
     ),
 }
 
 # The cadence axes are part of the presets (rather than assigned per game),
 # so a seeded assignment still returns one of the canonical personalities.
-_VERBOSITY = ("terse", "normal", "wordy")
-_ACTIVITY = (0.65, 0.85, 1.0, 1.2, 1.4)
+# (talkativeness, verbosity), read off what each preset says about itself.
+# They used to come from the preset's list position (`index % 5`, `index % 3`),
+# which made the listener who "rarely speaks up" (慎重な観察者) and the
+# "few words, own pace" player (のんびり屋) the two wordiest seats at the table.
+# talkativeness drives how often the coordinator re-queues a seat;
+# verbosity is the structured register's length range and the chat
+# register's cadence wording.
+PERSONA_CADENCE: dict[str, tuple[float, str]] = {
+    "冷静な論客": (1.0, "normal"),
+    "元気なムードメーカー": (1.4, "terse"),
+    "慎重な観察者": (0.65, "terse"),
+    "自信家のリーダー": (1.2, "normal"),
+    "疑り深い探偵": (1.2, "terse"),
+    "優しい世話役": (1.0, "normal"),
+    "皮肉屋の理系": (0.85, "normal"),
+    "熱血な正義漢": (1.2, "terse"),
+    "のんびり屋": (0.65, "terse"),
+    "策略家": (0.85, "normal"),
+    "新人風の初々しさ": (0.85, "terse"),
+    "ベテランの古参": (0.85, "wordy"),
+    "陽気なお調子者": (1.2, "terse"),
+    "無口な実務家": (0.65, "terse"),
+    "情熱的な扇動家": (1.4, "normal"),
+    "素朴な聞き手": (0.85, "terse"),
+    "長考する参謀": (0.85, "wordy"),
+}
+
+_TALK_TEXT: tuple[tuple[float, str], ...] = (
+    (0.7, "自分からはあまり話さない"),
+    (0.9, "話す回数は少なめ"),
+    (1.1, "ふつうに話す"),
+    (1.3, "よく口を挟む"),
+)
+_LOUDEST_TALK_TEXT = "とにかくよく話す"
+_LENGTH_TEXT: dict[str, str] = {
+    "terse": "一言で済ませることが多い",
+    "normal": "言いたいことを一つだけ言う",
+    "wordy": "説明を足したくなるが、卓では1〜2文に収める",
+}
+
+
+def chat_cadence_text(talkativeness: float, verbosity: str) -> str:
+    """How often and how long a persona talks, as the chat prompt says it."""
+    talk = next(
+        (text for ceiling, text in _TALK_TEXT if talkativeness < ceiling), _LOUDEST_TALK_TEXT
+    )
+    length = _LENGTH_TEXT.get(verbosity, _LENGTH_TEXT["normal"])
+    return f"{talk}。{length}"
+
+
 PERSONALITIES = [
     replace(
         personality,
-        talkativeness=_ACTIVITY[index % len(_ACTIVITY)],
-        verbosity=_VERBOSITY[index % len(_VERBOSITY)],
+        talkativeness=PERSONA_CADENCE.get(personality.name, (1.0, "normal"))[0],
+        verbosity=PERSONA_CADENCE.get(personality.name, (1.0, "normal"))[1],
         # `.get`, not `[...]`: a preset added or renamed without updating
         # `_SAMPLE_LINES` would otherwise raise at import time and take the whole
         # app down rather than just losing its examples.
