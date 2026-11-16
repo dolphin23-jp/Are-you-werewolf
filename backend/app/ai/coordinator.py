@@ -2088,7 +2088,9 @@ class AICoordinator:
             self._recorder, "update_latest_decision"
         ):
             # Classified before a ballot-only audit can exist: the comparison
-            # is with what the seat had seen when it last spoke.
+            # is with what the seat had seen when it last spoke. Each round's
+            # ballot lands on its own record (`_ensure_ballot_audit`), so a
+            # runoff never overwrites the first round's.
             change_kind, change_reason = self._classify_vote_change(
                 state,
                 player_id,
@@ -2103,6 +2105,7 @@ class AICoordinator:
                 player_id,
                 state.day,
                 vote_target=actual_target,
+                vote_round=state.vote_round,
                 target_change_classification=change_kind,
                 target_change_reason=change_reason,
                 ally_vote=ally_vote,
@@ -2206,7 +2209,8 @@ class AICoordinator:
             for message_id, author_id in self._later_public_arguments(
                 state, player_id, (stated_target, actual_target)
             )
-            if mentions_player(reason, author_id, state.players[author_id].name)
+            if author_id in state.players
+            and mentions_player(reason, author_id, state.players[author_id].name)
         )
         if arguments:
             cited = "、".join(arguments)
@@ -2247,33 +2251,49 @@ class AICoordinator:
     def _ensure_ballot_audit(
         self, state: GameState, player_id: str, candidates: Sequence[str]
     ) -> None:
-        """Open a ballot-only audit for a seat that had no discussion turn today.
+        """Open a ballot-only audit for a ballot no audit of today can hold.
+
+        That is a seat with no discussion turn today, or a runoff ballot from
+        a seat whose latest audit already holds an earlier round's.
 
         Audits used to start at a discussion turn, so a seat that never spoke
         cast a ballot nobody checked -- 22 of the 69 in the first Claude game,
         a werewolf's vote on its partner among them, so the gate's zero for
-        ally votes was a zero over the seats that happened to speak. v2 and v3
-        only, like the turn audits: legacy keeps no audit at all.
+        ally votes was a zero over the seats that happened to speak. And a
+        runoff ballot used to be written over the first round's, so an
+        unplanned ally vote or an unexplained change in round 1 left the gate
+        when the seat voted differently in the runoff. A runoff record keeps
+        the snapshot of the audit it follows -- what the seat had seen when it
+        last spoke -- so every round is classified against the same thing.
+        v2 and v3 only, like the turn audits: legacy keeps no audit at all.
         """
         recorder = self._recorder
-        if (
-            recorder is None
-            or self.reasoning is None
-            or not hasattr(recorder, "latest_decision")
-            or recorder.latest_decision(player_id, state.day) is not None
+        if recorder is None or self.reasoning is None or not hasattr(recorder, "latest_decision"):
+            return
+        latest = recorder.latest_decision(player_id, state.day)
+        if latest is not None and (
+            latest.vote_target is None or latest.vote_round == state.vote_round
         ):
             return
+        if latest is None:
+            board_version = self.reasoning.observations.board_version
+            public_result_ids = self._public_result_ids(state)
+            correction_ids = tuple(
+                sorted({item.correction_id for item in recorder.transcript.correction_audits})
+            )
+        else:
+            board_version = latest.board_version
+            public_result_ids = latest.public_result_ids_at_decision
+            correction_ids = latest.correction_ids_at_decision
         recorder.record_decision_audit(
             DecisionAuditRecord(
                 game_id=state.session_id,
                 day=state.day,
                 phase=state.phase.value,
                 player_id=player_id,
-                board_version=self.reasoning.observations.board_version,
-                public_result_ids_at_decision=self._public_result_ids(state),
-                correction_ids_at_decision=tuple(
-                    sorted({item.correction_id for item in recorder.transcript.correction_audits})
-                ),
+                board_version=board_version,
+                public_result_ids_at_decision=public_result_ids,
+                correction_ids_at_decision=correction_ids,
                 votable_ids_at_decision=tuple(candidates),
                 vote_only=True,
             )

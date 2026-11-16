@@ -44,11 +44,17 @@ class DecisionAuditRecord:
     attempted_public_evidence_ids: tuple[str, ...] = ()
     brief_public_evidence_ids: tuple[str, ...] = ()
     emitted_public_evidence_ids: tuple[str, ...] = ()
-    # A ballot cast by a seat that had no discussion turn that day. Only a
-    # turn used to open an audit, so those ballots were never checked at all
-    # (22 of 69 in the first Claude game, an ally vote among them). The record
-    # carries the vote and nothing else: the seat decided nothing in public.
+    # A record that carries a ballot and nothing else: one cast by a seat that
+    # had no discussion turn that day, or a runoff round's ballot. Only a turn
+    # used to open an audit, so the first kind was never checked at all (22 of
+    # 69 in the first Claude game, an ally vote among them); and a runoff used
+    # to overwrite the first round's ballot on the same record, erasing an
+    # unplanned ally vote or an unexplained change from the gate.
     vote_only: bool = False
+    # The vote round `vote_target` was cast in: 1 for the day's vote, 2 and on
+    # for runoffs. 0 while no ballot is attached (and in transcripts written
+    # before rounds were kept).
+    vote_round: int = 0
 
 
 @dataclass(frozen=True)

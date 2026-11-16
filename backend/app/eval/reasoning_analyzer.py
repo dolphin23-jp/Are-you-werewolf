@@ -94,7 +94,20 @@ class ReasoningTranscriptAnalyzer:
         }.values()
         stale_attempts = sum(_stale(record) for record in decisions)
         stale_emitted = sum(_stale_emitted(record) for record in decisions)
-        changes = [_change_kind(record) for record in decisions if record.vote_target is not None]
+        # Every ballot of every round has its own record. A seat that made the
+        # same change, or the same vote on its partner, in two rounds of one
+        # day did it once; a different change in the runoff is another.
+        ballots = [record for record in decisions if record.vote_target is not None]
+        changes = {
+            (record.player_id, record.day, record.vote_target, _change_kind(record))
+            for record in ballots
+        }
+        change_kinds = [kind for (_seat, _day, _target, kind) in changes]
+        ally_votes: dict[tuple[str, int, str | None], bool] = {}
+        for record in decisions:
+            if record.ally_vote:
+                ballot = (record.player_id, record.day, record.vote_target)
+                ally_votes[ballot] = ally_votes.get(ballot, True) and record.ally_vote_planned
         deltas = [
             abs(delta)
             for correction in corrections
@@ -125,7 +138,7 @@ class ReasoningTranscriptAnalyzer:
             # A ballot-only audit records a vote, not a decision made in public:
             # it counts towards `vote_count` and the ally checks, not here.
             decision_count=sum(not record.vote_only for record in decisions),
-            vote_count=len(changes),
+            vote_count=len(ballots),
             dead_target_selection_count=sum(
                 not record.target_alive for record in decisions if record.decision_target
             ),
@@ -163,15 +176,11 @@ class ReasoningTranscriptAnalyzer:
             stale_evidence_attempt_count=stale_attempts,
             stale_evidence_blocked_count=stale_attempts - stale_emitted,
             stale_evidence_publicly_emitted_count=stale_emitted,
-            justified_vote_change_count=sum(kind in JUSTIFIED_CHANGES for kind in changes),
-            unexplained_vote_change_count=changes.count(VoteChangeKind.UNEXPLAINED),
-            wolf_ally_vote_count=sum(record.ally_vote for record in decisions),
-            planned_wolf_ally_vote_count=sum(
-                record.ally_vote and record.ally_vote_planned for record in decisions
-            ),
-            unplanned_wolf_ally_vote_count=sum(
-                record.ally_vote and not record.ally_vote_planned for record in decisions
-            ),
+            justified_vote_change_count=sum(kind in JUSTIFIED_CHANGES for kind in change_kinds),
+            unexplained_vote_change_count=change_kinds.count(VoteChangeKind.UNEXPLAINED),
+            wolf_ally_vote_count=len(ally_votes),
+            planned_wolf_ally_vote_count=sum(ally_votes.values()),
+            unplanned_wolf_ally_vote_count=sum(not planned for planned in ally_votes.values()),
             correction_messages_heard=len(tuple(corrections)),
             corrections_confirmed=sum(record.verdict == "confirmed" for record in corrections),
             corrections_refuted=sum(record.verdict == "refuted" for record in corrections),
