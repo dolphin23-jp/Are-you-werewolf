@@ -1,7 +1,7 @@
 import re
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import ValidationInfo, field_validator
+from pydantic import ValidationInfo, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Shared by the field default below and by `_normalize_reasoning_engine`'s
@@ -57,6 +57,13 @@ DEFAULT_ANTHROPIC_BASE_URL = "https://api.anthropic.com"
 _ANTHROPIC_FALLBACK_MODES = ("default", "off")
 
 
+def _unquote(value: str) -> str:
+    """The value inside the quotes and whitespace a Codespaces secret is often
+    pasted with (`"sk-..."`, a trailing newline). A `.env` file is unquoted by
+    its parser already; a real environment variable arrives verbatim."""
+    return value.strip().strip("\"'").strip()
+
+
 class Settings(BaseSettings):
     # `.env` is read relative to the process's working directory (i.e. run
     # uvicorn from `backend/`). Real environment variables always win over
@@ -67,6 +74,11 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         env_prefix="",
         extra="ignore",
+        # A validation error normally quotes its input, and for a check that
+        # spans fields (`_model_id_in_the_provider_field_is_the_model`) the
+        # input is every setting -- API keys included -- printed to the
+        # startup log. The messages here name the offending setting instead.
+        hide_input_in_errors=True,
     )
 
     werewolf_env: str = "development"
@@ -149,6 +161,42 @@ class Settings(BaseSettings):
     # Ceiling on the estimated spend of one human-play session, in USD.
     werewolf_session_max_cost_usd: float = 30.0
 
+    @model_validator(mode="before")
+    @classmethod
+    def _model_id_in_the_provider_field_is_the_model(cls, data: Any) -> Any:
+        """`WEREWOLF_LLM_PROVIDER=claude-haiku-5-5` means Claude, *that* model.
+
+        `_normalize_llm_provider` turns a Claude model id in the provider
+        field into `anthropic`; without this the id itself was dropped and
+        the run billed the default model -- Opus 5.5, forty times Haiku's
+        price -- with nothing on screen to show the swap. This runs before
+        the field validators, so it still sees the id as typed.
+
+        A blank or absent `WEREWOLF_ANTHROPIC_MODEL` takes the id. One that
+        names the same model is fine. One that names another model means two
+        settings disagree about what to bill, and either guess bills a model
+        the owner did not pick, so startup fails and says which two.
+        """
+        if not isinstance(data, dict):
+            return data
+        provider = data.get("werewolf_llm_provider")
+        if not isinstance(provider, str):
+            return data
+        model_id = _unquote(provider).lower()
+        if not _CLAUDE_MODEL_NAME_RE.fullmatch(model_id):
+            return data
+        configured = data.get("werewolf_anthropic_model")
+        if configured is None or (isinstance(configured, str) and not _unquote(configured)):
+            return {**data, "werewolf_anthropic_model": model_id}
+        if isinstance(configured, str) and _unquote(configured).lower() != model_id:
+            raise ValueError(
+                f"WEREWOLF_LLM_PROVIDER={provider!r} names the model {model_id!r}, but "
+                f"WEREWOLF_ANTHROPIC_MODEL={configured!r} names another. Name the model "
+                "in one place: remove WEREWOLF_ANTHROPIC_MODEL, or set "
+                "WEREWOLF_LLM_PROVIDER=anthropic."
+            )
+        return data
+
     @field_validator("werewolf_llm_provider", mode="before")
     @classmethod
     def _normalize_llm_provider(cls, value: object) -> object:
@@ -160,6 +208,8 @@ class Settings(BaseSettings):
         # real provider's models have a name shape no other provider uses
         # (`gpt-*-luna`, `claude-*`), so these aliases cannot pick the wrong
         # one; anything else stays as typed and fails as an unknown provider.
+        # A Claude id is also the model asked for: see
+        # `_model_id_in_the_provider_field_is_the_model`.
         if _LUNA_MODEL_NAME_RE.fullmatch(normalized):
             return "luna"
         if normalized == "claude" or _CLAUDE_MODEL_NAME_RE.fullmatch(normalized):
@@ -205,6 +255,21 @@ class Settings(BaseSettings):
                 f"WEREWOLF_ANTHROPIC_FALLBACKS={value!r} is not one of {_ANTHROPIC_FALLBACK_MODES}"
             )
         return normalized
+
+    @field_validator("werewolf_anthropic_api_key", "luna_api_key", mode="before")
+    @classmethod
+    def _unquote_api_key(cls, value: object) -> object:
+        """A key never contains quotes or whitespace, so they are dropped.
+
+        A Codespaces secret pasted as `"sk-..."` or with a trailing newline
+        otherwise reached the API verbatim, as `Bearer "sk-..."`: a 401 on
+        every call, from a server that had started fine because the key was
+        not blank. A key that is nothing but quotes and spaces becomes blank,
+        so the provider factory's missing-key check stops startup instead.
+        """
+        if not isinstance(value, str):
+            return value
+        return _unquote(value)
 
     @field_validator("werewolf_anthropic_model", "werewolf_anthropic_base_url", mode="before")
     @classmethod

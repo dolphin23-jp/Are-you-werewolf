@@ -8,6 +8,8 @@ win over it (so a deployment can inject secrets with no .env file present).
 
 from __future__ import annotations
 
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -208,3 +210,144 @@ def test_shipped_env_example_configures_anthropic_with_placeholders_only():
     assert settings.werewolf_anthropic_model == DEFAULT_ANTHROPIC_MODEL
     assert settings.werewolf_anthropic_fallbacks == "default"
     assert settings.werewolf_allow_open_access is False
+
+
+# --- a model id in the provider field -------------------------------------------
+
+
+@pytest.mark.parametrize("configured", ["claude-haiku-5-5", ' "Claude-Haiku-5-5" '])
+def test_a_model_id_in_the_provider_field_is_the_model_asked_for(
+    configured: str, monkeypatch: pytest.MonkeyPatch
+):
+    """`.env.example` invites a model id in the provider field. Selecting
+    Claude but throwing the id away billed the default Opus 5.5 -- 40 times
+    Haiku's price -- for an owner who asked for Haiku to run cheaply."""
+    monkeypatch.setenv("WEREWOLF_LLM_PROVIDER", configured)
+    settings = Settings()
+    assert settings.werewolf_llm_provider == "anthropic"
+    assert settings.werewolf_anthropic_model == "claude-haiku-5-5"
+
+
+def test_a_blank_model_setting_leaves_the_provider_fields_model_in_charge(tmp_path: Path):
+    env_file = _write_env(
+        tmp_path, "WEREWOLF_LLM_PROVIDER=claude-sonnet-5-5\nWEREWOLF_ANTHROPIC_MODEL=\n"
+    )
+    assert Settings(_env_file=str(env_file)).werewolf_anthropic_model == "claude-sonnet-5-5"
+
+
+def test_the_same_model_named_in_both_settings_is_accepted(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("WEREWOLF_LLM_PROVIDER", "claude-sonnet-5-5")
+    monkeypatch.setenv("WEREWOLF_ANTHROPIC_MODEL", ' "claude-sonnet-5-5" ')
+    assert Settings().werewolf_anthropic_model == "claude-sonnet-5-5"
+
+
+def test_two_different_models_fail_at_startup_without_echoing_the_key(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Either guess bills a model the owner did not pick, so neither is made.
+    The error must not print the rest of the settings: one of them is the key."""
+    monkeypatch.setenv("WEREWOLF_LLM_PROVIDER", "claude-haiku-5-5")
+    monkeypatch.setenv("WEREWOLF_ANTHROPIC_MODEL", "claude-opus-5-5")
+    monkeypatch.setenv("WEREWOLF_ANTHROPIC_API_KEY", "sk-ant-not-a-real-key")
+    with pytest.raises(ValidationError) as excinfo:
+        Settings()
+    message = str(excinfo.value)
+    assert "claude-haiku-5-5" in message and "claude-opus-5-5" in message
+    assert "WEREWOLF_ANTHROPIC_MODEL" in message
+    assert "sk-ant-not-a-real-key" not in message
+
+
+@pytest.mark.parametrize("configured", ["claude", "anthropic", "mock", "luna", "gpt-6-luna"])
+def test_a_provider_without_a_claude_model_id_keeps_the_configured_model(configured: str):
+    assert Settings(werewolf_llm_provider=configured).werewolf_anthropic_model == (
+        DEFAULT_ANTHROPIC_MODEL
+    )
+    explicit = Settings(
+        werewolf_llm_provider=configured, werewolf_anthropic_model="claude-sonnet-5-5"
+    )
+    assert explicit.werewolf_anthropic_model == "claude-sonnet-5-5"
+
+
+# --- API keys -------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("field", "env_name"),
+    [
+        ("werewolf_anthropic_api_key", "WEREWOLF_ANTHROPIC_API_KEY"),
+        ("luna_api_key", "LUNA_API_KEY"),
+    ],
+)
+def test_a_quoted_or_space_padded_api_key_is_unwrapped(
+    field: str, env_name: str, monkeypatch: pytest.MonkeyPatch
+):
+    """A Codespaces secret pasted with quotes or a trailing newline reached the
+    API verbatim as `Bearer "sk-..."`: a 401 on every call, from a server that
+    had started fine. Blank after unwrapping is unset, so the startup check
+    for a missing key still fires."""
+    monkeypatch.setenv(env_name, ' "sk-test-key" \n')
+    assert getattr(Settings(), field) == "sk-test-key"
+    monkeypatch.setenv(env_name, "'sk-test-key'")
+    assert getattr(Settings(), field) == "sk-test-key"
+    monkeypatch.setenv(env_name, ' "" ')
+    assert getattr(Settings(), field) == ""
+
+
+# --- .devcontainer/start.sh -------------------------------------------------------
+
+_START_SH = Path(__file__).resolve().parents[3] / ".devcontainer" / "start.sh"
+_CLAUDE_READY = {"WEREWOLF_ANTHROPIC_API_KEY": "test-key", "WEREWOLF_ACCESS_PASSWORD": "pw"}
+_needs_bash = pytest.mark.skipif(shutil.which("bash") is None, reason="start.sh is bash")
+
+
+def _run_start_sh(tmp_path: Path, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    """start.sh with `uvicorn` and `pnpm` stubbed, so nothing is built or served."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for tool in ("uvicorn", "pnpm"):
+        stub = bin_dir / tool
+        stub.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        stub.chmod(0o755)
+    return subprocess.run(
+        ["bash", str(_START_SH)],
+        env={"PATH": f"{bin_dir}:/usr/bin:/bin", "HOME": str(tmp_path), **env},
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=True,
+    )
+
+
+@_needs_bash
+@pytest.mark.parametrize(
+    ("env", "expected_model"),
+    [
+        ({"WEREWOLF_LLM_PROVIDER": "anthropic"}, DEFAULT_ANTHROPIC_MODEL),
+        ({"WEREWOLF_LLM_PROVIDER": '"Claude-Haiku-5-5"'}, "claude-haiku-5-5"),
+        (
+            {"WEREWOLF_LLM_PROVIDER": "claude", "WEREWOLF_ANTHROPIC_MODEL": ' "claude-sonnet-5-5"'},
+            "claude-sonnet-5-5",
+        ),
+    ],
+)
+def test_start_sh_prints_the_model_that_will_be_billed(
+    tmp_path: Path, env: dict[str, str], expected_model: str
+):
+    """The provider line alone said `anthropic` whichever model was billed."""
+    result = _run_start_sh(tmp_path, {**_CLAUDE_READY, **env})
+    assert "LLM プロバイダ: anthropic" in result.stdout
+    assert f"モデル: {expected_model}\n" in result.stdout
+    assert result.stderr == ""
+
+
+@_needs_bash
+def test_start_sh_warns_when_the_provider_and_model_settings_disagree(tmp_path: Path):
+    result = _run_start_sh(
+        tmp_path,
+        {
+            **_CLAUDE_READY,
+            "WEREWOLF_LLM_PROVIDER": "claude-haiku-5-5",
+            "WEREWOLF_ANTHROPIC_MODEL": "claude-opus-5-5",
+        },
+    )
+    assert "claude-haiku-5-5" in result.stderr and "claude-opus-5-5" in result.stderr
