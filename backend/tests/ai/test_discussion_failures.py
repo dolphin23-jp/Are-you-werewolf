@@ -27,7 +27,7 @@ from app.ai.coordinator import AICoordinator
 from app.ai.provider.base import Message, SchemaT
 from app.ai.reasoning.facts import PublicFactLedger
 from app.ai.reasoning.runtime import ReasoningRuntime
-from app.ai.schemas import MorningIntentOutput
+from app.ai.schemas import BriefDiscussionOutput, MorningIntentOutput
 from app.engine.game import GameController
 from app.engine.phases import Phase
 from app.engine.roles import RoleName
@@ -204,6 +204,53 @@ def test_a_turn_written_in_code_keeps_the_seats_own_notes_and_statement() -> Non
 
     assert coordinator._context.get_reasoning_memo(seer) == notes
     assert runtime.stated_target(seer, state.day) == named
+
+
+class BriefOnlyProvider:
+    """The full contract fails (a truncated JSON, say); the brief one answers."""
+
+    def __init__(self) -> None:
+        self._metrics = _Metrics()
+
+    async def generate_structured(
+        self, *, system: str, messages: list[Message], response_schema: type[SchemaT], **kwargs
+    ):  # type: ignore[no-untyped-def]
+        del system, messages, kwargs
+        if response_schema is BriefDiscussionOutput:
+            return BriefDiscussionOutput(public_message="昨日の票の流れを見直したい。")
+        if response_schema is MorningIntentOutput:
+            return MorningIntentOutput()
+        return None
+
+
+def test_a_brief_fallback_turn_keeps_the_seats_own_notes_and_statement() -> None:
+    """The brief contract asks for the sentence alone, so its turn carries no
+    notes. Stored as the seat's memo it wiped the previous plan, and recorded as
+    the stated target it erased the candidate the seat argued earlier today --
+    the same harm a code-written turn was already guarded against."""
+    controller, seer, target = _seer_holding_a_result()
+    state = controller.state
+    runtime = ReasoningRuntime(state, AI_IDS, seed=1)
+    provider = BriefOnlyProvider()
+    coordinator = AICoordinator(
+        state, AI_IDS, provider, seed=1, reasoning=runtime, model_decides=True
+    )
+    quiet = next(
+        pid for pid in AI_IDS if state.players[pid].alive and pid != seer
+        and state.players[pid].role is RoleName.VILLAGER
+    )
+    named = next(pid for pid in state.alive_ids() if pid not in (quiet, seer, target, "p0"))
+    notes = {"execution_target": named, "overall_thought": "昨日の票の流れが気になる"}
+    coordinator._context.set_reasoning_memo(quiet, dict(notes))
+    runtime.record_stated_target(quiet, named, state.day)
+
+    output = asyncio.run(coordinator._speak(controller, state, quiet, "initial_view"))
+
+    assert output is not None
+    assert provider._metrics.events["brief_fallback"] == 1  # the brief path really ran
+    assert _public_by(controller, quiet) == ["昨日の票の流れを見直したい。"]
+    assert coordinator._context.get_reasoning_memo(quiet) == notes
+    assert runtime.stated_target(quiet, state.day) == named
 
 
 # -- a turn that arrives after the table moved on --

@@ -106,10 +106,16 @@ class AIPlayerAgent:
         self._max_retries = max_retries
         self._chat_contract = chat_contract
         self._metrics = metrics
+        # Whether the last `generate_discussion` turn came from the brief
+        # contract. Such a turn is a sentence and nothing else: its memo is
+        # empty and its target unset because nobody asked, not because the seat
+        # dropped them, and the caller must not store either over the real ones.
+        self.last_discussion_was_brief = False
 
     async def generate_discussion(
         self, system: str, messages: list[Message]
     ) -> DiscussionOutput | None:
+        self.last_discussion_was_brief = False
         _minimum, maximum = discussion_length_range(self._personality.verbosity)
         budget = _discussion_token_budget(maximum)
         result: DiscussionOutput | None
@@ -138,6 +144,7 @@ class AIPlayerAgent:
             if brief is None:
                 return None
             result = DiscussionOutput(public_message=brief.public_message)
+            self.last_discussion_was_brief = True
         result.public_message = self._sanitize(result.public_message, max_len=maximum)
         return result
 

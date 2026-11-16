@@ -916,10 +916,14 @@ class AICoordinator:
         # would otherwise land in the middle of the vote.
         epoch = (state.phase, state.day)
         controller.set_typing(player_id, True)  # type: ignore[attr-defined]
+        agent = self._agents[player_id]
         try:
-            output = await self._agents[player_id].generate_discussion(system, messages)
+            output = await agent.generate_discussion(system, messages)
         finally:
             controller.set_typing(player_id, False)  # type: ignore[attr-defined]
+        # The brief fallback asks for the sentence alone, so like a turn written
+        # in code it carries no notes: an empty memo and no target, by omission.
+        brief_turn = output is not None and agent.last_discussion_was_brief
         if self._metrics is not None:
             self._metrics.record_discussion_result(skipped=output is None)
         owes_coded_line = decision is not None and self._owes_coded_line(
@@ -941,6 +945,7 @@ class AICoordinator:
             # seer whose request failed lost its result for the whole day.
             output = DiscussionOutput(public_message="")
             posted_by_code = True
+        notes_missing = posted_by_code or brief_turn
         model_requested_target = output.reasoning_memo.execution_target
         if freemason_opening is not None:
             output.public_message = freemason_opening
@@ -1034,9 +1039,10 @@ class AICoordinator:
             # Agreement with no new argument is a reaction, not an analysis. Cut at a
             # sentence boundary so the shortened line still reads as finished Japanese.
             output.public_message = truncate_at_sentence(output.public_message, _REACTION_MAX_CHARS)
-        if not posted_by_code:
-            # A turn written in code carries no notes. Storing its empty memo
-            # would wipe the last thing the model actually thought.
+        if not notes_missing:
+            # A turn written in code, or answered through the brief contract,
+            # carries no notes. Storing its empty memo would wipe the last thing
+            # the model actually thought.
             self._context.set_reasoning_memo(player_id, output.reasoning_memo.model_dump())
         # The claims this turn publishes are decided before it is spoken, so the
         # message can be made to state them. Dropping a declared verdict because
@@ -1117,10 +1123,11 @@ class AICoordinator:
                 displayed_target = displayed_execution_target(
                     output.public_message, PublicFactLedger(state)
                 )
-            if not (posted_by_code and displayed_target is None):
-                # A v3 turn written in code names no candidate because the
-                # model said nothing, not because the seat dropped its earlier
-                # one; recording None would erase what it did say today.
+            if not (notes_missing and displayed_target is None):
+                # A v3 turn written in code or through the brief contract names
+                # no candidate because nobody asked the model for one, not
+                # because the seat dropped its earlier one; recording None would
+                # erase what it did say today.
                 self.reasoning.record_stated_target(player_id, displayed_target, state.day)
         required_ids: tuple[str, ...] = ()
         if self._recorder is not None and decision is not None and self.reasoning is not None:
