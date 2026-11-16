@@ -5,8 +5,22 @@
 - `frontend/`: Vite + React + TypeScript, strict mode, no `@ts-nocheck`.
 - Default LLM provider is `mock` (`WEREWOLF_LLM_PROVIDER=mock`) — zero cost, zero
   network. Tests always run against mock; never wire a live provider into CI.
+- The real provider is `anthropic` (`WEREWOLF_LLM_PROVIDER=anthropic`, default model
+  `claude-opus-5-5`); `luna` stays selectable but dormant. `WEREWOLF_ANTHROPIC_API_KEY`
+  lives only as a GitHub Actions secret for the manually dispatched eval workflows or
+  as a Codespaces secret — never in `ci.yml`, never in a committed file. The app reads
+  only `WEREWOLF_ANTHROPIC_*`, never the SDK's ambient `ANTHROPIC_*` variables.
+- Keep every schema a provider sends within Anthropic's structured-output limits
+  (24 optional / 16 union-typed parameters per request, nested included);
+  `backend/tests/ai/test_schema_complexity.py` enforces it. v3 sends
+  `ChatDiscussionOutput`, not `DiscussionOutput` (36 optional parameters).
+- Do not word prompts or wire fields as the model's 思考 / thought / reasoning: a
+  request to write out its thinking can be refused as `reasoning_extraction`, and
+  refusal fallbacks do not retry that.
+- Read `docs/approach-reset-2026-10.md` §11 before changing the provider.
 - Run backend tests: `cd backend && source .venv/bin/activate && pytest`.
-- Run backend lint/types: `ruff check app tests scripts && mypy app`.
+- Run backend lint/types: `ruff check app tests scripts && mypy app --exclude '^app/training/torch_.*\.py$'`
+  (the CI form; the torch modules are type-checked in the separate transformer job).
 - Run frontend tests: `cd frontend && pnpm test`. Lint/types: `pnpm exec eslint . && pnpm exec tsc -b --noEmit`.
 - See `docs/architecture.md` for the design philosophy carried over from the
   prior implementation and what was deliberately changed.

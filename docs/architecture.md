@@ -635,10 +635,18 @@ v2 と同じコードが担い、**誰を疑うか・投票・夜行動・発言
 ## LLMプロバイダ
 
 `backend/app/ai/provider/base.py` の `LLMProvider` プロトコルを介して
-プロバイダを抽象化。実装は2つ:
+プロバイダを抽象化。実装は4つ(オフラインのテスト用ダブルが2つ、実APIが2つ):
 
 - `mock.py`: 決定的・シード可能なテスト用ダブル。
+- `scenario.py`: 返信・名指し質問・処刑候補まで構造を埋める、より豊かなオフラインのダブル。
+- `anthropic_claude.py`: Anthropic の Claude API(既定 `claude-opus-5-5`)。**現在の実プロバイダ**
+  (2026-11-16 に luna から切り替えた)。設定は `WEREWOLF_ANTHROPIC_*` の名前空間だけを読み、
+  キーと接続先を SDK に明示して渡す。構造化出力のスキーマの上限(1要求あたり任意パラメータ24・
+  union 16)、呼び出し種別ごとの思考量(effort)、拒否時のサーバー側フォールバック、単価表による
+  費用の予約と精算、プロセス全体の同時実行上限は、決定の理由とあわせて
+  `docs/approach-reset-2026-10.md` の §11 にまとめた。
 - `luna_openai.py`: `openai.AsyncOpenAI` を使った gpt-luna 系(現行は gpt-6-luna)の実装。
+  休眠中の選択肢として残している(以下の記述は導入時のもの)。
   strict JSON-schema structured output を第一経路とし、失敗時は
   `json_object` モード + 寛容パーサー(生パース→フェンス付きJSON抽出→
   最初の`{`〜最後の`}`)にフォールバックする。
@@ -652,8 +660,9 @@ v2 と同じコードが担い、**誰を疑うか・投票・夜行動・発言
   「JSONとして壊れている」と「出力予算が尽きて途中で切れた」を
   区別できない(前者はプロンプト、後者は `max_tokens` の問題)。
 
-`WEREWOLF_LLM_PROVIDER` 環境変数で明示的に切り替える(`mock` | `luna`)。
-`luna` 選択時に `LUNA_API_KEY` が未設定なら起動時に即エラーとする
+`WEREWOLF_LLM_PROVIDER` 環境変数で明示的に切り替える(`mock` | `scenario` | `anthropic` |
+`luna`。既定は `mock`)。`anthropic` で `WEREWOLF_ANTHROPIC_API_KEY`、`luna` で
+`LUNA_API_KEY` が未設定なら、課金APIを呼ぶ前にエラーとする
 (旧実装のAPIキー文字列を見て自動フォールバックする挙動はやめた)。
 
 ## 旧実装から修正した既知の問題
@@ -663,8 +672,8 @@ v2 と同じコードが担い、**誰を疑うか・投票・夜行動・発言
 | 同期SDKを`async def`内でブロッキング呼び出し | `AsyncOpenAI`を徹底使用 |
 | プレーンテキスト+正規表現JSONパースのみ | structured output を第一経路に |
 | 単一グローバルインメモリセッション | `SessionStore`で複数ゲーム対応 |
-| プロバイダ抽象化なし | `LLMProvider`プロトコル+2実装+factory |
-| 投票/夜フェーズでのLLM呼び出しが無制限並列 | `LUNA_MAX_CONCURRENCY`セマフォ |
+| プロバイダ抽象化なし | `LLMProvider`プロトコル+複数実装(mock・scenario・anthropic・luna)+factory |
+| 投票/夜フェーズでのLLM呼び出しが無制限並列 | `WEREWOLF_ANTHROPIC_MAX_CONCURRENCY` / `LUNA_MAX_CONCURRENCY` の同時実行上限 |
 | APIキー文字列の中身で自動モック判定 | `WEREWOLF_LLM_PROVIDER`明示指定 |
 
 ## セッション管理

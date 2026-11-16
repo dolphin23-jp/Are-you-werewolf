@@ -16,19 +16,30 @@ GitHubのリポジトリページ → **Settings → Secrets and variables → A
 
 | 種別 | 名前 | 値 |
 |---|---|---|
+| Secret | `WEREWOLF_ANTHROPIC_API_KEY` | Anthropic Console で発行した実際のキー |
+| Variable | `WEREWOLF_ANTHROPIC_MODEL` | `claude-opus-5-5`(既定値なので省略可) |
+
+> Codespaces secrets とは別枠です。Codespacesに登録済みでも、Actions用に改めて
+> 登録が必要です。キーは手動実行だけの評価ワークフローに渡り、CI(`ci.yml`)には
+> 渡りません。
+
+キーは、月の利用上限(spend limit)を設定した専用のワークスペースで発行しておくと、
+評価の回しすぎやキーの漏えいがあっても、使われる額がその上限で止まります。
+
+**別の選択肢: luna(gpt-6-luna)。** luna で評価する場合だけ、次も登録します。
+
+| 種別 | 名前 | 値 |
+|---|---|---|
 | Secret | `LUNA_API_KEY` | 発行された実際のキー |
 | Secret | `LUNA_BASE_URL` | gpt-6-luna のエンドポイントURL |
 | Variable | `LUNA_MODEL` | `gpt-6-luna`(既定値なので省略可) |
 
-> Codespaces secrets とは別枠です。Codespacesに登録済みでも、Actions用に改めて
-> 登録が必要です。
-
 ### 実行
 
 1. リポジトリの **Actions** タブ → 左の **AI評価** を選ぶ
-2. **Run workflow** をタップし、対戦数・シードなどを入力して実行
+2. **Run workflow** をタップし、対戦数・シード・費用の上限(USD)などを入力して実行
 3. 終わると、実行ページに**レポートがそのまま表示されます**(ダウンロード不要)。
-   実モデルでは1戦に1時間以上かかることがあります(上限は180分)
+   v3 の1戦は gpt-6-luna で約28分でした。Claude ではまだ計測していません(ジョブの上限は180分)
 4. 全出力は Artifacts の `eval-out` からダウンロードできます
 
 対戦記録も折りたたみで同じページに出るので、発言の日本語や人格の維持を
@@ -50,8 +61,10 @@ GitHubのリポジトリページ → **Settings → Secrets and variables → A
 ```
 
 - `──` の行は段階(夜・昼の議論・投票…)の切り替わりで、そこまでの**呼び出し回数・失敗・
-  途中切れ・平均応答時間**が付きます。途中切れ(`finish_reason=length`)が増えているなら、
-  思考量(`reasoning_effort`)を下げて再実行する合図です。
+  途中切れ・平均応答時間**が付きます。途中切れ(`finish_reason=length`。Claude の
+  `stop_reason=max_tokens` もこれとして数えます)が増えているなら、思考量を下げるか
+  (Claude は `WEREWOLF_ANTHROPIC_EFFORT_*`、luna は `LUNA_REASONING_EFFORT`)、Claude なら
+  出力上限 `WEREWOLF_ANTHROPIC_MAX_TOKENS` を上げて再実行する合図です。
 - `[フォールバック]` は、モデルの応答が使えず定型文で代用された発言です。
 - 2分間なにも出ないと `… 生成中` の行が出ます。**出続けていれば遅いだけ**、
   **出ていなければ止まっている**と読めます。
@@ -61,18 +74,23 @@ GitHubのリポジトリページ → **Settings → Secrets and variables → A
   (`report.md` は完走したときだけ出ます)。終了処理は数秒しか待ってもらえないため、
   確実に残るのは直前の段階の切り替わりまでです。
 
-## まず接続確認(1回の呼び出しだけ)
+## まず接続確認(少ない呼び出しだけ)
 
-いきなり評価を回すと1戦で数百回の呼び出しが発生します。その前に、キー・URL・
-モデル名・構造化出力の対応状況を **1回の呼び出し** で確認してください。
+いきなり評価を回すと1戦で数百回の呼び出しが発生します。その前に、キー・モデル名・
+構造化出力の対応状況を、少ない呼び出しで確認してください。
 
 ```bash
 cd backend
-python scripts/check_llm.py
+WEREWOLF_LLM_PROVIDER=anthropic python scripts/check_llm.py
 ```
 
-`LUNA_API_KEY` が空、`LUNA_BASE_URL` がプレースホルダーのまま、URLの誤り、
-認証エラーは、それぞれ具体的な対処つきで表示されます。
+`anthropic` では、ゲームが送る構造化出力のスキーマが API に受け付けられること
+(スキーマが複雑すぎて400にならないこと、拒否されないこと)まで確かめます。発言の
+スキーマが通らないと、試合は動いて見えても、CO・結果の公開・質問・吊り先が黙って
+簡易契約に落ちるためです(`docs/approach-reset-2026-10.md` の §11.2)。
+
+luna(`WEREWOLF_LLM_PROVIDER=luna`)では、`LUNA_API_KEY` が空、`LUNA_BASE_URL` が
+プレースホルダーのまま、URLの誤り、認証エラーが、それぞれ具体的な対処つきで表示されます。
 
 > Codespaces secrets は登録しただけでは反映されません。**Codespace の再起動**
 > (または作り直し)が必要です。
@@ -85,13 +103,27 @@ cd backend
 # 1) ハーネスの動作確認(通信なし・費用ゼロ)
 python scripts/evaluate.py --games 2 --provider mock --out eval-out
 
-# 2) 実際の gpt-6-luna で評価(まず1戦から)
-python scripts/evaluate.py --games 1 --provider luna --out eval-out
+# 2) 実際の Claude で評価(まず1戦から。--max-cost は必須)
+python scripts/evaluate.py --games 1 --provider anthropic --max-cost 20 --out eval-out
 
-# 3) 日本語/人格のLLM判定も行う(追加費用)
-python scripts/evaluate.py --games 3 --provider luna --judge \
+# 3) 日本語/人格のLLM判定も行う(追加費用。判定は別モデルで)
+python scripts/evaluate.py --games 1 --provider anthropic --max-cost 25 \
+    --judge --judge-model claude-sonnet-5-5 --out eval-out
+
+# 別の選択肢: luna(単価を渡すと金額換算)
+python scripts/evaluate.py --games 1 --provider luna \
     --price-in 0.15 --price-out 0.60 --out eval-out
 ```
+
+`--provider anthropic` では **`--max-cost`(USD)が必須**です。各呼び出しは送る前に最悪の
+費用を予約し、終わってから実際の費用で精算するので、同時に走る呼び出しがそろって上限を
+すり抜けることはありません。上限を超えそうになった時点で、その呼び出しを送らずに評価を
+止めます。費用はAPIが返す usage と単価表(`backend/app/ai/provider/pricing.py`)から
+自動で計算するので、`--price-in` / `--price-out` は要りません。
+
+1戦の費用はまだ計測していません。run #11(gpt-6-luna)のトークン量を Opus 5.5 の単価に
+当てはめると、キャッシュ無しで約 $7.5 ですが、トークナイザと思考量が違うので±2倍程度の
+幅があります。最初の1戦のレポートで実額を確かめてから、上限と対戦数を決めてください。
 
 出力(`eval-out/`):
 
@@ -103,7 +135,34 @@ python scripts/evaluate.py --games 3 --provider luna --judge \
 | `transcript-seedN.json` | 生データ |
 
 > **費用の注意**: 17人ゲーム1戦で数百回のLLM呼び出しが発生します。
-> まず `--games 1` で実行し、レポートのトークン数を見てから増やしてください。
+> まず `--games 1` で実行し、レポートのトークン数と費用を見てから増やしてください。
+
+### Claude の設定(思考量・同時実行など)
+
+どれも環境変数で、省略すれば既定値です。Actions では評価ワークフローが、Codespaces や
+ローカルでは Codespaces secrets・`backend/.env` が渡します。
+
+| 環境変数 | 既定 | 意味 |
+|---|---|---|
+| `WEREWOLF_ANTHROPIC_EFFORT_DISCUSSION` | `low` | 議論の発言の思考量 |
+| `WEREWOLF_ANTHROPIC_EFFORT_VOTE` | `medium` | 投票の思考量 |
+| `WEREWOLF_ANTHROPIC_EFFORT_NIGHT` | `medium` | 夜行動の思考量 |
+| `WEREWOLF_ANTHROPIC_EFFORT_CHAT` | `low` | 狼・共有チャットの思考量 |
+| `WEREWOLF_ANTHROPIC_EFFORT_DEFAULT` | `medium` | それ以外(要約・判定など)の思考量 |
+| `WEREWOLF_ANTHROPIC_MAX_TOKENS` | `12000` | 1呼び出しの出力上限の下限。思考も出力に数えます |
+| `WEREWOLF_ANTHROPIC_MAX_CONCURRENCY` | `8` | プロセス全体の同時呼び出し数 |
+| `WEREWOLF_ANTHROPIC_TIMEOUT_SECONDS` | `120` | 1呼び出しのタイムアウト(秒) |
+| `WEREWOLF_ANTHROPIC_MAX_RETRIES` | `2` | 再試行の回数(429 は `retry-after` を守る) |
+| `WEREWOLF_ANTHROPIC_FALLBACKS` | `default` | 拒否された手番を別モデルが答え直すサーバー側フォールバック(`default` / `off`) |
+
+思考量は `low` / `medium` / `high` / `xhigh` / `max` から選びます(空は既定値)。Opus 5.5 は
+思考を切れないので、待ち時間と費用は主にこの値で調整します。既定値は仮置きで、
+応答時間の計測をもとに見直す予定です(`docs/approach-reset-2026-10.md` の §11.2・§11.5)。
+
+フォールバックが有効だと、拒否された手番を `claude-opus-5` などの別モデルが答えます。
+実際に答えたモデルは呼び出しごとに記録され、`summary.json` の `metrics` に
+`served_model_counts` と `fallback_served_calls` として出ます。基準線として比べる試合では、
+この数を確かめてください。
 
 ## 評価項目と測り方
 
@@ -116,7 +175,9 @@ python scripts/evaluate.py --games 3 --provider luna --judge \
 |---|---|
 | JSON成功率 | strict schema / json_object / 寛容パース / 失敗 の内訳。**「成功率」だけ見ると、実は全部フォールバックに救われている状態を見逃す**ため経路別に出す |
 | 応答時間 | 呼び出し種別ごとの平均・p50・p95・最大 |
-| 実コスト | APIが返す `usage` を集計。単価を渡すと金額換算 |
+| 実コスト | APIが返す `usage` を集計。Claude は単価表から自動で金額換算(キャッシュの書き込み・読みも別に数える)。luna は単価を渡すと金額換算 |
+| 拒否・フォールバック | 拒否の件数(種類別)、実際に答えたモデルの内訳、フォールバックで答えた呼び出し数(`summary.json` の `metrics`) |
+| コードによる代行 | 簡易契約への降格、コードが決めた投票・夜行動、コードが出した公開義務の文などを名前つきで数える(`metrics` の `events`)。「動いたように見えて実はコードが代行していた」試合を見分けるため |
 | 自分の役職との整合性 | 役職に無い占い/霊媒結果の主張、役職と異なるCO(騙り担当は除外) |
 | 過去発言との矛盾 | CO役職の変更、死亡者を現在の行動対象にする発言、思考メモと投票先の不一致 |
 | 人狼側の欺瞞・連携 | 仲間への明示的な狼視、仲間投票の観測、騙り担当がCOしたか、潜伏担当が黙れたか |
@@ -135,7 +196,8 @@ python scripts/evaluate.py --games 3 --provider luna --judge \
 **2つの注意点**:
 
 1. **自己採点バイアス** — 既定では発言したモデル自身が採点します。自分の出力には
-   甘くなる傾向があるため、可能なら `--judge-model` で別モデルを指定してください。
+   甘くなる傾向があるため、可能なら `--judge-model` で別モデル(たとえば
+   `claude-sonnet-5-5`)を指定してください。
    絶対値より **プロンプト変更前後の相対比較** に使うのが実用的です。
 2. **追加費用** — ゲーム本体とは別に呼び出しが発生します。判定分のコストは
    本体の集計には混ぜていません(本体の応答時間・コストが汚れないようにするため)。
@@ -147,6 +209,17 @@ python scripts/evaluate.py --games 3 --provider luna --judge \
 
 プロンプトを変更したら、**同じ `--seed` で前後比較**してください。役職配置と人格割当は
 シードで再現されるため、変更の効果を分離できます。
+
+- Claude を温度0で動かすことはできません(サンプリングの引数を受け付けないため)。同じシード
+  でも試合は毎回少しずつ変わるので、1試合の差で判断せず、異なるシードを複数、比べる条件の
+  あいだで対にして使ってください。`--games N` は2戦目以降のシードを1ずつ進め、指標を試合を
+  またいで合算するので、試合ごとのばらつきを見るときは1ジョブ1試合で回します
+  (`docs/approach-reset-2026-10.md` の §11.5)。
+- 基準線や A/B に使った試合は、`report.md`・`summary.json`・対戦記録を
+  `backend/artifacts/` にコミットし、コミット SHA・モデル・思考量・シードを添えます。
+  Actions の成果物は14日で消えます(`docs/approach-reset-2026-10.md` の §11.6)。
+- gpt-6-luna の記録(`backend/artifacts/live-v3-luna-run11/`)は文脈として読むためのもので、
+  Claude の試合と前後比較しません。
 
 `summary.json` は実行間の差分を取りやすい形にしてあります。
 
