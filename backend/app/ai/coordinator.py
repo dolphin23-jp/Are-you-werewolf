@@ -1363,10 +1363,6 @@ class AICoordinator:
         # What this turn's prompt will put to the seat. Only these are served by
         # it: a question asked while the model is generating has not been seen.
         shown_questions = self._open_questions(player_id)
-        # The stage the prompt is built for and whose cap the record names:
-        # the scheduler's own. The closing designation has its own stage text
-        # in the context builder, so it is no longer built as a summary.
-        context_stage = stage
         decision = None
         if self.reasoning is not None:
             decision = self.reasoning.discussion_decision(
@@ -1381,13 +1377,13 @@ class AICoordinator:
             system, messages = self._context.build_discussion_context(
                 state,
                 player_id,
-                context_stage,
+                stage,
                 board_memo=self.reasoning.board_memo(state, player_id),
                 required_lines=self._required_lines(state, player_id, decision),
             )
         else:
             system, messages = self._context.build_discussion_context(
-                state, player_id, context_stage
+                state, player_id, stage
             )
             if decision is not None:
                 messages = [
@@ -1442,6 +1438,8 @@ class AICoordinator:
             output = DiscussionOutput(public_message="")
             posted_by_code = True
         notes_missing = posted_by_code or brief_turn
+        # Set when code replaces the whole line, so its length is not the model's.
+        line_replaced_by_code = False
         model_requested_target = output.reasoning_memo.execution_target
         if freemason_opening is not None:
             output.public_message = freemason_opening
@@ -1456,6 +1454,7 @@ class AICoordinator:
             # code meant to keep the partner hidden be the thing that outed it.
             if detect_claimed_role(output.public_message) is not None:
                 output.public_message = "現時点ではCOしません。既出の判定と灰の発言を比較します。"
+                line_replaced_by_code = True
             output.public_claim_role = None
             output.contains_co_claim = False
             output.claim_action = None
@@ -1557,6 +1556,7 @@ class AICoordinator:
         model_text_chars = (
             0
             if posted_by_code
+            or line_replaced_by_code
             or freemason_opening is not None
             or pending_relation is not None
             or self._is_fallback(player_id, output.public_message)
@@ -1597,7 +1597,7 @@ class AICoordinator:
             # v3: the cap this turn's prompt named for its stage, so an overrun
             # counts what the model was told, not the hard cut at 160.
             effective_length_limit=(
-                chat_stage_max_chars(context_stage)
+                chat_stage_max_chars(stage)
                 if self.model_decides
                 else discussion_length_range(self._personalities[player_id].verbosity)[1]
             ),
