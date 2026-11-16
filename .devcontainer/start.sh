@@ -18,16 +18,34 @@ normalize() {
 }
 
 PROVIDER="$(normalize "${WEREWOLF_LLM_PROVIDER:-mock}")"
+# A Claude model id typed into the provider field, which the backend then
+# asks for (app/config.py) -- the line below shows it, so a run that bills
+# a different model than the owner meant is visible before it starts.
+PROVIDER_MODEL=""
 case "$PROVIDER" in
   # A model name typed into the provider field means its provider, as in
   # the backend: "claude" / "claude-opus-5-5" -> anthropic, "gpt-6-luna" -> luna.
-  claude | claude-*) PROVIDER="anthropic" ;;
+  claude) PROVIDER="anthropic" ;;
+  claude-*)
+    PROVIDER_MODEL="$PROVIDER"
+    PROVIDER="anthropic"
+    ;;
   gpt-*-luna) PROVIDER="luna" ;;
 esac
 echo "==> LLM プロバイダ: ${PROVIDER}"
 
 case "$PROVIDER" in
   anthropic)
+    # Quotes and spaces dropped as the backend does, case kept: it sends the
+    # model id as written. The default is DEFAULT_ANTHROPIC_MODEL in
+    # app/config.py (tests/unit/test_config.py keeps the two in step).
+    CONFIGURED_MODEL="$(printf '%s' "${WEREWOLF_ANTHROPIC_MODEL:-}" | tr -d "\"' ")"
+    if [ -n "$PROVIDER_MODEL" ] && [ -n "$CONFIGURED_MODEL" ] \
+      && [ "$(normalize "$CONFIGURED_MODEL")" != "$PROVIDER_MODEL" ]; then
+      echo "!!! WEREWOLF_LLM_PROVIDER は ${PROVIDER_MODEL}、WEREWOLF_ANTHROPIC_MODEL は ${CONFIGURED_MODEL} で、" >&2
+      echo "!!! モデルが食い違っています。どちらか一方だけにしてください(このままではサーバーが起動しません)。" >&2
+    fi
+    echo "==> モデル: ${CONFIGURED_MODEL:-${PROVIDER_MODEL:-claude-opus-5-5}}"
     if [ -z "${WEREWOLF_ANTHROPIC_API_KEY:-}" ]; then
       echo "!!! WEREWOLF_LLM_PROVIDER=anthropic ですが WEREWOLF_ANTHROPIC_API_KEY が空です。" >&2
       echo "!!! GitHub の Settings → Codespaces → Secrets を確認してください。" >&2

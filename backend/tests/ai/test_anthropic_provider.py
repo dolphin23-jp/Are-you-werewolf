@@ -17,6 +17,7 @@ from typing import Any
 import anthropic
 import httpx2
 import pytest
+from anthropic._constants import ANTHROPIC_API_VERSION
 from pydantic import BaseModel
 
 from app.ai.metrics import CallRecord, MetricsCollector, ParsePath
@@ -262,6 +263,69 @@ async def test_a_rejected_fallback_beta_is_switched_off_instead_of_failing_every
     assert "fallbacks" not in retried and "fallbacks" not in later
 
 
+async def test_calls_in_flight_when_the_fallback_beta_is_rejected_are_all_resent():
+    """A parallel batch (votes, night actions) is all built with `fallbacks`
+    before any answer arrives. Whichever 400 comes back first switches the
+    feature off; the others must still be re-sent without it rather than
+    fail because the shared switch already reads off."""
+    in_flight = 3
+    arrived: list[httpx2.Request] = []
+    all_arrived = asyncio.Event()
+
+    async def respond(request: httpx2.Request) -> httpx2.Response:
+        if "fallbacks" not in json.loads(request.content):
+            return _message()
+        arrived.append(request)
+        if len(arrived) == in_flight:
+            all_arrived.set()
+        await asyncio.wait_for(all_arrived.wait(), timeout=5)
+        return _error(400, "fallbacks: 'default' is not available for this organization")
+
+    server = _Server(*(respond for _ in range(2 * in_flight)))
+    metrics = MetricsCollector()
+    provider = _provider(server, metrics=metrics, fallbacks=True)
+
+    results = await asyncio.gather(*(_vote(provider) for _ in range(in_flight)))
+
+    assert all(result is not None for result in results)
+    assert provider.fallbacks_enabled is False
+    assert len(server.requests) == 2 * in_flight
+    assert all(record.path is ParsePath.STRICT_SCHEMA for record in metrics.records)
+    # A rejection of the beta is not a transient-error retry.
+    assert all(record.attempt == 0 for record in metrics.records)
+
+
+async def test_a_request_with_fallbacks_reserves_a_second_attempt():
+    """With fallbacks on, one call can bill the requested model's attempt
+    (which may decline after its whole `max_tokens`) and then the fallback
+    model's attempt on the same input. The reservation must cover both, or
+    a cap can be crossed by a call that passed the check."""
+    budget = EvaluationBudget(max_requests=10, max_estimated_cost=50.0)
+    reserved_in_flight: list[float] = []
+
+    def rejected(request: httpx2.Request) -> httpx2.Response:
+        reserved_in_flight.append(budget.reserved_cost)
+        return _error(400, "fallbacks: 'default' is not available for this organization")
+
+    def served(request: httpx2.Request) -> httpx2.Response:
+        reserved_in_flight.append(budget.reserved_cost)
+        return _message()
+
+    # The same call, same prompt and same prices, sent once with fallbacks
+    # and then without them: only the number of attempts it can bill differs.
+    server = _Server(rejected, served)
+    provider = _provider(server, fallbacks=True)
+    provider.set_request_budget(budget)
+
+    assert await _vote(provider) is not None
+
+    with_fallback, without = reserved_in_flight
+    assert "fallbacks" in server.bodies[0] and "fallbacks" not in server.bodies[1]
+    assert without > 0.0
+    assert with_fallback == pytest.approx(2 * without)
+    assert budget.reserved_cost == pytest.approx(0.0)
+
+
 # --- credentials and endpoint are ours, never the environment's --------------
 
 
@@ -317,6 +381,32 @@ async def test_key_and_base_url_are_explicit_even_when_ambient_variables_exist(
     assert "ambient" not in all_header_values
 
 
+async def test_ambient_headers_never_strip_the_sdks_own_required_headers(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Another tool's `ANTHROPIC_CUSTOM_HEADERS` may name a header the SDK
+    sends itself. Cancelling that name must leave the SDK's own value in
+    place: a request with no `anthropic-version` or with a non-JSON
+    `Content-Type` is a 400 on every call of every game."""
+    monkeypatch.setenv(
+        "ANTHROPIC_CUSTOM_HEADERS",
+        "anthropic-version: 2023-06-01\nContent-Type: text/plain\nACCEPT: text/html\n"
+        "X-Ambient-Header: leaked",
+    )
+    server = _Server(_message())
+    _capture_built_client(monkeypatch, server)
+
+    provider = AnthropicClaudeProvider(api_key=API_KEY, base_url=BASE_URL, model="claude-opus-5-5")
+    assert await _vote(provider) is not None
+
+    (request,) = server.requests
+    assert request.headers["anthropic-version"] == ANTHROPIC_API_VERSION
+    assert request.headers["content-type"] == "application/json"
+    assert request.headers["accept"] == "application/json"
+    # A name the SDK does not send itself is still cancelled outright.
+    assert "X-Ambient-Header" not in request.headers
+
+
 def test_an_empty_key_is_refused_rather_than_failing_every_call_with_401():
     with pytest.raises(ValueError, match="api_key"):
         AnthropicClaudeProvider(api_key="", base_url=BASE_URL, model="claude-opus-5-5")
@@ -366,7 +456,76 @@ async def test_thinking_then_text_content_is_parsed_and_usage_recorded():
     )
 
 
-async def test_a_fallback_served_turn_is_priced_at_the_served_model():
+def _iteration(
+    kind: str,
+    *,
+    input_tokens: int,
+    output_tokens: int,
+    model: str | None = None,
+    cache_creation: int = 0,
+    cache_read: int = 0,
+) -> dict[str, Any]:
+    entry: dict[str, Any] = {
+        "type": kind,
+        "input_tokens": input_tokens,
+        "cache_creation_input_tokens": cache_creation,
+        "cache_read_input_tokens": cache_read,
+        "output_tokens": output_tokens,
+    }
+    if model is not None:
+        entry["model"] = model
+    return entry
+
+
+async def test_a_fallback_served_turn_bills_every_attempt_at_its_own_model():
+    """The shape the API returns when Opus 5.5 declines part-way and a
+    fallback model serves the turn: top-level `usage` is only the serving
+    attempt, `usage.iterations` lists both, and the declined attempt's 8000
+    output tokens are billed too. Reading top-level usage alone priced this
+    turn at about a fifth of its bill."""
+    metrics = MetricsCollector()
+    usage = {
+        "input_tokens": 5000,
+        "output_tokens": 600,
+        "iterations": [
+            # The requested model's declined attempt; the API may leave its
+            # model unnamed, which means the requested one.
+            _iteration("message", input_tokens=5000, output_tokens=8000),
+            # Fallback attempts are repriced credit-style: cache reads count.
+            _iteration(
+                "fallback_message",
+                model="claude-opus-5",
+                input_tokens=1000,
+                cache_read=4000,
+                output_tokens=600,
+            ),
+        ],
+    }
+    server = _Server(_message(model="claude-opus-5", usage=usage))
+    provider = _provider(server, metrics=metrics)
+    budget = EvaluationBudget(max_requests=10, max_estimated_cost=5.0)
+    provider.set_request_budget(budget)
+
+    assert await _vote(provider) is not None
+
+    declined = cost_usd(price_for("claude-opus-5-5")[0], input_tokens=5000, output_tokens=8000)
+    served = cost_usd(
+        price_for("claude-opus-5")[0], input_tokens=1000, cache_read_tokens=4000, output_tokens=600
+    )
+    record = _only_record(metrics)
+    assert record.served_model == "claude-opus-5"
+    assert record.estimated_cost == pytest.approx(declined + served)
+    assert budget.spent_cost == pytest.approx(declined + served)
+    # Tokens are counted the same way as the cost, attempt by attempt.
+    assert record.prompt_tokens == 10000
+    assert record.cache_read_tokens == 4000
+    assert record.completion_tokens == 8600
+    assert metrics.summary()["fallback_served_calls"] == 1
+
+
+async def test_without_iterations_the_top_level_usage_is_priced_at_the_served_model():
+    """A response with no per-attempt breakdown has only top-level usage to go
+    on, and the model that served it is the one that billed it."""
     metrics = MetricsCollector()
     server = _Server(_message(model="claude-opus-5"))
     await _vote(_provider(server, metrics=metrics))
@@ -376,7 +535,25 @@ async def test_a_fallback_served_turn_is_priced_at_the_served_model():
     assert record.estimated_cost == pytest.approx(
         cost_usd(price_for("claude-opus-5")[0], input_tokens=100, output_tokens=50)
     )
-    assert metrics.summary()["fallback_served_calls"] == 1
+    assert record.prompt_tokens == 100 and record.completion_tokens == 50
+
+
+async def test_a_single_attempt_iterations_list_matches_top_level_usage():
+    """Iterations can also accompany an ordinary response; they must not be
+    counted on top of the top-level figures they repeat."""
+    metrics = MetricsCollector()
+    usage = {
+        "input_tokens": 100,
+        "output_tokens": 50,
+        "iterations": [_iteration("message", input_tokens=100, output_tokens=50)],
+    }
+    await _vote(_provider(_Server(_message(usage=usage)), metrics=metrics))
+
+    record = _only_record(metrics)
+    assert record.estimated_cost == pytest.approx(
+        cost_usd(price_for("claude-opus-5-5")[0], input_tokens=100, output_tokens=50)
+    )
+    assert record.prompt_tokens == 100 and record.completion_tokens == 50
 
 
 async def test_max_tokens_stop_is_a_truncation_and_is_not_retried():

@@ -143,22 +143,44 @@ def test_anthropic_fallbacks_can_be_switched_off():
 
 
 @pytest.mark.parametrize(
-    "configured",
+    ("configured", "expected_model"),
     [
-        "anthropic",
-        " Anthropic ",
-        "claude",
-        '"Claude"',
-        # A model id typed into the provider field.
-        "claude-opus-5-5",
-        " CLAUDE-SONNET-5-5 ",
-        "claude-opus-5-5-20261101",
+        ("anthropic", "claude-opus-5-5"),
+        (" Anthropic ", "claude-opus-5-5"),
+        ("claude", "claude-opus-5-5"),
+        ('"Claude"', "claude-opus-5-5"),
+        # A model id typed into the provider field is also the model asked
+        # for: selecting Claude but billing the default model instead would
+        # turn a cheap Haiku run into an Opus one.
+        ("claude-opus-5-5", "claude-opus-5-5"),
+        (" CLAUDE-SONNET-5-5 ", "claude-sonnet-5-5"),
+        ("claude-haiku-5-5", "claude-haiku-5-5"),
+        ("claude-opus-5-5-20261101", "claude-opus-5-5-20261101"),
     ],
 )
-def test_anthropic_aliases_select_the_anthropic_provider(configured: str):
+def test_anthropic_aliases_select_the_anthropic_provider(configured: str, expected_model: str):
     settings = Settings(werewolf_llm_provider=configured, werewolf_anthropic_api_key="test-key")
     assert settings.werewolf_llm_provider == "anthropic"
-    assert isinstance(build_llm_provider(settings), AnthropicClaudeProvider)
+    provider = build_llm_provider(settings)
+    assert isinstance(provider, AnthropicClaudeProvider)
+    assert provider.model == expected_model
+
+
+def test_a_key_that_is_only_quotes_and_spaces_is_a_missing_key():
+    """Unwrapped to nothing, so the server refuses to start instead of
+    sending `Bearer ""` and failing every call with a 401."""
+    settings = Settings(werewolf_llm_provider="anthropic", werewolf_anthropic_api_key=' "" \n')
+    with pytest.raises(LLMProviderConfigError, match="WEREWOLF_ANTHROPIC_API_KEY"):
+        build_llm_provider(settings)
+
+
+def test_a_quoted_key_reaches_the_provider_unwrapped():
+    settings = Settings(
+        werewolf_llm_provider="anthropic", werewolf_anthropic_api_key=' "sk-test-key" '
+    )
+    provider = build_llm_provider(settings)
+    assert isinstance(provider, AnthropicClaudeProvider)
+    assert provider._client.api_key == "sk-test-key"
 
 
 @pytest.mark.parametrize("configured", ["claude-", "claude_opus", "claud", "opus-5-5"])

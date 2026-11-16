@@ -36,6 +36,11 @@ provider learned the expensive way:
     content capture) are neutralised. `ANTHROPIC_*` variables on this machine
     usually belong to some other tool; inheriting them would bill the wrong
     account or ship hidden-role prompts somewhere unintended.
+  - A call is priced attempt by attempt. With refusal fallbacks on, one call
+    can bill the requested model's attempt (which may decline after writing
+    its whole `max_tokens`) and then the fallback model's, so the budget
+    reserves both before sending and settles on `usage.iterations`, the
+    per-attempt bill; top-level `usage` covers only the attempt that served.
   - `generate_structured` returns None on every failure except one:
     `BudgetExceeded` propagates, because a spending cap that turns into a
     fallback line is not a cap.
@@ -69,6 +74,11 @@ from anthropic import (
     OverloadedError,
     RateLimitError,
 )
+
+# Not re-exported at the package top level. Imported by name rather than
+# hard-coded so the pin below always matches what this SDK sends, and so an
+# SDK upgrade that moves it fails at import instead of in a paid request.
+from anthropic._constants import ANTHROPIC_API_VERSION
 from anthropic.types.beta import BetaMessage, BetaTextBlock
 from pydantic import BaseModel, ValidationError
 
@@ -89,6 +99,10 @@ _LOGGER = logging.getLogger("app.ai.provider.anthropic")
 # re-run on a fallback model inside the same call. The scalar
 # `fallbacks="default"` form needs exactly this beta version.
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
+# How many attempts one call that carries `fallbacks="default"` can bill: the
+# requested model's, then the one fallback model the refusal category is
+# routed to. Each runs the same input and may write up to `max_tokens`.
+_ATTEMPTS_WITH_FALLBACK = 2
 
 # Call kind per response schema, which selects the effort setting.
 _EFFORT_KIND_BY_SCHEMA: dict[str, str] = {
@@ -208,6 +222,17 @@ def _with_embedded_schema(system: str, response_schema: type[BaseModel]) -> str:
 
 # --- ambient SDK inputs ----------------------------------------------------
 
+# Headers the SDK itself sends that the API needs to accept a request, keyed
+# by lowercase name, with the SDK's own values. An ambient header of the same
+# name has to be pinned back to this value, not cancelled: the SDK applies
+# a cancellation to its own value as well, and a request with no
+# `anthropic-version` or a non-JSON `Content-Type` is a 400.
+_SDK_REQUIRED_HEADERS: dict[str, str] = {
+    "anthropic-version": ANTHROPIC_API_VERSION,
+    "content-type": "application/json",
+    "accept": "application/json",
+}
+
 
 def _ambient_header_overrides(api_key: str) -> dict[str, Any]:
     """Headers that cancel whatever `ANTHROPIC_CUSTOM_HEADERS` would inject.
@@ -216,8 +241,12 @@ def _ambient_header_overrides(api_key: str) -> dict[str, Any]:
     request, even with an explicit key and base URL; on a machine that runs
     other Anthropic tooling it can carry that tooling's headers -- including
     an `Authorization` that would replace ours. It is read here only to know
-    which names to cancel: each becomes `omit`, except `Authorization`, which
-    is pinned back to our own key so the request stays authenticated.
+    which names to cancel. `Authorization` is pinned back to our own key so
+    the request stays authenticated, a header the API requires is pinned back
+    to the SDK's own value (`_SDK_REQUIRED_HEADERS`), and every other name
+    becomes `omit`. An ambient name that shadows one of the SDK's
+    informational headers (`User-Agent`, `X-Stainless-*`, some of them set
+    per request) is cancelled with it; the API accepts a request without them.
     """
     raw = os.environ.get("ANTHROPIC_CUSTOM_HEADERS")
     if not raw:
@@ -231,7 +260,13 @@ def _ambient_header_overrides(api_key: str) -> dict[str, Any]:
         name = line[:colon].strip()
         if not name:
             continue
-        overrides[name] = f"Bearer {api_key}" if name.lower() == "authorization" else anthropic.omit
+        lowered = name.lower()
+        if lowered == "authorization":
+            overrides[name] = f"Bearer {api_key}"
+        elif lowered in _SDK_REQUIRED_HEADERS:
+            overrides[name] = _SDK_REQUIRED_HEADERS[lowered]
+        else:
+            overrides[name] = anthropic.omit
     return overrides
 
 
@@ -272,6 +307,56 @@ class _CallTally:
     @property
     def prompt_tokens(self) -> int:
         return self.input_tokens + self.cache_creation_tokens + self.cache_read_tokens
+
+
+@dataclass(frozen=True)
+class _BilledAttempt:
+    """One model's attempt inside one response, as the API bills it."""
+
+    model: str
+    input_tokens: int
+    cache_creation_tokens: int
+    cache_read_tokens: int
+    output_tokens: int
+
+
+def _billed_attempts(message: BetaMessage, requested_model: str) -> list[_BilledAttempt]:
+    """Every attempt a response bills, each with the model that ran it.
+
+    `usage.iterations` is the per-attempt record when the API sends one: with
+    a refusal fallback, a `message` entry for the requested model's declined
+    attempt and a `fallback_message` entry for the attempt that served. Every
+    entry is counted, whatever its type: they do not overlap, and a kind this
+    code does not know is still something billed -- counting it errs towards
+    the budget stopping early, never towards it being overspent. An entry
+    that names no model is priced at the requested model, the one the API
+    runs first and the one a declined attempt ran on. Without iterations,
+    the top-level usage is the whole bill, run by the model that served it.
+    """
+    usage = message.usage
+    if usage.iterations:
+        return [
+            _BilledAttempt(
+                # Not every entry type declares a model (compaction does not).
+                model=str(getattr(entry, "model", None) or requested_model),
+                # The SDK builds an entry of an unknown type leniently, so a
+                # count it lacks arrives as None despite the annotation.
+                input_tokens=entry.input_tokens or 0,
+                cache_creation_tokens=entry.cache_creation_input_tokens or 0,
+                cache_read_tokens=entry.cache_read_input_tokens or 0,
+                output_tokens=entry.output_tokens or 0,
+            )
+            for entry in usage.iterations
+        ]
+    return [
+        _BilledAttempt(
+            model=str(message.model),
+            input_tokens=usage.input_tokens,
+            cache_creation_tokens=usage.cache_creation_input_tokens or 0,
+            cache_read_tokens=usage.cache_read_input_tokens or 0,
+            output_tokens=usage.output_tokens,
+        )
+    ]
 
 
 class AnthropicClaudeProvider:
@@ -429,7 +514,11 @@ class AnthropicClaudeProvider:
                 system, wire_messages, response_schema, max_tokens_sent, effort, degraded=degraded
             )
             estimated_input = self._estimated_input_tokens(request, response_schema, degraded)
-            worst_case = cost_usd(
+            # Decided on this request, not on `self._fallbacks`: a request
+            # built with fallbacks can bill a second attempt even if another
+            # call has switched them off since.
+            attempts = _ATTEMPTS_WITH_FALLBACK if "fallbacks" in request else 1
+            worst_case = attempts * cost_usd(
                 self._worst_case_price,
                 input_tokens=estimated_input,
                 output_tokens=max_tokens_sent,
@@ -466,15 +555,20 @@ class AnthropicClaudeProvider:
             if not degraded and _is_grammar_rejection(failure):
                 self._remember_grammar_rejection(name, tally.request_id)
                 continue  # the degraded request for this same call
-            if self._fallbacks and _is_fallback_rejection(failure):
+            if "fallbacks" in request and _is_fallback_rejection(failure):
                 # The beta (or the scalar form) is not available to this key.
                 # Every later call would fail the same way, so stop asking.
-                self._fallbacks = False
-                _LOGGER.warning(
-                    "server-side refusal fallbacks rejected (request_id=%s); "
-                    "continuing without them",
-                    tally.request_id,
-                )
+                # Decided on what this attempt sent, not on the shared switch:
+                # every call of a parallel batch was built with fallbacks
+                # before the first rejection came back, and each one has to
+                # be re-sent without them, not only the first to return.
+                if self._fallbacks:
+                    self._fallbacks = False
+                    _LOGGER.warning(
+                        "server-side refusal fallbacks rejected (request_id=%s); "
+                        "continuing without them",
+                        tally.request_id,
+                    )
                 continue
             if _is_retryable(failure) and tally.retries < self._max_retries:
                 tally.retries += 1
@@ -526,21 +620,27 @@ class AnthropicClaudeProvider:
         return math.ceil(_ESTIMATED_TOKENS_PER_CHAR * chars)
 
     def _response_cost(self, message: BetaMessage) -> float:
-        """USD for one response, priced at the model that served it.
+        """USD for one response: every attempt it bills, each at its own model.
 
-        A refusal-fallback turn is billed partly at the requested model's
-        rate and partly at the fallback's; pricing all of it at the served
-        (fallback) model's rate over-states it slightly, since the fallback
-        models cost more -- the safe side for an estimate.
+        A refusal-fallback turn bills the requested model's attempt -- which
+        may have declined after writing its whole output, billed at normal
+        rates -- and then the fallback model's attempt. Top-level `usage`
+        covers only the attempt that served the turn, so pricing from it alone
+        left the declined attempt off the books entirely.
         """
-        usage = message.usage
-        price, _ = self._served_price(str(message.model), usage.speed)
-        return cost_usd(
-            price,
-            input_tokens=usage.input_tokens,
-            cache_creation_tokens=usage.cache_creation_input_tokens or 0,
-            cache_read_tokens=usage.cache_read_input_tokens or 0,
-            output_tokens=usage.output_tokens,
+        speed = message.usage.speed
+        return sum(
+            (
+                cost_usd(
+                    self._served_price(attempt.model, speed)[0],
+                    input_tokens=attempt.input_tokens,
+                    cache_creation_tokens=attempt.cache_creation_tokens,
+                    cache_read_tokens=attempt.cache_read_tokens,
+                    output_tokens=attempt.output_tokens,
+                )
+                for attempt in _billed_attempts(message, self._model)
+            ),
+            0.0,
         )
 
     def _served_price(self, served_model: str, speed: str | None) -> tuple[ModelPrice, bool]:
@@ -555,14 +655,16 @@ class AnthropicClaudeProvider:
             )
         return price, known
 
-    @staticmethod
-    def _tally_response(message: BetaMessage, tally: _CallTally) -> None:
+    def _tally_response(self, message: BetaMessage, tally: _CallTally) -> None:
         usage = message.usage
         tally.responses += 1
-        tally.input_tokens += usage.input_tokens
-        tally.cache_creation_tokens += usage.cache_creation_input_tokens or 0
-        tally.cache_read_tokens += usage.cache_read_input_tokens or 0
-        tally.output_tokens += usage.output_tokens
+        # Counted from the same per-attempt record as the cost, so the token
+        # totals and the estimated cost always describe the same bill.
+        for attempt in _billed_attempts(message, self._model):
+            tally.input_tokens += attempt.input_tokens
+            tally.cache_creation_tokens += attempt.cache_creation_tokens
+            tally.cache_read_tokens += attempt.cache_read_tokens
+            tally.output_tokens += attempt.output_tokens
         details = usage.output_tokens_details
         if details is not None:
             tally.thinking_tokens = (tally.thinking_tokens or 0) + (details.thinking_tokens or 0)
