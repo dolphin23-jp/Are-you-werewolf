@@ -560,6 +560,78 @@ async def test_a_reservation_waits_for_in_flight_requests_instead_of_stopping_ea
     assert sorted(seen) == list(range(6))
 
 
+async def test_a_cost_stop_leaves_every_config_on_the_same_prompts():
+    """A dear request waiting for room must not be overtaken by cheaper later
+    ones: the run stops at a point in job order, so the configs are compared
+    on the same prompts (all but the last, which the stop can split)."""
+    configs = sweep.parse_configs("claude-opus-5-5:low:fast,claude-haiku-5-5:low")
+    prompts = [_prompt(i) for i in range(30)]
+    jobs = sweep.interleave(prompts, configs)
+    worst_opus = sweep.worst_case_cost(prompts[0], configs[0], 12000)
+    # One fast-Opus worst case fits beside the cheap requests, two do not;
+    # each answer really costs a quarter of its worst case, so the cap is
+    # reached part-way through.
+    budget = EvaluationBudget(max_requests=len(jobs), max_estimated_cost=worst_opus * 1.5)
+    server = _vote_server(input_tokens=10, output_tokens=3000, thinking_tokens=100)
+
+    outcome = await sweep.run_sweep(
+        jobs,
+        client=_client(server.handler),
+        budget=budget,
+        concurrency=4,
+        max_tokens_floor=12000,
+        clock=_StepClock(),
+    )
+
+    assert outcome.stopped_reason is not None
+    assert 0 < outcome.sent < outcome.planned
+    # Admitted strictly in job order: what was sent is a prefix of the plan.
+    assert [row.order for row in outcome.rows] == list(range(outcome.sent))
+    by_config = {
+        config.label: {row.prompt_index for row in outcome.rows if row.config == config.label}
+        for config in configs
+    }
+    sets = list(by_config.values())
+    union, common = set.union(*sets), set.intersection(*sets)
+    assert len(union - common) <= 1  # only the prompt the stop fell in
+    # The summary compares the configs on the prompts every one of them saw.
+    stats = sweep.summarize(outcome.rows, configs)
+    whole = [stat for stat in stats if stat.schema == sweep.ALL_SCHEMAS]
+    assert [stat.n for stat in whole] == [len(common)] * len(configs)
+
+
+def test_prompts_not_measured_under_every_config_are_left_out_of_the_comparison():
+    configs = sweep.parse_configs("claude-opus-5-5:low,claude-haiku-5-5:low")
+    rows = [
+        _row("claude-opus-5-5:low", "VoteOutput", 1.0, prompt_index=0, order=0),
+        _row("claude-haiku-5-5:low", "VoteOutput", 1.0, prompt_index=0, order=1),
+        _row("claude-haiku-5-5:low", "VoteOutput", 9.0, prompt_index=1, order=2),
+    ]
+    assert sweep.comparable_prompts(rows, configs) == {0}
+    stats = sweep.summarize(rows, configs)
+    assert [(s.config, s.n) for s in stats if s.schema == sweep.ALL_SCHEMAS] == [
+        ("claude-opus-5-5:low", 1),
+        ("claude-haiku-5-5:low", 1),
+    ]
+    plan = sweep.SweepPlan(
+        seed=1,
+        configs=configs,
+        prompts=[_prompt(0), _prompt(1)],
+        max_tokens_floor=12000,
+        captured_prompts=2,
+        captured_schema_counts={"VoteOutput": 2},
+    )
+    outcome = sweep.SweepOutcome(rows=rows, planned=4, stopped_reason="budget would be exceeded")
+    text = sweep.render_summary(
+        plan,
+        outcome,
+        stats,
+        budget=EvaluationBudget(max_requests=4, max_estimated_cost=1.0),
+        max_cost=1.0,
+    )
+    assert "全条件で測れなかった標本 1件" in text
+
+
 async def test_once_the_budget_is_spent_the_gate_stays_shut_even_for_a_cheap_request():
     """Stopping mid-way must leave every config with the same prompts, so a
     cheaper config may not keep going after a dearer one was refused."""

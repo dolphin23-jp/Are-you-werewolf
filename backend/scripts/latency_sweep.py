@@ -45,6 +45,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import csv
+import itertools
 import json
 import math
 import os
@@ -522,6 +523,13 @@ class BudgetGate:
     From then on the gate stays shut, even for a cheaper request that would
     still fit: the run stops where it stopped, so every config keeps the
     same prompts and the comparison stays like for like.
+
+    That only holds if the stop falls at one point in job order, so a
+    reservation given a `turn` is admitted strictly in turn order. Without
+    it, a dear request waiting for room was overtaken by cheaper later ones
+    that still fit, and at the stop the configs had been measured on
+    different prompts. Turns are 0, 1, 2, ... with none skipped; a turn whose
+    holder leaves without a reservation (cancelled) is passed over.
     """
 
     def __init__(self, budget: EvaluationBudget) -> None:
@@ -529,22 +537,42 @@ class BudgetGate:
         self._condition = asyncio.Condition()
         self._in_flight = 0
         self._closed: str | None = None
+        self._next_turn = 0
+        self._turns_done: set[int] = set()
 
-    async def reserve(self, worst_case: float) -> None:
+    async def reserve(self, worst_case: float, *, turn: int | None = None) -> None:
         async with self._condition:
-            while True:
-                if self._closed is not None:
-                    raise BudgetExceeded(self._closed)
-                try:
-                    self.budget.reserve(worst_case)
-                except BudgetExceeded as exc:
-                    if self._in_flight == 0:
-                        self._closed = str(exc)
-                        raise
-                    await self._condition.wait()
-                    continue
-                self._in_flight += 1
-                return
+            try:
+                while True:
+                    if self._closed is not None:
+                        raise BudgetExceeded(self._closed)
+                    if turn is not None and turn != self._next_turn:
+                        await self._condition.wait()
+                        continue
+                    try:
+                        self.budget.reserve(worst_case)
+                    except BudgetExceeded as exc:
+                        if self._in_flight == 0:
+                            self._closed = str(exc)
+                            # Wake every waiter, so each sees the gate shut.
+                            self._condition.notify_all()
+                            raise
+                        await self._condition.wait()
+                        continue
+                    self._in_flight += 1
+                    return
+            finally:
+                if turn is not None:
+                    self._finish_turn(turn)
+
+    def _finish_turn(self, turn: int) -> None:
+        """Mark `turn` as gone through (admitted, refused or cancelled) and
+        hand the gate to the next turn still waiting. Called with the lock."""
+        self._turns_done.add(turn)
+        while self._next_turn in self._turns_done:
+            self._turns_done.discard(self._next_turn)
+            self._next_turn += 1
+        self._condition.notify_all()
 
     async def settle(self, reserved: float, actual: float) -> None:
         async with self._condition:
@@ -595,12 +623,14 @@ async def measure(
     gate: BudgetGate,
     max_tokens_floor: int,
     clock: Callable[[], float] = time.perf_counter,
+    turn: int | None = None,
 ) -> SweepRow:
     """Send one request through the beta streaming API and time it.
 
     `BudgetExceeded` from the reservation propagates: nothing was sent. Any
     error after that becomes the row's `error`; nothing is retried, because a
-    retried request's time is not one request's time.
+    retried request's time is not one request's time. `turn` is this job's
+    place in the gate's admission order (see `BudgetGate`).
     """
     prompt, config = job.prompt, job.config
     request = build_request(prompt, config, max_tokens_floor)
@@ -618,7 +648,7 @@ async def measure(
         max_tokens=request["max_tokens"],
     )
     worst = worst_case_cost(prompt, config, max_tokens_floor)
-    await gate.reserve(worst)
+    await gate.reserve(worst, turn=turn)
     # Until a response says otherwise -- including if this task is cancelled
     # mid-stream -- the attempt is assumed to have cost its input.
     actual = input_only_cost(prompt, config)
@@ -677,10 +707,13 @@ async def run_sweep(
     """Run the jobs in order with at most `concurrency` in flight.
 
     On `BudgetExceeded` no further job is started; the ones already in flight
-    finish and are kept. Rows come back in job order.
+    finish and are kept. Rows come back in job order, and the jobs sent are
+    always a prefix of `jobs`: each takes its turn at the budget gate in the
+    order it was taken from the queue.
     """
     gate = BudgetGate(budget)
     pending = iter(jobs)
+    turns = itertools.count()
     rows: list[SweepRow] = []
     stop: list[str] = []
 
@@ -689,9 +722,17 @@ async def run_sweep(
             job = next(pending, None)
             if job is None:
                 return
+            # Taken together with the job, with no await between, so turns
+            # follow job order whichever worker gets which job.
+            turn = next(turns)
             try:
                 row = await measure(
-                    job, client=client, gate=gate, max_tokens_floor=max_tokens_floor, clock=clock
+                    job,
+                    client=client,
+                    gate=gate,
+                    max_tokens_floor=max_tokens_floor,
+                    clock=clock,
+                    turn=turn,
                 )
             except BudgetExceeded as exc:
                 if not stop:
@@ -789,8 +830,27 @@ def group_stats(rows: Sequence[SweepRow], config: str, schema: str) -> GroupStat
     )
 
 
+def comparable_prompts(rows: Sequence[SweepRow], configs: Sequence[SweepConfig]) -> set[int]:
+    """The prompts measured under every config.
+
+    A cost stop falls at one point in job order, and a prompt's configs are
+    sent next to each other, so the stop can split at most the last prompt;
+    its rows would give the configs it reached one extra (and different)
+    prompt to be compared on.
+    """
+    labels = {config.label for config in configs}
+    seen: dict[int, set[str]] = {}
+    for row in rows:
+        seen.setdefault(row.prompt_index, set()).add(row.config)
+    return {index for index, measured in seen.items() if labels <= measured}
+
+
 def summarize(rows: Sequence[SweepRow], configs: Sequence[SweepConfig]) -> list[GroupStats]:
-    """Per config: every schema present, then the config as a whole."""
+    """Per config: every schema present, then the config as a whole -- over
+    the `comparable_prompts` only, so every config is judged on the same set.
+    The other rows stay in rows.csv."""
+    comparable = comparable_prompts(rows, configs)
+    rows = [row for row in rows if row.prompt_index in comparable]
     stats: list[GroupStats] = []
     schemas = [name for name in SCHEMA_SHARES if any(row.schema == name for row in rows)]
     schemas += sorted({row.schema for row in rows} - set(schemas))
@@ -903,6 +963,15 @@ def render_summary(
             "",
             f"**費用の上限で止めた**(未送信 {outcome.planned - outcome.sent}件): "
             f"{outcome.stopped_reason}",
+        ]
+    comparable = comparable_prompts(outcome.rows, plan.configs)
+    partial = {row.prompt_index for row in outcome.rows} - comparable
+    if partial:
+        left_out = sum(1 for row in outcome.rows if row.prompt_index in partial)
+        lines += [
+            "",
+            f"全条件で測れなかった標本 {len(partial)}件(要求 {left_out}件)は、条件どうしを"
+            "同じ標本で比べるため下の表から外した(rows.csv には残っている)。",
         ]
     lines += [
         "",
@@ -1163,6 +1232,8 @@ async def main(
                 "sent": outcome.sent,
                 "planned": outcome.planned,
                 "stopped_reason": outcome.stopped_reason,
+                # The stats cover these prompts only (see `comparable_prompts`).
+                "comparable_prompts": sorted(comparable_prompts(outcome.rows, configs)),
                 "spent_usd": round(budget.spent_cost, 6),
                 "stats": [asdict(stat) for stat in stats],
             },
