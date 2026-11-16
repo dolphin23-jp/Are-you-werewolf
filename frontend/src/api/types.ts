@@ -153,6 +153,13 @@ export interface GameView {
   speech_wait_token: string | null;
   discussion_progress: { spoken: number; total: number };
   discussion_paused: boolean;
+  /** True once this game's AI hit its spend cap (WEREWOLF_SESSION_MAX_COST_USD).
+   * The AI seats have stopped speaking, voting and acting, so the game will not
+   * progress past whatever they still owed. */
+  ai_budget_exhausted: boolean;
+  /** Estimated USD this game's AI has spent so far. Null when the provider does
+   * not price its calls (the free offline providers). */
+  ai_cost_usd: number | null;
   your_divine_results: DivineResult[];
   your_medium_results: MediumResult[];
   co_declarations: CoDeclarationRecord[];

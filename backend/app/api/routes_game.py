@@ -18,6 +18,9 @@ from fastapi import APIRouter, HTTPException, Query
 
 from app.ai.coordinator import AICoordinator
 from app.ai.engine_mode import build_reasoning_runtime, model_decides
+from app.ai.metrics import MetricsCollector
+from app.ai.provider.base import LLMProvider
+from app.ai.provider.budget import BudgetedProvider, EvaluationBudget
 from app.ai.provider.factory import LLMProviderConfigError, build_llm_provider
 from app.ai.reasoning import PublicFactLedger
 from app.ai.reasoning.claims import build_claim_drafts, register_claim_drafts
@@ -35,7 +38,7 @@ from app.api.schemas import (
     VoteRequest,
 )
 from app.api.ws_hub import SessionWSHub
-from app.config import get_settings
+from app.config import Settings, get_settings
 from app.engine.game import GameController, GameError, PlayerSpec
 from app.engine.phases import Phase
 from app.eval.transcript import TranscriptRecorder
@@ -63,6 +66,13 @@ AI_NAME_POOL = [
     "ケント",
 ]
 
+# Backstop on HTTP requests for one human-play session. The dollar cap
+# (`WEREWOLF_SESSION_MAX_COST_USD`) is the real limit; this only stops a
+# runaway loop that makes many cheap calls. The live v3 game on record made
+# 197 logical calls (backend/artifacts/live-v3-luna-run11), so this sits more
+# than an order of magnitude above a real game.
+SESSION_MAX_REQUESTS = 5000
+
 
 def _new_session_id() -> str:
     return uuid.uuid4().hex[:12]
@@ -78,6 +88,46 @@ def _get_session(session_id: str) -> GameSession:
 
 def _resolve_player_id(session: GameSession, player_id: str | None) -> str:
     return player_id or session.human_id
+
+
+def build_session_provider(
+    settings: Settings, *, seed: int | None
+) -> tuple[LLMProvider, MetricsCollector, EvaluationBudget | None]:
+    """The provider one game's AI seats talk through, with its own accounting.
+
+    Every session gets its own `MetricsCollector`, so a game's calls, events
+    and cost can be read off the session instead of being mixed with other
+    games in the process. A paid provider is also wrapped in a per-session
+    `EvaluationBudget`: every game started on the server bills the owner's
+    account, and without a cap a stuck or looping game would bill without
+    limit. The Anthropic provider reserves each request's worst case against
+    the cap before sending it, so the cap holds even with sixteen votes in
+    flight.
+
+    Only `anthropic` is capped. `mock` and `scenario` cost nothing, and the
+    dormant `luna` provider does not price its own calls.
+    """
+    metrics = MetricsCollector()
+    provider = build_llm_provider(settings, seed=seed, metrics=metrics)
+    if settings.werewolf_llm_provider != "anthropic":
+        return provider, metrics, None
+    budget = EvaluationBudget(
+        max_requests=SESSION_MAX_REQUESTS,
+        max_estimated_cost=settings.werewolf_session_max_cost_usd,
+    )
+    return BudgetedProvider(provider, budget), metrics, budget
+
+
+def _session_cost_usd(session: GameSession) -> float | None:
+    """Estimated spend so far, or None when the session's provider is not priced.
+
+    A capped session that has not settled a request yet has spent nothing, so
+    it reads 0.0 rather than "unknown".
+    """
+    if session.budget is None:
+        return None
+    cost = session.budget.estimated_cost
+    return round(cost if cost is not None else 0.0, 6)
 
 
 def _run(fn: object, *args: object, **kwargs: object) -> Any:
@@ -109,7 +159,7 @@ def create_game(req: CreateGameRequest) -> CreateGameResponse:
     controller.events.subscribe(ws_hub.on_event)
 
     try:
-        provider = build_llm_provider(settings, seed=seed)
+        provider, metrics, budget = build_session_provider(settings, seed=seed)
         transcript_recorder = TranscriptRecorder()
         engine = settings.werewolf_reasoning_engine
         reasoning = build_reasoning_runtime(engine, controller.state, ai_ids, seed=seed)
@@ -139,6 +189,8 @@ def create_game(req: CreateGameRequest) -> CreateGameResponse:
         ws_hub=ws_hub,
         coordinator=coordinator,
         transcript_recorder=transcript_recorder,
+        metrics=metrics,
+        budget=budget,
     )
     get_session_store().create(session)
     return CreateGameResponse(
@@ -198,6 +250,11 @@ def get_view(session_id: str, player_id: str | None = Query(default=None)) -> di
             0, int(settings.werewolf_discussion_wait_seconds - elapsed + 0.999)
         )
         view["speech_wait_token"] = f"{round_state.day}:{round_state.awaiting_since}"
+    # Once the spend cap is hit the AI seats stop acting, and the game cannot
+    # progress past whatever they owed. Say so, rather than leave the player
+    # waiting on votes that will never come.
+    view["ai_budget_exhausted"] = bool(session.ai_budget_exhausted)
+    view["ai_cost_usd"] = _session_cost_usd(session)
     return view
 
 
@@ -323,9 +380,7 @@ async def start_discussion(session_id: str) -> OkResponse:
 @router.post("/{session_id}/pass-turn", response_model=OkResponse)
 async def pass_turn(session_id: str) -> OkResponse:
     session = _get_session(session_id)
-    if session.coordinator is not None:
-        session.coordinator.resume_after_human(session)
-        await session.coordinator.advance_discussion(session)
+    await orchestrator.resume_discussion(session)
     return OkResponse()
 
 
@@ -344,7 +399,5 @@ async def discussion_control(session_id: str, req: DiscussionControlRequest) -> 
     session.discussion_pause_requested = False
     session.discussion_paused = False
     session.discussion_step_budget = 1 if req.action == "step" else None
-    if session.coordinator is not None:
-        session.coordinator.resume_after_human(session)
-        await session.coordinator.advance_discussion(session)
+    await orchestrator.resume_discussion(session)
     return OkResponse()

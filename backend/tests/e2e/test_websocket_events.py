@@ -11,8 +11,58 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.sessions.store import get_session_store
 
 client = TestClient(app)
+
+
+def test_a_wolf_channel_frame_never_reaches_a_non_wolf_socket():
+    """Over real sockets: a non-wolf's next frame after a wolf-channel message
+    is the public message that followed it, while a wolf receives both.
+
+    The AI coordinator is detached so that only the two messages sent here
+    produce frames, which keeps the receive order deterministic (a missing
+    frame shows up as the wrong frame, never as a hang).
+    """
+    resp = client.post("/api/games", json={"human_name": "Tester", "seed": 42})
+    session_id = resp.json()["session_id"]
+    session = get_session_store().get(session_id)
+    assert session is not None
+    session.coordinator = None
+    roles = {
+        p["player_id"]: p["role"]
+        for p in client.get(f"/api/games/{session_id}/debug").json()["players"]
+    }
+    wolf = next(pid for pid, role in roles.items() if role == "werewolf")
+    outsider = next(pid for pid, role in roles.items() if role not in ("werewolf", "freemason"))
+
+    with (
+        client.websocket_connect(f"/ws/{session_id}/{outsider}") as outsider_ws,
+        client.websocket_connect(f"/ws/{session_id}/{wolf}") as wolf_ws,
+    ):
+        resp = client.post(
+            f"/api/games/{session_id}/chat",
+            params={"player_id": wolf},
+            json={"content": "今夜の噛み先を決めよう", "channel": "wolf"},
+        )
+        assert resp.status_code == 200
+        resp = client.post(
+            f"/api/games/{session_id}/chat",
+            params={"player_id": outsider},
+            json={"content": "おはようございます"},
+        )
+        assert resp.status_code == 200
+
+        outsider_first = outsider_ws.receive_json()
+        assert outsider_first["type"] == "chat_message"
+        assert outsider_first["payload"]["channel"] == "public"
+        assert outsider_first["payload"]["content"] == "おはようございます"
+
+        wolf_first = wolf_ws.receive_json()
+        assert wolf_first["payload"]["channel"] == "wolf"
+        assert wolf_first["payload"]["content"] == "今夜の噛み先を決めよう"
+        wolf_second = wolf_ws.receive_json()
+        assert wolf_second["payload"]["channel"] == "public"
 
 
 def test_mutating_routes_succeed_with_a_websocket_client_connected():

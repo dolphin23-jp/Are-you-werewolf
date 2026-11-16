@@ -4,12 +4,18 @@ setup work). These tests pin the routing rules that make that safe."""
 
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 
+import app.config as config
 from app import main
+from app.config import DEFAULT_ANTHROPIC_MODEL, Settings
 from app.main import app
 
 client = TestClient(app)
+
+# Shaped like a real key so a leak through any formatting path would still match.
+_SENTINEL_ANTHROPIC_KEY = "sk-ant-api03-SENTINEL-spa-serving-0123456789abcdef"
 
 
 def _dist_built() -> bool:
@@ -67,3 +73,46 @@ def test_path_traversal_cannot_escape_the_dist_directory():
     assert resp.status_code == 200
     assert "LUNA_API_KEY" not in resp.text
     assert "luna_api_key" not in resp.text
+
+
+@pytest.mark.parametrize(
+    ("password", "allow_open_access"),
+    [("table-password", False), ("", True)],
+    ids=["behind-password", "open-access-opt-in"],
+)
+def test_the_anthropic_api_key_never_reaches_health_or_the_spa(
+    monkeypatch: pytest.MonkeyPatch, password: str, allow_open_access: bool
+):
+    """The key is in the server's settings for as long as it runs; nothing the
+    browser can fetch -- the public health check, the HTML shell, any bundled
+    asset, an error page -- may carry it."""
+    monkeypatch.setattr(
+        config,
+        "_settings",
+        Settings(
+            werewolf_llm_provider="anthropic",
+            werewolf_anthropic_api_key=_SENTINEL_ANTHROPIC_KEY,
+            werewolf_access_password=password,
+            werewolf_allow_open_access=allow_open_access,
+        ),
+    )
+    keyed = TestClient(main.create_app())
+    auth = ("werewolf", password) if password else None
+
+    health = keyed.get("/api/health")
+    assert health.status_code == 200
+    assert health.json()["llm_provider"] == "anthropic"
+    assert health.json()["llm_model"] == DEFAULT_ANTHROPIC_MODEL
+
+    paths = ["/api/health", "/", "/index.html", "/some/client/route", "/api/nope", "/.env"]
+    if _dist_built():
+        paths += [
+            "/" + asset.relative_to(main.FRONTEND_DIST).as_posix()
+            for asset in main.FRONTEND_DIST.rglob("*")
+            if asset.is_file()
+        ]
+    for path in paths:
+        # Both as the owner and as a stranger without the password.
+        for credentials in {auth, None}:
+            resp = keyed.get(path, auth=credentials)
+            assert _SENTINEL_ANTHROPIC_KEY not in resp.text, path

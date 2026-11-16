@@ -26,6 +26,9 @@ class SessionWSHub:
 
     def __init__(self) -> None:
         self._connections: dict[str, list[WebSocket]] = {}
+        # The loop keeps only a weak reference to a task; one nobody holds can
+        # be collected before its frame is sent.
+        self._sends: set[asyncio.Task[None]] = set()
 
     async def connect(self, player_id: str, ws: WebSocket) -> None:
         await ws.accept()
@@ -47,11 +50,18 @@ class SessionWSHub:
             # up, and this must never crash the request that triggered it.
             return
 
-        recipients = [event.recipient_id] if event.recipient_id else list(self._connections.keys())
+        # The engine decides who an event is for (`GameEvent.audience`); the hub
+        # only honours it. A public event goes to every connected seat; any
+        # other event only to the seats named, so a private channel's frames
+        # never reach a socket outside it.
+        audience = event.audience()
+        recipients = list(self._connections) if audience is None else sorted(audience)
         payload = {"type": event.type.value, "payload": to_jsonable(event.payload)}
         for pid in recipients:
             for ws in self._connections.get(pid, []):
-                loop.create_task(_safe_send(ws, payload))
+                task = loop.create_task(_safe_send(ws, payload))
+                self._sends.add(task)
+                task.add_done_callback(self._sends.discard)
 
 
 async def _safe_send(ws: WebSocket, payload: dict[str, Any]) -> None:
