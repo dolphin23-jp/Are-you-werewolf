@@ -15,6 +15,18 @@ unsatisfiable criterion is not a strict gate but a silent one. It now requires
 two, and nothing else was loosened -- in particular PASS still needs a complete
 human transcript review (`--review-dir`), which no amount of machine evidence
 substitutes for.
+
+The schedule is built from `--engines`, so `--engines v3` (or any single
+engine) plays that engine's games; the gate measures every requested engine
+except the legacy comparison arm. The provider comes from
+`WEREWOLF_LLM_PROVIDER` as in `scripts/live_reasoning_check.py`; with
+`anthropic` the provider prices its own calls and `--max-estimated-cost` caps
+them before they are sent, and a resumed run carries the dollars already
+spent forward:
+
+    WEREWOLF_LLM_PROVIDER=anthropic WEREWOLF_ANTHROPIC_API_KEY=... \\
+        python scripts/live_ab_reasoning_check.py --engines v3 --seeds 11 12 \\
+            --max-estimated-cost 40 --output-dir live-ab-out
 """
 
 from __future__ import annotations
@@ -24,6 +36,7 @@ import asyncio
 import json
 import os
 import sys
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -34,10 +47,65 @@ from app.eval.reasoning_analyzer import (  # noqa: E402
     ReasoningQualityReport,
     ReasoningTranscriptAnalyzer,
 )
-from app.eval.release_gate import ReleaseGate  # noqa: E402
+from app.eval.release_gate import HARD_FAILURE_FIELDS, ReleaseGate  # noqa: E402
 from app.eval.release_report import HumanTranscriptReview  # noqa: E402
 from app.eval.transcript import GameTranscript  # noqa: E402
 from scripts.live_reasoning_check import run  # noqa: E402
+
+COMPARISON_ENGINE = "legacy"
+
+
+def candidate_engines(engines: Sequence[str]) -> list[str]:
+    """The engines being qualified: every requested one except the legacy
+    comparison arm, in the order given, without repeats."""
+    return [e for e in dict.fromkeys(engines) if e != COMPARISON_ENGINE]
+
+
+def build_schedule(
+    seeds: Sequence[int], engines: Sequence[str], max_games: int
+) -> list[tuple[int, str]]:
+    """`(seed, engine)` pairs in qualification order, for exactly the requested engines.
+
+    The order is the formal one the paired run always used -- on the first
+    seed the candidate's smoke game comes before its legacy pair, so a broken
+    candidate stops the run before the comparison arm is paid for; on later
+    seeds legacy comes first -- but it is now built from `engines` rather than
+    filtered from a hardcoded v2/legacy list, which silently scheduled nothing
+    for `--engines v3`.
+    """
+    candidates = candidate_engines(engines)
+    with_legacy = COMPARISON_ENGINE in engines
+    schedule: list[tuple[int, str]] = []
+    for index, seed in enumerate(seeds[: max(1, max_games)]):
+        if index == 0:
+            order = [*candidates, *([COMPARISON_ENGINE] if with_legacy else [])]
+        else:
+            order = [*([COMPARISON_ENGINE] if with_legacy else []), *candidates]
+        schedule.extend((seed, engine) for engine in order)
+    return schedule
+
+
+def restore_budget(args: argparse.Namespace, budget_state: dict[str, Any]) -> EvaluationBudget:
+    """The run's budget, carrying over what a resumed run already spent.
+
+    Both accounting styles are restored: luna's token counts, and the settled
+    dollars a self-pricing provider (anthropic) reports. Without the latter a
+    resumed anthropic run would start its cap from zero again. `settled_attempts`
+    is not in the snapshot; one is enough to make `estimated_cost` read the
+    restored dollars rather than recompute from token prices it never had.
+    """
+    spent_cost = float(budget_state.get("spent_cost") or 0.0)
+    return EvaluationBudget(
+        max_requests=args.max_http_requests,
+        used_requests=int(budget_state.get("used_requests", 0)),
+        max_estimated_cost=args.max_estimated_cost,
+        input_price_per_million=args.input_price_per_million,
+        output_price_per_million=args.output_price_per_million,
+        prompt_tokens=int(budget_state.get("prompt_tokens", 0)),
+        completion_tokens=int(budget_state.get("completion_tokens", 0)),
+        spent_cost=spent_cost,
+        settled_attempts=1 if spent_cost > 0 else 0,
+    )
 
 
 async def execute(args: argparse.Namespace) -> list[dict[str, Any]]:
@@ -47,34 +115,21 @@ async def execute(args: argparse.Namespace) -> list[dict[str, Any]]:
     aggregate_path = args.output_dir / "aggregate.json"
     if args.resume and aggregate_path.exists():
         existing = json.loads(aggregate_path.read_text(encoding="utf-8"))
-    budget_state = existing.get("budget", {})
-    requests = int(budget_state.get("used_requests", 0))
-    budget = EvaluationBudget(
-        max_requests=args.max_http_requests,
-        used_requests=requests,
-        max_estimated_cost=args.max_estimated_cost,
-        input_price_per_million=args.input_price_per_million,
-        output_price_per_million=args.output_price_per_million,
-        prompt_tokens=int(budget_state.get("prompt_tokens", 0)),
-        completion_tokens=int(budget_state.get("completion_tokens", 0)),
-    )
+    budget = restore_budget(args, existing.get("budget", {}))
+    requests = budget.used_requests
     spent = budget.estimated_cost or 0.0
-    # Formal qualification order: v2 smoke, its legacy pair, then remaining pairs.
-    schedule = [(args.seeds[0], "v2"), (args.seeds[0], "legacy")]
-    schedule.extend(
-        (seed, engine) for seed in args.seeds[1 : args.max_games] for engine in ("legacy", "v2")
-    )
-    for seed, engine in schedule:
-        if engine not in args.engines:
-            continue
+    candidates = candidate_engines(args.engines)
+    for seed, engine in build_schedule(args.seeds, args.engines, args.max_games):
         path = args.output_dir / f"{seed}-{engine}.json"
         transcript = args.output_dir / f"{seed}-{engine}-transcript.json"
+        stopped_by_budget = False
         if args.resume and path.exists():
             report = json.loads(path.read_text(encoding="utf-8"))
         else:
             try:
                 report = await run(seed, transcript, engine, budget)
             except BudgetExceeded as exc:
+                stopped_by_budget = True
                 report = {
                     "seed": seed,
                     "engine": engine,
@@ -92,22 +147,18 @@ async def execute(args: argparse.Namespace) -> list[dict[str, Any]]:
         rows.append(report)
         requests = budget.used_requests
         spent = budget.estimated_cost or 0.0
-        _save_aggregate(args.output_dir, rows, budget, args.review_dir)
+        _save_aggregate(args.output_dir, rows, budget, args.review_dir, candidates=candidates)
         hard = report.get("reasoning_quality", {})
-        if engine == "v2" and any(
-            hard.get(field, 0)
-            for field in (
-                "private_evidence_exposed_count",
-                "team_private_evidence_exposed_count",
-                "dead_target_selection_count",
-                "missing_required_result_count",
-                "displayed_target_mismatch_count",
-                "stale_evidence_publicly_emitted_count",
-                "unexplained_vote_change_count",
-                "unplanned_wolf_ally_vote_count",
-                "duplicate_night_action_count",
-            )
-        ):
+        # The release gate's own list: any of these fails it, so another paid
+        # game cannot change the verdict.
+        if engine in candidates and any(hard.get(field, 0) for field in HARD_FAILURE_FIELDS):
+            return rows
+        # A self-pricing provider refuses the request that would cross the
+        # cap, so `spent` stays just under it and the check below never
+        # fires: stop on the refusal itself, or every later game would start
+        # only to be cut off. (A row reloaded on resume does not stop the run,
+        # as before.)
+        if stopped_by_budget:
             return rows
         if requests >= args.max_http_requests or spent >= args.max_estimated_cost:
             return rows
@@ -119,16 +170,19 @@ def _save_aggregate(
     rows: list[dict[str, Any]],
     budget: EvaluationBudget,
     review_dir: Path | None = None,
+    *,
+    candidates: Sequence[str] = ("v2",),
 ) -> None:
     # Seeds, not rows: a resumed run that replays the same seed has not added
     # evidence, and the gate's bar is about coverage.
-    v2_seeds = {
+    candidate_rows = [row for row in rows if row.get("engine") in candidates]
+    candidate_seeds = {
         row["seed"]
-        for row in rows
-        if row.get("engine") == "v2" and row.get("status") not in ("budget_exhausted", "failed")
+        for row in candidate_rows
+        if row.get("status") not in ("budget_exhausted", "failed")
     }
-    live_games = len(v2_seeds)
-    reports = [row.get("reasoning_quality", {}) for row in rows if row.get("engine") == "v2"]
+    live_games = len(candidate_seeds)
+    reports = [row.get("reasoning_quality", {}) for row in candidate_rows]
     combined = (
         ReasoningQualityReport(
             **{
@@ -139,17 +193,16 @@ def _save_aggregate(
         if reports
         else ReasoningQualityReport()
     )
-    v2_game_ids = {
-        str(row["game_id"]) for row in rows if row.get("engine") == "v2" and row.get("game_id")
-    }
+    candidate_game_ids = {str(row["game_id"]) for row in candidate_rows if row.get("game_id")}
     reviews: list[HumanTranscriptReview] = []
     if review_dir is not None:
-        for game_id in v2_game_ids:
+        for game_id in candidate_game_ids:
             path = review_dir / f"{game_id}.json"
             if path.exists():
                 reviews.append(HumanTranscriptReview.from_json(path))
     review_complete = (
-        bool(v2_game_ids) and {r.game_id for r in reviews if r.complete} == v2_game_ids
+        bool(candidate_game_ids)
+        and {r.game_id for r in reviews if r.complete} == candidate_game_ids
     )
     operational_complete = (
         budget.pricing_supplied and bool(rows) and all("operational_metrics" in row for row in rows)
@@ -164,8 +217,10 @@ def _save_aggregate(
         operational_complete=operational_complete,
     )
     payload = {
+        "engines": list(candidates),
+        "models": sorted({str(row["model"]) for row in rows if row.get("model")}),
         "games": rows,
-        "stages": _stage_status(rows),
+        "stages": _stage_status(rows, candidates),
         "http_requests": budget.used_requests,
         "estimated_cost": budget.estimated_cost,
         "budget": budget.snapshot(),
@@ -177,6 +232,8 @@ def _save_aggregate(
     )
     (directory / "report.md").write_text(
         f"# Live A/B qualification\n\nGames: {len(rows)}\n\n"
+        f"Qualified engines: {', '.join(candidates)}\n\n"
+        f"Models: {', '.join(payload['models']) or 'unknown'}\n\n"
         f"HTTP requests: {budget.used_requests}\n\n"
         f"Estimated cost: {budget.estimated_cost}\n\n"
         f"ReleaseDecision: {gate.decision.value.upper()}\n"
@@ -185,9 +242,13 @@ def _save_aggregate(
     )
 
 
-def _stage_status(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+def _stage_status(
+    rows: list[dict[str, Any]], candidates: Sequence[str] = ("v2",)
+) -> dict[str, dict[str, Any]]:
+    # The key names are kept from the v2-only days so existing readers of
+    # aggregate.json still find them; stage A is the candidate engines' smoke.
     first_seed = rows[0].get("seed") if rows else None
-    stage_a = [r for r in rows if r.get("seed") == first_seed and r.get("engine") == "v2"]
+    stage_a = [r for r in rows if r.get("seed") == first_seed and r.get("engine") in candidates]
     stage_b = [r for r in rows if r.get("seed") == first_seed]
     stage_c = [r for r in rows if r.get("seed") != first_seed]
 
@@ -207,8 +268,10 @@ def _stage_status(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     }
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
+def main(argv: Sequence[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("--seeds", nargs="+", type=int, default=[11, 12, 13])
     # v2 only by default. The legacy arm was the A side of a comparison that has
     # served its purpose, and every legacy game is a full game's spend and about
@@ -231,7 +294,7 @@ def main() -> None:
     )
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--review-dir", type=Path, default=None)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     asyncio.run(execute(args))
 
 
