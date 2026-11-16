@@ -628,7 +628,12 @@ def _collect_format_stats(t: GameTranscript, result: AnalysisResult) -> None:
         result.stats["speech"] = None
         return
 
-    lengths = sorted(len(u.text) for u in speech)
+    # Lengths are the model's own writing. The CO and result sentences code
+    # puts in front of a line are not its register and not its overrun, and a
+    # line code wrote whole has no model part to measure. A transcript recorded
+    # before `model_text_chars` existed reads the whole text, as it always did.
+    written = [u for u in speech if u.model_text_chars != 0]
+    lengths = sorted(_model_chars(u) for u in written) or [0]
     fallbacks = [u for u in speech if u.used_fallback]
 
     for u in speech:
@@ -673,8 +678,8 @@ def _collect_format_stats(t: GameTranscript, result: AnalysisResult) -> None:
 
     over_limit = [
         u
-        for u in speech
-        if u.effective_length_limit is not None and len(u.text) > u.effective_length_limit
+        for u in written
+        if u.effective_length_limit is not None and _model_chars(u) > u.effective_length_limit
     ]
     discussions = [u for u in speech if u.kind == "discussion"]
     counts = [
@@ -706,9 +711,13 @@ def _collect_format_stats(t: GameTranscript, result: AnalysisResult) -> None:
         for question in questions
     ]
     adjacent = _adjacent_similarities(discussions)
+    public_lengths = _public_model_lengths(public_chat, discussions)
 
     result.stats["speech"] = {
         "utterances": len(speech),
+        # The lines the length figures below are taken over: those with a part
+        # the model wrote.
+        "length_lines": len(written),
         "mean_length": round(sum(lengths) / len(lengths), 1),
         "median_length": lengths[len(lengths) // 2],
         "max_length": lengths[-1],
@@ -768,12 +777,38 @@ def _collect_format_stats(t: GameTranscript, result: AnalysisResult) -> None:
             4,
         ),
         "public_messages_per_day": round(len(public_chat) / max(len(public_days), 1), 1),
-        "public_mean_length": round(
-            sum(len(str(message.get("content", ""))) for message in public_chat)
-            / max(len(public_chat), 1),
-            1,
-        ),
+        "public_mean_length": round(sum(public_lengths) / max(len(public_lengths), 1), 1),
     }
+
+
+def _model_chars(u: Utterance) -> int:
+    """The characters of a line the model wrote; the whole text when not recorded."""
+    return len(u.text) if u.model_text_chars is None else u.model_text_chars
+
+
+def _public_model_lengths(
+    public_chat: list[dict[str, Any]], discussions: list[Utterance]
+) -> list[int]:
+    """Each public message's length, counting only the model's part of an AI line.
+
+    A message is matched to the discussion turn that posted it by author, day
+    and text. The code-written prefix is left out, and a message code wrote
+    whole is left out of the mean altogether. A human's line, and every line
+    of a transcript recorded before the split, counts in full.
+    """
+    recorded: dict[tuple[str, int, str], list[int | None]] = {}
+    for u in discussions:
+        recorded.setdefault((u.player_id, u.day, u.text), []).append(u.model_text_chars)
+    lengths: list[int] = []
+    for message in public_chat:
+        content = str(message.get("content", ""))
+        key = (str(message.get("author_id", "")), int(message.get("day", 0)), content)
+        queue = recorded.get(key)
+        model_chars = queue.pop(0) if queue else None
+        if model_chars == 0:
+            continue
+        lengths.append(len(content) if model_chars is None else model_chars)
+    return lengths
 
 
 def _unanswered_split(

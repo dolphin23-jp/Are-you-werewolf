@@ -13,6 +13,7 @@ keeps total summary size bounded instead of ever-growing transcript replay.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Iterable, Sequence
 from typing import Any
 
@@ -27,7 +28,7 @@ from app.ai.personalities import (
 )
 from app.ai.provider.base import Message
 from app.ai.reasoning.board_memo import render_roster
-from app.ai.reasoning.facts import PublicFactLedger, mentions_player
+from app.ai.reasoning.facts import PublicFactLedger
 from app.ai.schemas import PLAN_NOTE_MEMO_FIELDS
 from app.ai.strategy import (
     StrategyAnalyzer,
@@ -1018,12 +1019,18 @@ class ContextBuilder:
         the model write "昼に言った通り" about a name it never said at the table.
         Whether the seat did say it is checked here, in code, on its own public
         lines from today, and stated when it did not.
+
+        "Said it" means put forward for the hang -- the name and a hang, vote
+        or suspicion word in one clause, not negated (see
+        `_puts_forward_for_hanging`). A bare mention is not enough: a seat that
+        only answered the target's question, or said 「Xは吊らない」, has not
+        named X as its hang target, and dropping the flag for it let the vote
+        line read as if it had.
         """
         if target_id is None or target_id not in state.players:
             return "【今日のメモの吊り先】なし"
-        name = state.players[target_id].name
         said = any(
-            mentions_player(message.content, target_id, name)
+            _puts_forward_for_hanging(state, message.content, target_id)
             for message in state.chat_log
             if message.channel == ChatChannel.PUBLIC
             and message.day == state.day
@@ -1186,3 +1193,170 @@ class ContextBuilder:
             "final_designation": "本指定",
             "human_followup": "人間発言への応答",
         }.get(stage, "議論")
+
+
+# -- did the seat put its memo target up for the hang today --
+#
+# Read for the vote prompt's (卓ではまだ名指ししていない) flag. Conservative on
+# purpose: a missed push only shows the flag on a name the seat did say, while
+# a bare mention read as a push lets the vote line imply 「昼に言った通り」 about
+# a name the seat never put forward -- the fabrication the flag exists to stop.
+
+# A clause: the stretch between sentence and clause breaks. The name and the
+# word that puts it up must share one, so 「Xさん、私の投票理由は…」 (a vocative,
+# then the seat's own vote) is no vote for X. The break is kept on the clause so
+# a rhetorical 「…ない？」 can be told from a plain negative.
+_CLAUSE_RE = re.compile(r"[^。！？!?\n、，,]+[。！？!?\n、，,]?")
+# Someone else's words, quoted, are not the seat's own push.
+_QUOTED_RE = re.compile(r"「[^「」]*」|『[^『』]*』")
+# A clause about an earlier day reports what happened -- yesterday's ballots,
+# yesterday's hang -- and puts nobody up today, unless it also says today.
+_EARLIER_DAY_RE = re.compile(r"昨日|昨夜|一昨日|おととい|初日|前日|(?P<day>[0-9０-９]+)日目")
+_TODAY_RE = re.compile(r"今日|本日")
+# The words that put a named seat up. `act`: a hang or vote with a subject of
+# its own, so 「Xが投票」 is X voting. `doubt`: suspecting, likewise a verb.
+# `slot`: a place X fills (「Xが第一候補」「X1択」). `judgement`: an adjective on
+# X, whatever the grammar around it (「Xの発言が怪しい」).
+_HANG_WORD_RE = re.compile(
+    r"(?P<act>吊|処刑|投票|票を?(?:入れ|合わせ|乗せ|集め|置|投じ)|に入れ|指定)"
+    r"|(?P<doubt>疑[いうっ])"
+    r"|(?P<slot>(?<!占い)(?<!護衛)(?<!襲撃)(?<!噛み)候補|本命|最有力|[1一１]択|で決ま|に決め)"
+    r"|(?P<judgement>怪し|疑わし|狼(?:っぽ|だと|寄り|目|濃)|黒(?:っぽ|寄り|目|濃))"
+)
+_HONORIFIC_RE = re.compile(r"^(?:さん|くん|君|ちゃん|氏|様)")
+# Names joined into one list share the word that follows: 「XかYに投票」.
+_LIST_JOIN_RE = re.compile(r"^(?:さん|くん|君|ちゃん|氏|様)?(?:と|か|や|・|／|/|or)$")
+# A heading that names the slot before the name: 「今日の吊り先はX」「怪しいのはX」.
+_LEADS_INTO_RE = re.compile(
+    r"^(?:り|る|い|く)?(?:たい|べき)?"
+    r"(?:(?:な?の)?(?:先|候補|希望|対象|筆頭|相手|人)(?:は|が|も|なら)?|な?の(?:は|が)|は|が|も|なら)?"
+    r"[:：→=＝\s]*$"
+)
+# A noun between the name and the hang word is that word's object instead:
+# 「Xは白だからグレー吊り」 hangs a grey, not X.
+_OTHER_OBJECT_RE = re.compile(r"(?:グレー|ローラー|白|黒|村|狼|占い|霊媒?|共有|狩人|位置|CO|ＣＯ)$")
+# 「Xが吊り先」 is a slot, not X doing the hanging.
+_SLOT_AFTER_ACT_RE = re.compile(r"^(?:り|る)?(?:先|候補|対象|筆頭|希望)")
+# An act already done or standing -- 「Xに入れた」「Xに入れていて」「吊らせた」 --
+# is a report of a ballot, not a push.
+_REPORTED_ACT_RE = re.compile(
+    r"^(?:られ|され|らせ|させ|し|っ|り)?"
+    r"(?:(?:てい|てお|まし|ていまし|て)?た(?![いくらけ])|てい?[てるま])"
+)
+_NEGATED_RE = re.compile(
+    r"ない|なく|なかっ|ません|[らさわせれ]ず|ぬ|避け|外[さしすせ]|やめ|止め|反対|なし|無し"
+    r"|違う|ダメ|駄目|不要|早い|保留|見送"
+)
+# Negative forms that still push: no other choice, must, a rhetorical ask,
+# keeping a position (「X吊りは変えない」).
+_AFFIRMED_RE = re.compile(
+    r"変え(?:ない|ません)|変わら(?:ない|ず)|譲ら|ブレ"
+    r"|しかな|ほかな|他な|以外な|ないと(?:いけ|だめ|ダメ|駄目|まず|[。！!]|$)"
+    r"|なきゃ|なければ|なくては|ざるを|いいんじゃ|いいじゃ"
+    r"|(?:ない|ません)(?:です)?か[？?。！!]?\s*$|ない[？?]\s*$"
+)
+_NEGATION_WINDOW = 8
+_GAP_LIMIT = 10
+
+
+def _puts_forward_for_hanging(state: GameState, text: str, target_id: str) -> bool:
+    """Whether `text` puts `target_id` up for today's hang.
+
+    The name and a hang, vote or suspicion word in one clause, not negated:
+    「今日はX吊り」「Xに投票」「X怪しい、吊りたい」 count; 「Xは吊らない」,
+    「Xさん、私の投票理由は…」, 「Xは白っぽい」 and 「昨日Xに入れた」 do not.
+    """
+    for clause in _CLAUSE_RE.findall(_QUOTED_RE.sub("（引用）", text)):
+        if _about_an_earlier_day(clause, state.day):
+            continue
+        spans = _mention_spans(state, clause)
+        for index, span in enumerate(spans):
+            if span[2] == target_id and _clause_pushes(clause, spans, index):
+                return True
+    return False
+
+
+def _about_an_earlier_day(clause: str, today: int) -> bool:
+    if _TODAY_RE.search(clause):
+        return False
+    for match in _EARLIER_DAY_RE.finditer(clause):
+        number = match.group("day")
+        if number is None or int(number) != today:
+            return True
+    return False
+
+
+def _mention_spans(state: GameState, text: str) -> list[tuple[int, int, str]]:
+    """Every seat the text names, as (start, end, player_id), in order.
+
+    The trailing-digit guard applies only to a label that ends in a digit (an
+    id, "Player1"), so Player1 is not read inside Player11 while 「ソウタ1択」
+    still names ソウタ. A label inside a longer seat's label at the same place
+    is that longer seat: サク inside サクラ.
+    """
+    found: list[tuple[int, int, str]] = []
+    for player_id, player in state.players.items():
+        for label in {player_id, player.name} - {""}:
+            trail = r"(?![0-9])" if label[-1].isdigit() else ""
+            pattern = re.compile(rf"(?<![0-9A-Za-z]){re.escape(label)}{trail}")
+            found.extend((m.start(), m.end(), player_id) for m in pattern.finditer(text))
+    found.sort(key=lambda span: (span[0], span[0] - span[1]))
+    kept: list[tuple[int, int, str]] = []
+    for span in found:
+        if not any(start <= span[0] and span[1] <= end for start, end, _ in kept):
+            kept.append(span)
+    return kept
+
+
+def _clause_pushes(clause: str, spans: list[tuple[int, int, str]], index: int) -> bool:
+    start, end, player_id = spans[index]
+    # The words that belong to this name run to the next other name, past a
+    # list join and past this seat named again ("Player2(p2)").
+    body_start, segment_end = end, len(clause)
+    for later_start, later_end, other in spans[index + 1 :]:
+        if other == player_id or _LIST_JOIN_RE.match(clause[body_start:later_start]):
+            body_start = later_end
+            continue
+        segment_end = later_start
+        break
+    head_end, segment_start = start, 0
+    for earlier_start, earlier_end, other in reversed(spans[:index]):
+        if other == player_id or _LIST_JOIN_RE.match(clause[earlier_end:head_end]):
+            head_end = earlier_start
+            continue
+        segment_start = earlier_end
+        break
+
+    word = _HANG_WORD_RE.search(clause, body_start, segment_end)
+    if word is not None:
+        return _word_pushes(clause, word, body_start, segment_end)
+    # Nothing after the name: a heading before it, 「今日の吊り先はX」.
+    headings = list(_HANG_WORD_RE.finditer(clause, segment_start, head_end))
+    if not headings or not _LEADS_INTO_RE.match(clause[headings[-1].end() : head_end]):
+        return False
+    return not _negated(_HONORIFIC_RE.sub("", clause[body_start:segment_end]))
+
+
+def _word_pushes(clause: str, word: re.Match[str], body_start: int, segment_end: int) -> bool:
+    gap = _HONORIFIC_RE.sub("", clause[body_start : word.start()])
+    if len(gap) > _GAP_LIMIT or _OTHER_OBJECT_RE.search(gap):
+        return False
+    kind = word.lastgroup
+    tail = clause[word.end() : segment_end]
+    if kind in ("act", "doubt"):
+        if gap.startswith("の"):
+            return False  # X's own vote, X's suspicion
+        if gap.startswith("が") and not _SLOT_AFTER_ACT_RE.match(tail):
+            return False  # X is the one voting
+    if kind == "act":
+        if not gap and word.group() == "投票":
+            return False  # 「X投票」: the ballots someone cast, a report
+        if _REPORTED_ACT_RE.match(tail):
+            return False
+    if kind == "slot" and gap.startswith("の"):
+        return False  # 「Xの候補」: X's candidate
+    return not _negated(tail)
+
+
+def _negated(tail: str) -> bool:
+    return bool(_NEGATED_RE.search(tail[:_NEGATION_WINDOW])) and not _AFFIRMED_RE.search(tail)

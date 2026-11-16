@@ -4,6 +4,8 @@ a detector that flags everything is as useless as one that flags nothing."""
 
 from __future__ import annotations
 
+from dataclasses import asdict
+
 from app.eval.analyzers import analyze
 from app.eval.transcript import GameTranscript, Utterance
 
@@ -333,6 +335,91 @@ def test_length_limit_uses_each_recorded_personality_limit():
     )
 
     assert analyze(t).stats["speech"]["over_length_limit"] == 1
+
+
+_CODE_PREFIX = "占いCO。占い結果、ハルトは白(人狼ではない)です。"
+
+
+def test_length_counts_only_what_the_model_wrote():
+    """The review's len_repro.py: a seer's own 99-character line under the
+    120 cap was counted over it once code put its CO and result in front.
+    A line code wrote whole is not the model's overrun at all; a line from a
+    transcript recorded before the split counts in full, as it always did."""
+    model_line = "あ" * 99
+    t = _transcript(
+        utterances=[
+            _say(
+                "p1",
+                _CODE_PREFIX + model_line,
+                effective_length_limit=120,
+                model_text_chars=len(model_line),
+            ),
+            _say("p2", _CODE_PREFIX * 2, effective_length_limit=30, model_text_chars=0),
+            _say("p3", "い" * 130, effective_length_limit=120),
+        ]
+    )
+    assert len(_CODE_PREFIX + model_line) > 120
+
+    stats = analyze(t).stats["speech"]
+
+    assert stats["over_length_limit"] == 1  # p3's legacy line only
+    assert stats["length_lines"] == 2
+    assert stats["mean_length"] == (99 + 130) / 2
+    assert stats["max_length"] == 130
+
+
+def test_the_public_mean_length_counts_the_models_part_of_an_ai_line():
+    model_line = "あ" * 40
+    t = _transcript(
+        utterances=[
+            _say("p1", _CODE_PREFIX + model_line, model_text_chars=len(model_line)),
+            _say("p2", _CODE_PREFIX, model_text_chars=0),
+        ],
+        final_state={
+            "chat_log": [
+                {
+                    "channel": "public",
+                    "day": 1,
+                    "author_id": "p1",
+                    "content": _CODE_PREFIX + model_line,
+                },
+                {"channel": "public", "day": 1, "author_id": "p2", "content": _CODE_PREFIX},
+                {"channel": "public", "day": 1, "author_id": "p0", "content": "はい"},
+            ]
+        },
+    )
+
+    stats = analyze(t).stats["speech"]
+
+    # The code-written line is left out; the human's line counts in full.
+    assert stats["public_mean_length"] == (40 + 2) / 2
+    assert stats["public_messages_per_day"] == 3
+
+
+def test_a_transcript_recorded_before_the_split_loads_and_reads_the_whole_text():
+    item = asdict(_say("p1", _CODE_PREFIX + "あ" * 99, effective_length_limit=120))
+    del item["model_text_chars"]
+
+    t = GameTranscript.from_dict(asdict(_transcript()) | {"utterances": [item]})
+
+    assert t.utterances[0].model_text_chars is None
+    assert analyze(t).stats["speech"]["over_length_limit"] == 1
+
+
+def test_the_report_weighs_lengths_by_the_lines_the_model_wrote():
+    from app.eval.report import _render_speech_stats
+
+    t = _transcript(
+        utterances=[
+            _say("p1", _CODE_PREFIX + "あ" * 50, effective_length_limit=60, model_text_chars=50),
+            _say("p2", _CODE_PREFIX * 3, effective_length_limit=30, model_text_chars=0),
+        ]
+    )
+
+    table = _render_speech_stats([(t, analyze(t))])
+
+    assert "| 平均文字数(モデルが書いた部分) | 50.0 |" in table
+    assert "| 発言長上限超過(モデルが書いた部分) | 0 (0.0%) |" in table
 
 
 def test_clean_transcript_produces_no_findings():

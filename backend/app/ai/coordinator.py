@@ -525,6 +525,7 @@ class AICoordinator:
         directed_question_targets: list[str] | None = None,
         ready_to_vote: bool | None = None,
         effective_length_limit: int | None = None,
+        model_text_chars: int | None = None,
         key_point: str = "",
         agrees_with: list[str] | None = None,
         decision_evidence: str = "",
@@ -557,6 +558,7 @@ class AICoordinator:
                 ready_to_vote=ready_to_vote,
                 used_fallback=used_fallback,
                 effective_length_limit=effective_length_limit,
+                model_text_chars=model_text_chars,
                 key_point=key_point,
                 agrees_with=agrees_with or [],
                 decision_evidence=decision_evidence,
@@ -1547,6 +1549,19 @@ class AICoordinator:
             speaker_id=player_id,
             names_only=self.model_decides,
         )
+        # What the model itself wrote, measured before code puts the canonical
+        # CO and result sentences in front of it: the stage cap and the register
+        # are the model's to answer for, the prefix is not. A turn code wrote
+        # whole -- a failed generation's obligations, the freemason lines, the
+        # personality's canned fallback -- has no model part at all.
+        model_text_chars = (
+            0
+            if posted_by_code
+            or freemason_opening is not None
+            or pending_relation is not None
+            or self._is_fallback(player_id, output.public_message)
+            else len(output.public_message)
+        )
         output.public_message = ensure_fact_sentences(
             output.public_message,
             drafts,
@@ -1586,6 +1601,7 @@ class AICoordinator:
                 if self.model_decides
                 else discussion_length_range(self._personalities[player_id].verbosity)[1]
             ),
+            model_text_chars=model_text_chars,
             stage=stage,
             key_point=output.key_point,
             agrees_with=output.agrees_with,

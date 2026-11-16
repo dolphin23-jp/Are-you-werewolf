@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from app.eval.analyzers import AnalysisResult, analyze
+from app.eval.analyzers import _CODE_FACT_SENTENCE_RE, AnalysisResult, analyze
 from app.eval.transcript import GameTranscript
 
 TRANSCRIPT = (
@@ -66,6 +66,41 @@ def test_the_code_written_fact_sentences_are_counted(first_game: AnalysisResult)
     assert speech["code_fact_sentence_lines"] == 11
     assert speech["prompt_template_phrase_rate"] == round(7 / 77, 4)
     assert speech["template_phrase_rate"] == round(18 / 77, 4)
+
+
+def test_a_transcript_recorded_before_the_split_keeps_its_length_numbers(
+    first_game: AnalysisResult,
+):
+    """Lengths are now the model's own part of a line, but this game was
+    recorded before `model_text_chars` existed, so they read the whole posted
+    text -- the numbers its report gave."""
+    speech = first_game.stats["speech"]
+
+    assert speech["length_lines"] == 93
+    assert speech["mean_length"] == 117.6
+    assert speech["public_mean_length"] == 129.7
+    assert speech["over_length_limit"] == 0
+
+
+def test_recorded_now_its_code_written_prefixes_would_leave_the_lengths():
+    """The same game as the recorder writes it now: each of the 11 lines that
+    opens with a code-written CO or result sentence records only the model's
+    part, and the 110 prefix characters leave the public mean (9989 -> 9879
+    characters over the same 77 public lines)."""
+    transcript = GameTranscript.from_dict(json.loads(TRANSCRIPT.read_text(encoding="utf-8")))
+    prefix_chars = 0
+    for utterance in transcript.utterances:
+        match = _CODE_FACT_SENTENCE_RE.match(utterance.text)
+        if utterance.kind == "discussion" and match is not None:
+            utterance.model_text_chars = len(utterance.text) - len(match.group())
+            prefix_chars += len(match.group())
+
+    speech = analyze(transcript).stats["speech"]
+
+    assert prefix_chars == 110
+    assert speech["public_mean_length"] == round(9879 / 77, 1)
+    assert speech["mean_length"] == 116.5
+    assert speech["over_length_limit"] == 0
 
 
 def test_unanswered_questions_are_split_by_whether_the_target_had_a_turn(
