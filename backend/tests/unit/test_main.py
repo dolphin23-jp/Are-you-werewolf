@@ -66,15 +66,27 @@ def bare_root_logger() -> Iterator[logging.Logger]:
 # -- the open-access guard --
 
 
-@pytest.mark.parametrize("provider", ["anthropic", "claude", "claude-opus-5-5"])
+# Every provider that bills a key, under each spelling the provider field
+# accepts for it. The dormant luna provider bills too, and its README section
+# says nothing about a password, so it needs the guard as much as anthropic.
+PAID_PROVIDER_SPELLINGS = [
+    ("anthropic", {"werewolf_anthropic_api_key": FAKE_ANTHROPIC_KEY}),
+    ("claude", {"werewolf_anthropic_api_key": FAKE_ANTHROPIC_KEY}),
+    ("claude-opus-5-5", {"werewolf_anthropic_api_key": FAKE_ANTHROPIC_KEY}),
+    ("luna", {"luna_api_key": FAKE_LUNA_KEY}),
+    ("gpt-6-luna", {"luna_api_key": FAKE_LUNA_KEY}),
+]
+
+
+@pytest.mark.parametrize(("provider", "key"), PAID_PROVIDER_SPELLINGS)
 def test_refuses_to_start_a_paid_provider_without_a_password(
-    use_settings: UseSettings, provider: str
+    use_settings: UseSettings, provider: str, key: dict[str, str]
 ) -> None:
     use_settings(
         werewolf_llm_provider=provider,
-        werewolf_anthropic_api_key=FAKE_ANTHROPIC_KEY,
         werewolf_access_password="",
         werewolf_allow_open_access=False,
+        **key,
     )
     with pytest.raises(RuntimeError) as excinfo:
         create_app()
@@ -86,31 +98,39 @@ def test_refuses_to_start_a_paid_provider_without_a_password(
     assert "起動を中止" in message
     assert "Refusing to start" in message
     assert FAKE_ANTHROPIC_KEY not in message
+    assert FAKE_LUNA_KEY not in message
 
 
-def test_starts_a_paid_provider_behind_a_password(use_settings: UseSettings) -> None:
-    use_settings(
-        werewolf_llm_provider="anthropic",
-        werewolf_anthropic_api_key=FAKE_ANTHROPIC_KEY,
+@pytest.mark.parametrize(("provider", "key"), PAID_PROVIDER_SPELLINGS)
+def test_starts_a_paid_provider_behind_a_password(
+    use_settings: UseSettings, provider: str, key: dict[str, str]
+) -> None:
+    settings = use_settings(
+        werewolf_llm_provider=provider,
         werewolf_access_password="table-password",
         werewolf_allow_open_access=False,
+        **key,
     )
     client = TestClient(create_app())
     # The game API is behind the password; health stays public.
     assert client.post("/api/games", json={}).status_code == 401
     health = client.get("/api/health")
     assert health.status_code == 200
-    assert health.json()["llm_provider"] == "anthropic"
+    assert health.json()["llm_provider"] == settings.werewolf_llm_provider
 
 
+@pytest.mark.parametrize(("provider", "key"), PAID_PROVIDER_SPELLINGS)
 def test_open_access_is_an_explicit_opt_in_and_is_logged(
-    use_settings: UseSettings, caplog: pytest.LogCaptureFixture
+    use_settings: UseSettings,
+    caplog: pytest.LogCaptureFixture,
+    provider: str,
+    key: dict[str, str],
 ) -> None:
     use_settings(
-        werewolf_llm_provider="anthropic",
-        werewolf_anthropic_api_key=FAKE_ANTHROPIC_KEY,
+        werewolf_llm_provider=provider,
         werewolf_access_password="",
         werewolf_allow_open_access=True,
+        **key,
     )
     with caplog.at_level(logging.WARNING, logger="app.main"):
         client = TestClient(create_app())
@@ -158,7 +178,11 @@ def test_offline_providers_need_no_password(use_settings: UseSettings, provider:
             "claude-sonnet-5-5",
         ),
         (
-            {"werewolf_llm_provider": "luna", "luna_api_key": FAKE_LUNA_KEY},
+            {
+                "werewolf_llm_provider": "luna",
+                "luna_api_key": FAKE_LUNA_KEY,
+                "werewolf_allow_open_access": True,
+            },
             DEFAULT_LUNA_MODEL,
         ),
     ],
