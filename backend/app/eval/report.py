@@ -9,7 +9,7 @@ judge model.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import Any, Literal
 
 from app.eval.analyzers import AnalysisResult
 from app.eval.release_gate import HARD_FAILURE_FIELDS
@@ -20,6 +20,10 @@ _SEVERITY_ORDER = {"high": 0, "medium": 1, "low": 2}
 # Shown at the top of a report written after the spending cap stopped the run.
 # Short and fixed, so a workflow or a person can grep for it.
 BUDGET_STOP_BANNER = "費用上限に達したため中断"
+
+# What the cap stopped: the games themselves, or the LLM judge that runs after
+# every game has finished.
+BudgetStopPhase = Literal["game", "judge"]
 
 # Section headings other tooling and the docs refer to by name.
 CALL_HEALTH_HEADING = "呼び出し種別ごとの健全性"
@@ -106,6 +110,7 @@ def render_report(
     per_game: Sequence[Mapping[str, Any]] | None = None,
     budget: Mapping[str, Any] | None = None,
     budget_stop: str | None = None,
+    budget_stop_phase: BudgetStopPhase = "game",
 ) -> str:
     """The whole run on one page.
 
@@ -114,12 +119,25 @@ def render_report(
     rather than disappear. `budget_stop` is the `BudgetExceeded` message when
     the spending cap ended the run: the report then says so first, because
     every number below it covers only what was played before the stop.
+
+    `budget_stop_phase` says what the cap stopped. "judge" means every game
+    was played without reaching it and only the LLM judge afterwards did:
+    the report must not then send the reader looking for interrupted games,
+    nor tell them to pass a `--judge` they already passed.
     """
     lines: list[str] = []
     add = lines.append
+    judge_stopped = budget_stop is not None and budget_stop_phase == "judge"
 
     add("# AI人狼プレイヤー 評価レポート\n")
-    if budget_stop is not None:
+    if judge_stopped:
+        add(
+            f"> **{BUDGET_STOP_BANNER}。** 対戦は上限に届く前にすべて終わり、そのあとの"
+            "LLM判定(`--judge`)で上限に達したため、判定の呼び出しは送らずに止めました。"
+            "対戦の数値はそろっています。LLM判定の結果はありません(6章)。\n>\n"
+            f"> `{budget_stop}`\n"
+        )
+    elif budget_stop is not None:
         add(
             f"> **{BUDGET_STOP_BANNER}。** 上限に届く呼び出しは送らずに止めました。"
             "以下の数値は止まるまでに行った分だけです。途中で止まった試合の対戦記録は"
@@ -163,7 +181,14 @@ def render_report(
     add(_render_speech_stats(games))
 
     add("\n## 6. 日本語の自然さ・人格の維持\n")
-    if judge_summary is None:
+    if judge_summary is None and judge_stopped:
+        add(
+            "LLM判定は費用上限に達したため中断しました(結果なし)。判定も含めるには、"
+            "`--max-cost` を上げて実行し直してください。\n\n"
+            "`transcript-*.md` に読みやすい形式の全発言を出力しているので、"
+            "目視での確認も可能です。"
+        )
+    elif judge_summary is None:
         add(
             "LLM判定は未実行です(`--judge` で有効化)。\n\n"
             "`transcript-*.md` に読みやすい形式の全発言を出力しているので、"

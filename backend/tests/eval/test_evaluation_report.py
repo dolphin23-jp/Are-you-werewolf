@@ -123,6 +123,30 @@ def test_a_budget_stop_is_the_first_thing_the_report_says() -> None:
 
     assert report.index(BUDGET_STOP_BANNER) < report.index("- プロバイダ")
     assert "15.1 > 15.0" in report
+    # A stop during the games keeps saying where the partial games are.
+    assert "途中経過" in report.split("- プロバイダ")[0]
+
+
+def test_a_stop_in_the_judge_says_the_games_finished_and_the_judge_did_not() -> None:
+    report = _render(
+        budget_stop="estimated cost budget would be exceeded (20.1 > 20.0)",
+        budget_stop_phase="judge",
+    )
+
+    head = report.split("- プロバイダ")[0]
+    assert BUDGET_STOP_BANNER in head  # still greppable by workflows
+    assert "20.1 > 20.0" in head
+    # No game was cut short, so the reader is not sent looking for one.
+    assert "途中経過" not in head
+    assert "LLM判定" in head
+    judge = _section(report, "## 6.")
+    assert "費用上限" in judge
+    # The flag was passed; telling the owner to pass it would be wrong.
+    assert "`--judge` で有効化" not in judge
+
+
+def test_without_a_judge_stop_section_6_still_points_at_the_flag() -> None:
+    assert "`--judge` で有効化" in _section(_render(), "## 6.")
 
 
 def test_offline_doubles_are_flagged_as_such() -> None:

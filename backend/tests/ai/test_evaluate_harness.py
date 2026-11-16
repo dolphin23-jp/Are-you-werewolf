@@ -329,6 +329,7 @@ def test_the_spending_cap_stops_the_run_and_keeps_what_was_played(
     report = (tmp_path / "report.md").read_text(encoding="utf-8")
     assert BUDGET_STOP_BANNER in report.split("\n- プロバイダ")[0]  # above everything else
     assert summary["stopped_by_budget"] is True
+    assert summary["budget_stop_phase"] == "game"
     assert summary["games_played"] == 1  # the second game never started
     assert summary["per_game"][0]["finished"] is False
     assert summary["per_game"][0]["budget_stop"]
@@ -392,6 +393,34 @@ def test_the_judge_shares_the_cap(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
     assert summary["budget"]["used_requests"] == sum(provider.sent for provider in built)
     assert summary["judge"]["metrics"]["total_calls"] == judge_provider.sent
     assert summary["metrics"]["total_calls"] == built[0].sent
+
+
+def test_a_cap_reached_by_the_judge_alone_is_reported_as_such(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("WEREWOLF_REASONING_ENGINE", "legacy")
+    argv = ["--provider", "anthropic", "--judge"]
+    # A free probe, run exactly like the real one, counts the game's calls.
+    probe = _install_priced_mock(monkeypatch, cost=0.0)
+    assert _run_main([*argv, "--max-cost", "1000", "--out", str(tmp_path / "probe")]) == 0
+    game_calls = probe[0].sent
+
+    _install_priced_mock(monkeypatch, cost=0.25)
+    cap = game_calls * 0.25 + 0.125  # the whole game fits; not one judge call
+    code = _run_main([*argv, "--max-cost", str(cap), "--out", str(tmp_path / "run")])
+
+    assert code == evaluate.EXIT_BUDGET_STOPPED
+    summary = json.loads((tmp_path / "run" / "summary.json").read_text(encoding="utf-8"))
+    assert summary["stopped_by_budget"] is True
+    assert summary["budget_stop_phase"] == "judge"
+    assert summary["per_game"][0]["finished"] is True
+    report = (tmp_path / "run" / "report.md").read_text(encoding="utf-8")
+    head = report.split("\n- プロバイダ")[0]
+    assert BUDGET_STOP_BANNER in head
+    assert "途中経過" not in head  # no game was cut short
+    section_6 = report.split("## 6.", 1)[1]
+    assert "費用上限" in section_6
+    assert "`--judge` で有効化" not in section_6  # it was passed
 
 
 def test_a_cap_that_is_not_reached_changes_nothing() -> None:

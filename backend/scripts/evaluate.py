@@ -82,7 +82,11 @@ from app.eval.progress import (  # noqa: E402
 )
 from app.eval.reasoning_analyzer import ReasoningTranscriptAnalyzer  # noqa: E402
 from app.eval.release_gate import HARD_FAILURE_FIELDS  # noqa: E402
-from app.eval.report import BUDGET_STOP_BANNER, render_report  # noqa: E402
+from app.eval.report import (  # noqa: E402
+    BUDGET_STOP_BANNER,
+    BudgetStopPhase,
+    render_report,
+)
 from app.eval.transcript import GameTranscript, TranscriptRecorder  # noqa: E402
 
 HUMAN_ID = "p0"
@@ -529,6 +533,8 @@ async def main(argv: Sequence[str] | None = None) -> int:
 
     runs: list[GameRun] = []
     budget_stop: str | None = None
+    # Which part of the run the cap stopped; the report words the stop by it.
+    budget_stop_phase: BudgetStopPhase = "game"
     for offset in range(args.games):
         seed = args.seed + offset
         print(f"==> game {offset + 1}/{args.games} (seed={seed})", flush=True)
@@ -568,6 +574,7 @@ async def main(argv: Sequence[str] | None = None) -> int:
             result = await judge_transcript(runs[0].transcript, judge_provider)
         except BudgetExceeded as exc:
             budget_stop = str(exc)
+            budget_stop_phase = "judge"
             print(f"==> {BUDGET_STOP_BANNER}(判定中): {budget_stop}", flush=True)
         else:
             judge_summary = result.summary
@@ -596,6 +603,7 @@ async def main(argv: Sequence[str] | None = None) -> int:
         per_game=per_game,
         budget=snapshot,
         budget_stop=budget_stop,
+        budget_stop_phase=budget_stop_phase,
     )
     (args.out / "report.md").write_text(report, encoding="utf-8")
     summary: dict[str, Any] = {
@@ -607,6 +615,9 @@ async def main(argv: Sequence[str] | None = None) -> int:
         "games_played": len(runs),
         "stopped_by_budget": budget_stop is not None,
         "budget_stop": budget_stop,
+        # "game": a game was cut short; "judge": every game finished and only
+        # the LLM judge afterwards reached the cap.
+        "budget_stop_phase": budget_stop_phase if budget_stop is not None else None,
         "budget": snapshot,
         "metrics": overall,
         "per_game": per_game,
