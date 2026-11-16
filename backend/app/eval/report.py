@@ -464,7 +464,13 @@ def _render_speech_stats(games: list[tuple[GameTranscript, AnalysisResult]]) -> 
         return "(発言がありません)"
 
     total = sum(s["utterances"] for s in collected)
-    mean_len = sum(s["mean_length"] * s["utterances"] for s in collected) / max(total, 1)
+    # Lengths are over the lines with a part the model wrote (all of them in a
+    # transcript recorded before code-written prefixes were told apart).
+    measured = sum(s.get("length_lines", s["utterances"]) for s in collected)
+    mean_len = (
+        sum(s["mean_length"] * s.get("length_lines", s["utterances"]) for s in collected)
+        / max(measured, 1)
+    )
     over = sum(s["over_length_limit"] for s in collected)
     fallbacks = sum(s["fallback_lines"] for s in collected)
     repeats = sum(s["verbatim_repeat_players"] for s in collected)
@@ -485,8 +491,8 @@ def _render_speech_stats(games: list[tuple[GameTranscript, AnalysisResult]]) -> 
             "| 指標 | 値 |",
             "|---|---|",
             f"| 発言数 | {total} |",
-            f"| 平均文字数 | {mean_len:.1f} |",
-            f"| 人格別の発言長上限超過 | {over} ({over / max(total, 1):.1%}) |",
+            f"| 平均文字数(モデルが書いた部分) | {mean_len:.1f} |",
+            f"| 発言長上限超過(モデルが書いた部分) | {over} ({over / max(measured, 1):.1%}) |",
             f"| フォールバック定型文 | {fallbacks} ({fallbacks / max(total, 1):.1%}) |",
             f"| 同一発言の繰り返し | {repeats} |",
             f"| クロスプレイヤー論点重複率 | {weighted('cross_player_topic_overlap_rate'):.1%} |",
@@ -510,7 +516,8 @@ def _render_speech_stats(games: list[tuple[GameTranscript, AnalysisResult]]) -> 
             f"({weighted('code_fact_sentence_rate'):.1%}) |",
             f"| ID表記(pN)を含むAI発言率 | {weighted('id_mention_rate'):.1%} |",
             f"| 1日あたり公開発言数 | {weighted('public_messages_per_day'):.1f} |",
-            f"| 公開発言の平均文字数 | {weighted('public_mean_length'):.1f} |",
+            f"| 公開発言の平均文字数(AI発言はモデルが書いた部分) | "
+            f"{weighted('public_mean_length'):.1f} |",
             *stance,
             *examples,
         ]

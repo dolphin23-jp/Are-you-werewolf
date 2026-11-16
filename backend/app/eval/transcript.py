@@ -139,6 +139,12 @@ class Utterance:
     # `consensus_summary`, `final_designation`, ...); None for other kinds and
     # for transcripts written before it was recorded.
     stage: str | None = None
+    # How many characters of `text` the model wrote, before code put the
+    # canonical CO and result sentences in front of it. 0 for a turn code wrote
+    # whole (a failed generation's obligations, the freemason lines, the canned
+    # fallback). None for kinds that never get a code prefix and for transcripts
+    # recorded before the field existed: length metrics then read `len(text)`.
+    model_text_chars: int | None = None
 
 
 @dataclass
