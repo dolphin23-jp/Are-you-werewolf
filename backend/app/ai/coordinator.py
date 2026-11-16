@@ -196,6 +196,9 @@ class _RoundBook:
     summary_speaker: str | None = None
     # Seats the summary put a question to, each owed one answer before the close.
     summary_answers: list[str] = field(default_factory=list)
+    # The summary put a question to the living human, and the round may wait
+    # for them: the table stops right after it so they have the floor first.
+    summary_asked_human: bool = False
     designation_pending: bool = False
 
 
@@ -595,19 +598,29 @@ class AICoordinator:
                     session.discussion_paused = True  # type: ignore[attr-defined]
                 if getattr(session, "discussion_step_budget", None) == 0:
                     session.discussion_paused = True  # type: ignore[attr-defined]
-                if can_pause and getattr(session, "discussion_paused", False):
-                    self._set_awaiting(round_state, True)
-                    break
+                # What the closing turns open or close is settled before any
+                # pause is honoured. A step or a pause that landed on the
+                # summary used to stop the loop before its follow-ups were
+                # queued, and the next segment found nothing left to say.
+                waits_for_human = False
                 if stage == "consensus_summary":
                     # A summary that asks the candidate for a last word used
                     # to close the round before the question was queued, so
                     # the answer never came (five of six days in the first
                     # Claude game). Its questions are answered first now.
-                    if not self._open_summary_followups(state, round_state, pid, output):
+                    if not self._open_summary_followups(
+                        state,
+                        round_state,
+                        pid,
+                        output,
+                        waiting_human=human_id if can_pause else None,
+                    ):
                         round_state.complete = True
                         break
-                    continue
-                if stage == _FINAL_DESIGNATION_STAGE:
+                    # A question to the human is theirs to answer before any
+                    # AI answer or the designation: the floor goes to them now.
+                    waits_for_human = self._book_for(round_state).summary_asked_human
+                elif stage == _FINAL_DESIGNATION_STAGE:
                     if any(
                         question.target_id in state.players
                         and question.target_id != pid
@@ -620,6 +633,11 @@ class AICoordinator:
                         self._record_event("designation_question_unanswered")
                     round_state.complete = True
                     break
+                if can_pause and (waits_for_human or getattr(session, "discussion_paused", False)):
+                    self._set_awaiting(round_state, True)
+                    break
+                if stage == "consensus_summary":
+                    continue
                 for question in output.directed_questions:
                     self._round_queue_reply(state, round_state, question.target_id)
                 if output.needs_another_statement and self._rng.random() < min(
@@ -1065,13 +1083,19 @@ class AICoordinator:
         round_state: DiscussionRoundState,
         speaker_id: str,
         output: DiscussionOutput,
+        *,
+        waiting_human: str | None = None,
     ) -> bool:
         """Queue the answers a summary asked for. False when there is nothing to wait for.
 
         Each AI seat the summary put a question to answers once, in the order
         asked, and the summariser then closes with a short designation. A
         black the summary itself published is owed its answer the same way.
-        The human is never scheduled -- they can answer on their own.
+        The human is never scheduled. `waiting_human` is the living human the
+        round may wait for (None when it may not): a question to them is
+        noted, so the round gives them the floor before the AI answers and
+        the designation, and the designation follows their turn even when
+        no AI seat was asked.
         """
         book = self._book_for(round_state)
         book.summary_speaker = speaker_id
@@ -1081,8 +1105,11 @@ class AICoordinator:
             for target in named
             if target in self._agents and target != speaker_id and state.players[target].alive
         ]
+        book.summary_asked_human = waiting_human is not None and waiting_human in named
         self._collect_owed_replies(state, round_state, book)
-        book.designation_pending = bool(book.summary_answers or book.owed_replies)
+        book.designation_pending = bool(
+            book.summary_answers or book.owed_replies or book.summary_asked_human
+        )
         return book.designation_pending
 
     def _closing_speaker(

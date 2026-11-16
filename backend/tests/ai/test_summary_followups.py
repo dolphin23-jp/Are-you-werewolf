@@ -1,8 +1,12 @@
-"""The close after the summary is a turn of its own, and every turn is counted.
+"""What the closing summary opens survives the human's controls, and the close is its own turn.
 
-The summariser's 本指定 was built as a second summary, whose text invited a
-new question that nobody would answer: the round closes on that turn. A note
-in the system prompt added that every named seat had been given its turn.
+The summary's follow-ups -- an answer from each seat it questioned, then the
+summariser's 本指定 -- were opened only after the pause check, so a step or a
+pause that landed on the summary dropped them for good. A summary that put
+its question to the living human went straight on to the designation in the
+same segment, before the human had the floor, under a note that said every
+named seat had been given its turn. The designation itself was built as a
+second summary, whose text invited a new question that nobody would answer.
 And the progress counter could read 31/29: owed replies and closing turns
 were never counted in the total.
 """
@@ -82,6 +86,206 @@ async def _drive(coordinator: AICoordinator, session: SimpleNamespace, mode: str
 
 def _after_summary(turns: list[tuple[str, str]]) -> list[tuple[str, str]]:
     return turns[[stage for _seat, stage in turns].index(SUMMARY) :]
+
+
+# -- (1) a pause or a step that lands on the summary keeps what it opened --
+
+
+def test_a_step_that_lands_on_the_summary_keeps_its_answer_and_designation():
+    """The reviewer's step_summary.py: pass and step must schedule the same close."""
+    tails = {}
+    for mode in ("pass", "step"):
+        provider = _StagedProvider({SUMMARY: _summary_asking("p2")})
+        controller, coordinator, turns = _table(provider)
+        session = _human_session(controller)
+
+        asyncio.run(_drive(coordinator, session, mode))
+
+        tails[mode] = _after_summary(turns)
+        assert session.discussion_round.complete is True
+
+    assert (
+        tails["step"]
+        == tails["pass"]
+        == [
+            ("p1", SUMMARY),
+            ("p2", "reaction"),
+            ("p1", _FINAL_DESIGNATION_STAGE),
+        ]
+    )
+
+
+def test_a_pause_pressed_while_the_summary_generates_keeps_its_follow_ups():
+    provider = _StagedProvider({SUMMARY: _summary_asking("p2")})
+    controller, coordinator, turns = _table(provider)
+    session = _human_session(controller)
+    original = provider.generate_structured
+
+    async def pause_during_summary(**kwargs: Any) -> Any:
+        if provider.stage == SUMMARY:
+            # /discussion-control {action: pause} while the request is in flight.
+            session.discussion_pause_requested = True
+        return await original(**kwargs)
+
+    provider.generate_structured = pause_during_summary  # type: ignore[method-assign]
+
+    async def until_summary() -> None:
+        while SUMMARY not in [stage for _seat, stage in turns]:
+            await _press(coordinator, session, "pass")
+
+    asyncio.run(until_summary())
+    round_state = session.discussion_round
+    assert turns[-1] == ("p1", SUMMARY)
+    assert round_state.awaiting_human is True and round_state.complete is False
+
+    # The human lifts the pause.
+    session.discussion_paused = False
+    asyncio.run(_drive(coordinator, session, "pass"))
+
+    assert _after_summary(turns) == [
+        ("p1", SUMMARY),
+        ("p2", "reaction"),
+        ("p1", _FINAL_DESIGNATION_STAGE),
+    ]
+
+
+def test_a_step_on_a_summary_that_closes_the_day_closes_it():
+    """Nothing is left to wait for, so the round is over, not paused."""
+    provider = _StagedProvider()
+    controller, coordinator, turns = _table(provider)
+    session = _human_session(controller)
+
+    async def until_summary() -> None:
+        while SUMMARY not in [stage for _seat, stage in turns]:
+            await _press(coordinator, session, "step")
+
+    asyncio.run(until_summary())
+
+    assert turns[-1] == ("p1", SUMMARY)
+    assert session.discussion_round.complete is True
+    assert session.discussion_round.awaiting_human is False
+
+
+# -- (2) a summary that questions the living human waits for them --
+
+
+def _segments(
+    coordinator: AICoordinator,
+    session: SimpleNamespace,
+    turns: list[tuple[str, str]],
+    answer: Any = None,
+) -> list[tuple[list[tuple[str, str]], bool, bool]]:
+    """Each advance as (turns it gave, awaiting_human, complete), driven like /pass-turn.
+
+    `answer`, when given, is called once on the first wait after the summary:
+    the human speaking instead of passing.
+    """
+    segments: list[tuple[list[tuple[str, str]], bool, bool]] = []
+
+    async def run() -> None:
+        answered = answer is None
+        for _ in range(30):
+            round_state = getattr(session, "discussion_round", None)
+            if round_state is not None and round_state.complete:
+                return
+            if (
+                not answered
+                and round_state is not None
+                and round_state.awaiting_human
+                and SUMMARY in [stage for _seat, stage in turns]
+            ):
+                answered = True
+                answer()
+            before = len(turns)
+            await _press(coordinator, session, "pass")
+            round_state = session.discussion_round
+            segments.append((turns[before:], round_state.awaiting_human, round_state.complete))
+        raise AssertionError("the round never closed")
+
+    asyncio.run(run())
+    return segments
+
+
+def test_a_summary_that_asks_the_human_stops_for_them_before_any_answer_or_designation():
+    """The reviewer's human_asked.py: summary asks p0 (human) and p2, segment of four."""
+    provider = _StagedProvider({SUMMARY: _summary_asking("p0", "p2")})
+    controller, coordinator, turns = _table(provider, ("p1", "p2", "p3", "p4", "p5"))
+    session = _human_session(controller)
+
+    segments = _segments(coordinator, session, turns)
+
+    with_summary = next(i for i, (seg, *_rest) in enumerate(segments) if ("p1", SUMMARY) in seg)
+    given, awaiting, complete = segments[with_summary]
+    assert given[-1] == ("p1", SUMMARY)
+    assert awaiting is True and complete is False
+    # Once the human has had the floor, the AI addressee answers and the close follows.
+    assert segments[with_summary + 1] == (
+        [("p2", "reaction"), ("p1", _FINAL_DESIGNATION_STAGE)],
+        False,
+        True,
+    )
+
+
+def test_the_human_answering_the_summary_is_followed_by_the_ai_answers_and_the_close():
+    provider = _StagedProvider({SUMMARY: _summary_asking("p0", "p2")})
+    controller, coordinator, turns = _table(provider, ("p1", "p2", "p3", "p4", "p5"))
+    session = _human_session(controller)
+
+    def human_answers() -> None:
+        summary_id = controller.state.chat_log[-1].message_id
+        controller.chat("p0", "反論はない。p3が気になる。", "public", summary_id)
+        coordinator.resume_after_human(session, summary_id)
+
+    _segments(coordinator, session, turns, answer=human_answers)
+
+    assert _after_summary(turns) == [
+        ("p1", SUMMARY),
+        ("p2", "reaction"),
+        ("p1", _FINAL_DESIGNATION_STAGE),
+    ]
+    assert controller.state.chat_log[-1].author_id == "p1"
+
+
+def test_a_summary_that_asks_only_the_human_closes_with_a_designation_after_their_turn():
+    provider = _StagedProvider({SUMMARY: _summary_asking("p0")})
+    controller, coordinator, turns = _table(provider)
+    session = _human_session(controller)
+
+    segments = _segments(coordinator, session, turns)
+
+    with_summary = next(i for i, (seg, *_rest) in enumerate(segments) if ("p1", SUMMARY) in seg)
+    assert segments[with_summary][0][-1] == ("p1", SUMMARY)
+    assert segments[with_summary][1:] == (True, False)
+    assert segments[with_summary + 1] == ([("p1", _FINAL_DESIGNATION_STAGE)], False, True)
+
+
+def test_a_round_that_may_not_wait_never_stops_for_the_human_it_asked():
+    """No pause allowed (evaluation, a dead or observing human): the close is unchanged."""
+    provider = _StagedProvider({SUMMARY: _summary_asking("p0", "p2")})
+    controller, coordinator, turns = _table(provider)
+    session = _human_session(controller)
+
+    asyncio.run(asyncio.wait_for(coordinator.run_discussion_round(session), timeout=10))
+
+    assert _after_summary(turns) == [
+        ("p1", SUMMARY),
+        ("p2", "reaction"),
+        ("p1", _FINAL_DESIGNATION_STAGE),
+    ]
+    assert "p0" not in [seat for seat, _stage in turns]
+    assert session.discussion_round.complete is True
+
+
+def test_a_dead_human_named_by_the_summary_is_not_waited_for():
+    provider = _StagedProvider({SUMMARY: _summary_asking("p0")})
+    controller, coordinator, turns = _table(provider)
+    controller.state.players["p0"].alive = False
+    session = _human_session(controller)
+
+    asyncio.run(asyncio.wait_for(_drive(coordinator, session, "pass"), timeout=10))
+
+    assert turns[-1] == ("p1", SUMMARY)
+    assert session.discussion_round.awaiting_human is False
 
 
 # -- (3) the progress counter never reads past its total --
