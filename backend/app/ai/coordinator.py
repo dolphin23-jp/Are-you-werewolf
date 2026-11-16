@@ -144,16 +144,12 @@ _REACTION_MAX_CHARS = 60
 # evaluation harness needs the same number to flag overruns.
 _PRIVATE_CHAT_MAX_CHARS = 100
 
-# The closing turn after a summary that put questions to people: their answers
-# are in, and the summariser names today's candidate. The context builder has
-# no stage of that name, so the turn is built as `consensus_summary` (whose
-# instruction is the pre-vote wrap-up) plus this one line -- an unknown stage
-# would fall back to the opening-turn instruction, which is the wrong ask.
+# The closing turn after a summary that put questions to people: whatever
+# answers came are in, and the summariser names today's candidate. A stage of
+# its own in the context builder (its text, its 60-character cap): it used to
+# be built as a second `consensus_summary`, whose text invites one last
+# question -- one the round, closing on this turn, would never let anyone answer.
 _FINAL_DESIGNATION_STAGE = "final_designation"
-_FINAL_DESIGNATION_NOTE = (
-    "\n\n【本指定】名指しで聞いた相手には答える番を回した。新しい質問はせず、"
-    "ここまでの返答を踏まえて今日の吊り先を一言で決める。"
-)
 
 # A wolf-chat sentence that names a partner and puts it up for the ballot:
 # cutting it loose, voting it, letting it hang, sacrificing it. Read per
@@ -612,6 +608,16 @@ class AICoordinator:
                         break
                     continue
                 if stage == _FINAL_DESIGNATION_STAGE:
+                    if any(
+                        question.target_id in state.players
+                        and question.target_id != pid
+                        and question.question.strip()
+                        for question in output.directed_questions
+                    ):
+                        # Told not to ask, it asked anyway. The round closes
+                        # here regardless -- one designation, never a new
+                        # exchange -- so the miss is counted, not looped on.
+                        self._record_event("designation_question_unanswered")
                     round_state.complete = True
                     break
                 for question in output.directed_questions:
@@ -1230,11 +1236,10 @@ class AICoordinator:
         # What this turn's prompt will put to the seat. Only these are served by
         # it: a question asked while the model is generating has not been seen.
         shown_questions = self._open_questions(player_id)
-        # The closing designation is the wrap-up turn plus one line; see
-        # `_FINAL_DESIGNATION_STAGE`.
-        context_stage = (
-            "consensus_summary" if stage == _FINAL_DESIGNATION_STAGE else stage
-        )
+        # The stage the prompt is built for and whose cap the record names:
+        # the scheduler's own. The closing designation has its own stage text
+        # in the context builder, so it is no longer built as a summary.
+        context_stage = stage
         decision = None
         if self.reasoning is not None:
             decision = self.reasoning.discussion_decision(
@@ -1263,8 +1268,6 @@ class AICoordinator:
                     Message(role="user", content=decision.render_brief()),
                     messages[-1],
                 ]
-        if stage == _FINAL_DESIGNATION_STAGE:
-            system += _FINAL_DESIGNATION_NOTE
         freemason_opening = self._freemason_opening(state, player_id)
         freemason_must_hide = self._freemason_must_hide(state, player_id)
         if freemason_opening is not None:
