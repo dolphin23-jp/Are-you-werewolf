@@ -1,0 +1,136 @@
+name: レイテンシ測定
+
+# Manual only. With dry_run off this spends real API credit, so it must never
+# fire on push. Phase 1b of docs/approach-reset-2026-10.md §11.5: which
+# model / effort / speed can answer a game turn in about 5 seconds. It times
+# requests only; it does not judge answer quality (docs/measurement-scripts.md).
+on:
+  workflow_dispatch:
+    inputs:
+      configs:
+        description: "測る条件(model:effort[:fast] のカンマ区切り)"
+        required: true
+        default: "claude-opus-5-5:low,claude-opus-5-5:medium,claude-opus-5-5:low:fast,claude-sonnet-5-5:low,claude-haiku-5-5:low"
+      prompts:
+        description: "標本のプロンプト数(1〜1000。各条件でこの数だけ要求する)"
+        required: true
+        default: "60"
+      seed:
+        description: "記録する対戦と標本のシード"
+        required: true
+        default: "1"
+      max_cost:
+        description: "推定費用の上限(USD、200まで)。dry_run でも見積もりの比較に使う"
+        required: true
+        default: "5"
+      dry_run:
+        description: "計画と費用の見積もりだけ(通信なし・費用ゼロ)。外すと実測する(有料)"
+        type: boolean
+        default: true
+
+# One live-API job at a time across the evaluation workflows: they share one
+# API key and its rate limit, and two runs at once would distort each other's
+# timing. A second dispatch waits instead of cancelling the first.
+concurrency:
+  group: ai-evaluation
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    # 300 requests at concurrency 4 take about 20-30 minutes; the ceiling
+    # stops a hung run from holding the shared concurrency group.
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 依存関係のインストール
+        run: pip install -e ".[dev]"
+
+      # Every input reaches the shell through env and is validated before it
+      # is used; none is expanded into the script text itself.
+      - name: 入力の確認と測定
+        env:
+          CONFIGS: ${{ inputs.configs }}
+          PROMPTS: ${{ inputs.prompts }}
+          SEED: ${{ inputs.seed }}
+          MAX_COST: ${{ inputs.max_cost }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          # The capture game is offline whatever happens here.
+          WEREWOLF_LLM_PROVIDER: mock
+          # A dry run never needs the key, so it never receives it.
+          WEREWOLF_ANTHROPIC_API_KEY: ${{ !inputs.dry_run && secrets.WEREWOLF_ANTHROPIC_API_KEY || '' }}
+          WEREWOLF_ANTHROPIC_BASE_URL: ${{ vars.WEREWOLF_ANTHROPIC_BASE_URL }}
+        run: |
+          set -euo pipefail
+
+          configs="${CONFIGS//[[:space:]]/}"
+          item_re='^claude-[a-z0-9]+(-[a-z0-9]+)*:(low|medium|high|xhigh|max)(:fast)?$'
+          if [ -z "$configs" ] || [ "${#configs}" -gt 500 ]; then
+            echo "::error::configs は model:effort[:fast] のカンマ区切りで、500文字までです"
+            exit 1
+          fi
+          IFS=',' read -r -a items <<< "$configs"
+          for item in "${items[@]}"; do
+            if [[ ! "$item" =~ $item_re ]]; then
+              echo "::error::configs の項目が model:effort[:fast] の形ではありません(effort は low/medium/high/xhigh/max)"
+              exit 1
+            fi
+          done
+
+          if [[ ! "$PROMPTS" =~ ^[0-9]{1,4}$ ]] || [ "$PROMPTS" -lt 1 ] || [ "$PROMPTS" -gt 1000 ]; then
+            echo "::error::prompts は 1〜1000 の整数です"
+            exit 1
+          fi
+          if [[ ! "$SEED" =~ ^[0-9]{1,9}$ ]]; then
+            echo "::error::seed は 0 以上の整数です"
+            exit 1
+          fi
+          if [[ ! "$MAX_COST" =~ ^[0-9]{1,3}(\.[0-9]{1,2})?$ ]] \
+            || ! awk -v v="$MAX_COST" 'BEGIN { exit !(v > 0 && v <= 200) }'; then
+            echo "::error::max_cost は 0 より大きく 200 以下の数(USD、小数2桁まで)です"
+            exit 1
+          fi
+
+          args=(--configs "$configs" --prompts "$PROMPTS" --seed "$SEED" --max-cost "$MAX_COST" --out latency-out)
+          if [ "$DRY_RUN" = "true" ]; then
+            args+=(--dry-run)
+          elif [ -z "$WEREWOLF_ANTHROPIC_API_KEY" ]; then
+            echo "::error::secret WEREWOLF_ANTHROPIC_API_KEY が設定されていません(実測には必要です)"
+            exit 1
+          fi
+          python scripts/latency_sweep.py "${args[@]}"
+
+      # Rendered on the run page, so the result is readable on a phone
+      # without downloading the artifact.
+      - name: 結果を画面に表示
+        if: always()
+        run: |
+          if [ -f latency-out/summary.md ]; then
+            cat latency-out/summary.md >> "$GITHUB_STEP_SUMMARY"
+          elif [ -f latency-out/plan.md ]; then
+            cat latency-out/plan.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "結果が生成されませんでした(入力の確認で止まった、または途中で失敗した)。上のログを確認してください。" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # Kept for 90 days, but Actions artifacts still expire: a result worth
+      # keeping is committed to backend/artifacts/ (approach-reset §11.6).
+      - name: 全出力をダウンロード可能にする
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: latency-sweep-${{ github.run_number }}
+          path: backend/latency-out/
+          retention-days: 90
+          if-no-files-found: ignore
