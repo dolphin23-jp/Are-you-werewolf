@@ -11,8 +11,10 @@ and that word ends the way the team's own proposal or decision ends (吊ろう,
 投票して, 切るしかない, 吊りで決まり, 明日は入れる。). A question, a report, a
 prohibition, a refusal, a guess or someone else's ballot is no plan because it
 does not end that way -- not because a list of refusals happened to hold it.
-And a plan the team goes on to doubt or refuse ("俺を切るのはまだ早い") is no
-longer one.
+A pronoun stands for the partner only with a request: お前 when the partner
+alone was addressed ("ダイキ、お前を切っていいな"), 俺/私 in the partner's own
+line ("俺を切ってくれ"). And a plan the team goes on to doubt or refuse
+("俺を切るのはまだ早い") is no longer one.
 
 The labelled corpus below holds every line the reviews and verifiers tried
 (the fix and repro scripts, allyplan/allyplan2, the wolfchat_stress scripts
@@ -53,13 +55,11 @@ PLANS: list[tuple[str, str]] = [
     ("{a}を吊ろう。", V),
     ("{a}は切ろう。", V),
     ("{a}を見捨てる。", V),
-    ("{a}、すまんが明日はお前に投票する。", V),
     ("{a}を切るしかない。", V),
     ("{a}を吊らないといけない。", V),
     ("{a}に一票。", V),
     ("{a}さんに投票しよう。", V),
     ("{a}には悪いが切る。", V),
-    ("{a}、すまん。明日はお前を切る。", V),
     ("明日は俺を切って信用を取れ。", P),
     ("明日は私に投票して。", P),
     # -- wolfchat_stress.py / wolfchat_stress2.py --
@@ -133,13 +133,9 @@ PLANS: list[tuple[str, str]] = [
     ("{a}さんを吊らないといけませんね。", V),
     ("{a}ちゃんに一票入れようね。", V),
     ("{a}さんを落としましょう。", V),
-    # -- the partner addressed alone, then called お前 / あなた --
-    ("{a}、悪いが明日はお前に入れる。", V),
-    ("{a}、お前を切るしかない。", V),
-    ("{a}、すまん、お前に投票しよう。", V),
-    ("{a}、明日はお前を吊ろう。", V),
-    ("{a}さん、明日はあなたに投票しますね。", V),
-    ("{a}、すまないがお前を見捨てる。", V),
+    # -- the partner addressed alone, then called お前 / あなた, with a request --
+    ("{a}、悪いがお前を切っていいな。", V),
+    ("{a}さん、悪いけどあなたに入れてもいいですね。", V),
     # -- the partner offering itself up: 俺/私 with a request --
     ("俺を切っていいぞ。", P),
     ("明日は俺に入れてくれ。", P),
@@ -371,6 +367,62 @@ NOT_PLANS: list[tuple[str, str]] = [
     ("明日は俺が吊られるかも。", P),
     ("俺を切る気か？", P),
     ("私を吊るのは村の思うつぼです。", P),
+    # -- found while finishing the proposal-only rule --
+    # another subject before the partner: a pronoun, a role, a crowd, the one
+    # addressed as お前, another seat with も
+    ("あいつは{a}に入れる。", V),
+    ("彼女は{a}に投票する。", V),
+    ("あの人が{a}を吊る。", V),
+    ("こいつが{a}を吊る。", V),
+    ("相方は{a}に入れる。", V),
+    ("他の狼は{a}に入れる。", V),
+    ("占い師は{a}に投票する。", V),
+    ("霊媒師が{a}に入れる。", V),
+    ("狩人は{a}を吊るよ。", V),
+    ("グレーの人たちは{a}に入れる。", V),
+    ("{b}、お前は{a}に投票して。", V),
+    ("あなたは{a}さんに投票してください。", V),
+    ("{o}も{a}に投票して。", V),
+    ("{o}も{a}に入れる。", V),
+    # よね / よな checks it, like a question
+    ("{a}吊りでいいよね。", V),
+    ("{a}に入れてもいいよね。", V),
+    ("{a}を吊ってもいいよな。", V),
+    ("{a}吊りで決まりだよね。", V),
+    ("{a}を吊るしかないよね。", V),
+    # a condition nobody can check yet, without たら / なら / ば
+    ("最悪{a}を切ろう。", V),
+    ("最悪の場合は{a}を切ろう。", V),
+    ("状況によっては{a}を吊ろう。", V),
+    ("場合によっては{a}に入れよう。", V),
+    ("万が一の時は{a}を吊ろう。", V),
+    ("必要とあらば{a}を切る。", V),
+    ("展開次第で{a}を吊ろう。", V),
+    ("{a}が疑われた時は{a}に入れよう。", V),
+    ("吊られそうなときは{a}を切ろう。", V),
+    # a hedge, a condition or a quotation after the comma
+    ("{a}を吊ろう、けど迷う。", V),
+    ("{a}を吊ろうと思う、けど迷う。", V),
+    ("{a}を吊ろう、ただし明日次第。", V),
+    ("{a}を吊ろう、多分。", V),
+    ("{a}を吊ろう、もし黒が出たら。", V),
+    ("{a}を吊ろう、が村の総意。", V),
+    ("{a}に投票しよう、は無し。", V),
+    ("{a}に投票しよう、はダメ。", V),
+    # the next sentence of the same message quotes or refuses it
+    ("{a}吊りで。って村が言ってる。", V),
+    ("{a}に投票。は避けたい。", V),
+    ("{a}に入れる。わけない。", V),
+    ("{a}に投票する。と見せかけて{o}。", V),
+    ("{a}を吊る。それが村の考えだ。", V),
+    # a quotation inside a て-chain: someone else is made to want it
+    ("{a}を吊って欲しいと村に思わせよう。", V),
+    # a dare, not a request
+    ("俺を吊ってみろ。", P),
+    ("{a}を吊ってみろ。", V),
+    # the partner putting its own vote on itself asks nobody
+    ("俺に入れておく。", P),
+    ("俺を切っておきます。", P),
 ]
 
 # Real plans the rule does not recognise. It errs this way on purpose: each of
@@ -410,6 +462,26 @@ CONSERVATIVE_MISSES: list[tuple[str, str]] = [
     # 俺/私 in the partner's own line counts only with a request
     ("私は切られ役でいい。", P),
     ("俺を切るしかない。", P),
+    ("俺に入れておこう。", P),
+    ("俺に投票して白く見せよう。", P),
+    # お前 counts only with a request too: the voter's own decision or
+    # proposal, said to the partner's face, is missed
+    ("{a}、すまんが明日はお前に投票する。", V),
+    ("{a}、すまん。明日はお前を切る。", V),
+    ("{a}、悪いが明日はお前に入れる。", V),
+    ("{a}、お前を切るしかない。", V),
+    ("{a}、すまん、お前に投票しよう。", V),
+    ("{a}、明日はお前を吊ろう。", V),
+    ("{a}さん、明日はあなたに投票しますね。", V),
+    ("{a}、すまないがお前を見捨てる。", V),
+    # よね / よな is read as a check, even when it presses a request
+    ("{a}に入れてよね。", V),
+    # a subject before the partner, even one that is also put up (both of
+    # them) or a role whose result is the reason
+    ("{o}も{a}も吊ろう。", V),
+    ("占い師が{a}に黒を出したから{a}を吊ろう。", V),
+    # a condition after the comma, even one that only spells out the payoff
+    ("{a}を吊ろう、そうしたら勝てる。", V),
 ]
 
 # The first game's names, so the corpus also runs on katakana seats.
@@ -494,8 +566,10 @@ TAKEN_BACK: list[list[tuple[str, str]]] = [
     [(V, "{a}を切ろう。"), (P, "俺を切るのはまだ早い。")],
     [(V, "{a}を切ろう。"), (P, "俺を切るなよ。")],
     [(V, "{a}を切ろう。"), (P, "俺を切る？")],
+    # a check is read as a question, so it reopens the plan too
+    [(V, "{a}を切ろう。"), (V, "{a}吊りでいいよね。")],
     [(V, "{a}吊りでいこう。"), (V, "やっぱり{a}は吊らない。")],
-    [(V, "{a}、明日はお前を吊ろう。"), (V, "{a}、やっぱりお前を吊るのはやめる。")],
+    [(V, "{a}、お前を切っていいな。"), (V, "{a}、やっぱりお前を切るのはやめる。")],
     # keeping the partner, or turning around on it, with no ballot word
     [(V, "{a}を切ろう。"), (V, "いや、{a}は残そう。")],
     [(V, "{a}吊りでいこう。"), (V, "{a}を守ろう。")],
@@ -508,6 +582,7 @@ TAKEN_BACK: list[list[tuple[str, str]]] = [
 def test_a_later_doubt_or_refusal_takes_the_plan_back(
     lines: list[tuple[str, str]], naming: str
 ):
+    assert _plan_after(lines[:1], naming) is not None
     assert _plan_after(lines, naming) is None
 
 
@@ -577,7 +652,7 @@ THROUGH_THE_BALLOT: list[tuple[str, str, bool]] = [
     ("{a}への投票で信用を取る。", V, False),
     ("{a}は切ろう。", V, True),
     ("{a}を見捨てる。", V, True),
-    ("{a}、すまんが明日はお前に投票する。", V, True),
+    ("{a}、すまんが明日はお前に投票する。", V, False),
     ("{a}を切り捨てるのはまだ早い。", V, False),
     ("俺を切るなよ。", P, False),
     ("村は俺を吊りたがってる。", P, False),
@@ -589,6 +664,16 @@ THROUGH_THE_BALLOT: list[tuple[str, str, bool]] = [
     ("明日は俺を切って信用を取れ。", P, True),
     ("明日は私に投票して。", P, True),
     ("明日は俺を切って信用を取れ。", V, False),
+    # found while finishing the proposal-only rule
+    ("{a}、悪いがお前を切っていいな。", V, True),
+    ("あいつは{a}に入れる。", V, False),
+    ("{o}も{a}に投票して。", V, False),
+    ("{a}吊りでいいよね。", V, False),
+    ("最悪{a}を切ろう。", V, False),
+    ("{a}を吊ろう、けど迷う。", V, False),
+    ("{a}吊りで。って村が言ってる。", V, False),
+    ("俺を吊ってみろ。", P, False),
+    ("俺に入れておく。", P, False),
 ]
 
 
