@@ -74,12 +74,15 @@ APIキーを発行します。キーが漏れても、使われる額はその�
 
    `WEREWOLF_LLM_PROVIDER` はモデル名ではなくプロバイダ種別です。値には
    `anthropic` だけを入力します(モデルは `WEREWOLF_ANTHROPIC_MODEL` で指定します)。
+   誤って `claude-sonnet-5-5` のようなモデル名を入れた場合は、`WEREWOLF_ANTHROPIC_MODEL`
+   が未設定ならそのモデルで動き、別のモデル名が設定されていれば起動時にエラーで止まります。
    キーの名前は `ANTHROPIC_API_KEY` ではなく **`WEREWOLF_ANTHROPIC_API_KEY`** です。
    ほかのツール向けの `ANTHROPIC_*` を誤って使わないよう、このアプリは
    `WEREWOLF_ANTHROPIC_*` だけを読みます。
 
 3. **Codespace を再起動**(または作り直す)と反映されます
 4. 反映確認は `/api/health` を開き、`"llm_provider": "anthropic"` になっていればOK
+   (`"llm_model"` が要求するモデルです)
 
 `anthropic` では **`WEREWOLF_ACCESS_PASSWORD` が必須**です。空のままだとサーバーは
 起動しません(誰でも課金の試合を作れる状態で動かさないため)。ブラウザの認証画面では、
@@ -194,6 +197,11 @@ WEREWOLF_SESSION_MAX_COST_USD=30
 docker build -t are-you-werewolf .
 docker run --rm -p 8000:8000 --env-file backend/.env are-you-werewolf
 ```
+
+`--env-file` は値をそのまま渡し、行末の `# コメント`・空白・引用符を取り除きません。
+`backend/.env` では、コメントは値とは別の行に書き、値を引用符で囲まないでください
+(`.env.example` はその形にしてあります)。`KEY=  # コメント` と書くと、空のつもりの値が
+コメントの文字列になり、たとえば `WEREWOLF_ACCESS_PASSWORD` の起動時の確認が効きません。
 
 現在のゲームセッションはメモリ保存なので、サービスは1インスタンスで運用し、
 プレイ中に再起動・スケールダウンしない設定にしてください。

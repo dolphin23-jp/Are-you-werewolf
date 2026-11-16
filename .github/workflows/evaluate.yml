@@ -134,6 +134,10 @@ jobs:
           WEREWOLF_ANTHROPIC_EFFORT_CHAT: ${{ inputs.effort_discussion }}
           WEREWOLF_ANTHROPIC_EFFORT_VOTE: ${{ inputs.effort_decisions }}
           WEREWOLF_ANTHROPIC_EFFORT_NIGHT: ${{ inputs.effort_decisions }}
+          # Repository variable, so many 途中切れ can be answered without a code
+          # change. The fallback is the code default: an unset variable would
+          # arrive as "", which fails int parsing at startup.
+          WEREWOLF_ANTHROPIC_MAX_TOKENS: ${{ vars.WEREWOLF_ANTHROPIC_MAX_TOKENS || '12000' }}
           LUNA_API_KEY: ${{ inputs.provider == 'luna' && secrets.LUNA_API_KEY || '' }}
           LUNA_BASE_URL: ${{ inputs.provider == 'luna' && secrets.LUNA_BASE_URL || '' }}
           LUNA_MODEL: ${{ inputs.model || vars.LUNA_MODEL || 'gpt-6-luna' }}
@@ -179,6 +183,7 @@ jobs:
           WEREWOLF_ANTHROPIC_EFFORT_CHAT: ${{ inputs.effort_discussion }}
           WEREWOLF_ANTHROPIC_EFFORT_VOTE: ${{ inputs.effort_decisions }}
           WEREWOLF_ANTHROPIC_EFFORT_NIGHT: ${{ inputs.effort_decisions }}
+          WEREWOLF_ANTHROPIC_MAX_TOKENS: ${{ vars.WEREWOLF_ANTHROPIC_MAX_TOKENS || '12000' }}
           LUNA_API_KEY: ${{ inputs.provider == 'luna' && secrets.LUNA_API_KEY || '' }}
           LUNA_BASE_URL: ${{ inputs.provider == 'luna' && secrets.LUNA_BASE_URL || '' }}
           LUNA_MODEL: ${{ inputs.model || vars.LUNA_MODEL || 'gpt-6-luna' }}
