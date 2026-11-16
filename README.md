@@ -240,7 +240,14 @@ python scripts/evaluate.py --games 1 --provider anthropic --max-cost 20
 `--provider anthropic` では、費用の上限 `--max-cost`(USD)の指定が必須です。推定費用が
 上限を超えそうになると、その呼び出しを送らずに評価を止めます。
 
-詳細は `docs/evaluation.md` を参照してください。
+詳細は `docs/evaluation.md` を参照してください。モデル・思考量ごとの応答時間を測る
+「レイテンシ測定」と、AIの発言を人間が見分けられるかを測る人間判定クイズは
+`docs/measurement-scripts.md` にあります。
+
+人間がプレイするゲームでは、`/api/health` が `llm_model` を返し、ゲーム画面の取得結果
+(`/view`)に `ai_budget_exhausted`・`ai_cost_usd` が入ります。セッションの費用上限
+(`WEREWOLF_SESSION_MAX_COST_USD`)に達するとAIは発言・投票を止め、画面に知らせが出ます。
+`WEREWOLF_LOG_LEVEL` はアプリ自身のログ(プロバイダの失敗の警告を含む)にも効きます。
 
 ## 設計ドキュメント
 

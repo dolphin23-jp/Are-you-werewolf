@@ -90,11 +90,14 @@ def restore_budget(args: argparse.Namespace, budget_state: dict[str, Any]) -> Ev
 
     Both accounting styles are restored: luna's token counts, and the settled
     dollars a self-pricing provider (anthropic) reports. Without the latter a
-    resumed anthropic run would start its cap from zero again. `settled_attempts`
-    is not in the snapshot; one is enough to make `estimated_cost` read the
-    restored dollars rather than recompute from token prices it never had.
+    resumed anthropic run would start its cap from zero again. Snapshots written
+    before `settled_attempts` was recorded lack it; for those, one settled attempt
+    is assumed whenever dollars were spent, which is enough to make
+    `estimated_cost` read the restored dollars rather than recompute from token
+    prices it never had.
     """
     spent_cost = float(budget_state.get("spent_cost") or 0.0)
+    recorded_attempts = budget_state.get("settled_attempts")
     return EvaluationBudget(
         max_requests=args.max_http_requests,
         used_requests=int(budget_state.get("used_requests", 0)),
@@ -104,7 +107,11 @@ def restore_budget(args: argparse.Namespace, budget_state: dict[str, Any]) -> Ev
         prompt_tokens=int(budget_state.get("prompt_tokens", 0)),
         completion_tokens=int(budget_state.get("completion_tokens", 0)),
         spent_cost=spent_cost,
-        settled_attempts=1 if spent_cost > 0 else 0,
+        settled_attempts=(
+            int(recorded_attempts)
+            if recorded_attempts is not None
+            else (1 if spent_cost > 0 else 0)
+        ),
     )
 
 

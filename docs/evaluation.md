@@ -326,3 +326,7 @@ python scripts/evaluate_expert_scenarios_v2.py --provider anthropic --max-cost 5
 - 死亡者への霊媒結果、過去発言、過去投票の言及は正常な分析として検出しません。
   現在の処刑・投票・能力・返答対象として扱った場合だけ問題として計上します。
 - 判定用プロンプトは推理の当否を評価しません(表現のみ)。強さの評価は勝率で見てください。
+
+## 関連: 応答時間の測定と人間判定
+
+モデル・effort・fast mode ごとの応答時間(最初のトークン・最初の可視テキスト・完了まで)を、記録済みのv3プロンプトで測る `scripts/latency_sweep.py` と、AIの発言を人間が見分けられるかを測る `scripts/human_judgment_quiz.py` の使い方は `docs/measurement-scripts.md` を参照。前者は時間だけを測り、品質は測らない(モデルや effort の変更は、この評価で確かめる)。

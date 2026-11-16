@@ -128,6 +128,7 @@ class EvaluationBudget:
             "pricing_supplied": self.pricing_supplied,
             "spent_cost": self.spent_cost,
             "reserved_cost": self.reserved_cost,
+            "settled_attempts": self.settled_attempts,
         }
 
 

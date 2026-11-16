@@ -692,8 +692,8 @@ effort を足した。コードがモデルの代わりに埋めた箇所は、�
 
 - 基準線と A/B の各試合は、`report.md`・`summary.json`・対戦記録（`transcript-seedN.md`・
   `.json`）を `backend/artifacts/` にコミットする。コミット SHA・モデル・effort・シードを
-  添える。Actions の成果物は保持期間（このリポジトリでは14日）で消える。run #11 の対戦記録は
-  これで失われた。
+  添える。Actions の成果物は保持期間で消える（run #11 の時点では14日で、対戦記録はこれで失われた。
+  評価ワークフローは90日に延ばしたが、公開リポジトリの上限も90日なので、コミットが唯一の保存手段）。
 - luna の run #11 は**文脈としてだけ**使う（`backend/artifacts/live-v3-luna-run11/`）。
   Claude の基準線と前後比較しない。
 
@@ -701,7 +701,9 @@ effort を足した。コードがモデルの代わりに埋めた箇所は、�
 
 - Claude でのライブ対戦。この環境には Anthropic のキーが無い。オーナーが Actions から回す
   （Phase 1b）。
-- レイテンシ測定。effort の既定値は仮置きのまま。
+- レイテンシ測定の**実行**。測定スクリプト（`scripts/latency_sweep.py`、ワークフロー
+  「レイテンシ測定」）と人間判定クイズ（`scripts/human_judgment_quiz.py`）は入った
+  （`docs/measurement-scripts.md`）。有料の実行はまだなので、effort の既定値は仮置きのまま。
 - キャッシュのための並べ替え、Phase 2 以降。
 
 ---

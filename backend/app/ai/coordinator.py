@@ -132,6 +132,15 @@ _REACTION_MAX_CHARS = 60
 _PRIVATE_CHAT_MAX_CHARS = 100
 
 
+def _unwrap_provider(provider: object) -> object:
+    """Follow `.inner` through provider wrappers to the provider that calls the API."""
+    seen: set[int] = set()
+    while hasattr(provider, "inner") and id(provider) not in seen:
+        seen.add(id(provider))
+        provider = provider.inner
+    return provider
+
+
 class AICoordinator:
     def __init__(
         self,
@@ -255,7 +264,10 @@ class AICoordinator:
                     "madman_strategy": madman_strategy_name if madman else None,
                 },
                 seed=seed,
-                provider=type(provider).__name__,
+                # Wrappers (the session/evaluation budget, prompt capture) keep
+                # the real provider as `inner`; the transcript names the model
+                # vendor, not the wrapper.
+                provider=type(_unwrap_provider(provider)).__name__,
             )
 
     @property

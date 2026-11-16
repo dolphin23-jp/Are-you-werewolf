@@ -107,7 +107,10 @@ The seed changes candidate order only. It never changes the expert gold answer.
 Open **Actions → Expert cutoff評価 → Run workflow** and choose:
 
 - `benchmark_version`: `v1` or `v2`;
-- `provider`: `baseline` or `luna`;
+- `provider`: `baseline`, `luna` or `anthropic` (Claude; needs the `WEREWOLF_ANTHROPIC_API_KEY`
+  secret);
+- `max_cost`: spending cap in USD for an `anthropic` run (the run stops at the cap and the
+  report says so); see `docs/evaluation.md`;
 - `seed`: normally `1`;
 - optional `scenario_id` for one cutoff.
 

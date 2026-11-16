@@ -509,7 +509,9 @@ AIに許された誤りである（指示書2.4）。許されないのは、投
 
 ### 実API確認は手動のまま
 
-`scripts/live_reasoning_check.py`。CIからは絶対に走らず、テストからも import しない。
+`scripts/live_reasoning_check.py`。CIから実APIに対して走ることは絶対にない。テスト
+（`tests/scripts/test_live_reasoning_scripts.py`）は import するが、オフラインのプロバイダで
+legacy の対戦を流すだけで、通信も課金もしない。
 モックは下手な議論も誤引用も破綻した日程も作らないので、
 「v2 の推理が良い」はモック実行だけからは結論できない（指示書23-f）。
 
