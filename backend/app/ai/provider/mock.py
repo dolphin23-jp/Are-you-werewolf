@@ -12,6 +12,7 @@ from time import perf_counter
 from app.ai.metrics import CallRecord, MetricsCollector, ParsePath
 from app.ai.provider.base import Message, SchemaT
 from app.ai.schemas import (
+    ChatDiscussionOutput,
     DiscussionOutput,
     MorningIntentOutput,
     NightActionOutput,
@@ -78,7 +79,9 @@ class MockProvider:
         pick = self._rng.choice(candidates) if candidates else "p0"
 
         result: object
-        if response_schema is DiscussionOutput:
+        if response_schema is DiscussionOutput or response_schema is ChatDiscussionOutput:
+            # One turn, whichever contract asked for it: the v3 wire form gets
+            # the same answer (and consumes the same random draws), converted.
             line = self._rng.choice(_MOCK_DISCUSSION_LINES)
             claim_role = None
             if line.startswith("占い師CO"):
@@ -92,11 +95,13 @@ class MockProvider:
             result = DiscussionOutput(
                 public_message=line,
                 key_point=line,
-                reasoning_memo=ReasoningMemo(overall_thought="モックの思考メモです。"),
+                reasoning_memo=ReasoningMemo(overall_thought="モックの方針メモです。"),
                 public_claim_role=claim_role,
                 contains_co_claim=claim_role is not None,
                 ready_to_vote=True,
             )
+            if response_schema is ChatDiscussionOutput:
+                result = ChatDiscussionOutput.from_discussion_output(result)
         elif response_schema is MorningIntentOutput:
             result = MorningIntentOutput()
         elif response_schema is VoteOutput:

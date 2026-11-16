@@ -40,10 +40,20 @@ class Personality:
     openness: str = "normal"
 
     def to_prompt_section(self, *, chat: bool = False) -> str:
+        # A cheap precaution: the chat register keeps the word 思考 out of the
+        # v3 prompt entirely, so nothing it carries can read as a request for
+        # the model's own reasoning -- Anthropic may refuse that as reasoning
+        # extraction, and its refusal fallback does not retry it. The
+        # structured register keeps the wording it was measured with.
+        if chat:
+            style = CHAT_THINKING_STYLE.get(self.thinking_style, self.thinking_style)
+            style_line = f"- 考え方の癖: {style}\n"
+        else:
+            style_line = f"- 思考スタイル: {self.thinking_style}\n"
         section = (
             f"【あなたの人格】\n"
             f"- 口調: {self.tone}\n"
-            f"- 思考スタイル: {self.thinking_style}\n"
+            f"{style_line}"
             f"- 議論スタイル: {self.discussion_style}\n"
             f"- 感情傾向: {self.emotional_tendency}\n"
             f"- 発言頻度: {self.talkativeness:.1f}\n"
@@ -62,6 +72,12 @@ class Personality:
     def get_fallback_message(self) -> str:
         return self.fallback_message
 
+
+# Chat-register wording for a `thinking_style` that itself says 思考 (see
+# `to_prompt_section`). Keyed by the text, so a renamed preset keeps it.
+CHAT_THINKING_STYLE: dict[str, str] = {
+    "多数派形成を狙う戦略的思考": "多数派を作って流れを決める戦略型",
+}
 
 # Every preset is asked to weigh what it hears; this is only how far an argument
 # has to go before it moves them. Without it the table is either players who

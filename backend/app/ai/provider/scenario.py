@@ -30,6 +30,7 @@ from time import perf_counter
 from app.ai.metrics import CallRecord, MetricsCollector, ParsePath
 from app.ai.provider.base import Message, SchemaT
 from app.ai.schemas import (
+    ChatDiscussionOutput,
     DirectedQuestion,
     DiscussionOutput,
     MorningIntentOutput,
@@ -44,6 +45,9 @@ from app.ai.schemas import (
 _PLAYER_ID_RE = re.compile(r"\bp\d+\b")
 _MESSAGE_ID_RE = re.compile(r"\[(m\d+)")
 _SELF_ID_RE = re.compile(r"あなた自身のplayer_idは (p\d+) です")
+# The v3 prompt never states the id in prose; the roster is the one place it
+# appears, as `あなた=名前(pN)`.
+_ROSTER_SELF_ID_RE = re.compile(r"【名簿[^】]*】あなた=[^(、\n]*\((p\d+)\)")
 # The pending-question layer renders one `[mN] 名前(pN) →あなた:「...」` line per
 # open question, and falls back to a literal "(ありません)" when there are none.
 _PENDING_BLOCK_RE = re.compile(r"【あなたへの未回答の質問】\n(.*?)\n最初にこれへ", re.DOTALL)
@@ -134,6 +138,13 @@ class ScenarioProvider:
 
         if response_schema is DiscussionOutput:
             return self._discussion(text, self_id, others)
+        if response_schema is ChatDiscussionOutput:
+            # The v3 wire form of the same turn. What it has no room for
+            # (key_point, agrees_with, quote) is dropped, exactly as a real
+            # model answering that contract would never send it.
+            return ChatDiscussionOutput.from_discussion_output(
+                self._discussion(text, self_id, others)
+            )
         if response_schema is MorningIntentOutput:
             return MorningIntentOutput()
         if response_schema is VoteOutput:
@@ -217,7 +228,7 @@ class ScenarioProvider:
                 )
             ],
             reasoning_memo=ReasoningMemo(
-                overall_thought="シナリオの思考メモです。",
+                overall_thought="シナリオの方針メモです。",
                 execution_target=target,
                 suspects=[target],
             ),
@@ -229,7 +240,7 @@ class ScenarioProvider:
 
     @staticmethod
     def _self_id(text: str) -> str:
-        match = _SELF_ID_RE.search(text)
+        match = _SELF_ID_RE.search(text) or _ROSTER_SELF_ID_RE.search(text)
         return match.group(1) if match else "p0"
 
     @staticmethod
