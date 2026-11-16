@@ -54,6 +54,7 @@ from app.ai.reasoning.perspectives import (
     Perspective,
     PlayerPrivatePerspective,
 )
+from app.ai.reasoning.rendering import declared_candidates
 from app.ai.reasoning.solver import (
     AccurateTimeline,
     RoleSolver,
@@ -954,7 +955,10 @@ class ReasoningRuntime:
         used to be read off each seat's belief engine, which weighs what only
         that seat knows -- a seer's unpublished black, a wolf's own team -- and
         was handed to the whole table as if someone had said it. Only
-        candidates a seat named in public today count now.
+        candidates a seat named in public today count now -- and named as a
+        candidate, in a sentence that puts them forward for execution. A seat
+        that only mentioned its private target, to clear or question them, has
+        not told the table it wants them hanged.
         """
         ledger = PublicFactLedger(state)
         points: list[str] = []
@@ -972,13 +976,16 @@ class ReasoningRuntime:
                 f"{result.claimant_id}→{result.target_id}={colour}({result.day}日目)"
             )
         # Under v3 a stated target is the model's structured answer, which its
-        # message need not name. Only a name the seat said out loud today is
-        # public; anything else stays in its own notes.
+        # message need not name. Only a candidate the seat declared out loud
+        # today is public; a bare mention is no declaration, and a seat with no
+        # declaring sentence is left out rather than guessed at.
         named_today: dict[str, set[str]] = {}
         for message in state.chat_log:
             if message.day == state.day and message.channel is ChatChannel.PUBLIC:
                 named_today.setdefault(message.author_id, set()).update(
-                    ledger.mentioned_player_ids(message.content)
+                    declared_candidates(
+                        message.content, ledger, speaker_id=message.author_id
+                    )
                 )
         backers: dict[str, list[str]] = {}
         for speaker_id, target_id in sorted(self.stated_targets_on(state.day).items()):

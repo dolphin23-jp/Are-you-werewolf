@@ -280,9 +280,7 @@ def test_no_seats_private_target_reaches_the_shared_summary():
     assert not any("p9" in point for point in points)
 
 
-def _says(state, speaker: str, target: str | None, day: int) -> None:  # type: ignore[no-untyped-def]
-    """`speaker` names `target` in public on `day`, and the runtime records it."""
-    text = f"Player{target[1:]}が怪しい。" if target else "まだ決めきれない。"
+def _post(state, speaker: str, text: str, day: int) -> None:  # type: ignore[no-untyped-def]
     state.chat_log.append(
         ChatMessage(
             message_id=f"m{len(state.chat_log)}",
@@ -292,6 +290,12 @@ def _says(state, speaker: str, target: str | None, day: int) -> None:  # type: i
             day=day,
         )
     )
+
+
+def _says(state, speaker: str, target: str | None, day: int) -> None:  # type: ignore[no-untyped-def]
+    """`speaker` puts `target` forward for execution in public on `day`."""
+    text = f"Player{target[1:]}を吊りたい。" if target else "まだ決めきれない。"
+    _post(state, speaker, text, day)
 
 
 def test_a_publicly_stated_split_is_reported_from_todays_statements_only():
@@ -339,6 +343,23 @@ def test_a_candidate_only_in_a_seats_structured_answer_stays_private():
 
     assert not any("割れている" in point for point in points)
     assert not any("p8" in point for point in points)
+
+
+def test_a_seat_that_only_mentions_its_private_target_is_not_reported_backing_it():
+    """Under v3 the stated target is the model's private plan note. A seat that
+    named that player in public -- here to clear them -- has not told the table
+    it wants them hanged, and the summary every seat reads must not say so."""
+    state = _played_board()
+    runtime = _runtime(state)
+    _post(state, "p2", "Player5は白っぽいと思う。Player7が怪しい。", 2)
+    runtime.record_stated_target("p2", "p5", 2)
+    _says(state, "p3", "p7", 2)
+    runtime.record_stated_target("p3", "p7", 2)
+
+    points = runtime.conflict_points(state)
+
+    assert not any("p5←p2" in point for point in points)
+    assert not any("割れている" in point for point in points)
 
 
 def test_a_stated_target_belongs_to_the_day_it_was_stated():
