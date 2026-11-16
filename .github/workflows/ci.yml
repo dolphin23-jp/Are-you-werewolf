@@ -8,6 +8,16 @@ on:
 jobs:
   backend:
     runs-on: ubuntu-latest
+    # Belt and braces for the mock-only rule. Secrets reach a job only when a
+    # step names them, and tests/conftest.py already scrubs provider settings;
+    # pinning the provider and blanking the keys here keeps CI on mock even if
+    # a later edit or a runner's own environment brings one in. Never put a
+    # real key in this file: the live provider is used only by the manually
+    # dispatched evaluation workflows.
+    env:
+      WEREWOLF_LLM_PROVIDER: mock
+      WEREWOLF_ANTHROPIC_API_KEY: ""
+      LUNA_API_KEY: ""
     defaults:
       run:
         working-directory: backend
@@ -39,6 +49,11 @@ jobs:
   # GitHub-hosted runners. Transformer tests are isolated and zero-API-cost.
   backend-transformer:
     runs-on: ubuntu-latest
+    # Same mock-only pin as the backend job.
+    env:
+      WEREWOLF_LLM_PROVIDER: mock
+      WEREWOLF_ANTHROPIC_API_KEY: ""
+      LUNA_API_KEY: ""
     defaults:
       run:
         working-directory: backend
@@ -60,7 +75,10 @@ jobs:
         run: mypy app/training/torch_*.py
       - name: Test transformer code
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
-        run: pytest tests/training/test_torch_*.py
+        # test_population_runtime.py imports the torch population modules and
+        # skips itself when torch is missing, so the backend job above always
+        # skips it; this is the only job where it can run.
+        run: pytest tests/training/test_torch_*.py tests/training/test_population_runtime.py
 
   frontend:
     runs-on: ubuntu-latest
@@ -98,6 +116,11 @@ jobs:
   # API + UI + WebSocket from one port via .devcontainer/start.sh.
   single-port-serve:
     runs-on: ubuntu-latest
+    # The smoke test serves the real app; keep it on the mock provider too.
+    env:
+      WEREWOLF_LLM_PROVIDER: mock
+      WEREWOLF_ANTHROPIC_API_KEY: ""
+      LUNA_API_KEY: ""
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -111,11 +134,14 @@ jobs:
           node-version: "22"
           cache: "pnpm"
           cache-dependency-path: frontend/pnpm-lock.yaml
+      # `bash -n` checks only its first argument and treats the rest as that
+      # script's positional parameters, so each file needs its own call.
       - name: Check shell scripts parse
-        run: >-
-          bash -n .devcontainer/setup.sh .devcontainer/start.sh
-          tools/runpod_pilot002.sh tools/runpod_pilot002_last5.sh
-          tools/runpod_pilot002_last5_parallel.sh
+        run: |
+          for script in .devcontainer/*.sh tools/*.sh; do
+            echo "bash -n $script"
+            bash -n "$script"
+          done
       - name: Install backend
         run: pip install -e "./backend[dev]"
       - name: Install and build frontend

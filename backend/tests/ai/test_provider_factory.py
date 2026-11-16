@@ -1,8 +1,10 @@
 import pytest
 
+from app.ai.provider.anthropic_claude import AnthropicClaudeProvider
 from app.ai.provider.factory import LLMProviderConfigError, build_llm_provider
 from app.ai.provider.luna_openai import LunaOpenAIProvider
 from app.ai.provider.mock import MockProvider
+from app.ai.schemas import DiscussionOutput, VoteOutput
 from app.config import Settings
 
 
@@ -91,6 +93,98 @@ def test_unknown_provider_raises():
 )
 def test_only_luna_shaped_model_names_are_aliased(configured: str):
     """The alias must not swallow a typo: anything else stays an unknown provider."""
+    settings = Settings(werewolf_llm_provider=configured)
+    assert settings.werewolf_llm_provider == configured
+    with pytest.raises(LLMProviderConfigError):
+        build_llm_provider(settings)
+
+
+# --- anthropic -----------------------------------------------------------------
+
+
+def test_anthropic_provider_requires_its_own_namespaced_key(monkeypatch):
+    """The SDK's ambient ANTHROPIC_API_KEY usually belongs to some other tool
+    on the machine; it must not stand in for the game's key."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "ambient-key-of-another-tool")
+    settings = Settings(werewolf_llm_provider="anthropic", werewolf_anthropic_api_key="")
+    with pytest.raises(LLMProviderConfigError, match="WEREWOLF_ANTHROPIC_API_KEY"):
+        build_llm_provider(settings)
+
+
+def test_anthropic_provider_builds_from_settings():
+    settings = Settings(
+        werewolf_llm_provider="anthropic",
+        werewolf_anthropic_api_key="test-key",
+        werewolf_anthropic_base_url="https://example.invalid",
+        werewolf_anthropic_max_retries=3,
+        werewolf_anthropic_max_tokens=16000,
+        werewolf_anthropic_effort_vote="high",
+    )
+    provider = build_llm_provider(settings)
+    assert isinstance(provider, AnthropicClaudeProvider)
+    assert provider.model == "claude-opus-5-5"
+    assert provider.fallbacks_enabled is True
+    assert provider._max_retries == 3
+    assert provider._max_tokens_floor == 16000
+    assert str(provider._client.base_url).startswith("https://example.invalid")
+    assert provider.effort_for(VoteOutput) == "high"
+    assert provider.effort_for(DiscussionOutput) == "low"
+
+
+def test_anthropic_fallbacks_can_be_switched_off():
+    settings = Settings(
+        werewolf_llm_provider="anthropic",
+        werewolf_anthropic_api_key="test-key",
+        werewolf_anthropic_fallbacks="off",
+    )
+    provider = build_llm_provider(settings)
+    assert isinstance(provider, AnthropicClaudeProvider)
+    assert provider.fallbacks_enabled is False
+
+
+@pytest.mark.parametrize(
+    ("configured", "expected_model"),
+    [
+        ("anthropic", "claude-opus-5-5"),
+        (" Anthropic ", "claude-opus-5-5"),
+        ("claude", "claude-opus-5-5"),
+        ('"Claude"', "claude-opus-5-5"),
+        # A model id typed into the provider field is also the model asked
+        # for: selecting Claude but billing the default model instead would
+        # turn a cheap Haiku run into an Opus one.
+        ("claude-opus-5-5", "claude-opus-5-5"),
+        (" CLAUDE-SONNET-5-5 ", "claude-sonnet-5-5"),
+        ("claude-haiku-5-5", "claude-haiku-5-5"),
+        ("claude-opus-5-5-20261101", "claude-opus-5-5-20261101"),
+    ],
+)
+def test_anthropic_aliases_select_the_anthropic_provider(configured: str, expected_model: str):
+    settings = Settings(werewolf_llm_provider=configured, werewolf_anthropic_api_key="test-key")
+    assert settings.werewolf_llm_provider == "anthropic"
+    provider = build_llm_provider(settings)
+    assert isinstance(provider, AnthropicClaudeProvider)
+    assert provider.model == expected_model
+
+
+def test_a_key_that_is_only_quotes_and_spaces_is_a_missing_key():
+    """Unwrapped to nothing, so the server refuses to start instead of
+    sending `Bearer ""` and failing every call with a 401."""
+    settings = Settings(werewolf_llm_provider="anthropic", werewolf_anthropic_api_key=' "" \n')
+    with pytest.raises(LLMProviderConfigError, match="WEREWOLF_ANTHROPIC_API_KEY"):
+        build_llm_provider(settings)
+
+
+def test_a_quoted_key_reaches_the_provider_unwrapped():
+    settings = Settings(
+        werewolf_llm_provider="anthropic", werewolf_anthropic_api_key=' "sk-test-key" '
+    )
+    provider = build_llm_provider(settings)
+    assert isinstance(provider, AnthropicClaudeProvider)
+    assert provider._client.api_key == "sk-test-key"
+
+
+@pytest.mark.parametrize("configured", ["claude-", "claude_opus", "claud", "opus-5-5"])
+def test_only_claude_shaped_names_are_aliased(configured: str):
     settings = Settings(werewolf_llm_provider=configured)
     assert settings.werewolf_llm_provider == configured
     with pytest.raises(LLMProviderConfigError):

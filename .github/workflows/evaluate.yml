@@ -1,15 +1,31 @@
 name: AI評価
 
 # Manual only. This spends real API credit, so it must never fire on push.
+#
+# Standing rule (docs/approach-reset-2026-10.md §11.6): every game used as a
+# baseline or in an A/B comparison has its report.md, summary.json and
+# transcript-seedN.md/.json committed to backend/artifacts/, together with the
+# commit SHA, model, effort and seed (summary.json records all four). The
+# Actions artifacts below expire; the repository is the record.
+#
+# One matrix job per seed, one game per job: `evaluate.py --games N` advances
+# the seed and pools the metrics across games, which hides the game-to-game
+# spread a baseline needs (docs/approach-reset-2026-10.md §11.5).
+#
+# Every input reaches a shell step through `env:`, never by `${{ }}`
+# interpolation inside `run:` -- a free-text input pasted into a script is a
+# script-injection hole. Free-text inputs are validated in the `plan` job
+# before any job that holds a secret starts.
 on:
   workflow_dispatch:
     inputs:
-      games:
-        description: "対戦数(1戦あたり約280回のAPI呼び出し)"
-        required: true
-        default: "1"
-      seed:
-        description: "シード(同じ値なら配役・人格が再現され、変更前後を比較できます)"
+      provider:
+        description: "プロバイダ(anthropic = Claude / luna = 休眠中の gpt-6-luna)"
+        type: choice
+        options: ["anthropic", "luna"]
+        default: "anthropic"
+      seeds:
+        description: "シード(カンマ区切り。例: 1,2,3。1シード=1ジョブ=1試合。同じ値なら配役・人格が再現される)"
         required: true
         default: "1"
       reasoning_engine:
@@ -17,32 +33,86 @@ on:
         type: choice
         options: ["v3", "v2", "legacy"]
         default: "v3"
-      reasoning_effort:
-        description: "推論モデルの思考量(空=送らない / low / medium / high)。途中切れが多いなら low"
-        required: false
-        default: ""
+      effort_discussion:
+        description: "議論と狼・共有チャットの思考量(Claude のみ)"
+        type: choice
+        options: ["low", "medium", "high"]
+        default: "low"
+      effort_decisions:
+        description: "投票と夜行動の思考量(Claude のみ)"
+        type: choice
+        options: ["low", "medium", "high"]
+        default: "medium"
       judge:
-        description: "日本語・人格をLLMで採点する(追加費用)"
+        description: "日本語・人格をLLMで採点する(追加費用。上限は対戦と共有)"
         type: boolean
         default: false
-      price_in:
-        description: "入力100万トークンあたりの単価(0なら金額換算しない)"
+      judge_model:
+        description: "判定に使うモデル(空欄なら対戦と同じ。例: claude-sonnet-5-5)"
         required: false
-        default: "0"
-      price_out:
-        description: "出力100万トークンあたりの単価"
+        default: ""
+      max_cost_per_game:
+        description: "1試合(1ジョブ)あたりの推定費用の上限(USD)。超えそうなら送らずに止める"
+        required: true
+        default: "15"
+      model:
+        description: "モデル(空欄なら変数 WEREWOLF_ANTHROPIC_MODEL、なければ claude-opus-5-5。luna なら LUNA_MODEL)"
         required: false
-        default: "0"
+        default: ""
+
+# One evaluation at a time across both evaluation workflows: they share one API
+# key, its rate limit and its spend. A second dispatch waits instead of
+# cancelling a run that is already paying for its games.
+concurrency:
+  group: ai-evaluation
+  cancel-in-progress: false
+
+permissions:
+  contents: read
 
 jobs:
-  evaluate:
+  plan:
     runs-on: ubuntu-latest
-    # A real 17-player game makes roughly 250 model calls. PR #7 deliberately
-    # deepened the discussion flow, so a single game can legitimately take
-    # longer than one hour even though the endpoint is healthy. Keep a finite
-    # ceiling to prevent runaway spend, but do not cancel a normal evaluation
-    # immediately before it can write report.md.
-    timeout-minutes: 180
+    timeout-minutes: 5
+    outputs:
+      seeds: ${{ steps.plan.outputs.seeds }}
+    steps:
+      - name: 入力の確認とシードの展開
+        id: plan
+        env:
+          SEEDS: ${{ inputs.seeds }}
+          MAX_COST: ${{ inputs.max_cost_per_game }}
+          MODEL: ${{ inputs.model }}
+          JUDGE_MODEL: ${{ inputs.judge_model }}
+        run: |
+          set -euo pipefail
+          seeds=$(printf '%s' "$SEEDS" | tr -d '[:space:]')
+          if ! printf '%s' "$seeds" | grep -Eq '^[0-9]{1,9}(,[0-9]{1,9}){0,19}$'; then
+            echo "::error::seeds は数字をカンマで区切って指定してください(例: 1,2,3。最大20個)。"
+            exit 1
+          fi
+          if ! printf '%s' "$MAX_COST" | grep -Eq '^[0-9]{1,4}(\.[0-9]{1,4})?$' \
+            || ! python3 -c 'import sys; sys.exit(0 if float(sys.argv[1]) > 0 else 1)' "$MAX_COST"; then
+            echo "::error::max_cost_per_game は0より大きいUSDの数値にしてください(例: 15)。"
+            exit 1
+          fi
+          for name in MODEL JUDGE_MODEL; do
+            value="${!name}"
+            if [ -n "$value" ] && ! printf '%s' "$value" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,99}$'; then
+              echo "::error::$name に使えない文字があります(英数字と . _ : @ / - のみ)。"
+              exit 1
+            fi
+          done
+          json=$(python3 -c 'import json, sys; print(json.dumps(list(dict.fromkeys(int(s) for s in sys.argv[1].split(",")))))' "$seeds")
+          echo "seeds=$json" >> "$GITHUB_OUTPUT"
+          echo "シード: $json" >> "$GITHUB_STEP_SUMMARY"
+
+  # Once, before any game: a wrong key, model or schema costs a handful of
+  # requests here instead of failing every matrix job a game in.
+  preflight:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
@@ -53,44 +123,107 @@ jobs:
       - name: 依存関係のインストール
         run: pip install -e "./backend[dev]"
 
-      - name: 接続確認(1回の呼び出し)
+      - name: 接続確認(少ない呼び出しだけ)
         working-directory: backend
         env:
-          WEREWOLF_LLM_PROVIDER: luna
-          LUNA_API_KEY: ${{ secrets.LUNA_API_KEY }}
-          LUNA_BASE_URL: ${{ secrets.LUNA_BASE_URL }}
-          LUNA_MODEL: ${{ vars.LUNA_MODEL || 'gpt-6-luna' }}
-        run: python scripts/check_llm.py
+          PROVIDER: ${{ inputs.provider }}
+          WEREWOLF_LLM_PROVIDER: ${{ inputs.provider }}
+          WEREWOLF_ANTHROPIC_API_KEY: ${{ inputs.provider == 'anthropic' && secrets.WEREWOLF_ANTHROPIC_API_KEY || '' }}
+          WEREWOLF_ANTHROPIC_MODEL: ${{ inputs.model || vars.WEREWOLF_ANTHROPIC_MODEL || 'claude-opus-5-5' }}
+          WEREWOLF_ANTHROPIC_FALLBACKS: ${{ vars.WEREWOLF_ANTHROPIC_FALLBACKS || 'default' }}
+          WEREWOLF_ANTHROPIC_EFFORT_DISCUSSION: ${{ inputs.effort_discussion }}
+          WEREWOLF_ANTHROPIC_EFFORT_CHAT: ${{ inputs.effort_discussion }}
+          WEREWOLF_ANTHROPIC_EFFORT_VOTE: ${{ inputs.effort_decisions }}
+          WEREWOLF_ANTHROPIC_EFFORT_NIGHT: ${{ inputs.effort_decisions }}
+          # Repository variable, so many 途中切れ can be answered without a code
+          # change. The fallback is the code default: an unset variable would
+          # arrive as "", which fails int parsing at startup.
+          WEREWOLF_ANTHROPIC_MAX_TOKENS: ${{ vars.WEREWOLF_ANTHROPIC_MAX_TOKENS || '12000' }}
+          LUNA_API_KEY: ${{ inputs.provider == 'luna' && secrets.LUNA_API_KEY || '' }}
+          LUNA_BASE_URL: ${{ inputs.provider == 'luna' && secrets.LUNA_BASE_URL || '' }}
+          LUNA_MODEL: ${{ inputs.model || vars.LUNA_MODEL || 'gpt-6-luna' }}
+        run: python scripts/check_llm.py --provider "$PROVIDER"
+
+  evaluate:
+    needs: [plan, preflight]
+    name: evaluate (seed ${{ matrix.seed }})
+    runs-on: ubuntu-latest
+    # One v3 game took about 28 minutes on gpt-6-luna; Claude is not measured
+    # yet. A finite ceiling stops a runaway, the cost cap stops overspend.
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        seed: ${{ fromJSON(needs.plan.outputs.seeds) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 依存関係のインストール
+        run: pip install -e "./backend[dev]"
 
       - name: 評価の実行
         working-directory: backend
         env:
-          WEREWOLF_LLM_PROVIDER: luna
+          PROVIDER: ${{ inputs.provider }}
+          SEED: ${{ matrix.seed }}
+          MAX_COST: ${{ inputs.max_cost_per_game }}
+          JUDGE: ${{ inputs.judge }}
+          JUDGE_MODEL: ${{ inputs.judge_model }}
+          LUNA_PRICE_IN: ${{ vars.LUNA_PRICE_IN }}
+          LUNA_PRICE_OUT: ${{ vars.LUNA_PRICE_OUT }}
+          WEREWOLF_LLM_PROVIDER: ${{ inputs.provider }}
           WEREWOLF_REASONING_ENGINE: ${{ inputs.reasoning_engine }}
-          LUNA_REASONING_EFFORT: ${{ inputs.reasoning_effort }}
-          LUNA_API_KEY: ${{ secrets.LUNA_API_KEY }}
-          LUNA_BASE_URL: ${{ secrets.LUNA_BASE_URL }}
-          LUNA_MODEL: ${{ vars.LUNA_MODEL || 'gpt-6-luna' }}
+          WEREWOLF_ANTHROPIC_API_KEY: ${{ inputs.provider == 'anthropic' && secrets.WEREWOLF_ANTHROPIC_API_KEY || '' }}
+          WEREWOLF_ANTHROPIC_MODEL: ${{ inputs.model || vars.WEREWOLF_ANTHROPIC_MODEL || 'claude-opus-5-5' }}
+          WEREWOLF_ANTHROPIC_FALLBACKS: ${{ vars.WEREWOLF_ANTHROPIC_FALLBACKS || 'default' }}
+          WEREWOLF_ANTHROPIC_EFFORT_DISCUSSION: ${{ inputs.effort_discussion }}
+          WEREWOLF_ANTHROPIC_EFFORT_CHAT: ${{ inputs.effort_discussion }}
+          WEREWOLF_ANTHROPIC_EFFORT_VOTE: ${{ inputs.effort_decisions }}
+          WEREWOLF_ANTHROPIC_EFFORT_NIGHT: ${{ inputs.effort_decisions }}
+          WEREWOLF_ANTHROPIC_MAX_TOKENS: ${{ vars.WEREWOLF_ANTHROPIC_MAX_TOKENS || '12000' }}
+          LUNA_API_KEY: ${{ inputs.provider == 'luna' && secrets.LUNA_API_KEY || '' }}
+          LUNA_BASE_URL: ${{ inputs.provider == 'luna' && secrets.LUNA_BASE_URL || '' }}
+          LUNA_MODEL: ${{ inputs.model || vars.LUNA_MODEL || 'gpt-6-luna' }}
         run: |
-          python scripts/evaluate.py \
-            --games "${{ inputs.games }}" \
-            --seed "${{ inputs.seed }}" \
-            --provider luna \
-            ${{ inputs.judge && '--judge' || '' }} \
-            --price-in "${{ inputs.price_in }}" \
-            --price-out "${{ inputs.price_out }}" \
-            --out eval-out
+          set -euo pipefail
+          args=(--games 1 --seed "$SEED" --provider "$PROVIDER" --out eval-out)
+          if [ "$PROVIDER" = "anthropic" ]; then
+            # Priced by the provider's own table; the cap is enforced before
+            # each request is sent.
+            args+=(--max-cost "$MAX_COST")
+          elif [ -n "$LUNA_PRICE_IN" ] || [ -n "$LUNA_PRICE_OUT" ]; then
+            args+=(--price-in "${LUNA_PRICE_IN:-0}" --price-out "${LUNA_PRICE_OUT:-0}" --max-cost "$MAX_COST")
+          else
+            echo "::warning::luna の単価(変数 LUNA_PRICE_IN / LUNA_PRICE_OUT)が無いので、費用は計算されず上限も効きません。"
+          fi
+          if [ "$JUDGE" = "true" ]; then
+            args+=(--judge)
+            if [ -n "$JUDGE_MODEL" ]; then
+              args+=(--judge-model "$JUDGE_MODEL")
+            fi
+          fi
+          # Exit code 3: the cost cap stopped the game. The partial transcript
+          # and a report that says so are already written, and the job fails
+          # so the stop is not mistaken for a finished game.
+          python scripts/evaluate.py "${args[@]}"
 
       # Renders the report directly on the run page, so it is readable on a
       # phone without downloading the artifact.
       - name: レポートを画面に表示
         if: always()
         working-directory: backend
+        env:
+          SEED: ${{ matrix.seed }}
         run: |
           if [ -f eval-out/report.md ]; then
             cat eval-out/report.md >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "レポートが生成されませんでした(接続確認で失敗した、対戦の途中で止めた、または時間切れ)。上のログを確認してください。途中まで進んでいれば、対戦記録が下と Artifacts の eval-out に残っています。" >> "$GITHUB_STEP_SUMMARY"
+            echo "シード $SEED のレポートが生成されませんでした(接続確認で失敗した、対戦の途中で止めた、または時間切れ)。上のログを確認してください。途中まで進んでいれば、対戦記録が下と Artifacts の eval-out-seed$SEED に残っています。" >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: 対戦記録も表示(先頭のみ)
@@ -115,6 +248,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: eval-out
+          name: eval-out-seed${{ matrix.seed }}
           path: backend/eval-out/
-          retention-days: 14
+          retention-days: 90

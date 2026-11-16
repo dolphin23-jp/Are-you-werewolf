@@ -8,12 +8,73 @@ judge model.
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Mapping, Sequence
+from typing import Any, Literal
 
 from app.eval.analyzers import AnalysisResult
+from app.eval.release_gate import HARD_FAILURE_FIELDS
 from app.eval.transcript import GameTranscript
 
 _SEVERITY_ORDER = {"high": 0, "medium": 1, "low": 2}
+
+# Shown at the top of a report written after the spending cap stopped the run.
+# Short and fixed, so a workflow or a person can grep for it.
+BUDGET_STOP_BANNER = "費用上限に達したため中断"
+
+# What the cap stopped: the games themselves, or the LLM judge that runs after
+# every game has finished.
+BudgetStopPhase = Literal["game", "judge"]
+
+# Section headings other tooling and the docs refer to by name.
+CALL_HEALTH_HEADING = "呼び出し種別ごとの健全性"
+HARD_CORRECTNESS_HEADING = "ハード正しさ（すべて0が合格）"
+
+# Providers that never reach a model. Their numbers measure the harness only.
+_OFFLINE_PROVIDERS = frozenset({"MockProvider", "ScenarioProvider"})
+
+# Everything the code did *instead of* the model, by the event names the AI
+# layer records (`MetricsCollector.record_event`). Listed even when zero: a
+# missing row reads as "not measured", a zero row as "did not happen".
+EVENT_LABELS: dict[str, str] = {
+    "brief_fallback": "簡易契約(発言だけ)への降格",
+    "vote_code_resolved": "コードが決めた投票",
+    "night_code_resolved": "コードが決めた夜行動",
+    "wolf_chat_fallback_line": "狼チャットの定型文",
+    "obligation_posted_by_code": "コードが出した公開義務の文",
+    "speech_discarded_after_phase_end": "議論の終了後に届いて捨てた発言",
+    "discussion_stalled": "連続失敗で止まった議論",
+}
+
+# `release_gate.HARD_FAILURE_FIELDS`, in words. Any non-zero count fails the
+# release gate, whatever else the run looks like.
+HARD_FAILURE_LABELS: dict[str, str] = {
+    "private_evidence_exposed_count": "自分だけの根拠を公開発言に出した",
+    "team_private_evidence_exposed_count": "陣営内だけの根拠を公開発言に出した",
+    "dead_target_selection_count": "死亡者を対象に選んだ",
+    "public_fact_flip_count": "同じ公開結果の白黒を言い換えた",
+    "missing_required_result_count": "出すべき能力結果を出さなかった",
+    "duplicate_required_result_count": "同じ能力結果を重ねて出した",
+    "displayed_target_mismatch_count": "表示した対象と決めた対象が違った",
+    "stale_evidence_publicly_emitted_count": "訂正済みの古い根拠を公開発言に出した",
+    "unexplained_vote_change_count": "理由のない投票先の変更",
+    "unplanned_wolf_ally_vote_count": "計画のない人狼の仲間投票",
+    "duplicate_night_action_count": "同じ夜の行動の重複",
+}
+
+# The validation-log repairs `scripts/live_reasoning_check.py` reports. The
+# code caught each before it reached the table, so they are context for the
+# hard counts, not part of the verdict.
+VALIDATION_LABELS: dict[str, str] = {
+    "dead_target_selections": "死亡者・選べない相手を対象にした",
+    "public_fact_flips": "公開結果と逆の白黒を書いた",
+    "vote_history_misreads": "投票の記録を読み違えた",
+    "vote_plan_mismatches": "言った吊り先と違う相手に投票した",
+}
+
+_PRICING_SOURCE_LABELS = {
+    "table": "単価表(pricing.py)から自動計算",
+    "arguments": "`--price-in` / `--price-out` から計算",
+}
 
 _CHECK_LABELS = {
     "result_claim_without_role": "役職に無い占い/霊媒結果の主張",
@@ -43,14 +104,60 @@ def render_report(
     judge_summary: dict[str, Any] | None,
     provider: str,
     model: str,
+    engine: str | None = None,
+    effort_by_kind: Mapping[str, str] | None = None,
+    commit: str | None = None,
+    per_game: Sequence[Mapping[str, Any]] | None = None,
+    budget: Mapping[str, Any] | None = None,
+    budget_stop: str | None = None,
+    budget_stop_phase: BudgetStopPhase = "game",
 ) -> str:
+    """The whole run on one page.
+
+    `per_game` is the list `summary.json` carries under `per_game`; without it
+    the per-game and hard-correctness sections say they were not measured
+    rather than disappear. `budget_stop` is the `BudgetExceeded` message when
+    the spending cap ended the run: the report then says so first, because
+    every number below it covers only what was played before the stop.
+
+    `budget_stop_phase` says what the cap stopped. "judge" means every game
+    was played without reaching it and only the LLM judge afterwards did:
+    the report must not then send the reader looking for interrupted games,
+    nor tell them to pass a `--judge` they already passed.
+    """
     lines: list[str] = []
     add = lines.append
+    judge_stopped = budget_stop is not None and budget_stop_phase == "judge"
 
     add("# AI人狼プレイヤー 評価レポート\n")
+    if judge_stopped:
+        add(
+            f"> **{BUDGET_STOP_BANNER}。** 対戦は上限に届く前にすべて終わり、そのあとの"
+            "LLM判定(`--judge`)で上限に達したため、上限に届く判定の呼び出しは送らずに止めました"
+            "(それまでに送った判定の呼び出しは費用に含まれます)。"
+            "対戦の数値はそろっています。LLM判定の結果はありません(6章)。\n>\n"
+            f"> `{budget_stop}`\n"
+        )
+    elif budget_stop is not None:
+        add(
+            f"> **{BUDGET_STOP_BANNER}。** 上限に届く呼び出しは送らずに止めました。"
+            "以下の数値は止まるまでに行った分だけです。途中で止まった試合の対戦記録は"
+            "「途中経過」として残っています(試合ごとの表で勝者が「(中断)」の試合)。\n>\n"
+            f"> `{budget_stop}`\n"
+        )
     add(f"- プロバイダ: `{provider}` / モデル: `{model}`")
+    if engine is not None:
+        add(f"- 推理エンジン: `{engine}`")
+    if effort_by_kind:
+        add("- 思考量(effort): " + " / ".join(f"{k} `{v}`" for k, v in effort_by_kind.items()))
+    if commit:
+        add(f"- コミット: `{commit}`")
     add(f"- 評価ゲーム数: {len(games)}")
-    if provider == "MockProvider":
+    if budget is not None and budget.get("max_estimated_cost") is not None:
+        spent = budget.get("estimated_cost")
+        spent_text = f"${spent:.4f}" if isinstance(spent, int | float) else "不明"
+        add(f"- 費用上限: ${budget['max_estimated_cost']:.2f}(使用 {spent_text})")
+    if provider in _OFFLINE_PROVIDERS:
         add("")
         add(
             "> **注意: モックプロバイダでの実行です。** 定型文を返すだけなので、"
@@ -62,14 +169,27 @@ def render_report(
     add("## 1. 動作指標(JSON成功率・応答時間・コスト)\n")
     add(_render_metrics(metrics_summary))
 
-    add("\n## 2. ルールベース検査(役職整合性・矛盾・人狼の連携)\n")
+    add(f"\n## 2. {CALL_HEALTH_HEADING}\n")
+    add(_render_call_health(metrics_summary, per_game))
+
+    add(f"\n## 3. {HARD_CORRECTNESS_HEADING}\n")
+    add(_render_hard_correctness(per_game))
+
+    add("\n## 4. ルールベース検査(役職整合性・矛盾・人狼の連携)\n")
     add(_render_findings(games))
 
-    add("\n## 3. 発言の形式指標\n")
+    add("\n## 5. 発言の形式指標\n")
     add(_render_speech_stats(games))
 
-    add("\n## 4. 日本語の自然さ・人格の維持\n")
-    if judge_summary is None:
+    add("\n## 6. 日本語の自然さ・人格の維持\n")
+    if judge_summary is None and judge_stopped:
+        add(
+            "LLM判定は費用上限に達したため中断しました(結果なし)。判定も含めるには、"
+            "`--max-cost` を上げて実行し直してください。\n\n"
+            "`transcript-*.md` に読みやすい形式の全発言を出力しているので、"
+            "目視での確認も可能です。"
+        )
+    elif judge_summary is None:
         add(
             "LLM判定は未実行です(`--judge` で有効化)。\n\n"
             "`transcript-*.md` に読みやすい形式の全発言を出力しているので、"
@@ -101,36 +221,201 @@ def _render_metrics(summary: dict[str, Any]) -> str:
         f"| 応答時間 最大 | {summary['latency_seconds']['max']:.3f} 秒 |",
     ]
 
+    wall = summary.get("total_game_wall_time") or 0.0
+    if wall > 0:
+        rows.append(f"| 対戦の所要時間(合計) | {format_duration(wall)} |")
+        # Every seat is an AI and pacing is off here, so this is how long the
+        # models took to produce one public line -- not what a human at the
+        # table would wait, which adds pacing and their own pauses.
+        rows.append(
+            "| 1発言あたりの生成時間(全席AI・ペース配分と人間の間なし) | "
+            f"{summary.get('time_per_public_utterance', 0.0):.1f} 秒 |"
+        )
+
     tokens = summary.get("tokens")
     if tokens:
         rows.append(f"| 入力トークン | {tokens['prompt']:,} |")
         rows.append(f"| 出力トークン | {tokens['completion']:,} |")
-        if summary.get("pricing_supplied"):
-            rows.append(f"| **推定コスト** | {summary['estimated_cost']:.6f} |")
-        else:
-            rows.append("| 推定コスト | 単価未指定 (`--price-in` / `--price-out` で算出) |")
     else:
-        rows.append("| トークン/コスト | エンドポイントが usage を返していません |")
+        rows.append("| トークン | エンドポイントが usage を返していません |")
+    rows.append(f"| **推定コスト** | {_cost_text(summary)} |")
 
-    out = ["\n".join(rows)]
+    return "\n".join(rows)
 
-    by_schema = summary.get("by_schema") or {}
-    if by_schema:
-        out.append("\n呼び出し種別ごと:\n")
-        out.append("| 種別 | 回数 | 成功率 | 平均応答 |")
-        out.append("|---|---|---|---|")
+
+def format_duration(seconds: float) -> str:
+    """mm:ss under an hour, h:mm:ss after -- the same shape as the live log."""
+    hours, rest = divmod(int(round(seconds)), 3600)
+    minutes, secs = divmod(rest, 60)
+    return f"{hours}:{minutes:02d}:{secs:02d}" if hours else f"{minutes:02d}:{secs:02d}"
+
+
+def _cost_text(summary: Mapping[str, Any]) -> str:
+    """The estimated cost with where its prices came from.
+
+    An unpriced run says so instead of printing 0, which would read as free.
+    """
+    if not summary.get("tokens"):
+        return "不明(usage が無い)"
+    if not summary.get("pricing_supplied") or summary.get("estimated_cost") is None:
+        return "単価未指定 (`--price-in` / `--price-out` で算出)"
+    source = _PRICING_SOURCE_LABELS.get(str(summary.get("pricing_source")), "出典不明")
+    return f"${summary['estimated_cost']:.4f}({source})"
+
+
+def _short_cost(metrics: Mapping[str, Any] | None) -> str:
+    if not metrics or not metrics.get("pricing_supplied"):
+        return "—"
+    cost = metrics.get("estimated_cost")
+    return f"${cost:.2f}" if isinstance(cost, int | float) else "—"
+
+
+def _render_call_health(
+    summary: Mapping[str, Any], per_game: Sequence[Mapping[str, Any]] | None
+) -> str:
+    """Whether the run was carried by the model or by the safety nets.
+
+    A 100% success rate says little on its own: a refused turn re-served by a
+    fallback model, a turn degraded to the brief contract, or a vote the code
+    resolved all count as successes. Each of those is counted here by name.
+    """
+    out: list[str] = []
+    if not summary or summary.get("total_calls", 0) == 0:
+        out.append("(LLM呼び出しの記録がありません)")
+    else:
+        by_schema = summary.get("by_schema") or {}
+        out.append("| 種別 | 回数 | 成功率 | 平均応答 | effort |")
+        out.append("|---|---|---|---|---|")
         for schema, data in by_schema.items():
             out.append(
                 f"| {schema} | {data['calls']} | {data['success_rate']:.1%} | "
-                f"{data['mean_latency_seconds']:.3f} 秒 |"
+                f"{data['mean_latency_seconds']:.1f} 秒 | {data.get('effort') or '—'} |"
             )
 
-    errors = summary.get("errors") or []
-    if errors:
-        out.append("\n主なエラー:\n")
-        for entry in errors:
-            out.append(f"- `{entry['error']}` ({entry['count']}件)")
+    events: Mapping[str, int] = summary.get("events") or {}
+    out.append("\nコードによる代行(0 が理想):\n")
+    out.append("| 出来事 | 件数 |")
+    out.append("|---|---|")
+    for name, label in EVENT_LABELS.items():
+        out.append(f"| {label} (`{name}`) | {events.get(name, 0)} |")
+    for name, count in events.items():
+        if name not in EVENT_LABELS:
+            out.append(f"| `{name}` | {count} |")
 
+    if summary and summary.get("total_calls", 0):
+        refusals: Mapping[str, int] = summary.get("refusals") or {}
+        served: Mapping[str, int] = summary.get("served_model_counts") or {}
+        out.append("\n| 指標 | 値 |")
+        out.append("|---|---|")
+        out.append(
+            "| 拒否 | "
+            + (
+                ", ".join(f"{category} {count}" for category, count in refusals.items())
+                if refusals
+                else "0"
+            )
+            + " |"
+        )
+        out.append(
+            f"| 途中切れ(出力上限) | {summary.get('truncated_calls', 0)}"
+            f"(失敗のうち {summary.get('truncated_failure_rate', 0.0):.0%}) |"
+        )
+        out.append(
+            "| 応答したモデル | "
+            + (
+                " / ".join(f"`{model}` {count}" for model, count in served.items())
+                if served
+                else "記録なし"
+            )
+            + " |"
+        )
+        fallback_calls = summary.get("fallback_served_calls", 0)
+        out.append(f"| フォールバックのモデルが答えた呼び出し | {fallback_calls} |")
+        out.append(f"| キャッシュ読みの割合 | {summary.get('cache_read_share', 0.0):.1%} |")
+        out.append(f"| 推定コスト | {_cost_text(summary)} |")
+
+        errors = summary.get("errors") or []
+        if errors:
+            out.append("\n主なエラー:\n")
+            for entry in errors:
+                out.append(f"- `{entry['error']}` ({entry['count']}件)")
+
+    out.append("\n試合ごと:\n")
+    if not per_game:
+        out.append("(試合ごとの記録はありません)")
+    else:
+        out.append("| seed | 勝者 | 発言/日 | 所要 | 費用 | ハード |")
+        out.append("|---|---|---|---|---|---|")
+        for game in per_game:
+            days = int(game.get("days") or 0)
+            utterances = int(game.get("public_utterances") or 0)
+            per_day = f"{utterances / days:.1f}" if days else "—"
+            winner = game.get("winner") or ("(中断)" if not game.get("finished") else "—")
+            hard = game.get("hard_failures")
+            hard_text = "—" if hard is None else str(sum(int(v) for v in hard.values()))
+            out.append(
+                f"| {game.get('seed')} | {winner} | {per_day} | "
+                f"{format_duration(float(game.get('wall_time_seconds') or 0.0))} | "
+                f"{_short_cost(game.get('metrics'))} | {hard_text} |"
+            )
+        out.append(
+            "\n「ハード」は次の節の項目の合計(0 が合格)。`—` は計測していない"
+            "(legacy エンジン)という意味です。"
+        )
+    return "\n".join(out)
+
+
+def _render_hard_correctness(per_game: Sequence[Mapping[str, Any]] | None) -> str:
+    """The release gate's hard failures, per game. Any non-zero fails the run.
+
+    Computed from the transcript's audit records the same way the release
+    gate reads them, so a number here and a gate verdict can never disagree.
+    """
+    measured = [game for game in per_game or () if game.get("hard_failures") is not None]
+    if not measured:
+        return (
+            "計測していません。監査記録(判断・公開・夜行動)を残すのは v2 と v3 だけで、"
+            "legacy にはありません。"
+        )
+
+    out = ["| 項目 | 合計 | 0 でない試合(seed) |", "|---|---|---|"]
+    failing: list[str] = []
+    for field in HARD_FAILURE_FIELDS:
+        total = sum(int(game["hard_failures"].get(field, 0)) for game in measured)
+        seeds = [
+            str(game.get("seed"))
+            for game in measured
+            if int(game["hard_failures"].get(field, 0)) > 0
+        ]
+        if total:
+            failing.append(field)
+        mark = f"**{total}**" if total else "0"
+        out.append(
+            f"| {HARD_FAILURE_LABELS.get(field, field)} | {mark} | {', '.join(seeds) or '—'} |"
+        )
+    unfinished = [str(game.get("seed")) for game in measured if not game.get("finished", True)]
+    verdict = (
+        f"**不合格**: {len(failing)}項目が 0 ではありません(`{'`, `'.join(failing)}`)。"
+        if failing
+        else "**合格**: すべて 0 です。"
+    )
+    out.append(f"\n{verdict}")
+
+    repairs = [game.get("validation") or {} for game in measured]
+    if any(repairs):
+        out.append(
+            "\n参考: コードが差し戻した誤り(公開記録には届いていないので合否には数えない。"
+            "多ければ、正しさをモデルではなく検証が支えているということ)\n"
+        )
+        out.append("| 項目 | 合計 |")
+        out.append("|---|---|")
+        for key, label in VALIDATION_LABELS.items():
+            out.append(f"| {label} | {sum(int(r.get(key, 0)) for r in repairs)} |")
+    if unfinished:
+        out.append(
+            f"\n途中で止まった試合(seed {', '.join(unfinished)})は、"
+            "止まるまでの分だけを数えています。"
+        )
     return "\n".join(out)
 
 

@@ -57,6 +57,25 @@ _CLAIM_ROLE_ORDER = (RoleName.SEER, RoleName.MEDIUM, RoleName.HUNTER, RoleName.F
 _PLAYER_ID_RE = re.compile(r"(?<![0-9A-Za-z])p(\d+)(?![0-9])")
 
 
+def role_label(role: RoleName) -> str:
+    """The short label the memo writes a role with: 占い, not `seer`.
+
+    Public so the day summary every seat reads names roles the way the memo
+    does, instead of leaking the enum value into Japanese text.
+    """
+    return _ROLE_LABELS.get(role, role.value)
+
+
+def fake_claim_floor(role: RoleName, claimant_count: int) -> int:
+    """How many claims on `role` must be fake: those beyond the role's seat count.
+
+    Zero means the claims do not conflict at all. The village holds two
+    freemasons, so a pair claiming it is the composition, not a counter-claim;
+    "more than one claimant" is the wrong test for every role but the unique ones.
+    """
+    return max(0, claimant_count - ROLE_DEFINITIONS[role].count)
+
+
 def render_roster(ledger: PublicFactLedger, self_id: str) -> str:
     """The one place ids appear: the lookup table for structured fields."""
     pairs = "、".join(
@@ -151,8 +170,8 @@ def _claim_lines(state: GameState, ledger: PublicFactLedger) -> list[str]:
         )
         capacity = ROLE_DEFINITIONS[role].count
         note = ""
-        if len(claimants) > capacity:
-            fakes = len(claimants) - capacity
+        fakes = fake_claim_floor(role, len(claimants))
+        if fakes:
             note = f"（{_ROLE_LABELS[role]}は{capacity}人なので少なくとも{fakes}人は偽）"
         elif role is RoleName.FREEMASON:
             note = _freemason_note(state, ledger, claimants)

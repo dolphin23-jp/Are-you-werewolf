@@ -2,10 +2,15 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
+from typing import Any
+
+import pytest
 
 from app.ai.coordinator import _MAX_CONSECUTIVE_SPEECH_FAILURES, AICoordinator
 from app.ai.player_agent import DEFAULT_MAX_RETRIES
 from app.ai.provider.base import Message, SchemaT
+from app.ai.reasoning.facts import PublicFactLedger
+from app.ai.reasoning.runtime import ReasoningRuntime
 from app.ai.schemas import DirectedQuestion, DiscussionOutput, MorningIntentOutput
 from app.engine.phases import Phase
 from app.engine.roles import RoleName
@@ -136,6 +141,77 @@ def test_hidden_partner_reveals_immediately_when_given_a_public_black_result():
     assert coordinator._freemason_opening(controller.state, "p2") == (
         "共有者CO。相方はPlayer1(p1)です。"
     )
+
+
+class _StructuredClaimProvider:
+    """Answers every discussion turn with plain prose plus a structured claim."""
+
+    def __init__(self, claim: dict[str, Any]) -> None:
+        self.claim = claim
+
+    async def generate_structured(
+        self, *, system: str, messages: list[Message], response_schema: type[SchemaT], **kwargs
+    ):  # type: ignore[no-untyped-def]
+        del system, messages, kwargs
+        if "Discussion" in response_schema.__name__:
+            return response_schema.model_validate(
+                {"public_message": "灰の発言を比べたい。", **self.claim}
+            )
+        if response_schema is MorningIntentOutput:
+            return MorningIntentOutput()
+        return None
+
+
+_AI_IDS = [f"p{i}" for i in range(1, 17)]
+
+
+@pytest.mark.parametrize(
+    ("model_decides", "claim"),
+    [
+        (False, {"public_claim_role": "freemason"}),
+        (True, {"public_claim_role": "freemason"}),
+        (False, {"claim_action": {"action": "switch", "role": "freemason"}}),
+    ],
+    ids=["v2-claim-role", "v3-claim-role", "v2-claim-action"],
+)
+def test_a_hiding_freemason_partner_never_claims_through_the_structured_fields(
+    model_decides: bool, claim: dict[str, Any]
+) -> None:
+    """The hide plan used to be enforced on the prose alone. A partner whose
+    answer set the claim field with no CO in the sentence was handed the
+    canonical CO sentence by `ensure_fact_sentences` -- the code meant to keep
+    it hidden is what revealed it."""
+    controller = next(
+        candidate
+        for candidate in (make_controller(seed=seed) for seed in range(1, 60))
+        if all(
+            p.player_id in _AI_IDS
+            for p in candidate.state.players_by_role(RoleName.FREEMASON)
+        )
+    )
+    state = controller.state
+    state.phase = Phase.DISCUSSION
+    state.day = 2
+    coordinator = AICoordinator(
+        state,
+        _AI_IDS,
+        _StructuredClaimProvider(claim),
+        seed=1,
+        reasoning=ReasoningRuntime(state, _AI_IDS, seed=1),
+        model_decides=model_decides,
+    )
+    assert coordinator._freemason_public_plan is not None
+    _leader, partner, _full_reveal = coordinator._freemason_public_plan
+    assert coordinator._freemason_must_hide(state, partner) is True
+    assert coordinator._freemason_opening(state, partner) is None
+
+    output = asyncio.run(coordinator._speak(controller, state, partner, "initial_view"))
+
+    assert output is not None
+    posted = [m.content for m in state.chat_log if m.author_id == partner]
+    assert posted and not any("共有" in text for text in posted)
+    assert PublicFactLedger(state).claimed_role_of(partner) is None
+    assert not [c for c in state.co_declarations if c.player_id == partner]
 
 
 def test_question_topic_groups_equivalent_execution_questions():

@@ -16,6 +16,7 @@ from app.ai.reasoning.board_memo import MEMO_HEADING
 from app.ai.reasoning.facts import PublicFactLedger
 from app.ai.reasoning.runtime import ReasoningRuntime
 from app.ai.schemas import (
+    ChatDiscussionOutput,
     DiscussionOutput,
     MorningIntentOutput,
     NightActionOutput,
@@ -48,10 +49,12 @@ class InsistentProvider:
         self.prompts.append((response_schema, system, "\n".join(m.content for m in messages)))
         if response_schema is MorningIntentOutput:
             return MorningIntentOutput()
-        if response_schema is DiscussionOutput:
+        if response_schema in (DiscussionOutput, ChatDiscussionOutput):
             output = DiscussionOutput(public_message=self.message)
             output.reasoning_memo.execution_target = self.rogue
             output.reasoning_memo.suspects = [self.rogue]
+            if response_schema is ChatDiscussionOutput:
+                return ChatDiscussionOutput.from_discussion_output(output)
             return output
         if response_schema is VoteOutput:
             return VoteOutput(vote_target=self.vote, reason="気が変わった。")
@@ -117,7 +120,7 @@ def test_the_prompt_carries_the_board_memo_and_not_the_brief():
 
     asyncio.run(coordinator._speak(controller, state, speaker, "initial_view"))
 
-    schema, system, user = next(p for p in provider.prompts if p[0] is DiscussionOutput)
+    schema, system, user = next(p for p in provider.prompts if p[0] is ChatDiscussionOutput)
     assert MEMO_HEADING in user
     assert "上の結論・根拠・数値は変更しないでください" not in user
     assert "第一処刑候補" not in user
@@ -178,6 +181,44 @@ def test_the_vote_prompt_tells_the_model_what_it_said():
     _schema, _system, user = next(p for p in provider.prompts if p[0] is VoteOutput)
     assert f"【昼にあなたが推した吊り先】{state.players[rogue].name}" in user
     assert MEMO_HEADING in user
+
+
+def _stated_line(user: str) -> str:
+    heading = "【昼にあなたが推した吊り先】"
+    return next(line for line in user.splitlines() if line.startswith(heading))
+
+
+def test_yesterdays_candidate_is_neither_shown_nor_compared():
+    controller, state, runtime, coordinator, provider, speaker, coded, rogue = _setup()
+    asyncio.run(coordinator._speak(controller, state, speaker, "initial_view"))
+    assert runtime.stated_target(speaker, state.day) == rogue
+    other = next(pid for pid in state.alive_ids() if pid not in (speaker, rogue, "p0"))
+    provider.vote = other
+    # The next day's vote, with nothing said today.
+    state.day += 1
+    state.phase = Phase.VOTING
+
+    asyncio.run(coordinator._cast_vote(controller, state, speaker))
+
+    assert state.pending_votes[speaker] == other
+    _schema, _system, user = next(p for p in provider.prompts if p[0] is VoteOutput)
+    assert _stated_line(user) == "【昼にあなたが推した吊り先】特に名指ししていない"
+    assert coordinator.validation.vote_plan_mismatches == []
+
+
+def test_a_candidate_who_died_is_not_put_to_the_ballot():
+    controller, state, runtime, coordinator, provider, speaker, coded, rogue = _setup()
+    asyncio.run(coordinator._speak(controller, state, speaker, "initial_view"))
+    state.players[rogue].alive = False
+    state.phase = Phase.VOTING
+
+    asyncio.run(coordinator._cast_vote(controller, state, speaker))
+
+    _schema, _system, user = next(p for p in provider.prompts if p[0] is VoteOutput)
+    assert state.players[rogue].name not in _stated_line(user)
+    # The comparison still sees the statement, and files the change correctly.
+    audit = coordinator._recorder.transcript.decision_audits[-1]  # type: ignore[union-attr]
+    assert audit.target_change_classification == "target_became_invalid"
 
 
 def _night_game() -> tuple[GameController, str]:

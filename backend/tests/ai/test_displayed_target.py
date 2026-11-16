@@ -19,7 +19,7 @@ import pytest
 from app.ai.coordinator import AICoordinator
 from app.ai.provider.base import Message, SchemaT
 from app.ai.reasoning.facts import PublicFactLedger
-from app.ai.reasoning.rendering import displayed_execution_target
+from app.ai.reasoning.rendering import declared_candidates, displayed_execution_target
 from app.ai.reasoning.runtime import ReasoningRuntime
 from app.ai.schemas import (
     DiscussionOutput,
@@ -164,3 +164,21 @@ def test_an_unexpected_error_is_not_swallowed():
     controller.chat = exploding_chat  # type: ignore[method-assign]
     with pytest.raises(RuntimeError):
         asyncio.run(coordinator._speak(controller, state, speaker, "initial_view"))
+
+
+def test_only_a_declaring_sentence_puts_someone_forward():
+    """What the day summary may attribute to a seat: candidates it declared,
+    not everyone it named. Clearing or questioning a player is not backing
+    them, and a speaker naming itself backs nobody."""
+    state = make_controller(seed=4).state
+    ledger = PublicFactLedger(state)
+
+    assert declared_candidates(
+        "Player5は白っぽいと思う。Player7が怪しい。", ledger, speaker_id="p2"
+    ) == set()
+    assert declared_candidates(
+        "Player5は白っぽい。Player7を吊りたい。", ledger, speaker_id="p2"
+    ) == {"p7"}
+    assert declared_candidates(
+        "現時点の第一処刑候補はPlayer8です。Player2の私から見て。", ledger, speaker_id="p2"
+    ) == {"p8"}

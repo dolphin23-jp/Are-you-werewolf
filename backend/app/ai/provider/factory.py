@@ -1,7 +1,10 @@
 """Provider selection via an explicit env var (`WEREWOLF_LLM_PROVIDER`), not
-a heuristic sniff of the API key string like the prior implementation. If
-`luna` is selected without an API key configured, fail loud at startup
-rather than silently degrading to mock."""
+a heuristic sniff of the API key string like the prior implementation. If a
+real provider (`anthropic`, or the dormant `luna`) is selected without its API
+key configured, fail loud at startup rather than silently degrading to mock.
+
+The real SDKs are imported only inside their branch, so the offline providers
+(and the test suite) never pay for importing them."""
 
 from __future__ import annotations
 
@@ -31,6 +34,29 @@ def build_llm_provider(
         # Also offline and free -- a richer double than `mock`, used to drive the
         # reply/quote, pending-question and pressured-candidate paths end to end.
         return ScenarioProvider(seed=seed, metrics=metrics)
+
+    if provider == "anthropic":
+        if not settings.werewolf_anthropic_api_key:
+            raise LLMProviderConfigError(
+                "WEREWOLF_LLM_PROVIDER=anthropic but WEREWOLF_ANTHROPIC_API_KEY is not set. "
+                "Set WEREWOLF_ANTHROPIC_API_KEY (the SDK's own ANTHROPIC_API_KEY is "
+                "deliberately not read), or switch to WEREWOLF_LLM_PROVIDER=mock for "
+                "offline development."
+            )
+        from app.ai.provider.anthropic_claude import AnthropicClaudeProvider
+
+        return AnthropicClaudeProvider(
+            api_key=settings.werewolf_anthropic_api_key,
+            base_url=settings.werewolf_anthropic_base_url,
+            model=settings.werewolf_anthropic_model,
+            max_concurrency=settings.werewolf_anthropic_max_concurrency,
+            timeout_seconds=settings.werewolf_anthropic_timeout_seconds,
+            max_retries=settings.werewolf_anthropic_max_retries,
+            max_tokens_floor=settings.werewolf_anthropic_max_tokens,
+            effort_by_kind=settings.anthropic_effort_by_kind,
+            fallbacks=settings.werewolf_anthropic_fallbacks != "off",
+            metrics=metrics,
+        )
 
     if provider == "luna":
         if not settings.luna_api_key:

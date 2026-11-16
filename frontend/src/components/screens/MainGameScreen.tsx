@@ -1,4 +1,5 @@
 import { endDiscussion, startDiscussion, startNight } from "../../api/client";
+import { AiBudgetNotice } from "../common/AiBudgetNotice";
 import { PhaseBanner } from "../common/PhaseBanner";
 import { RolePanel } from "../panels/RolePanel";
 import { PlayerListPanel } from "../panels/PlayerListPanel";
@@ -47,6 +48,7 @@ export function MainGameScreen() {
   return (
     <div className="screen screen--main">
       <PhaseBanner phase={view.phase} day={view.day} connected={connected} />
+      <AiBudgetNotice exhausted={view.ai_budget_exhausted} costUsd={view.ai_cost_usd} />
       {error && <p className="error-text">{error}</p>}
 
       <div className="main-game-layout">

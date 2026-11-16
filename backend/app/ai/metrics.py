@@ -14,12 +14,14 @@ from __future__ import annotations
 
 import statistics
 import threading
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import StrEnum
 from time import perf_counter
 from typing import Any
+
+from app.ai.provider.pricing import is_same_model
 
 
 class ParsePath(StrEnum):
@@ -49,6 +51,27 @@ class CallRecord:
     # cut off mid-object -- two failures with opposite fixes.
     finish_reason: str | None = None
     reasoning_tokens: int | None = None
+    # Anthropic prompt-cache usage. `prompt_tokens` stays the *total* input
+    # (uncached + cache writes + cache reads) so token counts remain
+    # comparable across providers; these say how much of it the cache served.
+    cache_creation_tokens: int | None = None
+    cache_read_tokens: int | None = None
+    # The provider's own stop value (`end_turn`, `max_tokens`, `refusal`, ...).
+    # `finish_reason` is the normalized form `truncated` reads; keeping both
+    # means a provider-specific stop is never lost in translation.
+    stop_reason: str | None = None
+    refusal_category: str | None = None
+    # Which model actually answered, and which one was asked for. A
+    # server-side refusal fallback can serve a turn on a different -- and
+    # differently priced -- model than the one requested.
+    served_model: str | None = None
+    requested_model: str | None = None
+    request_id: str | None = None
+    # USD for this logical call across all its HTTP attempts, priced by the
+    # provider from `app/ai/provider/pricing.py`. None when the provider does
+    # not price its own calls (mock, luna).
+    estimated_cost: float | None = None
+    effort: str | None = None
 
     @property
     def succeeded(self) -> bool:
@@ -57,6 +80,22 @@ class CallRecord:
     @property
     def truncated(self) -> bool:
         return self.finish_reason == "length"
+
+    @property
+    def refused(self) -> bool:
+        return self.finish_reason == "refusal" or self.stop_reason == "refusal"
+
+    @property
+    def served_by_fallback(self) -> bool:
+        """Did a different model answer than the one asked for?
+
+        Only when both are known. A dated snapshot of the requested model
+        (`claude-opus-5-5-20261101` for `claude-opus-5-5`) is the same model,
+        not a fallback; `claude-opus-5` for `claude-opus-5-5` is a fallback.
+        """
+        if not self.served_model or not self.requested_model:
+            return False
+        return not is_same_model(self.served_model, self.requested_model)
 
 
 @dataclass
@@ -73,11 +112,49 @@ class MetricsCollector:
     time_spent_in_solver: float = 0.0
     solver_query_count: int = 0
     solver_cache_hits: int = 0
+    # Named counters for things the code did *instead of* the model -- a vote
+    # resolved in code, a fallback line posted, a speech discarded. A rate of
+    # these is how a run that "succeeded" is shown to have been carried by
+    # safety nets rather than by the model.
+    events: dict[str, int] = field(default_factory=dict)
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+
+    @classmethod
+    def merged(cls, collectors: Iterable[MetricsCollector]) -> MetricsCollector:
+        """One collector holding everything the given ones recorded.
+
+        The evaluation harness keeps a collector per game, so one game's
+        failures or cost are never averaged away by another's, and merges them
+        for the run-wide figures. Summing the counters (wall time, utterances,
+        days, solver time) rather than averaging them keeps every ratio in
+        `summary()` -- seconds per utterance, per day -- a pooled ratio over
+        all the games, the same as if one collector had recorded them all.
+        The inputs are copied, not shared: recording into a source afterwards
+        does not change the merge.
+        """
+        merged = cls()
+        for collector in collectors:
+            with collector._lock:
+                merged.records.extend(collector.records)
+                merged.discussion_attempts += collector.discussion_attempts
+                merged.discussion_skips += collector.discussion_skips
+                merged.total_game_wall_time += collector.total_game_wall_time
+                merged.public_utterances += collector.public_utterances
+                merged.game_days += collector.game_days
+                merged.time_spent_in_solver += collector.time_spent_in_solver
+                merged.solver_query_count += collector.solver_query_count
+                merged.solver_cache_hits += collector.solver_cache_hits
+                for name, count in collector.events.items():
+                    merged.events[name] = merged.events.get(name, 0) + count
+        return merged
 
     def record(self, record: CallRecord) -> None:
         with self._lock:
             self.records.append(record)
+
+    def record_event(self, name: str) -> None:
+        with self._lock:
+            self.events[name] = self.events.get(name, 0) + 1
 
     def record_discussion_result(self, *, skipped: bool) -> None:
         with self._lock:
@@ -105,10 +182,13 @@ class MetricsCollector:
             records = list(self.records)
             discussion_attempts = self.discussion_attempts
             discussion_skips = self.discussion_skips
+            events = dict(sorted(self.events.items()))
 
         total = len(records)
         if total == 0:
-            return {"total_calls": 0}
+            # Events can fire with no LLM call at all (everything resolved in
+            # code), which is exactly the case where hiding them would mislead.
+            return {"total_calls": 0, "events": events} if events else {"total_calls": 0}
 
         by_path: dict[str, int] = {}
         for path in ParsePath:
@@ -118,6 +198,8 @@ class MetricsCollector:
         prompt_tokens = sum(r.prompt_tokens or 0 for r in records)
         completion_tokens = sum(r.completion_tokens or 0 for r in records)
         tokens_reported = any(r.prompt_tokens is not None for r in records)
+        cache_creation_tokens = sum(r.cache_creation_tokens or 0 for r in records)
+        cache_read_tokens = sum(r.cache_read_tokens or 0 for r in records)
 
         by_schema: dict[str, dict[str, Any]] = {}
         for schema in sorted({r.schema for r in records}):
@@ -175,26 +257,52 @@ class MetricsCollector:
             "solver_query_count": self.solver_query_count,
             "solver_cache_hit_rate": self.solver_cache_hits
             / max(self.solver_query_count, 1),
+            "events": events,
+            "cache_creation_tokens": cache_creation_tokens,
+            "cache_read_tokens": cache_read_tokens,
+            # Share of all input the prompt cache served. Cache reads cost a
+            # fraction of fresh input and do not count toward the input-token
+            # rate limit, so this is the first number to check when a run is
+            # slower or dearer than expected.
+            "cache_read_share": cache_read_tokens / max(prompt_tokens, 1),
+            "refusals": _refusal_counts(records),
+            "served_model_counts": _served_model_counts(records),
+            "fallback_served_calls": sum(1 for r in records if r.served_by_fallback),
         }
 
-        if tokens_reported:
-            cost = (
-                prompt_tokens / 1_000_000 * price_per_1m_input
-                + completion_tokens / 1_000_000 * price_per_1m_output
-            )
-            summary["tokens"] = {
+        token_totals = (
+            {
                 "prompt": prompt_tokens,
                 "completion": completion_tokens,
                 "total": prompt_tokens + completion_tokens,
             }
+            if tokens_reported
+            else None
+        )
+        if _priced_by_provider(records):
+            # The provider priced every call that used tokens from its own
+            # table -- per served model and with cache rates, which one flat
+            # input/output price applied to the totals cannot reproduce.
+            summary["tokens"] = token_totals
+            summary["estimated_cost"] = round(sum(r.estimated_cost or 0.0 for r in records), 6)
+            summary["pricing_supplied"] = True
+            summary["pricing_source"] = "table"
+        elif tokens_reported:
+            cost = (
+                prompt_tokens / 1_000_000 * price_per_1m_input
+                + completion_tokens / 1_000_000 * price_per_1m_output
+            )
+            summary["tokens"] = token_totals
             summary["estimated_cost"] = round(cost, 6)
             summary["pricing_supplied"] = bool(price_per_1m_input or price_per_1m_output)
+            summary["pricing_source"] = "arguments" if summary["pricing_supplied"] else None
         else:
             # The mock provider reports no usage, and a real endpoint may
             # omit it too -- say so rather than implying zero spend.
             summary["tokens"] = None
             summary["estimated_cost"] = None
             summary["pricing_supplied"] = False
+            summary["pricing_source"] = None
 
         return summary
 
@@ -206,6 +314,35 @@ def _percentile(sorted_values: list[float], q: float) -> float:
         return sorted_values[0]
     index = min(int(round(q * (len(sorted_values) - 1))), len(sorted_values) - 1)
     return sorted_values[index]
+
+
+def _priced_by_provider(records: list[CallRecord]) -> bool:
+    """True when the provider priced its own calls and left none that used
+    tokens unpriced -- a sum over only some of them would understate spend."""
+    if not any(r.estimated_cost is not None for r in records):
+        return False
+    return all(
+        r.estimated_cost is not None
+        for r in records
+        if r.prompt_tokens is not None or r.completion_tokens is not None
+    )
+
+
+def _refusal_counts(records: list[CallRecord]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for record in records:
+        if record.refused:
+            category = record.refusal_category or "uncategorized"
+            counts[category] = counts.get(category, 0) + 1
+    return dict(sorted(counts.items(), key=lambda kv: kv[1], reverse=True))
+
+
+def _served_model_counts(records: list[CallRecord]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for record in records:
+        if record.served_model:
+            counts[record.served_model] = counts.get(record.served_model, 0) + 1
+    return dict(sorted(counts.items(), key=lambda kv: kv[1], reverse=True))
 
 
 def _finish_reason_counts(records: list[CallRecord]) -> dict[str, int]:

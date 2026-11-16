@@ -94,8 +94,29 @@ def displayed_execution_target(message: str, ledger: PublicFactLedger) -> str | 
     return named[0] if len(named) == 1 else None
 
 
+def declared_candidates(
+    message: str, ledger: PublicFactLedger, *, speaker_id: str
+) -> set[str]:
+    """Everyone a message puts forward for execution, the speaker aside.
+
+    Read from the same declaring sentences `enforce_execution_target` strips,
+    not from every name the message contains. A seat that says "Player5は
+    白っぽい" has talked about Player5, not backed hanging them; counting the
+    mention as backing is how a seat's private target, which the message only
+    happened to name, was announced to the whole table as its public position.
+    """
+    declared: set[str] = set()
+    for sentence in _sentences(message):
+        if _CANONICAL.search(sentence) or _DECLARES_CANDIDATE.search(sentence):
+            declared.update(
+                pid for pid in ledger.mentioned_player_ids(sentence) if pid != speaker_id
+            )
+    return declared
+
+
 __all__ = [
     "canonical_target_sentence",
+    "declared_candidates",
     "displayed_execution_target",
     "enforce_execution_target",
 ]

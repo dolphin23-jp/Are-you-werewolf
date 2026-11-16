@@ -1,6 +1,14 @@
 name: Expert cutoff評価
 
-# Manual only. Luna mode spends API credit; baseline mode is free.
+# Manual only. anthropic and luna spend API credit; baseline is free.
+#
+# Standing rule (docs/approach-reset-2026-10.md §11.6): a run used as a
+# baseline or in a comparison has its report.md and summary.json committed to
+# backend/artifacts/ with the commit SHA, model and seed. The Actions
+# artifact below expires.
+#
+# Every input reaches a shell step through `env:`, never by `${{ }}`
+# interpolation inside `run:`, and the free-text ones are validated first.
 on:
   workflow_dispatch:
     inputs:
@@ -12,10 +20,11 @@ on:
           - v2
         default: v2
       provider:
-        description: "評価対象"
+        description: "評価対象(baseline = 費用ゼロの基準 / anthropic = Claude / luna = 休眠中の gpt-6-luna)"
         type: choice
         options:
           - baseline
+          - anthropic
           - luna
         default: baseline
       seed:
@@ -26,20 +35,74 @@ on:
         description: "1件だけ実行するscenario_id。空欄なら全件"
         required: false
         default: ""
+      max_cost:
+        description: "推定費用の上限(USD)。anthropic では必ず効く。luna は単価を入れたときだけ効く"
+        required: true
+        default: "5"
       price_in:
-        description: "入力100万トークンあたり単価"
+        description: "luna の入力100万トークンあたり単価(anthropic は単価表から自動計算)"
         required: false
         default: "0"
       price_out:
-        description: "出力100万トークンあたり単価"
+        description: "luna の出力100万トークンあたり単価"
         required: false
         default: "0"
+
+# Shared with the game evaluation: one API key, one rate limit, one spend.
+concurrency:
+  group: ai-evaluation
+  cancel-in-progress: false
+
+permissions:
+  contents: read
 
 jobs:
   evaluate:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
+      # Before any step that is handed a secret.
+      - name: 入力の確認
+        id: inputs
+        env:
+          BENCHMARK_VERSION: ${{ inputs.benchmark_version }}
+          SEED: ${{ inputs.seed }}
+          SCENARIO_ID: ${{ inputs.scenario_id }}
+          MAX_COST: ${{ inputs.max_cost }}
+          PRICE_IN: ${{ inputs.price_in }}
+          PRICE_OUT: ${{ inputs.price_out }}
+        run: |
+          set -euo pipefail
+          if ! printf '%s' "$SEED" | grep -Eq '^[0-9]{1,9}$'; then
+            echo "::error::seed は数字で指定してください。"
+            exit 1
+          fi
+          if [ -n "$SCENARIO_ID" ] && ! printf '%s' "$SCENARIO_ID" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$'; then
+            echo "::error::scenario_id に使えない文字があります(英数字と . _ - のみ)。"
+            exit 1
+          fi
+          for name in MAX_COST PRICE_IN PRICE_OUT; do
+            value="${!name}"
+            if ! printf '%s' "$value" | grep -Eq '^[0-9]{1,4}(\.[0-9]{1,6})?$'; then
+              echo "::error::$name は0以上の数値にしてください(例: 5)。"
+              exit 1
+            fi
+          done
+          if ! python3 -c 'import sys; sys.exit(0 if float(sys.argv[1]) > 0 else 1)' "$MAX_COST"; then
+            echo "::error::max_cost は0より大きいUSDの数値にしてください。"
+            exit 1
+          fi
+          # Decided here, from a choice input, so the steps after a failed run
+          # still know where to look -- and an empty value can never make the
+          # upload below pick up the whole backend directory.
+          if [ "$BENCHMARK_VERSION" = "v2" ]; then
+            echo "output_dir=expert-eval-v2-out" >> "$GITHUB_OUTPUT"
+            echo "script=scripts/evaluate_expert_scenarios_v2.py" >> "$GITHUB_OUTPUT"
+          else
+            echo "output_dir=expert-eval-out" >> "$GITHUB_OUTPUT"
+            echo "script=scripts/evaluate_expert_scenarios.py" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
@@ -50,62 +113,71 @@ jobs:
         run: pip install -e "./backend[dev]"
 
       - name: 接続確認
-        if: inputs.provider == 'luna'
+        if: inputs.provider != 'baseline'
         working-directory: backend
         env:
-          WEREWOLF_LLM_PROVIDER: luna
-          LUNA_API_KEY: ${{ secrets.LUNA_API_KEY }}
-          LUNA_BASE_URL: ${{ secrets.LUNA_BASE_URL }}
+          PROVIDER: ${{ inputs.provider }}
+          WEREWOLF_LLM_PROVIDER: ${{ inputs.provider }}
+          WEREWOLF_ANTHROPIC_API_KEY: ${{ inputs.provider == 'anthropic' && secrets.WEREWOLF_ANTHROPIC_API_KEY || '' }}
+          WEREWOLF_ANTHROPIC_MODEL: ${{ vars.WEREWOLF_ANTHROPIC_MODEL || 'claude-opus-5-5' }}
+          WEREWOLF_ANTHROPIC_FALLBACKS: ${{ vars.WEREWOLF_ANTHROPIC_FALLBACKS || 'default' }}
+          LUNA_API_KEY: ${{ inputs.provider == 'luna' && secrets.LUNA_API_KEY || '' }}
+          LUNA_BASE_URL: ${{ inputs.provider == 'luna' && secrets.LUNA_BASE_URL || '' }}
           LUNA_MODEL: ${{ vars.LUNA_MODEL || 'gpt-6-luna' }}
-        run: python scripts/check_llm.py
+        run: python scripts/check_llm.py --provider "$PROVIDER"
 
       - name: Cutoff評価を実行
-        id: benchmark
         working-directory: backend
         env:
-          WEREWOLF_LLM_PROVIDER: ${{ inputs.provider == 'luna' && 'luna' || 'mock' }}
-          LUNA_API_KEY: ${{ secrets.LUNA_API_KEY }}
-          LUNA_BASE_URL: ${{ secrets.LUNA_BASE_URL }}
+          PROVIDER: ${{ inputs.provider }}
+          SEED: ${{ inputs.seed }}
+          SCENARIO_ID: ${{ inputs.scenario_id }}
+          MAX_COST: ${{ inputs.max_cost }}
+          PRICE_IN: ${{ inputs.price_in }}
+          PRICE_OUT: ${{ inputs.price_out }}
+          SCRIPT: ${{ steps.inputs.outputs.script }}
+          OUTPUT_DIR: ${{ steps.inputs.outputs.output_dir }}
+          WEREWOLF_LLM_PROVIDER: ${{ inputs.provider == 'baseline' && 'mock' || inputs.provider }}
+          WEREWOLF_ANTHROPIC_API_KEY: ${{ inputs.provider == 'anthropic' && secrets.WEREWOLF_ANTHROPIC_API_KEY || '' }}
+          WEREWOLF_ANTHROPIC_MODEL: ${{ vars.WEREWOLF_ANTHROPIC_MODEL || 'claude-opus-5-5' }}
+          WEREWOLF_ANTHROPIC_FALLBACKS: ${{ vars.WEREWOLF_ANTHROPIC_FALLBACKS || 'default' }}
+          LUNA_API_KEY: ${{ inputs.provider == 'luna' && secrets.LUNA_API_KEY || '' }}
+          LUNA_BASE_URL: ${{ inputs.provider == 'luna' && secrets.LUNA_BASE_URL || '' }}
           LUNA_MODEL: ${{ vars.LUNA_MODEL || 'gpt-6-luna' }}
         run: |
-          extra=()
-          if [ -n "${{ inputs.scenario_id }}" ]; then
-            extra+=(--scenario-id "${{ inputs.scenario_id }}")
+          set -euo pipefail
+          args=(--provider "$PROVIDER" --seed "$SEED" --out "$OUTPUT_DIR" --price-in "$PRICE_IN" --price-out "$PRICE_OUT")
+          if [ -n "$SCENARIO_ID" ]; then
+            args+=(--scenario-id "$SCENARIO_ID")
           fi
-          if [ "${{ inputs.benchmark_version }}" = "v2" ]; then
-            script="scripts/evaluate_expert_scenarios_v2.py"
-            output_dir="expert-eval-v2-out"
-          else
-            script="scripts/evaluate_expert_scenarios.py"
-            output_dir="expert-eval-out"
+          if [ "$PROVIDER" = "anthropic" ]; then
+            args+=(--max-cost "$MAX_COST")
+          elif [ "$PROVIDER" = "luna" ]; then
+            if python3 -c 'import sys; sys.exit(0 if float(sys.argv[1]) + float(sys.argv[2]) > 0 else 1)' "$PRICE_IN" "$PRICE_OUT"; then
+              args+=(--max-cost "$MAX_COST")
+            else
+              echo "::warning::luna の単価(price_in / price_out)が0なので、費用は計算されず上限も効きません。"
+            fi
           fi
-          python "$script" \
-            --provider "${{ inputs.provider }}" \
-            --seed "${{ inputs.seed }}" \
-            --price-in "${{ inputs.price_in }}" \
-            --price-out "${{ inputs.price_out }}" \
-            --out "$output_dir" \
-            "${extra[@]}"
-          echo "output_dir=$output_dir" >> "$GITHUB_OUTPUT"
+          # Exit code 3: the cost cap stopped the run; the report says so.
+          python "$SCRIPT" "${args[@]}"
 
       - name: レポートを画面に表示
         if: always()
         working-directory: backend
+        env:
+          OUTPUT_DIR: ${{ steps.inputs.outputs.output_dir }}
         run: |
-          output_dir="${{ steps.benchmark.outputs.output_dir }}"
-          if [ -z "$output_dir" ]; then
-            output_dir="${{ inputs.benchmark_version == 'v2' && 'expert-eval-v2-out' || 'expert-eval-out' }}"
-          fi
-          if [ -f "$output_dir/report.md" ]; then
-            cat "$output_dir/report.md" >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "$OUTPUT_DIR" ] && [ -f "$OUTPUT_DIR/report.md" ]; then
+            cat "$OUTPUT_DIR/report.md" >> "$GITHUB_STEP_SUMMARY"
           else
             echo "レポートが生成されませんでした。上のログを確認してください。" >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: 全出力をダウンロード可能にする
-        if: always()
+        if: always() && steps.inputs.outputs.output_dir != ''
         uses: actions/upload-artifact@v4
         with:
           name: expert-eval-${{ inputs.benchmark_version }}-out
-          path: backend/${{ steps.benchmark.outputs.output_dir }}/
-          retention-days: 30
+          path: backend/${{ steps.inputs.outputs.output_dir }}/
+          retention-days: 90

@@ -19,7 +19,7 @@ from app.ai.reasoning.runtime import (
 )
 from app.engine.phases import Phase
 from app.engine.roles import RoleName
-from app.engine.state import VoteRecord
+from app.engine.state import ChatChannel, ChatMessage, VoteRecord
 from tests.ai.reasoning.solver import boards
 from tests.conftest import make_controller
 
@@ -233,8 +233,146 @@ def test_conflict_points_come_from_structured_events():
 
     points = runtime.conflict_points(state)
 
-    assert any("seerCO対抗" in point for point in points)
+    # Labelled the way the board memo labels roles, not with the enum value.
+    assert any("占いCO対抗" in point for point in points)
+    assert not any("seer" in point for point in points)
     assert any("p4→p9=黒" in point for point in points)
+
+
+def test_a_freemason_pair_is_not_reported_as_a_counter_claim():
+    """Two freemasons is the composition. Only claims past a role's seat count
+    are a contest -- the rule the board memo already states."""
+    state = boards.deal({"p6": RoleName.FREEMASON, "p7": RoleName.FREEMASON}, day=2)
+    boards.claim(state, "p6", RoleName.FREEMASON, day=1)
+    boards.claim(state, "p7", RoleName.FREEMASON, day=1)
+    boards.claim(state, "p4", RoleName.SEER, day=1)
+    runtime = _runtime(state)
+
+    points = runtime.conflict_points(state)
+
+    assert not any("CO対抗" in point for point in points)
+
+
+def test_a_third_freemason_claim_is_a_counter_claim():
+    state = boards.deal({"p6": RoleName.FREEMASON, "p7": RoleName.FREEMASON}, day=2)
+    for player_id in ("p6", "p7", "p8"):
+        boards.claim(state, player_id, RoleName.FREEMASON, day=1)
+    runtime = _runtime(state)
+
+    assert "共有CO対抗: p6、p7、p8" in runtime.conflict_points(state)
+
+
+def test_no_seats_private_target_reaches_the_shared_summary():
+    """The seer's unpublished black is what its belief engine chases. The
+    summary every seat reads used to list it as a 'split' nobody had voiced."""
+    state = boards.deal({"p4": RoleName.SEER, "p9": RoleName.WEREWOLF}, day=2)
+    boards.divine(state, "p4", "p9", night=1)
+    runtime = _runtime(state)
+    private_targets = {
+        seat.belief.state.current_execution_target for seat in runtime.seats.values()
+    }
+    assert runtime.seats["p4"].belief.state.current_execution_target == "p9"
+    assert len(private_targets - {None}) > 1  # the belief engines do disagree
+
+    points = runtime.conflict_points(state)
+
+    assert not any("割れている" in point for point in points)
+    assert not any("p9" in point for point in points)
+
+
+def _post(state, speaker: str, text: str, day: int) -> None:  # type: ignore[no-untyped-def]
+    state.chat_log.append(
+        ChatMessage(
+            message_id=f"m{len(state.chat_log)}",
+            author_id=speaker,
+            content=text,
+            channel=ChatChannel.PUBLIC,
+            day=day,
+        )
+    )
+
+
+def _says(state, speaker: str, target: str | None, day: int) -> None:  # type: ignore[no-untyped-def]
+    """`speaker` puts `target` forward for execution in public on `day`."""
+    text = f"Player{target[1:]}を吊りたい。" if target else "まだ決めきれない。"
+    _post(state, speaker, text, day)
+
+
+def test_a_publicly_stated_split_is_reported_from_todays_statements_only():
+    state = _played_board()
+    boards.execute(state, "p11", day=2)
+    runtime = _runtime(state)
+    stated = [
+        ("p2", "p5", 2),
+        ("p3", "p5", 2),
+        ("p7", "p8", 2),
+        ("p10", "p12", 1),  # yesterday's: not today's split
+        ("p13", "p11", 2),  # executed since: no longer a choice
+        ("p14", None, 2),  # named nobody
+    ]
+    for speaker, target, day in stated:
+        _says(state, speaker, target, day)
+        runtime.record_stated_target(speaker, target, day)
+
+    points = runtime.conflict_points(state)
+
+    assert "吊り先の意見が割れている: p5←p2・p3、p8←p7" in points
+
+
+def test_one_publicly_stated_candidate_is_not_a_split():
+    state = _played_board()
+    runtime = _runtime(state)
+    for speaker, target, day in (("p2", "p5", 2), ("p3", "p5", 2), ("p7", "p8", 1)):
+        _says(state, speaker, target, day)
+        runtime.record_stated_target(speaker, target, day)
+
+    assert not any("割れている" in point for point in runtime.conflict_points(state))
+
+
+def test_a_candidate_only_in_a_seats_structured_answer_stays_private():
+    """Under v3 the stated target is the model's structured answer. A seat that
+    never named it out loud has not told the table, so the summary must not."""
+    state = _played_board()
+    runtime = _runtime(state)
+    _says(state, "p2", "p5", 2)
+    runtime.record_stated_target("p2", "p5", 2)
+    _says(state, "p3", None, 2)  # spoke, but named nobody
+    runtime.record_stated_target("p3", "p8", 2)
+
+    points = runtime.conflict_points(state)
+
+    assert not any("割れている" in point for point in points)
+    assert not any("p8" in point for point in points)
+
+
+def test_a_seat_that_only_mentions_its_private_target_is_not_reported_backing_it():
+    """Under v3 the stated target is the model's private plan note. A seat that
+    named that player in public -- here to clear them -- has not told the table
+    it wants them hanged, and the summary every seat reads must not say so."""
+    state = _played_board()
+    runtime = _runtime(state)
+    _post(state, "p2", "Player5は白っぽいと思う。Player7が怪しい。", 2)
+    runtime.record_stated_target("p2", "p5", 2)
+    _says(state, "p3", "p7", 2)
+    runtime.record_stated_target("p3", "p7", 2)
+
+    points = runtime.conflict_points(state)
+
+    assert not any("p5←p2" in point for point in points)
+    assert not any("割れている" in point for point in points)
+
+
+def test_a_stated_target_belongs_to_the_day_it_was_stated():
+    state = _played_board()
+    runtime = _runtime(state)
+    runtime.record_stated_target("p2", "p5", 1)
+
+    assert runtime.stated_target("p2", 1) == "p5"
+    assert runtime.stated_target("p2", 2) is None
+    # Undated, it is simply the last thing the seat said.
+    assert runtime.stated_target("p2") == "p5"
+    assert runtime.stated_targets_on(1) == {"p2": "p5"}
+    assert runtime.stated_targets_on(2) == {}
 
 
 def test_hypotheses_are_reported_in_bands_not_percentages():
@@ -344,3 +482,22 @@ def test_a_human_correction_splits_the_table_rather_than_resetting_it():
     assert runtime.seats["p8"].belief.state.reasons_for("p0") == ()
     # And the table still disagrees about who to execute.
     assert runtime.opinion_spread() > 0.0
+
+
+def test_under_v3_no_split_is_reported_because_stated_targets_are_private():
+    """A v3 stated target is the model's private plan note. Keyword matching
+    cannot tell 'Xを吊りたい' from 'Xは吊るべきではない', so under v3 the
+    day summary carries no split at all; the seats read the log instead."""
+    state = _played_board()
+    runtime = _runtime(state)
+    for speaker, target, day in (("p2", "p5", 2), ("p3", "p5", 2), ("p7", "p8", 2)):
+        _says(state, speaker, target, day)
+        runtime.record_stated_target(speaker, target, day)
+
+    v2_points = runtime.conflict_points(state)
+    v3_points = runtime.conflict_points(state, stated_targets_are_public=False)
+
+    assert any("割れている" in point for point in v2_points)
+    assert not any("割れている" in point for point in v3_points)
+    # The public facts are still summarised.
+    assert [p for p in v2_points if "割れている" not in p] == v3_points

@@ -1,3 +1,5 @@
+> **凍結中** — 優先順位は docs/approach-reset-2026-10.md §5 を参照。記録として残しているが、新規投資はしない。
+
 # Transformer historical-training recovery
 
 Historical/population training can run for many learner batches and mutate both the

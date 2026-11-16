@@ -405,3 +405,27 @@ async def test_learned_overhead_pads_a_later_turns_request_up_front():
     )
 
     assert budgets == [800 + 1400 + _REASONING_BUDGET_MARGIN]
+
+
+@pytest.mark.asyncio
+async def test_a_spent_budget_propagates_instead_of_failing_the_call():
+    """A cap is a stop, not a failed request: wrapping BudgetExceeded as a
+    failed attempt made capped luna sessions carry on with fallback lines and
+    never show the budget-exhausted notice."""
+    from app.ai.provider.budget import BudgetExceeded, EvaluationBudget
+
+    provider = _make_provider()
+    provider.set_request_budget(EvaluationBudget(max_requests=0))
+    sent: list[dict] = []
+
+    async def fake_create(**kwargs):
+        sent.append(kwargs)
+        return _fake_response('{"vote_target": "p1"}')
+
+    provider._client.chat.completions.create = fake_create  # type: ignore[method-assign]
+
+    with pytest.raises(BudgetExceeded):
+        await provider.generate_structured(
+            system="sys", messages=[Message(role="user", content="hi")], response_schema=VoteOutput
+        )
+    assert sent == []

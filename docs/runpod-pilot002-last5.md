@@ -1,3 +1,5 @@
+> **凍結中** — 優先順位は docs/approach-reset-2026-10.md §5 を参照。記録として残しているが、新規投資はしない。
+
 # RunPod で pilot-002 historical last-5 固定評価を行う
 
 この手順は、population iteration 4 まで完了した `pilot-002` に対して、rolling window の妥当性を調べるための **historical last-5 fixed evaluation** を RunPod 上で行うものです。

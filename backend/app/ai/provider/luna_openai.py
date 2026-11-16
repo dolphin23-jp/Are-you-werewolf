@@ -40,19 +40,19 @@ latency, and token usage summed across all responses. See `app/ai/metrics.py`.
 from __future__ import annotations
 
 import asyncio
-import re
 from dataclasses import dataclass
 from typing import Any
 
 from openai import APIConnectionError, APIStatusError, APITimeoutError, AsyncOpenAI, RateLimitError
-from pydantic import ValidationError
 
 from app.ai.dialect import EndpointDialect
 from app.ai.metrics import CallRecord, MetricsCollector, ParsePath
 from app.ai.provider.base import Message, SchemaT
-from app.ai.provider.budget import EvaluationBudget
+from app.ai.provider.budget import BudgetExceeded, EvaluationBudget
 
-_FENCED_JSON_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
+# Shared with the anthropic provider so both salvage exactly the same shapes.
+from app.ai.provider.json_parsing import parse_permissive as _parse_permissive
+from app.ai.provider.json_parsing import parse_strict as _parse_strict
 
 # Headroom reserved for the visible JSON on top of the learned reasoning
 # overhead below -- the overhead alone covers only what the thinking used
@@ -307,6 +307,11 @@ class LunaOpenAIProvider:
                     self._request_budget.claim_request()
                 requests += 1
                 return await self._client.chat.completions.create(**kwargs), requests
+            except BudgetExceeded:
+                # A spent cap is a stop, not a failed request: wrapping it
+                # like one made a capped session carry on with fallback lines
+                # and never raise the budget-exhausted notice.
+                raise
             except Exception as exc:
                 last_error = exc
                 adapted = self._dialect.adapt(exc)
@@ -334,6 +339,8 @@ class LunaOpenAIProvider:
             response, requests = await self._create(
                 openai_messages, response_format, max_tokens, temperature
             )
+        except BudgetExceeded:
+            raise
         except Exception as exc:
             root = _root_error(exc)
             return _Attempt(
@@ -404,6 +411,8 @@ class LunaOpenAIProvider:
             response, requests = await self._create(
                 openai_messages, {"type": "json_object"}, max_tokens, temperature
             )
+        except BudgetExceeded:
+            raise
         except Exception as exc:
             return _Attempt(error=_describe(_root_error(exc)), http_requests=_request_count(exc))
 
@@ -513,33 +522,3 @@ def _finish_reason(response: Any) -> str | None:
 
 def _describe(exc: Exception) -> str:
     return f"{type(exc).__name__}: {exc}"[:200]
-
-
-def _parse_strict(content: str | None, response_schema: type[SchemaT]) -> SchemaT | None:
-    if not content:
-        return None
-    try:
-        return response_schema.model_validate_json(content)
-    except (ValidationError, ValueError):
-        return None
-
-
-def _parse_permissive(content: str | None, response_schema: type[SchemaT]) -> SchemaT | None:
-    if not content:
-        return None
-
-    direct = _parse_strict(content, response_schema)
-    if direct is not None:
-        return direct
-
-    fenced = _FENCED_JSON_RE.search(content)
-    if fenced is not None:
-        candidate = _parse_strict(fenced.group(1), response_schema)
-        if candidate is not None:
-            return candidate
-
-    start, end = content.find("{"), content.rfind("}")
-    if start != -1 and end != -1 and end > start:
-        return _parse_strict(content[start : end + 1], response_schema)
-
-    return None

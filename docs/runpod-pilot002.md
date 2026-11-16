@@ -1,3 +1,5 @@
+> **凍結中** — 優先順位は docs/approach-reset-2026-10.md §5 を参照。記録として残しているが、新規投資はしない。
+
 # RunPod で pilot-002 を継続する
 
 この手順は、Google Drive 上にある既存の `pilot-002` を RunPod の永続ストレージへ一度だけ移し、population iteration 3–4 と固定評価を既存 checkpoint から exact resume するためのものです。

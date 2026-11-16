@@ -36,3 +36,4 @@ dist/
 # --- Evaluation output (transcripts/reports are run artifacts) ---
 eval-out/
 backend/eval-out/
+backend/latency-out/

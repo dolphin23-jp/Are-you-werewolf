@@ -8,6 +8,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from app.ai.metrics import MetricsCollector
+from app.ai.provider.budget import EvaluationBudget
 from app.api.ws_hub import SessionWSHub
 from app.engine.game import GameController
 from app.eval.transcript import TranscriptRecorder
@@ -56,6 +58,15 @@ class GameSession:
     discussion_paused: bool = False
     discussion_pause_requested: bool = False
     discussion_step_budget: int | None = None
+    # This session's own LLM accounting. Every game builds its own provider,
+    # so these count one game's calls and spend, not the process's.
+    metrics: MetricsCollector | None = None
+    # The spend cap for a paid provider (None for the free offline ones).
+    budget: EvaluationBudget | None = None
+    # Set once a coordinator call hit `BudgetExceeded`. From then on the
+    # orchestrator stops driving AI turns and the view tells the player why,
+    # instead of the game stalling with no explanation.
+    ai_budget_exhausted: bool = False
 
     def touch(self) -> None:
         self.last_active_at = time.time()

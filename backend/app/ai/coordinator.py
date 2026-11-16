@@ -62,7 +62,7 @@ from app.engine.game import GameError
 from app.engine.phases import Phase
 from app.engine.roles import ROLE_DEFINITIONS, RoleName
 from app.engine.speech_events import SpeechEventType
-from app.engine.state import GameState, PendingQuestion
+from app.engine.state import FreemasonPartnerClaim, GameState, PendingQuestion
 from app.eval.transcript import (
     CorrectionAuditRecord,
     DecisionAuditRecord,
@@ -130,6 +130,15 @@ _REACTION_MAX_CHARS = 60
 # Private-channel messages are capped at 100 chars by `generate_wolf_chat`; the
 # evaluation harness needs the same number to flag overruns.
 _PRIVATE_CHAT_MAX_CHARS = 100
+
+
+def _unwrap_provider(provider: object) -> object:
+    """Follow `.inner` through provider wrappers to the provider that calls the API."""
+    seen: set[int] = set()
+    while hasattr(provider, "inner") and id(provider) not in seen:
+        seen.add(id(provider))
+        provider = provider.inner
+    return provider
 
 
 class AICoordinator:
@@ -214,8 +223,20 @@ class AICoordinator:
             engine=self._engine,
         )
 
+        # v3 seats speak through the compact chat wire schema: the full
+        # `DiscussionOutput` exceeds Anthropic's structured-output limits, so
+        # sending it costs one rejected request per game and then runs without
+        # grammar enforcement (schema embedded in the prompt, parsed leniently).
+        # v2 and legacy still send it; see approach-reset §11. Agents hand back a
+        # `DiscussionOutput` either way, so nothing below changes.
         self._agents: dict[str, AIPlayerAgent] = {
-            pid: AIPlayerAgent(provider, self._personalities[pid]) for pid in self._ai_player_ids
+            pid: AIPlayerAgent(
+                provider,
+                self._personalities[pid],
+                chat_contract=self.model_decides,
+                metrics=self._metrics,
+            )
+            for pid in self._ai_player_ids
         }
 
         self._recorder = recorder
@@ -245,13 +266,27 @@ class AICoordinator:
                     "madman_strategy": madman_strategy_name if madman else None,
                 },
                 seed=seed,
-                provider=type(provider).__name__,
+                # Wrappers (the session/evaluation budget, prompt capture) keep
+                # the real provider as `inner`; the transcript names the model
+                # vendor, not the wrapper.
+                provider=type(_unwrap_provider(provider)).__name__,
             )
 
     @property
     def _decides_in_code(self) -> bool:
         """v2: the belief engine fixes targets, votes and night actions."""
         return self.reasoning is not None and not self.model_decides
+
+    def _record_event(self, name: str) -> None:
+        """Count a named event on the provider's metrics collector, if it keeps any.
+
+        Looked up rather than assumed: a collector without `record_event`, or a
+        provider with no collector at all, leaves the event uncounted instead of
+        turning a bookkeeping gap into a crash in the middle of a game.
+        """
+        record = getattr(self._metrics, "record_event", None)
+        if callable(record):
+            record(name)
 
     def _memo_for(self, state: GameState, player_id: str) -> str | None:
         """The seat's board memo under v3; None for the engines that do not use one."""
@@ -363,9 +398,14 @@ class AICoordinator:
         async with session.discussion_lock:  # type: ignore[attr-defined]
             controller = session.controller  # type: ignore[attr-defined]
             state = controller.state
-            if state.phase != Phase.DISCUSSION:
-                return
             round_state = getattr(session, "discussion_round", None)
+            if state.phase != Phase.DISCUSSION:
+                if round_state is not None and round_state.day == state.day:
+                    # DISCUSSION opens once a day, so today's round is over, not
+                    # paused. Left open, it reads as a morning still to drain to
+                    # any caller that loops until the round settles.
+                    round_state.complete = True
+                return
             if round_state is None or round_state.day != state.day:
                 round_state = await self._start_discussion_round(state)
                 session.discussion_round = round_state  # type: ignore[attr-defined]
@@ -388,11 +428,9 @@ class AICoordinator:
             if round_state.awaiting_human and can_pause:
                 return
             self._set_awaiting(round_state, False)
-            if round_state.stage == "immediate" and round_state.immediate_count == 0:
-                round_state.stage = "initial_view"
-                if can_pause:
-                    self._set_awaiting(round_state, True)
-                    return
+            if self._close_immediate_stage(round_state) and can_pause:
+                self._set_awaiting(round_state, True)
+                return
 
             spoken = 0
             # A speaker that never produces output must not be retried forever:
@@ -400,8 +438,17 @@ class AICoordinator:
             # (without awaiting, so a retry loop would never yield to the event
             # loop) and when generation fails outright.
             consecutive_failures = 0
+            stalled = False
             while spoken < self._segment_size and not round_state.complete:
-                if state.phase != Phase.DISCUSSION:
+                if state.phase != Phase.DISCUSSION or round_state.day != state.day:
+                    # The table moved on while a turn was generating. The phase
+                    # check alone is not enough: a vote, a night and a new
+                    # morning can all pass inside one slow request, DISCUSSION is
+                    # open again, and this segment would go on speaking in
+                    # yesterday's order ahead of the new morning's duty speakers.
+                    # Closing the round also keeps a caller looping until it
+                    # settles from spinning on one that can no longer move.
+                    round_state.complete = True
                     return
                 pid, stage = self._next_discussion_speaker(state, round_state)
                 if pid is None:
@@ -410,7 +457,14 @@ class AICoordinator:
                 output = await self._speak(controller, state, pid, stage)
                 if output is None:
                     consecutive_failures += 1
+                    # A failed turn still used its slot: the last morning duty
+                    # speaker failing ends the morning segment just the same.
+                    finished_immediate = self._close_immediate_stage(round_state)
                     if consecutive_failures >= _MAX_CONSECUTIVE_SPEECH_FAILURES:
+                        stalled = True
+                        break
+                    if finished_immediate and can_pause:
+                        self._set_awaiting(round_state, True)
                         break
                     continue
                 consecutive_failures = 0
@@ -420,6 +474,10 @@ class AICoordinator:
                     self._forced_partner_confirmations.discard(target_id)
                 round_state.speech_counts[pid] = round_state.speech_counts.get(pid, 0) + 1
                 spoken += 1
+                # Closed before the pause checks below, so a pause that lands on
+                # the last morning speaker is also the morning's pause -- not one
+                # more wait sprung on the human right after they resume.
+                finished_immediate = self._close_immediate_stage(round_state)
                 step_budget = getattr(session, "discussion_step_budget", None)
                 if step_budget is not None:
                     session.discussion_step_budget = max(0, step_budget - 1)  # type: ignore[attr-defined]
@@ -442,21 +500,41 @@ class AICoordinator:
                     self._round_queue_reply(state, round_state, pid)
 
                 # The first segment contains only morning-immediate speakers.
-                if (
-                    round_state.stage == "immediate"
-                    and round_state.cursor >= round_state.immediate_count
-                ):
-                    round_state.stage = "initial_view"
-                    if can_pause:
-                        self._set_awaiting(round_state, True)
-                        break
-            if (
+                if finished_immediate and can_pause:
+                    self._set_awaiting(round_state, True)
+                    break
+            if stalled:
+                # Nobody could be made to speak. Without a wait the client has no
+                # countdown to run, so nothing would ask for the next segment and
+                # the table would sit silent until the human typed something.
+                # Waiting hands control back: the countdown's auto-pass retries.
+                self._record_event("discussion_stalled")
+                if can_pause:
+                    self._set_awaiting(round_state, True)
+            elif (
                 can_pause
                 and round_state.stage != "immediate"
                 and not round_state.complete
                 and spoken >= self._segment_size
             ):
                 self._set_awaiting(round_state, True)
+
+    @staticmethod
+    def _close_immediate_stage(round_state: DiscussionRoundState) -> bool:
+        """Leave the morning-immediate stage once its speakers have had their turn.
+
+        Returns True only on the call that makes the transition. Bounded by the
+        order's length as well as `immediate_count`: a count that ever outran
+        the order -- it once counted a seat with two duties twice -- would
+        otherwise pin the stage at "immediate", and a living human would never
+        be given the floor.
+        """
+        if round_state.stage != "immediate":
+            return False
+        if round_state.cursor < min(round_state.immediate_count, len(round_state.order)):
+            return False
+        round_state.stage = "initial_view"
+        return True
 
     async def _start_discussion_round(self, state: GameState) -> DiscussionRoundState:
         alive = [pid for pid in self._ai_player_ids if state.players[pid].alive]
@@ -520,7 +598,10 @@ class AICoordinator:
             )
             if pid in alive
         ]
-        duty.extend(planned_claims)
+        # One turn per seat, however many duties it holds. A result holder
+        # without its CO is also a required claimant, and counting it twice made
+        # `immediate_count` outrun the speakers actually in the order.
+        duty = list(dict.fromkeys([*duty, *planned_claims]))
         chosen = self.reasoning.select_opening_speakers(
             state,
             pending_question_targets=[pid for pid in alive if self._open_questions(pid)],
@@ -551,11 +632,17 @@ class AICoordinator:
                 pass
             else:
                 round_state.order.pop(pending_index)
+                if pending_index < round_state.immediate_count:
+                    # A duty speaker taking its turn early. Left counted, the
+                    # morning stage would wait for one more seat than it holds.
+                    round_state.immediate_count -= 1
             return target_id, "freemason_confirmation"
         if round_state.cursor < len(round_state.order):
-            pid = round_state.order[round_state.cursor]
+            index = round_state.cursor
+            pid = round_state.order[index]
             round_state.cursor += 1
-            return pid, "immediate" if round_state.stage == "immediate" else "initial_view"
+            morning = round_state.stage == "immediate" and index < round_state.immediate_count
+            return pid, "immediate" if morning else "initial_view"
         if not round_state.major_targets_ready:
             # Restricted to seats this coordinator speaks for: the pressure list
             # drives speaking limits and the rebuttal sweep, neither of which can
@@ -838,15 +925,42 @@ class AICoordinator:
                 "\n\n【共有公開計画】あなたは潜伏側です。共有CO、相方の名前、共有者だと"
                 "推測できる表現を公開発言に絶対に含めないでください。"
             )
+        # The turn belongs to this phase of this day. Generation can take long
+        # enough for the table to move on, and the engine's `chat` checks only
+        # that the speaker is alive -- so a line written for the discussion
+        # would otherwise land in the middle of the vote.
+        epoch = (state.phase, state.day)
         controller.set_typing(player_id, True)  # type: ignore[attr-defined]
+        agent = self._agents[player_id]
         try:
-            output = await self._agents[player_id].generate_discussion(system, messages)
+            output = await agent.generate_discussion(system, messages)
         finally:
             controller.set_typing(player_id, False)  # type: ignore[attr-defined]
+        # The brief fallback asks for the sentence alone, so like a turn written
+        # in code it carries no notes: an empty memo and no target, by omission.
+        brief_turn = output is not None and agent.last_discussion_was_brief
         if self._metrics is not None:
             self._metrics.record_discussion_result(skipped=output is None)
-        if output is None:
+        owes_coded_line = decision is not None and self._owes_coded_line(
+            state, player_id, decision, freemason_opening
+        )
+        if (state.phase, state.day) != epoch or not state.players[player_id].alive:
+            # Dropped unseen: nothing is posted, and nothing is recorded as said.
+            if output is not None or owes_coded_line:
+                self._record_event("speech_discarded_after_phase_end")
             return None
+        posted_by_code = False
+        if output is None:
+            if not owes_coded_line:
+                return None
+            # Generation failed, but what this turn owes the table was never the
+            # model's to write: the results, the CO behind them and the
+            # freemason lines are fixed in code below and given their canonical
+            # sentences by `ensure_fact_sentences`. Going silent here is how a
+            # seer whose request failed lost its result for the whole day.
+            output = DiscussionOutput(public_message="")
+            posted_by_code = True
+        notes_missing = posted_by_code or brief_turn
         model_requested_target = output.reasoning_memo.execution_target
         if freemason_opening is not None:
             output.public_message = freemason_opening
@@ -854,10 +968,16 @@ class AICoordinator:
             output.contains_co_claim = True
             if "死亡" in freemason_opening:
                 self._freemason_death_announced.add(player_id)
-        elif freemason_must_hide and detect_claimed_role(output.public_message) is not None:
-            output.public_message = "現時点ではCOしません。既出の判定と灰の発言を比較します。"
+        elif freemason_must_hide:
+            # Every route to a CO is closed, not only the prose. A claim set in
+            # the structured fields alone is drafted into a ROLE_CLAIM and given
+            # its canonical sentence below, so checking the sentence let the
+            # code meant to keep the partner hidden be the thing that outed it.
+            if detect_claimed_role(output.public_message) is not None:
+                output.public_message = "現時点ではCOしません。既出の判定と灰の発言を比較します。"
             output.public_claim_role = None
             output.contains_co_claim = False
+            output.claim_action = None
         valid_reassessments = [
             item
             for item in output.reassessments
@@ -912,17 +1032,7 @@ class AICoordinator:
                 # result the model volunteers on some later turn is speech, not
                 # an obligation, and must not be audited as one.
                 enforced_results = tuple(required)
-        pending_relation = next(
-            (
-                claim
-                for claim in state.freemason_partner_claims
-                if claim.partner_id == player_id
-                and not claim.confirmed
-                and state.players[claim.claimant_id].role == RoleName.FREEMASON
-                and state.players[player_id].role == RoleName.FREEMASON
-            ),
-            None,
-        )
+        pending_relation = self._pending_partner_relation(state, player_id)
         if pending_relation is not None:
             claimant_label = self._spoken_label(state, pending_relation.claimant_id)
             output.public_message = (
@@ -944,7 +1054,11 @@ class AICoordinator:
             # Agreement with no new argument is a reaction, not an analysis. Cut at a
             # sentence boundary so the shortened line still reads as finished Japanese.
             output.public_message = truncate_at_sentence(output.public_message, _REACTION_MAX_CHARS)
-        self._context.set_reasoning_memo(player_id, output.reasoning_memo.model_dump())
+        if not notes_missing:
+            # A turn written in code, or answered through the brief contract,
+            # carries no notes. Storing its empty memo would wipe the last thing
+            # the model actually thought.
+            self._context.set_reasoning_memo(player_id, output.reasoning_memo.model_dump())
         # The claims this turn publishes are decided before it is spoken, so the
         # message can be made to state them. Dropping a declared verdict because
         # the prose forgot to name its target is how a result silently vanishes.
@@ -971,13 +1085,17 @@ class AICoordinator:
                 PublicFactLedger(state),
                 speaker_id=player_id,
             )
+        if not output.public_message.strip():
+            # Nothing survived to be said -- a code-written turn whose only
+            # result validation rejected, say. An empty bubble is not a turn.
+            return None
         self._record(
             state,
             player_id,
             "discussion",
             text=output.public_message,
             reasoning_memo=output.reasoning_memo,
-            used_fallback=self._is_fallback(player_id, output.public_message),
+            used_fallback=posted_by_code or self._is_fallback(player_id, output.public_message),
             public_claim_role=output.public_claim_role,
             public_results=[item.model_dump() for item in output.public_results],
             directed_question_targets=[item.target_id for item in output.directed_questions],
@@ -1001,6 +1119,8 @@ class AICoordinator:
             # The engine refused the message (the speaker died mid-round, say).
             # Nothing was displayed, so nothing is recorded as said.
             return None
+        if posted_by_code:
+            self._record_event("obligation_posted_by_code")
         for shown in shown_questions:
             shown.served = True
         displayed_target: str | None = None
@@ -1018,7 +1138,12 @@ class AICoordinator:
                 displayed_target = displayed_execution_target(
                     output.public_message, PublicFactLedger(state)
                 )
-            self.reasoning.record_stated_target(player_id, displayed_target)
+            if not (notes_missing and displayed_target is None):
+                # A v3 turn written in code or through the brief contract names
+                # no candidate because nobody asked the model for one, not
+                # because the seat dropped its earlier one; recording None would
+                # erase what it did say today.
+                self.reasoning.record_stated_target(player_id, displayed_target, state.day)
         required_ids: tuple[str, ...] = ()
         if self._recorder is not None and decision is not None and self.reasoning is not None:
             belief = self.reasoning.seats[player_id].belief
@@ -1140,6 +1265,44 @@ class AICoordinator:
         if self.reasoning is not None:
             self.reasoning.record_public_speech(state, player_id, output.public_message, message_id)
         return output
+
+    def _owes_coded_line(
+        self,
+        state: GameState,
+        player_id: str,
+        decision: DiscussionDecision,
+        freemason_opening: str | None,
+    ) -> bool:
+        """Whether this turn carries a line code fixes, whatever the model writes.
+
+        Those are the turn's obligations -- a result to publish, the CO behind
+        it, the freemason plan's opening or a partner confirmation -- and a
+        failed generation must not cancel them, because none of them ever
+        depended on the model's wording.
+        """
+        return bool(
+            decision.required_public_results
+            or decision.required_claim_role is not None
+            or freemason_opening is not None
+            or self._pending_partner_relation(state, player_id) is not None
+        )
+
+    @staticmethod
+    def _pending_partner_relation(
+        state: GameState, player_id: str
+    ) -> FreemasonPartnerClaim | None:
+        """A freemason's naming of this seat as partner, still awaiting its confirmation."""
+        return next(
+            (
+                claim
+                for claim in state.freemason_partner_claims
+                if claim.partner_id == player_id
+                and not claim.confirmed
+                and state.players[claim.claimant_id].role == RoleName.FREEMASON
+                and state.players[player_id].role == RoleName.FREEMASON
+            ),
+            None,
+        )
 
     def _validate_output(self, state: GameState, player_id: str, output: DiscussionOutput) -> None:
         """Reconcile one discussion turn with the public fact ledger."""
@@ -1440,8 +1603,8 @@ class AICoordinator:
             target, reason = self.reasoning.vote_decision(player_id, candidates)
             # Compared against what this seat actually told the table, not
             # against another internal number -- otherwise the check is the
-            # runtime marking its own homework.
-            stated_target = self.reasoning.stated_target(player_id)
+            # runtime marking its own homework. Today's statement only.
+            stated_target = self.reasoning.stated_target(player_id, state.day)
             output = VoteOutput(
                 vote_target=target,
                 reason=reason,
@@ -1450,14 +1613,25 @@ class AICoordinator:
             )
         else:
             if self.reasoning is not None:
-                # v3: checked against what the seat told the table, like v2.
-                stated_target = self.reasoning.stated_target(player_id)
+                # v3: checked against what the seat told the table, like v2 --
+                # and, like v2, against what it told the table today.
+                stated_target = self.reasoning.stated_target(player_id, state.day)
             system, messages = self._context.build_vote_context(
                 state,
                 player_id,
                 candidates,
                 board_memo=self._memo_for(state, player_id),
-                stated_target=stated_target if isinstance(stated_target, str) else None,
+                # A candidate who has since died is not one the ballot can
+                # follow; reminding the seat of it only invites a vote for a
+                # dead player. The comparison below still sees it, and files
+                # the change as the target having become invalid.
+                stated_target=(
+                    stated_target
+                    if isinstance(stated_target, str)
+                    and stated_target in state.players
+                    and state.players[stated_target].alive
+                    else None
+                ),
             )
             output = await self._agents[player_id].generate_vote(
                 system, messages, candidates, preferred_targets=self._belief_targets(player_id)
@@ -1583,7 +1757,11 @@ class AICoordinator:
             # The disagreements are already structured events; narrating them
             # back through a model adds a request and a chance to lose one.
             self.reasoning.refresh(state)
-            commentary = "。".join(self.reasoning.conflict_points(state))
+            commentary = "。".join(
+                self.reasoning.conflict_points(
+                    state, stated_targets_are_public=not self.model_decides
+                )
+            )
             if self.model_decides:
                 commentary = namify(commentary, PublicFactLedger(state))
             self._record(state, narrator_id, "summary", text=commentary)
