@@ -472,7 +472,14 @@ def _render_speech_stats(games: list[tuple[GameTranscript, AnalysisResult]]) -> 
     def weighted(key: str) -> float:
         return float(sum(s[key] * s["utterances"] for s in collected) / max(total, 1))
 
+    def weighted_or_dash(key: str) -> str:
+        """A rate some transcripts cannot give (recorded before the field existed)."""
+        if any(s.get(key) is None for s in collected):
+            return "—"
+        return f"{weighted(key):.1%}"
+
     stance = _stance_rows(games)
+    examples = _adjacent_example_lines(collected)
     return "\n".join(
         [
             "| 指標 | 値 |",
@@ -484,44 +491,92 @@ def _render_speech_stats(games: list[tuple[GameTranscript, AnalysisResult]]) -> 
             f"| 同一発言の繰り返し | {repeats} |",
             f"| クロスプレイヤー論点重複率 | {weighted('cross_player_topic_overlap_rate'):.1%} |",
             f"| クロスプレイヤー平均Jaccard | {weighted('cross_player_mean_jaccard'):.3f} |",
+            f"| 直前の発言との重複率(Jaccard 0.25以上) | "
+            f"{weighted('adjacent_overlap_rate'):.1%} |",
+            f"| 直前の発言との平均Jaccard | {weighted('adjacent_mean_jaccard'):.3f} |",
             f"| 発言回数ジニ係数 | {weighted('speech_count_gini'):.3f} |",
-            f"| 返信率 | {weighted('reply_rate'):.1%} |",
+            f"| 返信率(返信先の欄が埋まった公開発言の割合) | {weighted('reply_rate'):.1%} |",
             f"| 未回答質問残存率 | {weighted('unanswered_question_rate'):.1%} |",
+            f"| うち相手に手番が来なかった質問 | "
+            f"{weighted_or_dash('unanswered_never_served_rate')} |",
+            f"| うち手番は来たが返信リンクのない質問(本文で答えたか、答えなかった) | "
+            f"{weighted_or_dash('unanswered_served_without_reply_link_rate')} |",
             f"| 発言長の分散 | {weighted('length_variance'):.1f} |",
-            f"| 定型句を含むAI発言率 | {weighted('template_phrase_rate'):.1%} |",
+            f"| 定型句を含むAI発言率(プロンプト由来とコードが書いた文の合計) | "
+            f"{weighted('template_phrase_rate'):.1%} |",
+            f"| うちプロンプトの語彙 | {weighted('prompt_template_phrase_rate'):.1%} |",
+            f"| うちコードが文頭に足したCO・結果の文 | "
+            f"{sum(s['code_fact_sentence_lines'] for s in collected)}行 "
+            f"({weighted('code_fact_sentence_rate'):.1%}) |",
             f"| ID表記(pN)を含むAI発言率 | {weighted('id_mention_rate'):.1%} |",
             f"| 1日あたり公開発言数 | {weighted('public_messages_per_day'):.1f} |",
             f"| 公開発言の平均文字数 | {weighted('public_mean_length'):.1f} |",
             *stance,
+            *examples,
         ]
     )
 
 
+def _adjacent_example_lines(collected: list[dict[str, Any]]) -> list[str]:
+    """The strongest echoes, so the overlap rate can be checked against the lines."""
+    pairs = sorted(
+        (example for stats in collected for example in stats.get("adjacent_overlap_examples", [])),
+        key=lambda example: example["jaccard"],
+        reverse=True,
+    )[:3]
+    if not pairs:
+        return []
+    lines = ["", "直前の発言との重複が大きい組(先頭80字):", ""]
+    for pair in pairs:
+        lines.append(
+            f"- {pair['day']}日目 `{pair['first']}` → `{pair['second']}` "
+            f"(Jaccard {pair['jaccard']:.2f})"
+        )
+        lines.append(f"  > {pair['first_text']}")
+        lines.append(f"  > {pair['second_text']}")
+    return lines
+
+
 def _stance_rows(games: list[tuple[GameTranscript, AnalysisResult]]) -> list[str]:
-    """Rows for how often a seat moved its candidate, summed over the games."""
+    """Rows for how often a seat moved its candidate, summed over the games.
+
+    The denominator is the pairs of turns where a change *could* be seen: both
+    turns state a candidate and the old one is still alive. A pair with a blank
+    side is reported apart, because "did not move" is not observable there --
+    the first Claude game's 19 "acknowledged without change" were 11 such pairs,
+    3 misread words and 5 reasoned partial concessions.
+    """
     collected = [s for _t, a in games if (s := a.stats.get("stance")) is not None]
     if not collected:
         return []
 
     def total(key: str) -> int:
-        return sum(s[key] or 0 for s in collected)
+        return sum(s.get(key) or 0 for s in collected)
 
     turns = total("follow_up_turns")
     moved = total("voluntary_changes")
     replying = (
         "—"
-        if any(s["voluntary_changes_replying"] is None for s in collected)
+        if any(s.get("voluntary_changes_replying") is None for s in collected)
         else str(total("voluntary_changes_replying"))
     )
     return [
-        f"| 疑い先の自発的な変更(疑い先の死亡による変更を除く) | {moved} / {turns}手番 |",
+        "| 吊り先の自発的な変更(両方の手番に吊り先があり、元の吊り先が生きていた対) | "
+        f"{moved} / {total('observable_follow_ups')}対(全後続手番 {turns}) |",
         f"| うち同じ日のうちの変更 | {total('voluntary_changes_same_day')} |",
         f"| うち相手の発言に返信しての変更 | {replying} |",
         f"| うち認める言葉(確かに・認める・撤回…)を伴う変更 | "
         f"{total('voluntary_changes_acknowledged')} |",
-        f"| 疑い先の死亡による変更 | {total('forced_changes')} |",
-        f"| 認める・撤回すると言いながら疑い先が変わらない発言 | "
-        f"{total('acknowledged_without_change')} |",
+        f"| 吊り先の死亡による変更 | {total('forced_changes')} |",
+        f"| 認める言葉を言いながら同じ吊り先のまま | {total('acknowledged_without_change')} |",
+        f"| うち逆接と理由を添えた部分的な譲歩 | "
+        f"{total('acknowledged_without_change_with_reason')} |",
+        f"| うち理由のない空約束 | {total('acknowledged_without_change_no_reason')} |",
+        f"| 吊り先が片方でも空欄の対(変化を観測できない) | "
+        f"{total('target_unstated_follow_ups')} |",
+        f"| うち認める言葉を伴う | {total('target_unstated_acknowledged')} |",
+        f"| うち空欄から吊り先を置いた(認める言葉を伴う) | "
+        f"{total('target_adopted_acknowledged')} |",
     ]
 
 
