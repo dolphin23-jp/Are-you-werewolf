@@ -66,11 +66,12 @@ AI_NAME_POOL = [
     "ケント",
 ]
 
-# Backstop on HTTP requests for one human-play session. The dollar cap
-# (`WEREWOLF_SESSION_MAX_COST_USD`) is the real limit; this only stops a
-# runaway loop that makes many cheap calls. The live v3 game on record made
-# 197 logical calls (backend/artifacts/live-v3-luna-run11), so this sits more
-# than an order of magnitude above a real game.
+# Backstop on HTTP requests for one human-play session. On anthropic the
+# dollar cap (`WEREWOLF_SESSION_MAX_COST_USD`) is the real limit and this only
+# stops a runaway loop that makes many cheap calls; on luna, which has no
+# prices to hold a dollar cap against, it is the only limit. The live v3 game
+# on record made 197 logical calls (backend/artifacts/live-v3-luna-run11), so
+# this sits more than an order of magnitude above a real game.
 SESSION_MAX_REQUESTS = 5000
 
 
@@ -104,27 +105,34 @@ def build_session_provider(
     the cap before sending it, so the cap holds even with sixteen votes in
     flight.
 
-    Only `anthropic` is capped. `mock` and `scenario` cost nothing, and the
-    dormant `luna` provider does not price its own calls.
+    `mock` and `scenario` cost nothing and are not capped. The dormant `luna`
+    provider bills its key too, but a dollar cap needs prices and nothing
+    prices luna's calls, so its sessions are capped by request count alone
+    (`SESSION_MAX_REQUESTS`), counted where each HTTP request is sent.
     """
     metrics = MetricsCollector()
     provider = build_llm_provider(settings, seed=seed, metrics=metrics)
-    if settings.werewolf_llm_provider != "anthropic":
+    if settings.werewolf_llm_provider == "anthropic":
+        budget = EvaluationBudget(
+            max_requests=SESSION_MAX_REQUESTS,
+            max_estimated_cost=settings.werewolf_session_max_cost_usd,
+        )
+    elif settings.werewolf_llm_provider == "luna":
+        budget = EvaluationBudget(max_requests=SESSION_MAX_REQUESTS)
+    else:
         return provider, metrics, None
-    budget = EvaluationBudget(
-        max_requests=SESSION_MAX_REQUESTS,
-        max_estimated_cost=settings.werewolf_session_max_cost_usd,
-    )
     return BudgetedProvider(provider, budget), metrics, budget
 
 
 def _session_cost_usd(session: GameSession) -> float | None:
     """Estimated spend so far, or None when the session's provider is not priced.
 
-    A capped session that has not settled a request yet has spent nothing, so
-    it reads 0.0 rather than "unknown".
+    A session with a dollar cap that has not settled a request yet has spent
+    nothing, so it reads 0.0 rather than "unknown". A session capped by
+    request count alone (luna) has no prices, so its spend stays unknown
+    rather than reading as free.
     """
-    if session.budget is None:
+    if session.budget is None or session.budget.max_estimated_cost is None:
         return None
     cost = session.budget.estimated_cost
     return round(cost if cost is not None else 0.0, 6)

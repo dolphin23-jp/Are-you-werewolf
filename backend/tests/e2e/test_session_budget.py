@@ -9,6 +9,8 @@ the coordinator's entry points replaced.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
 from collections.abc import Callable
 from typing import Any
@@ -20,7 +22,9 @@ import app.config as config
 from app.ai.metrics import MetricsCollector
 from app.ai.provider.anthropic_claude import AnthropicClaudeProvider
 from app.ai.provider.budget import BudgetedProvider, BudgetExceeded, EvaluationBudget
+from app.ai.provider.luna_openai import LunaOpenAIProvider
 from app.ai.provider.mock import MockProvider
+from app.ai.schemas import VoteOutput
 from app.api.routes_game import SESSION_MAX_REQUESTS
 from app.config import Settings
 from app.main import create_app
@@ -28,6 +32,7 @@ from app.sessions.models import GameSession
 from app.sessions.store import get_session_store
 
 FAKE_KEY = "sk-ant-test-session-budget-not-a-real-key"
+FAKE_LUNA_KEY = "luna-test-session-budget-not-a-real-key"
 
 
 @pytest.fixture
@@ -102,6 +107,65 @@ def test_two_sessions_never_share_a_budget(client_for: Callable[..., TestClient]
     first, second = _create(client, seed=1), _create(client, seed=2)
     assert first.budget is not second.budget
     assert first.metrics is not second.metrics
+
+
+def _luna_client(client_for: Callable[..., TestClient]) -> TestClient:
+    return client_for(
+        werewolf_llm_provider="luna",
+        luna_api_key=FAKE_LUNA_KEY,
+        luna_base_url="https://luna.invalid/v1",
+        werewolf_allow_open_access=True,
+    )
+
+
+def test_a_luna_session_is_capped_by_request_count(client_for: Callable[..., TestClient]):
+    """luna bills the key too, but nothing prices its calls, so the request
+    count is its only cap -- and the view must not report an unpriced game
+    as having cost nothing."""
+    client = _luna_client(client_for)
+    session = _create(client)
+
+    budget = session.budget
+    assert isinstance(budget, EvaluationBudget)
+    assert budget.max_requests == SESSION_MAX_REQUESTS
+    assert budget.max_estimated_cost is None
+
+    provider = _agent_provider(session)
+    assert isinstance(provider, BudgetedProvider)
+    assert provider.budget is budget
+    inner = provider.inner
+    assert isinstance(inner, LunaOpenAIProvider)
+    # Counted where requests are sent, so a retry counts as the request it is.
+    assert inner._request_budget is budget
+    assert inner._metrics is session.metrics
+
+    view = client.get(f"/api/games/{session.session_id}/view").json()
+    assert view["ai_budget_exhausted"] is False
+    assert view["ai_cost_usd"] is None
+    for path in ("view", "debug"):
+        assert FAKE_LUNA_KEY not in client.get(f"/api/games/{session.session_id}/{path}").text
+
+
+def test_a_spent_luna_cap_sends_no_request(client_for: Callable[..., TestClient]):
+    session = _create(_luna_client(client_for))
+    provider = _agent_provider(session)
+    sent: list[dict[str, Any]] = []
+
+    async def must_not_send(**kwargs: Any) -> Any:
+        sent.append(kwargs)
+        raise AssertionError("a request went out past the session's cap")
+
+    provider.inner._client.chat.completions.create = must_not_send
+    assert session.budget is not None
+    session.budget.used_requests = session.budget.max_requests
+
+    # Whether the provider raises the stop or turns it into a failed turn,
+    # nothing may be sent.
+    with contextlib.suppress(BudgetExceeded):
+        asyncio.run(
+            provider.generate_structured(system="s", messages=[], response_schema=VoteOutput)
+        )
+    assert sent == []
 
 
 def test_an_offline_session_is_metered_but_not_capped(client_for: Callable[..., TestClient]):

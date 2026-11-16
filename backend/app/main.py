@@ -18,16 +18,28 @@ FRONTEND_DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
 
 _LOGGER = logging.getLogger(__name__)
 
+# Every provider whose calls bill an API key. `luna` is dormant, but a server
+# started with it bills its key exactly as `anthropic` does.
+BILLED_PROVIDERS = frozenset({"anthropic", "luna"})
+
 OPEN_ACCESS_REFUSAL = (
-    "WEREWOLF_LLM_PROVIDER=anthropic で WEREWOLF_ACCESS_PASSWORD が空のため、起動を中止しました。"
+    "WEREWOLF_LLM_PROVIDER が課金されるプロバイダ(anthropic・luna)で "
+    "WEREWOLF_ACCESS_PASSWORD が空のため、起動を中止しました。"
     "このままでは、このサーバーにアクセスできる人なら誰でも、APIキーに課金されるゲームを作れます。"
     "WEREWOLF_ACCESS_PASSWORD を設定してください。自分だけが使うローカル環境に限り、"
     "WEREWOLF_ALLOW_OPEN_ACCESS=true で外せます。 / "
-    "Refusing to start: WEREWOLF_LLM_PROVIDER=anthropic with an empty "
-    "WEREWOLF_ACCESS_PASSWORD would let anyone who can reach this server start "
-    "games billed to the API key. Set WEREWOLF_ACCESS_PASSWORD, or, only on a "
-    "local machine that nobody else can reach, set WEREWOLF_ALLOW_OPEN_ACCESS=true."
+    "Refusing to start: a billed WEREWOLF_LLM_PROVIDER (anthropic, luna) with an "
+    "empty WEREWOLF_ACCESS_PASSWORD would let anyone who can reach this server "
+    "start games billed to the API key. Set WEREWOLF_ACCESS_PASSWORD, or, only on "
+    "a local machine that nobody else can reach, set WEREWOLF_ALLOW_OPEN_ACCESS=true."
 )
+
+
+def _serves_billed_games_openly(settings: Settings) -> bool:
+    return (
+        settings.werewolf_llm_provider in BILLED_PROVIDERS
+        and not settings.werewolf_access_password
+    )
 
 
 def _refuse_open_paid_server(settings: Settings) -> None:
@@ -35,13 +47,12 @@ def _refuse_open_paid_server(settings: Settings) -> None:
 
     Checked at startup rather than per request: a server that starts and then
     refuses games looks healthy, and the first sign of the problem would be
-    the bill. The opt-out exists for a laptop nobody else can reach.
+    the bill. The opt-out exists for a laptop nobody else can reach. It covers
+    every billed provider, not only the default one: the README's luna
+    section never mentions a password, and a luna game bills its key all the
+    same.
     """
-    if (
-        settings.werewolf_llm_provider == "anthropic"
-        and not settings.werewolf_access_password
-        and not settings.werewolf_allow_open_access
-    ):
+    if _serves_billed_games_openly(settings) and not settings.werewolf_allow_open_access:
         raise RuntimeError(OPEN_ACCESS_REFUSAL)
 
 
@@ -80,10 +91,11 @@ def create_app() -> FastAPI:
     settings = get_settings()
     _configure_logging(settings)
     _refuse_open_paid_server(settings)
-    if settings.werewolf_llm_provider == "anthropic" and not settings.werewolf_access_password:
+    if _serves_billed_games_openly(settings):
         _LOGGER.warning(
-            "WEREWOLF_ALLOW_OPEN_ACCESS=true: serving a paid provider with no access "
-            "password; anyone who can reach this server can start billed games"
+            "WEREWOLF_ALLOW_OPEN_ACCESS=true: serving a paid provider (%s) with no access "
+            "password; anyone who can reach this server can start billed games",
+            settings.werewolf_llm_provider,
         )
     app = FastAPI(title="Are you werewolf API", version="0.1.0")
     if settings.werewolf_access_password:
