@@ -21,7 +21,7 @@ from app.ai.knowledge_base import KnowledgeBase, KnowledgeContext
 from app.ai.personalities import Personality, discussion_length_range
 from app.ai.provider.base import Message
 from app.ai.reasoning.board_memo import render_roster
-from app.ai.reasoning.facts import PublicFactLedger
+from app.ai.reasoning.facts import PublicFactLedger, mentions_player
 from app.ai.schemas import PLAN_NOTE_MEMO_FIELDS
 from app.ai.strategy import (
     StrategyAnalyzer,
@@ -137,7 +137,8 @@ CHAT_VOTE_OUTPUT_INSTRUCTION = """次のJSONだけを返してください:
 "decisive_evidence": "決め手になった一つの根拠", \
 "countercase": "その相手が村側でも説明がつく最も強い見方", \
 "alternative_target": "次点のplayer_idまたはnull"}
-昼に言った吊り先と違う相手に入れるなら、reasonに変えた理由を書いてください。"""
+卓で名指しした吊り先と違う相手に入れるなら、reasonに理由を書く。\
+卓で言っていないことを『昼に言った』と書かない。"""
 
 CHAT_PRIVATE_CHAT_INSTRUCTION = """次のJSONだけを返してください:
 {"message": "内輪チャットの1通。1〜2文、80文字以内。相手は名前で呼ぶ"}"""
@@ -911,11 +912,7 @@ class ContextBuilder:
             if state.runoff_candidates
             else "【投票候補】"
         )
-        stated = (
-            f"【昼にあなたが推した吊り先】{self._label(state, stated_target)}"
-            if stated_target is not None and stated_target in state.players
-            else "【昼にあなたが推した吊り先】特に名指ししていない"
-        )
+        stated = self._memo_target_line(state, player_id, stated_target)
         return self._assemble(
             [self._layer_a_system(state, player_id), self._layer_b_role(state, player_id)],
             [
@@ -934,6 +931,30 @@ class ContextBuilder:
                 CHAT_VOTE_OUTPUT_INSTRUCTION,
             ],
         )
+
+    def _memo_target_line(
+        self, state: GameState, player_id: str, target_id: str | None
+    ) -> str:
+        """The day's execution target as the seat's own plan note holds it.
+
+        Labelled as the note, not as "what you pushed in daytime": in v3 this
+        is the private note's value, and calling it what the seat had said made
+        the model write "昼に言った通り" about a name it never said at the table.
+        Whether the seat did say it is checked here, in code, on its own public
+        lines from today, and stated when it did not.
+        """
+        if target_id is None or target_id not in state.players:
+            return "【今日のメモの吊り先】なし"
+        name = state.players[target_id].name
+        said = any(
+            mentions_player(message.content, target_id, name)
+            for message in state.chat_log
+            if message.channel == ChatChannel.PUBLIC
+            and message.day == state.day
+            and message.author_id == player_id
+        )
+        flag = "" if said else "(卓ではまだ名指ししていない)"
+        return f"【今日のメモの吊り先】{self._label(state, target_id)}{flag}"
 
     def build_night_action_context(
         self,
