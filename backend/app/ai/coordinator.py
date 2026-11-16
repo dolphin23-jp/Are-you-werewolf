@@ -280,12 +280,13 @@ _MOODS: dict[str, dict[str, re.Pattern[str]]] = {
 _ANY_MOOD: tuple[str, ...] = ("propose", "ask", "decide")
 _ASKING: tuple[str, ...] = ("ask",)
 # Before the partner, anywhere in the sentence: the village or a crowd as the
-# subject (村はダイキを吊りたがってる), a guess (多分), an earlier day (昨日)
-# or a quotation. Another seat followed by が/は is added per board.
+# subject (村はダイキを吊りたがってる), a guess (多分), a condition nobody can
+# check yet (黒が出ればダイキに入れよう), an earlier day (昨日) or a quotation.
+# Another seat followed by が/は is added per board.
 _NOT_THE_TEAM = (
     r"村人?(?:は|が|の|目線|視点|側)|(?:みんな|皆|全員|誰か|他の人)(?:さん)?[はが]"
-    r"|多分|たぶん|おそらく|恐らく|きっと|どうせ|このまま|もし|仮に|昨日|前日|さっき|前回"
-    r"|[「『“\"]"
+    r"|多分|たぶん|おそらく|恐らく|きっと|どうせ|このまま|もし|仮に"
+    r"|たら|だら|なら|[えけげせてねべめれ]ば|昨日|前日|さっき|前回|[「『“\"]"
 )
 # Who お前 means when the partner alone was addressed, and who 俺 means when
 # the partner wrote the line (自分で is "by oneself", not "me").

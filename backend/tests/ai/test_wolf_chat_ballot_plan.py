@@ -334,6 +334,11 @@ NOT_PLANS: list[tuple[str, str]] = [
     ("{a}に入れてもらおう。", V),
     ("{a}にも投票してもらおう。", V),
     ("{a}に入れてくれる人を探そう。", V),
+    # a condition nobody can check yet
+    ("{a}が吊られる流れなら、{a}に票を合わせて身内切りに見せよう。", V),
+    ("{o}が黒を出されたら{a}を吊ろう。", V),
+    ("狩人が出てきたら{a}を切ろう。", V),
+    ("占いで黒が出れば{a}に入れよう。", V),
     # look-alikes
     ("{a}を明日吊る流れ。", V),
     ("{a}を吊るわけない。", V),
@@ -396,6 +401,8 @@ CONSERVATIVE_MISSES: list[tuple[str, str]] = [
     ("{a}を吊るべきだ。", V),
     # past: a decision reported as made
     ("{a}吊りで決まったね。", V),
+    # "in that case" reads as the condition a real conditional plan carries
+    ("それなら{a}を吊ろう。", V),
     # another seat as the subject, even of a request
     ("{o}は{a}に投票して。", V),
     # a て-form handed on across a comma
