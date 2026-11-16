@@ -63,6 +63,7 @@ from app.ai.reasoning.solver import (
     build_solver,
     has_role,
 )
+from app.ai.reasoning.timeline import disclosable_result_nights
 from app.engine.roles import RoleName
 from app.engine.state import ChatChannel, GameState
 
@@ -487,6 +488,8 @@ class ReasoningRuntime:
         * the freemason leader, until the freemason CO is made;
         * a seer or medium holding a result without the CO it needs;
         * a planned fake claimant, until that claim is actually made;
+        * a standing seer or medium claimant, true or fake, with this
+          morning's result still to announce (see `owes_morning_result`);
         * a bluffer whose story has collapsed and must retract or slide;
         * a seer or medium whose published colour contradicts its own result.
         """
@@ -510,11 +513,54 @@ class ReasoningRuntime:
             planned = (planned_fake_roles or {}).get(player_id)
             if planned is not None and standing is not planned:
                 required.append(player_id)
+            if self.owes_morning_result(state, player_id):
+                required.append(player_id)
             if seat.deception is not None and seat.deception.status is StoryStatus.COLLAPSED:
                 required.append(player_id)
             if self._published_colour_contradicts_own(ledger, observations, seat):
                 required.append(player_id)
         return tuple(dict.fromkeys(required))
+
+    def owes_morning_result(self, state: GameState, player_id: str) -> bool:
+        """A living seer or medium claimant, true or fake, with today's result unsaid.
+
+        The table expects every standing seer to report last night's look and
+        every standing medium to report yesterday's execution, first thing in
+        the morning. A real holder is already a duty speaker through its held
+        result; a fake one used to be one only until its CO, after which its
+        results arrived late or never and nobody noticed (the first Claude
+        game's madman seer reported at line 10 on day 2, at line 6 on day 4
+        after three requests, and not at all on day 3). The claimed role sets
+        the schedule, so the rule is the same whatever the seat really holds.
+
+        Read from public facts only -- the standing claim, the published
+        results and the public calendar -- plus the seat's own held results.
+        """
+        if player_id not in self.seats or not state.players[player_id].alive:
+            return False
+        ledger = PublicFactLedger(state)
+        claimed = ledger.claimed_role_of(player_id)
+        if claimed not in (RoleName.SEER, RoleName.MEDIUM):
+            return False
+        if self.holds_unpublished_result(state, player_id):
+            return True
+        last_night = state.day - 1
+        if last_night < 0:
+            return False
+        published = [r for r in ledger.public_results() if r.claimant_id == player_id]
+        if claimed is RoleName.SEER:
+            observations = ObservationSet.from_state(state)
+            if last_night not in disclosable_result_nights(observations, player_id, state.day):
+                return False
+            return not any(
+                r.result_type == "seer" and r.source_night == last_night for r in published
+            )
+        executed = {
+            pid for pid in ledger.executed_ids() if ledger.execution_day(pid) == last_night
+        }
+        return bool(executed) and not any(
+            r.result_type == "medium" and r.target_id in executed for r in published
+        )
 
     def impossible_claim_reasons(self, state: GameState, player_id: str) -> tuple[str, ...]:
         """Why the public record proves this seat does not hold the role it claims.

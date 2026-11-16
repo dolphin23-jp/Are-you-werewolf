@@ -21,7 +21,7 @@ import re
 import time
 from collections import Counter
 from collections.abc import Sequence
-from dataclasses import replace
+from dataclasses import dataclass, field, replace
 
 from app.ai.co_detection import detect_claimed_role
 from app.ai.context import ContextBuilder, DaySummaryManager
@@ -38,7 +38,7 @@ from app.ai.reasoning import (
     validate_discussion_output,
     validate_public_result_claim,
 )
-from app.ai.reasoning.belief import CorrectionOutcome, EvidenceVisibility
+from app.ai.reasoning.belief import CorrectionOutcome, EvidenceVisibility, StoryStatus
 from app.ai.reasoning.board_memo import namify
 from app.ai.reasoning.claims import (
     SpeechEventDraft,
@@ -140,6 +140,17 @@ _REACTION_MAX_CHARS = 60
 # evaluation harness needs the same number to flag overruns.
 _PRIVATE_CHAT_MAX_CHARS = 100
 
+# The closing turn after a summary that put questions to people: their answers
+# are in, and the summariser names today's candidate. The context builder has
+# no stage of that name, so the turn is built as `consensus_summary` (whose
+# instruction is the pre-vote wrap-up) plus this one line -- an unknown stage
+# would fall back to the opening-turn instruction, which is the wrong ask.
+_FINAL_DESIGNATION_STAGE = "final_designation"
+_FINAL_DESIGNATION_NOTE = (
+    "\n\n【本指定】名指しで聞いた相手には答える番を回した。新しい質問はせず、"
+    "ここまでの返答を踏まえて今日の吊り先を一言で決める。"
+)
+
 # A wolf-chat sentence that names a partner and puts it up for the ballot:
 # cutting it loose, voting it, letting it hang, sacrificing it. Read per
 # sentence, so a line about tonight's attack that merely names the partner is
@@ -162,6 +173,30 @@ def _plans_ballot_on(sentence: str) -> bool:
         if not _NEGATED_AFTER_RE.match(sentence[match.end() :]):
             return True
     return False
+
+
+@dataclass(eq=False)
+class _RoundBook:
+    """What the speaker scheduler tracks about one round, beside `DiscussionRoundState`.
+
+    The round state is the session's record, shared with the API layer; these
+    only decide who speaks next, so they live with the scheduler. A book is
+    bound to its round by identity -- a new day's round starts a new book.
+    """
+
+    round_state: DiscussionRoundState
+    # Blacks and standing COs when the pressured candidates were last ranked.
+    # A new one changes who the table is about to hang, so the ranking is redone.
+    accusation_signature: tuple[tuple[str, ...], tuple[str, ...]] | None = None
+    # Today's blacks already looked at, as (claimant, result type, target).
+    accusations_seen: set[tuple[str, str, str]] = field(default_factory=set)
+    # Seats blacked today that have not spoken since: each is owed one turn.
+    owed_replies: list[str] = field(default_factory=list)
+    roll_call_done: bool = False
+    summary_speaker: str | None = None
+    # Seats the summary put a question to, each owed one answer before the close.
+    summary_answers: list[str] = field(default_factory=list)
+    designation_pending: bool = False
 
 
 def _unwrap_provider(provider: object) -> object:
@@ -193,7 +228,9 @@ class AICoordinator:
         self._max_discussion_followups = max(0, max_discussion_followups)
         self._segment_size = max(1, discussion_segment_size)
         self._pacing_scale = max(0.0, pacing_scale)
+        self._seed = seed
         self._rng = random.Random(seed)
+        self._round_book: _RoundBook | None = None
         self._pending_questions = state.pending_questions
         # Pending questions disappear when answered, but their topic must remain in
         # the day's ledger or another AI immediately asks the same thing again.
@@ -326,8 +363,9 @@ class AICoordinator:
             return None
         return self.reasoning.board_memo(state, player_id)
 
-    @staticmethod
-    def _required_lines(state: GameState, decision: DiscussionDecision) -> list[str]:
+    def _required_lines(
+        self, state: GameState, player_id: str, decision: DiscussionDecision
+    ) -> list[str]:
         """Code-decided obligations for this turn, in plain words for the memo prompt."""
         lines: list[str] = []
         if decision.required_claim_role is not None:
@@ -338,7 +376,44 @@ class AICoordinator:
             colour = "黒" if item.is_werewolf else "白"
             name = state.players[item.target_id].name
             lines.append(f"{ability}結果を公開する: {name}={colour}（{when}のもの）")
+        owed = self._owed_claimed_result_line(state, player_id, decision)
+        if owed:
+            lines.append(owed)
         return lines
+
+    def _owed_claimed_result_line(
+        self, state: GameState, player_id: str, decision: DiscussionDecision
+    ) -> str:
+        """The morning result a standing claim still owes, when no real one stands behind it.
+
+        A real holder's result is already in the decision, verdict and all. A
+        fake claimant has no result for code to hand over -- whom it "looked
+        at" and what it "saw" are its own call -- but its claim still owes the
+        table this morning's report, and the duty turn it now gets is for
+        saying it. Phrased as the claim's obligation, so dropping the claim
+        stays open; a story that has already collapsed is not asked to go on.
+        """
+        if self.reasoning is None or decision.required_public_results:
+            return ""
+        if not self.reasoning.owes_morning_result(state, player_id):
+            return ""
+        seat = self.reasoning.seats.get(player_id)
+        if (
+            seat is not None
+            and seat.deception is not None
+            and seat.deception.status is StoryStatus.COLLAPSED
+        ):
+            return ""
+        ledger = PublicFactLedger(state)
+        yesterday = state.day - 1
+        if ledger.claimed_role_of(player_id) is RoleName.MEDIUM:
+            executed = "、".join(
+                ledger.name_of(pid)
+                for pid in ledger.executed_ids()
+                if ledger.execution_day(pid) == yesterday
+            )
+            return f"霊媒COを続けるなら、{yesterday}日目に処刑された{executed}の霊媒結果を出す"
+        return f"占いCOを続けるなら、{yesterday}日目夜の占い結果(誰を占って白か黒か)を出す"
 
     def _deception_role(self, player_id: str) -> str | None:
         if player_id in self._wolf_deception.fake_role_by_player:
@@ -522,6 +597,15 @@ class AICoordinator:
                     self._set_awaiting(round_state, True)
                     break
                 if stage == "consensus_summary":
+                    # A summary that asks the candidate for a last word used
+                    # to close the round before the question was queued, so
+                    # the answer never came (five of six days in the first
+                    # Claude game). Its questions are answered first now.
+                    if not self._open_summary_followups(state, round_state, pid, output):
+                        round_state.complete = True
+                        break
+                    continue
+                if stage == _FINAL_DESIGNATION_STAGE:
                     round_state.complete = True
                     break
                 for question in output.directed_questions:
@@ -669,29 +753,23 @@ class AICoordinator:
                     # morning stage would wait for one more seat than it holds.
                     round_state.immediate_count -= 1
             return target_id, "freemason_confirmation"
+        book = self._book_for(round_state)
+        if round_state.summary_done:
+            # The wrap-up has been given. Only what it opened is left: its
+            # addressees' answers, anyone it left freshly accused, the close.
+            return self._closing_speaker(state, round_state, book)
+        if round_state.cursor >= len(round_state.order):
+            self._extend_roll_call(state, round_state, book)
         if round_state.cursor < len(round_state.order):
             index = round_state.cursor
             pid = round_state.order[index]
             round_state.cursor += 1
             morning = round_state.stage == "immediate" and index < round_state.immediate_count
             return pid, "immediate" if morning else "initial_view"
-        if not round_state.major_targets_ready:
-            # Restricted to seats this coordinator speaks for: the pressure list
-            # drives speaking limits and the rebuttal sweep, neither of which can
-            # apply to the human.
-            latest_targets = {
-                speaker: target
-                for speaker, output in round_state.outputs
-                if isinstance((target := output.reasoning_memo.execution_target), str)
-                and target in self._agents
-                and state.players[target].alive
-            }
-            pressure: Counter[str] = Counter(latest_targets.values())
-            round_state.major_targets = [target for target, _count in pressure.most_common(2)]
-            round_state.major_targets_ready = True
-            for target in round_state.major_targets:
-                if round_state.speech_counts.get(target, 0) < 2:
-                    self._round_queue_reply(state, round_state, target)
+        self._refresh_major_targets(state, round_state, book)
+        accused = self._take_owed_reply(state, round_state, book)
+        if accused is not None:
+            return accused, "rebuttal_or_reassessment"
         # Every branch below must change round state before returning. A branch that
         # returns the same speaker without advancing anything spins forever when
         # `_speak` yields nothing -- and the phase-changed path of `_speak` returns
@@ -778,7 +856,233 @@ class AICoordinator:
                 )
             round_state.summary_done = True
             if leader is not None:
+                book.summary_speaker = leader
                 return leader, "consensus_summary"
+        return None, "consensus_summary"
+
+    def _book_for(self, round_state: DiscussionRoundState) -> _RoundBook:
+        """The scheduler's notes on this round, started fresh for a new one."""
+        book = self._round_book
+        if book is None or book.round_state is not round_state:
+            book = _RoundBook(round_state=round_state)
+            self._round_book = book
+        return book
+
+    def _extend_roll_call(
+        self, state: GameState, round_state: DiscussionRoundState, book: _RoundBook
+    ) -> None:
+        """Day 1: every AI seat that has had no turn yet gets one first-impression turn.
+
+        The opening is three to five seats plus the duty speakers, and the
+        rest were to speak when answered or challenged. On day 1 nobody has a
+        result or a reputation to be challenged on, so seven gray seats in the
+        first Claude game never spoke at all -- and the day's votes went to
+        "the one who stayed quiet", a silence the scheduler had imposed.
+        Appended once, after the opening order, before any rebuttal sweep; the
+        follow-up budget grows by the same count so the extra turns do not eat
+        the replies the day would otherwise have had.
+
+        Every seat counts, not only grays: on day 1 a seat that has not spoken
+        holds no CO, since a CO is made by speaking.
+        """
+        if book.roll_call_done or state.day != 1:
+            return
+        book.roll_call_done = True
+        spoken_today = {
+            message.author_id
+            for message in state.chat_log
+            if message.day == state.day and message.channel is ChatChannel.PUBLIC
+        }
+        had_turn = (
+            set(round_state.order)
+            | set(round_state.speech_counts)
+            | set(round_state.reply_queue)
+            | spoken_today
+        )
+        silent = [
+            pid
+            for pid in self._ai_player_ids
+            if pid not in had_turn
+            and state.players[pid].alive
+            and pid not in self._observer_player_ids
+        ]
+        if not silent:
+            return
+        random.Random(f"{self._seed}:roll-call:{state.day}").shuffle(silent)
+        round_state.order.extend(silent)
+        round_state.max_total += len(silent)
+
+    @staticmethod
+    def _accusation_signature(state: GameState) -> tuple[tuple[str, ...], tuple[str, ...]]:
+        """The published blacks and standing COs: what re-points the table's pressure."""
+        ledger = PublicFactLedger(state)
+        blacks = tuple(
+            sorted(
+                f"{r.claimant_id}:{r.result_type}:{r.target_id}"
+                for r in ledger.public_results()
+                if r.is_werewolf
+            )
+        )
+        claims = tuple(
+            sorted(f"{c.player_id}:{c.claimed_role.value}" for c in ledger.co_declarations())
+        )
+        return blacks, claims
+
+    def _pressured_targets(
+        self, state: GameState, round_state: DiscussionRoundState
+    ) -> list[str]:
+        """The two seats today's latest plan notes most want hanged.
+
+        Restricted to seats this coordinator speaks for: the pressure list
+        drives speaking limits and the rebuttal sweep, neither of which can
+        apply to the human.
+        """
+        latest_targets = {
+            speaker: target
+            for speaker, output in round_state.outputs
+            if isinstance((target := output.reasoning_memo.execution_target), str)
+            and target in self._agents
+            and state.players[target].alive
+        }
+        pressure: Counter[str] = Counter(latest_targets.values())
+        return [target for target, _count in pressure.most_common(2)]
+
+    def _refresh_major_targets(
+        self, state: GameState, round_state: DiscussionRoundState, book: _RoundBook
+    ) -> None:
+        """Rank the pressured candidates once, and again whenever a black or a CO lands.
+
+        It used to be ranked exactly once, when the opening order ran out.
+        A black published after that never reached the list: on day 4 of the
+        first Claude game the madman's black on ツムギ came after the ranking,
+        カイト (the only name in the plan notes until then) was queued twice,
+        and the summary closed the day with ツムギ never heard. A re-rank
+        keeps what was already on the list and adds what is new; a seat that
+        joins it with fewer than two turns is queued for its rebuttal, as on
+        the first ranking.
+
+        Blacks are also handled on their own, every time (see
+        `_collect_owed_replies`): the accused is owed an answer whatever the
+        plan notes say about them.
+        """
+        signature = self._accusation_signature(state)
+        previous_signature = book.accusation_signature
+        book.accusation_signature = signature
+        # A round that arrives already ranked, with no record of the board it
+        # was ranked on, takes the board as it is now for its baseline.
+        if not round_state.major_targets_ready or previous_signature not in (None, signature):
+            first = not round_state.major_targets_ready
+            known = list(round_state.major_targets)
+            pressured = self._pressured_targets(state, round_state)
+            round_state.major_targets = list(dict.fromkeys([*known, *pressured]))
+            round_state.major_targets_ready = True
+            for target in pressured:
+                if (first or target not in known) and round_state.speech_counts.get(
+                    target, 0
+                ) < 2:
+                    self._round_queue_reply(state, round_state, target)
+        self._collect_owed_replies(state, round_state, book)
+
+    def _collect_owed_replies(
+        self, state: GameState, round_state: DiscussionRoundState, book: _RoundBook
+    ) -> None:
+        """Owe one turn to every AI seat blacked today that has not spoken since.
+
+        A black is the strongest accusation the table hears; a human player
+        given one always answers it -- a counter-CO, a defence -- before the
+        vote. Each black is looked at once, so a seat that answered (or whose
+        owed turn was spent, even on a failed generation) is not called back
+        for the same accusation.
+        """
+        positions = {message.message_id: index for index, message in enumerate(state.chat_log)}
+        for result in PublicFactLedger(state).public_results():
+            if not result.is_werewolf or result.day != state.day:
+                continue
+            key = (result.claimant_id, result.result_type, result.target_id)
+            if key in book.accusations_seen:
+                continue
+            book.accusations_seen.add(key)
+            target = result.target_id
+            if target not in self._agents or not state.players[target].alive:
+                continue
+            since = positions.get(result.source_message_id, -1)
+            answered = any(
+                message.author_id == target
+                and message.channel is ChatChannel.PUBLIC
+                and message.day == state.day
+                for message in state.chat_log[since + 1 :]
+            )
+            if answered:
+                continue
+            if target not in round_state.major_targets:
+                round_state.major_targets.append(target)
+            if target not in book.owed_replies:
+                book.owed_replies.append(target)
+
+    def _take_owed_reply(
+        self, state: GameState, round_state: DiscussionRoundState, book: _RoundBook
+    ) -> str | None:
+        """The next accused seat owed its answer, taken off every queue it was on."""
+        while book.owed_replies:
+            pid = book.owed_replies.pop(0)
+            if pid in self._agents and state.players[pid].alive:
+                # One turn answers the accusation and whatever else had queued
+                # the seat; two back-to-back turns would only repeat it.
+                if pid in round_state.queued:
+                    round_state.queued.discard(pid)
+                    round_state.reply_queue.remove(pid)
+                return pid
+        return None
+
+    def _open_summary_followups(
+        self,
+        state: GameState,
+        round_state: DiscussionRoundState,
+        speaker_id: str,
+        output: DiscussionOutput,
+    ) -> bool:
+        """Queue the answers a summary asked for. False when there is nothing to wait for.
+
+        Each AI seat the summary put a question to answers once, in the order
+        asked, and the summariser then closes with a short designation. A
+        black the summary itself published is owed its answer the same way.
+        The human is never scheduled -- they can answer on their own.
+        """
+        book = self._book_for(round_state)
+        book.summary_speaker = speaker_id
+        named = dict.fromkeys(question.target_id for question in output.directed_questions)
+        book.summary_answers = [
+            target
+            for target in named
+            if target in self._agents and target != speaker_id and state.players[target].alive
+        ]
+        self._collect_owed_replies(state, round_state, book)
+        book.designation_pending = bool(book.summary_answers or book.owed_replies)
+        return book.designation_pending
+
+    def _closing_speaker(
+        self, state: GameState, round_state: DiscussionRoundState, book: _RoundBook
+    ) -> tuple[str | None, str]:
+        """After the summary: its addressees, anyone still owed an answer, then the close.
+
+        Bounded on purpose -- each addressee once, each accusation once, one
+        designation -- and every pick removes itself before it is returned,
+        so a seat whose generation fails cannot hold the close open.
+        """
+        self._collect_owed_replies(state, round_state, book)
+        while book.summary_answers or book.owed_replies:
+            pending = book.summary_answers or book.owed_replies
+            pid = pending.pop(0)
+            if pid in book.owed_replies:
+                book.owed_replies.remove(pid)
+            if pid in self._agents and state.players[pid].alive:
+                pressed = pid in round_state.major_targets
+                return pid, "rebuttal_or_reassessment" if pressed else "reaction"
+        if book.designation_pending:
+            book.designation_pending = False
+            speaker = book.summary_speaker
+            if speaker is not None and speaker in self._agents and state.players[speaker].alive:
+                return speaker, _FINAL_DESIGNATION_STAGE
         return None, "consensus_summary"
 
     def _round_queue_reply(
@@ -920,6 +1224,11 @@ class AICoordinator:
         # What this turn's prompt will put to the seat. Only these are served by
         # it: a question asked while the model is generating has not been seen.
         shown_questions = self._open_questions(player_id)
+        # The closing designation is the wrap-up turn plus one line; see
+        # `_FINAL_DESIGNATION_STAGE`.
+        context_stage = (
+            "consensus_summary" if stage == _FINAL_DESIGNATION_STAGE else stage
+        )
         decision = None
         if self.reasoning is not None:
             decision = self.reasoning.discussion_decision(
@@ -934,18 +1243,22 @@ class AICoordinator:
             system, messages = self._context.build_discussion_context(
                 state,
                 player_id,
-                stage,
+                context_stage,
                 board_memo=self.reasoning.board_memo(state, player_id),
-                required_lines=self._required_lines(state, decision),
+                required_lines=self._required_lines(state, player_id, decision),
             )
         else:
-            system, messages = self._context.build_discussion_context(state, player_id, stage)
+            system, messages = self._context.build_discussion_context(
+                state, player_id, context_stage
+            )
             if decision is not None:
                 messages = [
                     *messages[:-1],
                     Message(role="user", content=decision.render_brief()),
                     messages[-1],
                 ]
+        if stage == _FINAL_DESIGNATION_STAGE:
+            system += _FINAL_DESIGNATION_NOTE
         freemason_opening = self._freemason_opening(state, player_id)
         freemason_must_hide = self._freemason_must_hide(state, player_id)
         if freemason_opening is not None:
