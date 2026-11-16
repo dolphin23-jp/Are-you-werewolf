@@ -90,7 +90,7 @@ from app.ai.provider.budget import BudgetExceeded, EvaluationBudget
 # wrapper already extended is not given the schema a second time.
 from app.ai.provider.json_instruction import _SCHEMA_MARKER
 from app.ai.provider.json_parsing import parse_permissive, parse_strict
-from app.ai.provider.pricing import REFUSAL_FALLBACK_MODELS, ModelPrice, cost_usd, price_for
+from app.ai.provider.pricing import ModelPrice, cost_usd, price_for, worst_case_price
 from app.config import ANTHROPIC_EFFORT_LEVELS, DEFAULT_ANTHROPIC_EFFORT_BY_KIND
 
 _LOGGER = logging.getLogger("app.ai.provider.anthropic")
@@ -415,20 +415,15 @@ class AnthropicClaudeProvider:
         # of this provider: the same schema will be refused the same way.
         self._grammar_rejected: set[str] = set()
 
-        configured_price, known = price_for(model)
-        if not known:
+        if not price_for(model)[1]:
             _LOGGER.warning(
                 "no list price for model %r; cost estimates use the most expensive known row",
                 model,
             )
-        self._worst_case_price = configured_price
-        if fallbacks:
-            # A refused turn may be re-served by a fallback model, possibly a
-            # dearer one, so a reservation must cover the dearest of them.
-            for fallback_model in REFUSAL_FALLBACK_MODELS:
-                self._worst_case_price = self._worst_case_price.elementwise_max(
-                    price_for(fallback_model)[0]
-                )
+        # A refused turn may be re-served by a fallback model, possibly a
+        # dearer one, so a reservation must cover the dearest of the models
+        # *this* model falls back to (Sonnet 5.5 -> Sonnet 5, not Opus 5).
+        self._worst_case_price = worst_case_price(model, fallbacks=fallbacks)
 
     @property
     def model(self) -> str:

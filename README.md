@@ -1,7 +1,7 @@
 # Are you werewolf?
 
 AI 16人と挑む、本格チャット人狼ゲーム。人間1人 + 生成AI16人の17人人狼を、
-Anthropic API 経由の **Claude**(既定は Claude Opus 5.5)で動かします。
+Anthropic API 経由の **Claude**(既定は Claude Sonnet 5.5。Claude Opus 5.5 も選べます)で動かします。
 
 過去の実装(Claude Haiku ベース)の設計思想 —
 エンジン/AI分離、5層プロンプト構成、人格システム、人狼陣営の欺瞞パターン
@@ -69,12 +69,12 @@ APIキーを発行します。キーが漏れても、使われる額はその�
 
    | Name | 既定値 | 意味 |
    |---|---|---|
-   | `WEREWOLF_ANTHROPIC_MODEL` | `claude-opus-5-5` | 使うモデル |
+   | `WEREWOLF_ANTHROPIC_MODEL` | `claude-sonnet-5-5` | 使うモデル(Opus にするなら `claude-opus-5-5`) |
    | `WEREWOLF_SESSION_MAX_COST_USD` | `30` | 1セッションあたりの推定API費用の上限(USD)。超えるとそのセッションではそれ以上APIを呼びません |
 
    `WEREWOLF_LLM_PROVIDER` はモデル名ではなくプロバイダ種別です。値には
    `anthropic` だけを入力します(モデルは `WEREWOLF_ANTHROPIC_MODEL` で指定します)。
-   誤って `claude-sonnet-5-5` のようなモデル名を入れた場合は、`WEREWOLF_ANTHROPIC_MODEL`
+   誤って `claude-opus-5-5` のようなモデル名を入れた場合は、`WEREWOLF_ANTHROPIC_MODEL`
    が未設定ならそのモデルで動き、別のモデル名が設定されていれば起動時にエラーで止まります。
    キーの名前は `ANTHROPIC_API_KEY` ではなく **`WEREWOLF_ANTHROPIC_API_KEY`** です。
    ほかのツール向けの `ANTHROPIC_*` を誤って使わないよう、このアプリは
@@ -185,7 +185,7 @@ Codespaceを毎回起動せず、スマートフォンなどから同じURLで�
 ```text
 WEREWOLF_LLM_PROVIDER=anthropic
 WEREWOLF_ANTHROPIC_API_KEY=<実際のキー>
-WEREWOLF_ANTHROPIC_MODEL=claude-opus-5-5
+WEREWOLF_ANTHROPIC_MODEL=claude-sonnet-5-5
 WEREWOLF_ACCESS_PASSWORD=<長いランダムなパスワード>
 WEREWOLF_SESSION_MAX_COST_USD=30
 ```

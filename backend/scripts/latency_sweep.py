@@ -121,6 +121,11 @@ EXPECTED_OUTPUT_TOKENS: dict[str, int] = {
 
 _MODEL_ID_RE = re.compile(r"claude-[a-z0-9]+(?:-[a-z0-9]+)*")
 _ERROR_TEXT_LIMIT = 200
+# How much of an answer that did not validate is kept on its row. The first
+# sweep's one invalid answer (a fast-mode discussion turn that ended normally,
+# 154 characters) was dropped, so its cause could not be read; a discussion
+# answer is a few hundred characters, so this keeps the whole of almost any.
+INVALID_TEXT_LIMIT = 2000
 
 
 # --- configs -----------------------------------------------------------------
@@ -493,6 +498,11 @@ class SweepRow:
     cost_usd: float = 0.0
     status_code: int | None = None
     error: str | None = None
+    # Only for an answer whose text did not validate: its first
+    # `INVALID_TEXT_LIMIT` characters and the first validation error, so the
+    # next sweep can tell a schema miss from a truncation or stray prose.
+    invalid_text: str | None = None
+    validation_error: str | None = None
 
     @property
     def completed(self) -> bool:
@@ -612,8 +622,36 @@ def _fill_from_message(row: SweepRow, message: Any, response_schema: type[BaseMo
         try:
             response_schema.model_validate_json(text)
             row.json_valid = True
-        except ValidationError:
+        except ValidationError as exc:
             row.json_valid = False
+            row.invalid_text = text[:INVALID_TEXT_LIMIT]
+            row.validation_error = _first_validation_error(exc)
+
+
+def row_status(row: SweepRow) -> str:
+    """One word or phrase for the progress line: why a row did not succeed.
+
+    An answer that ended normally but did not validate used to print its
+    stop reason, `end_turn`, which reads as success; it now says what failed.
+    """
+    if row.succeeded:
+        return "ok"
+    if row.error:
+        return row.error
+    if row.stop_reason not in (None, "end_turn"):
+        return str(row.stop_reason)
+    return f"invalid json: {row.validation_error}" if row.validation_error else "invalid json"
+
+
+def _first_validation_error(exc: ValidationError) -> str:
+    """`field.path: message` of the first error, bounded like `error`."""
+    errors = exc.errors()
+    if not errors:
+        return str(exc)[:_ERROR_TEXT_LIMIT]
+    first = errors[0]
+    location = ".".join(str(part) for part in first.get("loc", ()))
+    message = f"{location}: {first['msg']}" if location else str(first["msg"])
+    return message[:_ERROR_TEXT_LIMIT]
 
 
 async def measure(
@@ -1000,6 +1038,8 @@ def render_summary(
         "- 成功: ストリームが最後まで届き、本文の JSON がスキーマに合った要求。",
         "- 最初の文字: 最初の本文(text)の断片が届くまで。思考のあいだは何も表示されない。",
         "- 拒否は `stop_reason=refusal`。種類は rows.csv の `refusal_category`。",
+        f"- 本文がスキーマに合わなかった要求は、本文の先頭{INVALID_TEXT_LIMIT}字と"
+        "最初の検証エラーを rows.csv の `invalid_text`・`validation_error` に残す。",
         "- p90 は n が小さいと粗い(線形補間)。",
     ]
     if fallback:
@@ -1198,7 +1238,7 @@ async def main(
     def on_row(row: SweepRow) -> None:
         with rows_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(_row_dict(row), ensure_ascii=False) + "\n")
-        status = "ok" if row.succeeded else (row.error or row.stop_reason or "invalid json")
+        status = row_status(row)
         print(
             f"  [{row.order + 1}/{plan.requests}] {row.config} {row.schema} "
             f"first_text={_fmt_s(row.first_text_s)}s total={_fmt_s(row.total_s)}s {status}",

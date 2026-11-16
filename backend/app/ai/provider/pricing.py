@@ -10,9 +10,9 @@ Every figure is USD per million tokens. Sources:
     (platform.claude.com/docs/en/about-claude/pricing) on 2026-11-15:
     `claude-opus-5-5`, `claude-sonnet-5-5`, `claude-haiku-5-5`.
   - Taken from the bundled claude-api skill reference, not re-fetched:
-    `claude-opus-5`, `claude-opus-4-8` (the models a server-side refusal
-    fallback may serve a turn with), `claude-fable-5-2`, and Opus 5.5 fast
-    mode.
+    `claude-opus-5`, `claude-opus-4-8`, `claude-sonnet-5` (the models a
+    server-side refusal fallback may serve a turn with), `claude-fable-5-2`,
+    and Opus 5.5 fast mode.
 
 A price here can go stale without any error, so a model this table does not
 know is priced at the most expensive standard row and reported as unknown
@@ -23,6 +23,7 @@ early, under-estimating it lets one overspend.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, fields
 
 _PER_MILLION = 1_000_000
@@ -58,6 +59,9 @@ STANDARD_PRICES: dict[str, ModelPrice] = {
     # From the skill reference.
     "claude-opus-5": ModelPrice(5.0, 6.25, 10.0, 0.50, 25.0),
     "claude-opus-4-8": ModelPrice(5.0, 6.25, 10.0, 0.50, 25.0),
+    # Sonnet 5.5's prices, except cache reads at twice Sonnet 5.5's rate
+    # (skill reference, "Migrating to Claude Sonnet 5.5").
+    "claude-sonnet-5": ModelPrice(2.0, 2.50, 4.0, 0.20, 10.0),
     "claude-fable-5-2": ModelPrice(8.0, 10.0, 16.0, 0.20, 40.0),
 }
 
@@ -66,8 +70,17 @@ FAST_PRICES: dict[str, ModelPrice] = {
     "claude-opus-5-5": ModelPrice(8.0, 10.0, 16.0, 0.40, 40.0),
 }
 
-# The models a `fallbacks="default"` turn may be re-run on after a refusal.
-REFUSAL_FALLBACK_MODELS: tuple[str, ...] = ("claude-opus-5", "claude-opus-4-8")
+# The models a `fallbacks="default"` turn may be re-run on after a refusal, by
+# the model that was asked (skill reference): a declined Sonnet 5.5 turn goes
+# to Sonnet 5, a declined Opus 5.5 turn to Opus 5 or Opus 4.8, and Haiku 5.5
+# has no server-side fallback. Keyed per requested model because one fixed
+# Opus pair priced every Sonnet call's worst case at Opus 5 rates -- 2.5x the
+# output rate -- and a per-game cap then refused calls far below real spend.
+_REFUSAL_FALLBACKS_BY_MODEL: dict[str, tuple[str, ...]] = {
+    "claude-sonnet-5-5": ("claude-sonnet-5",),
+    "claude-opus-5-5": ("claude-opus-5", "claude-opus-4-8"),
+    "claude-haiku-5-5": (),
+}
 
 # What a model id may carry after a known table key and still be that model:
 # a dated snapshot (`-20261101`), optionally followed by anything a platform
@@ -100,28 +113,65 @@ def _most_expensive(table: dict[str, ModelPrice]) -> ModelPrice:
 _UNKNOWN_MODEL_PRICE = _most_expensive(STANDARD_PRICES)
 
 
+def _table_key(model: str, keys: Iterable[str]) -> str | None:
+    """The table key a model id names: itself, or the longest key it extends
+    by a snapshot suffix. `claude-opus-5` is a prefix of both
+    `claude-opus-5-5-20261101` and `claude-opus-5-20260601`, which is why the
+    longest key wins."""
+    normalized = model.strip().lower()
+    keys = list(keys)
+    if normalized in keys:
+        return normalized
+    candidates = [
+        key
+        for key in keys
+        if normalized.startswith(key) and _SNAPSHOT_SUFFIX_RE.fullmatch(normalized[len(key) :])
+    ]
+    return max(candidates, key=len) if candidates else None
+
+
 def price_for(model: str, speed: str | None = None) -> tuple[ModelPrice, bool]:
     """Return `(price, known)` for a model id as the API reports it.
 
     Matches the exact id first, then the longest table key the id extends by
     a snapshot suffix, so `claude-opus-5-5-20261101` is Opus 5.5 while
-    `claude-opus-5-20260601` is Opus 5 -- `claude-opus-5` is a prefix of both,
-    which is why the longest key wins. Anything else is unknown and priced at
+    `claude-opus-5-20260601` is Opus 5. Anything else is unknown and priced at
     the most expensive standard row.
     """
     table = FAST_PRICES if speed == "fast" else STANDARD_PRICES
-    normalized = model.strip().lower()
-    exact = table.get(normalized)
-    if exact is not None:
-        return exact, True
-    candidates = [
-        key
-        for key in table
-        if normalized.startswith(key) and _SNAPSHOT_SUFFIX_RE.fullmatch(normalized[len(key) :])
-    ]
-    if candidates:
-        return table[max(candidates, key=len)], True
+    key = _table_key(model, table)
+    if key is not None:
+        return table[key], True
     return _UNKNOWN_MODEL_PRICE, False
+
+
+def refusal_fallback_models(model: str) -> tuple[str, ...]:
+    """The models a refused turn of `model` may be re-served by.
+
+    A model this module has no fallback route for may be routed anywhere, so
+    it gets every fallback model listed: an over-reservation stops a budgeted
+    run early, an under-reservation lets one call cross its cap.
+    """
+    key = _table_key(model, _REFUSAL_FALLBACKS_BY_MODEL)
+    if key is not None:
+        return _REFUSAL_FALLBACKS_BY_MODEL[key]
+    union: list[str] = []
+    for fallbacks in _REFUSAL_FALLBACKS_BY_MODEL.values():
+        union.extend(fallback for fallback in fallbacks if fallback not in union)
+    return tuple(union)
+
+
+def worst_case_price(model: str, *, fallbacks: bool) -> ModelPrice:
+    """The dearest rate, column by column, any attempt of one call can bill.
+
+    With refusal fallbacks on, the requested model's attempt may be followed
+    by one on a fallback model, and which one is not known in advance.
+    """
+    price = price_for(model)[0]
+    if fallbacks:
+        for fallback in refusal_fallback_models(model):
+            price = price.elementwise_max(price_for(fallback)[0])
+    return price
 
 
 def cost_usd(

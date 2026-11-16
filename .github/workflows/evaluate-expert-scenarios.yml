@@ -119,7 +119,7 @@ jobs:
           PROVIDER: ${{ inputs.provider }}
           WEREWOLF_LLM_PROVIDER: ${{ inputs.provider }}
           WEREWOLF_ANTHROPIC_API_KEY: ${{ inputs.provider == 'anthropic' && secrets.WEREWOLF_ANTHROPIC_API_KEY || '' }}
-          WEREWOLF_ANTHROPIC_MODEL: ${{ vars.WEREWOLF_ANTHROPIC_MODEL || 'claude-opus-5-5' }}
+          WEREWOLF_ANTHROPIC_MODEL: ${{ vars.WEREWOLF_ANTHROPIC_MODEL || 'claude-sonnet-5-5' }}
           WEREWOLF_ANTHROPIC_FALLBACKS: ${{ vars.WEREWOLF_ANTHROPIC_FALLBACKS || 'default' }}
           LUNA_API_KEY: ${{ inputs.provider == 'luna' && secrets.LUNA_API_KEY || '' }}
           LUNA_BASE_URL: ${{ inputs.provider == 'luna' && secrets.LUNA_BASE_URL || '' }}
@@ -139,7 +139,7 @@ jobs:
           OUTPUT_DIR: ${{ steps.inputs.outputs.output_dir }}
           WEREWOLF_LLM_PROVIDER: ${{ inputs.provider == 'baseline' && 'mock' || inputs.provider }}
           WEREWOLF_ANTHROPIC_API_KEY: ${{ inputs.provider == 'anthropic' && secrets.WEREWOLF_ANTHROPIC_API_KEY || '' }}
-          WEREWOLF_ANTHROPIC_MODEL: ${{ vars.WEREWOLF_ANTHROPIC_MODEL || 'claude-opus-5-5' }}
+          WEREWOLF_ANTHROPIC_MODEL: ${{ vars.WEREWOLF_ANTHROPIC_MODEL || 'claude-sonnet-5-5' }}
           WEREWOLF_ANTHROPIC_FALLBACKS: ${{ vars.WEREWOLF_ANTHROPIC_FALLBACKS || 'default' }}
           LUNA_API_KEY: ${{ inputs.provider == 'luna' && secrets.LUNA_API_KEY || '' }}
           LUNA_BASE_URL: ${{ inputs.provider == 'luna' && secrets.LUNA_BASE_URL || '' }}

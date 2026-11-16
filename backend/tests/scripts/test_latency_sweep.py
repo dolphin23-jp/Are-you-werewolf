@@ -496,6 +496,42 @@ async def test_invalid_json_is_counted_as_a_failure_not_an_error():
     assert row.error is None
 
 
+async def test_an_answer_that_did_not_validate_keeps_its_text_for_diagnosis():
+    """The first sweep had one fast-mode discussion answer that ended normally
+    but did not validate (154 characters), and nothing of it was kept, so the
+    cause could not be read. A row that fails validation keeps its text (a
+    bounded prefix) and the first validation error."""
+    text = '{"reason": "no target"}'
+    row, _ = await _measure(_vote_server(text=text), _job(_prompt(0)))
+
+    assert row.invalid_text == text
+    assert row.validation_error is not None and "vote_target" in row.validation_error
+
+
+async def test_a_long_invalid_answer_keeps_a_bounded_prefix():
+    text = '{"reason": "' + "長" * 5000
+    row, _ = await _measure(_vote_server(text=text), _job(_prompt(0)))
+
+    assert row.invalid_text is not None
+    assert len(row.invalid_text) == sweep.INVALID_TEXT_LIMIT
+    assert text.startswith(row.invalid_text)
+
+
+async def test_a_valid_answer_keeps_no_text():
+    row, _ = await _measure(_vote_server(), _job(_prompt(0)))
+
+    assert row.json_valid
+    assert row.invalid_text is None and row.validation_error is None
+    assert sweep.row_status(row) == "ok"
+
+
+async def test_the_progress_line_says_an_end_turn_answer_did_not_validate():
+    row, _ = await _measure(_vote_server(text='{"reason": "x"}'), _job(_prompt(0)))
+
+    assert row.stop_reason == "end_turn"
+    assert sweep.row_status(row).startswith("invalid json: vote_target")
+
+
 async def test_http_errors_become_rows_and_are_charged_like_the_provider_charges_them():
     prompt = _prompt(0, chars=1000)
     job = _job(prompt)

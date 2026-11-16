@@ -51,9 +51,34 @@ _TEMPLATE_PHRASE_RE = re.compile(
     r"|反対材料"
     r"|第二候補は"
 )
+# The canonical fact sentences `ensure_fact_sentences` (app/ai/reasoning/claims.py)
+# prepends when the prose does not state a declared CO or result -- the
+# `render_*_sentence` wording, at the very start of the line. The transcript
+# does not record what the code added, so this reads the wording: the labels
+# are the code's (`占いCO。`, where a player writes 占い師CO), and a verdict is
+# spelled `黒(人狼)` / `白(人狼ではない)`. In the first Claude game these opened 11
+# of 77 lines, one of them announcing the same result twice; the template rate
+# counted none of them.
+_CLAIM_LABEL = r"(?:占い|霊媒|狩人|共有)"
+_VERDICT = r"(?:黒\(人狼\)|白\(人狼ではない\))"
+_CODE_FACT_SENTENCE_RE = re.compile(
+    rf"(?:{_CLAIM_LABEL}CO。"
+    rf"|{_CLAIM_LABEL}COします。"
+    rf"|先ほどの{_CLAIM_LABEL}COを撤回します。"
+    rf"|{_CLAIM_LABEL}COを取り下げ、{_CLAIM_LABEL}COに変更します。"
+    rf"|(?:占い|霊媒)結果、[^、。]+?は{_VERDICT}です。"
+    rf"|[^、。]+?への(?:占い|霊媒)結果を撤回します。"
+    rf"|訂正します。[^、。]+?への(?:占い|霊媒)結果は{_VERDICT}です。)+"
+)
 # `名前(pN)` in public speech. Humans say names; the id form is a prompt
 # convention that leaked into what the table reads.
 _ID_MENTION_RE = re.compile(r"\(p\d+\)")
+# Bigram Jaccard at or above which the next seat is taken to restate the line
+# before it. Set on the first Claude game: the one restatement a reader flagged
+# (day 3, マコト then アカリ) scored 0.43, the next two echoes 0.25-0.26, and
+# the median adjacent pair 0.09.
+_ADJACENT_RESTATEMENT_JACCARD = 0.25
+_EXAMPLE_TEXT_CHARS = 80
 
 
 _META_LEAK_RE = re.compile(
@@ -472,14 +497,51 @@ def _check_ledger_results(t: GameTranscript, result: AnalysisResult) -> None:
 
 # Words a player uses to say they took a point or are dropping one. Counted next
 # to what they then did: saying it and not moving is the pattern worth seeing.
+# The last three are how a seat says it changed its mind; the first Claude game's
+# clearest change of mind (「リクさんの指摘で考えを変えます」) matched nothing.
 _ACK_RE = re.compile(
     r"確かに|なるほど|その通り|言う通り|言うとおり|納得|認め|撤回|考え直|見直|取り下げ"
+    r"|考えを変え|指摘で変え|引っ込め"
 )
+# 認め that is not the speaker taking a point: thanking or judging someone
+# else's admission (「認めてくださって」「認めたのは評価する」), or pointing back to
+# a concession already made (「前に認めた通り」 -- the short reply the prompt asks
+# for when the same objection comes back). All three were counted as "took the
+# point and did not move" in the first Claude game.
+_ACK_NOT_TAKEN_RE = re.compile(
+    r"認めて(?:くださ|くれ|もら|いただ)"
+    r"|認めた(?:の|こと)は"
+    r"|(?:前に|前にも|さっき|さっきも|先ほど|先程|昨日|昨日も)認め"
+)
+# A turn after the acknowledgement: "that is fair, *but* ...". でも and ただ also
+# occur inside words (「狼でも」「ただの」), so they count only at a clause start.
+_ADVERSATIVE_RE = re.compile(
+    r"(?:^|[。、，,！？!?…\s])(?:でも|ただ(?!の)|だが|しかし|それでも|とはいえ)"
+    r"|けど|けれど|(?:ます|です|だ|る)が[、,]"
+)
+# A reason given after that turn. Surface markers only: a concession that keeps
+# the view *and says why* reads differently from one that just keeps it.
+_REASON_RE = re.compile(r"から|ので|ため|なら|以上|理由|根拠|証拠|矛盾")
 
 
 def _stated_candidate(utterance: Utterance) -> str | None:
     value = (utterance.reasoning_memo or {}).get("execution_target")
     return value if isinstance(value, str) and value else None
+
+
+def _acknowledgement(text: str) -> re.Match[str] | None:
+    """The first acknowledgement word that is the speaker taking a point."""
+    not_taken = [match.span() for match in _ACK_NOT_TAKEN_RE.finditer(text)]
+    for match in _ACK_RE.finditer(text):
+        if not any(start <= match.start() < end for start, end in not_taken):
+            return match
+    return None
+
+
+def _keeps_view_with_reason(text: str, after: int) -> bool:
+    """Whether a turn (でも, ただ, …) and then a reason follow position `after`."""
+    turn = _ADVERSATIVE_RE.search(text, after)
+    return turn is not None and _REASON_RE.search(text, turn.end()) is not None
 
 
 def _collect_stance_stats(t: GameTranscript, result: AnalysisResult) -> None:
@@ -488,6 +550,15 @@ def _collect_stance_stats(t: GameTranscript, result: AnalysisResult) -> None:
     A change because the old candidate died is no change of mind, so those are
     counted apart. What is left is what a person at the table would call
     listening: the candidate moved while the old one was still alive.
+
+    "Unchanged" can only be seen where both turns state a candidate. The model
+    leaves `execution_target` blank on a third of its turns, and in the first
+    Claude game 11 of the 19 "took the point and did not move" turns had a
+    blank side -- some of them had in fact moved. So the observable pairs are
+    the denominator (`observable_follow_ups`), a blank side is its own bucket,
+    and a same-candidate acknowledgement is split by whether the speaker
+    turned and gave a reason (a partial concession) or did not (the empty
+    promise this metric exists to find).
     """
     deaths = {
         record["player_id"]: record["day"] for record in t.final_state.get("death_records", [])
@@ -498,31 +569,48 @@ def _collect_stance_stats(t: GameTranscript, result: AnalysisResult) -> None:
     # Transcripts from before the reply target was recorded cannot say.
     replies_known = any(u.reply_to is not None for u in t.by_kind("discussion"))
 
-    follow_ups = forced = moved = same_day = replying = acknowledging = unmoved = 0
+    follow_ups = observable = forced = moved = same_day = replying = acknowledging = 0
+    unmoved = unmoved_with_reason = unstated = unstated_acknowledged = adopted = 0
     for turns in by_player.values():
         for before, after in zip(turns, turns[1:], strict=False):
             follow_ups += 1
             was, now = _stated_candidate(before), _stated_candidate(after)
-            acknowledged = _ACK_RE.search(after.text) is not None
-            if was and now and was != now:
-                died_on = deaths.get(was)
-                if died_on is not None and before.day <= died_on < after.day:
-                    forced += 1
-                    continue
+            acknowledgement = _acknowledgement(after.text)
+            if not (was and now):
+                unstated += 1
+                if acknowledgement is not None:
+                    unstated_acknowledged += 1
+                    adopted += was is None and now is not None
+                continue
+            died_on = deaths.get(was)
+            if died_on is not None and before.day <= died_on < after.day:
+                # Moving off a dead candidate is no change of mind; keeping one
+                # is a different defect (`treats_dead_player_as_active`).
+                forced += was != now
+                continue
+            observable += 1
+            if was != now:
                 moved += 1
                 same_day += before.day == after.day
                 replying += after.reply_to is not None
-                acknowledging += acknowledged
-            elif acknowledged:
+                acknowledging += acknowledgement is not None
+            elif acknowledgement is not None:
                 unmoved += 1
+                unmoved_with_reason += _keeps_view_with_reason(after.text, acknowledgement.end())
     result.stats["stance"] = {
         "follow_up_turns": follow_ups,
+        "observable_follow_ups": observable,
         "forced_changes": forced,
         "voluntary_changes": moved,
         "voluntary_changes_same_day": same_day,
         "voluntary_changes_replying": replying if replies_known else None,
         "voluntary_changes_acknowledged": acknowledging,
         "acknowledged_without_change": unmoved,
+        "acknowledged_without_change_with_reason": unmoved_with_reason,
+        "acknowledged_without_change_no_reason": unmoved - unmoved_with_reason,
+        "target_unstated_follow_ups": unstated,
+        "target_unstated_acknowledged": unstated_acknowledged,
+        "target_adopted_acknowledged": adopted,
     }
 
 
@@ -603,11 +691,16 @@ def _collect_format_stats(t: GameTranscript, result: AnalysisResult) -> None:
     # AI public lines only: the human seat's wording is not the AI layer's to
     # answer for, and the id/template rates are claims about the AI layer.
     ai_public = [u.text for u in discussions]
+    prompt_template_lines = [bool(_TEMPLATE_PHRASE_RE.search(text)) for text in ai_public]
+    code_fact_lines = [bool(_CODE_FACT_SENTENCE_RE.match(text)) for text in ai_public]
     public_days = {int(message.get("day", 0)) for message in public_chat}
     question_count = sum(len(u.directed_question_targets) for u in discussions)
-    pending_count = sum(
-        len(questions) for questions in t.final_state.get("pending_questions", {}).values()
-    )
+    pending = [
+        question
+        for questions in t.final_state.get("pending_questions", {}).values()
+        for question in questions
+    ]
+    adjacent = _adjacent_similarities(discussions)
 
     result.stats["speech"] = {
         "utterances": len(speech),
@@ -625,19 +718,45 @@ def _collect_format_stats(t: GameTranscript, result: AnalysisResult) -> None:
             / max(len(public_chat), 1),
             4,
         ),
-        "unanswered_question_rate": round(pending_count / max(question_count, 1), 4),
+        "unanswered_question_rate": round(len(pending) / max(question_count, 1), 4),
+        **_unanswered_split(pending, question_count),
         "cross_player_topic_overlap_rate": round(
             sum(similarity >= 0.35 for similarity in cross_pairs) / max(len(cross_pairs), 1), 4
         ),
         "cross_player_mean_jaccard": round(
             sum(cross_pairs) / max(len(cross_pairs), 1), 4
         ),
+        # The next seat restating the line before it. Averaged over every pair
+        # of lines (above), one echo disappears among thousands of unrelated pairs.
+        "adjacent_pairs": len(adjacent),
+        "adjacent_mean_jaccard": round(
+            sum(similarity for similarity, _, _ in adjacent) / max(len(adjacent), 1), 4
+        ),
+        "adjacent_overlap_rate": round(
+            sum(similarity >= _ADJACENT_RESTATEMENT_JACCARD for similarity, _, _ in adjacent)
+            / max(len(adjacent), 1),
+            4,
+        ),
+        "adjacent_overlap_examples": _adjacent_examples(adjacent),
+        "utterances_by_stage": _stage_counts(discussions),
         # -- how much the table reads like a chat between people --
+        # Lines carrying wording no player chose: prompt vocabulary the model
+        # repeated, or a fact sentence the code wrote in front of the line.
         "template_phrase_rate": round(
-            sum(bool(_TEMPLATE_PHRASE_RE.search(text)) for text in ai_public)
+            sum(
+                prompt or code
+                for prompt, code in zip(prompt_template_lines, code_fact_lines, strict=True)
+            )
             / max(len(ai_public), 1),
             4,
         ),
+        # The two sources apart. The prompt-vocabulary rate alone is what this
+        # report called the template rate before 2026-11-16 (luna run #11).
+        "prompt_template_phrase_rate": round(
+            sum(prompt_template_lines) / max(len(ai_public), 1), 4
+        ),
+        "code_fact_sentence_lines": sum(code_fact_lines),
+        "code_fact_sentence_rate": round(sum(code_fact_lines) / max(len(ai_public), 1), 4),
         "id_mention_rate": round(
             sum(bool(_ID_MENTION_RE.search(text)) for text in ai_public)
             / max(len(ai_public), 1),
@@ -650,6 +769,90 @@ def _collect_format_stats(t: GameTranscript, result: AnalysisResult) -> None:
             1,
         ),
     }
+
+
+def _unanswered_split(
+    pending: list[dict[str, Any]], question_count: int
+) -> dict[str, float | None]:
+    """The questions still pending at the end, by why they are still pending.
+
+    A question leaves the queue only when its target replies with a link to it
+    (`reply_to` or a reference). One still there either never reached its
+    target (`served` is false: the target got no turn after it, or died) or
+    reached it and got an answer with no link, or none. The first is the turn
+    structure failing the accused; the second is mostly the model answering in
+    prose. In the first Claude game they were 4 and 10 of the 14, and the 4 were
+    the questions that mattered most (last words before a vote). Transcripts
+    that predate `served` cannot be split and say None.
+    """
+    if any("served" not in question for question in pending):
+        return {
+            "unanswered_never_served_rate": None,
+            "unanswered_served_without_reply_link_rate": None,
+        }
+    never_served = sum(1 for question in pending if not question["served"])
+    denominator = max(question_count, 1)
+    return {
+        "unanswered_never_served_rate": round(never_served / denominator, 4),
+        "unanswered_served_without_reply_link_rate": round(
+            (len(pending) - never_served) / denominator, 4
+        ),
+    }
+
+
+def _adjacent_similarities(
+    discussions: list[Utterance],
+) -> list[tuple[float, Utterance, Utterance]]:
+    """Bigram Jaccard of each line with the one before it, same day, other seat."""
+    pairs: list[tuple[float, Utterance, Utterance]] = []
+    for first, second in zip(discussions, discussions[1:], strict=False):
+        if first.day != second.day or first.player_id == second.player_id:
+            continue
+        left, right = _bigrams(first.text), _bigrams(second.text)
+        if left and right:
+            pairs.append((_jaccard(left, right), first, second))
+    return pairs
+
+
+def _adjacent_examples(
+    pairs: list[tuple[float, Utterance, Utterance]], limit: int = 3
+) -> list[dict[str, Any]]:
+    """The strongest restatements, so a rate can be checked against the lines."""
+    over = sorted(
+        (pair for pair in pairs if pair[0] >= _ADJACENT_RESTATEMENT_JACCARD),
+        key=lambda pair: pair[0],
+        reverse=True,
+    )
+    return [
+        {
+            "day": first.day,
+            "first": first.player_id,
+            "second": second.player_id,
+            "jaccard": round(similarity, 4),
+            "first_text": first.text[:_EXAMPLE_TEXT_CHARS],
+            "second_text": second.text[:_EXAMPLE_TEXT_CHARS],
+        }
+        for similarity, first, second in over[:limit]
+    ]
+
+
+def _stage_counts(discussions: list[Utterance]) -> dict[str, int] | None:
+    """Discussion lines per coordinator stage, or None when none was recorded.
+
+    The stage (`immediate`, `rebuttal…`, `consensus_summary`, …) says which
+    slot of the turn structure a line filled -- what the first Claude game's
+    read needed to tell whether a rebuttal turn was ever scheduled. The
+    transcript does not record it yet; read through `getattr` so the count
+    starts as soon as `Utterance` carries a `stage`.
+    """
+    stages = [getattr(u, "stage", None) for u in discussions]
+    if not any(isinstance(stage, str) and stage for stage in stages):
+        return None
+    counts: dict[str, int] = {}
+    for stage in stages:
+        key = stage if isinstance(stage, str) and stage else "unknown"
+        counts[key] = counts.get(key, 0) + 1
+    return counts
 
 
 def _bigrams(text: str) -> set[str]:

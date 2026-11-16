@@ -25,10 +25,15 @@ DEFAULT_LUNA_MODEL = "gpt-6-luna"
 _LUNA_MODEL_NAME_RE = re.compile(r"gpt-[0-9]+(?:\.[0-9]+)*-luna")
 
 # The Claude model the `anthropic` provider asks for when
-# `WEREWOLF_ANTHROPIC_MODEL` is not set. Exactly this id: Opus 5.5 always
-# thinks, and its depth is steered by `output_config.effort` (below), not by a
-# thinking budget.
-DEFAULT_ANTHROPIC_MODEL = "claude-opus-5-5"
+# `WEREWOLF_ANTHROPIC_MODEL` is not set: Sonnet 5.5, the owner's decision of
+# 2026-11-16 (docs/approach-reset-2026-10.md §11.8). On the game's own
+# discussion prompts at `low` effort it finished a turn in 4.0 s at the median
+# (Opus 5.5: 9.2 s; the target is about 5 s) at about 0.44x the cost; its game
+# quality is read on the next paired-seed evaluation. `claude-opus-5-5` stays
+# selectable here. Neither model takes a thinking budget or `disabled`
+# thinking, so the provider never sends `thinking` (adaptive by default) and
+# steers depth with `output_config.effort` (below).
+DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-5-5"
 
 # A Claude model id (`claude-opus-5-5`, `claude-sonnet-5-5-20261101`, ...) typed
 # into the *provider* field. Unambiguous for the same reason as the luna
@@ -142,9 +147,10 @@ class Settings(BaseSettings):
     werewolf_anthropic_timeout_seconds: float = 120.0
     werewolf_anthropic_max_retries: int = 2
     # Floor for every request's `max_tokens`: the larger of this and the
-    # caller's value is sent. Thinking is always on for Opus 5.5 and is billed
-    # against the same budget as the visible JSON, so the small budgets the
-    # agent asks for (sized for a non-thinking model) would truncate mid-object.
+    # caller's value is sent. Sonnet 5.5 and Opus 5.5 think adaptively by
+    # default, and thinking is billed against the same budget as the visible
+    # JSON, so the small budgets the agent asks for (sized for a non-thinking
+    # model) would truncate mid-object.
     # Only tokens actually produced are billed, so a high ceiling costs nothing
     # by itself.
     werewolf_anthropic_max_tokens: int = 12000
@@ -173,9 +179,9 @@ class Settings(BaseSettings):
 
         `_normalize_llm_provider` turns a Claude model id in the provider
         field into `anthropic`; without this the id itself was dropped and
-        the run billed the default model -- Opus 5.5, forty times Haiku's
-        price -- with nothing on screen to show the swap. This runs before
-        the field validators, so it still sees the id as typed.
+        the run billed the default model -- then Opus 5.5, forty times
+        Haiku's price -- with nothing on screen to show the swap. This runs
+        before the field validators, so it still sees the id as typed.
 
         A blank or absent `WEREWOLF_ANTHROPIC_MODEL` takes the id. One that
         names the same model is fine. One that names another model means two

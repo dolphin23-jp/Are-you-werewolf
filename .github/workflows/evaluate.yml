@@ -48,7 +48,7 @@ on:
         type: boolean
         default: false
       judge_model:
-        description: "判定に使うモデル(空欄なら対戦と同じ。例: claude-sonnet-5-5)"
+        description: "判定に使うモデル(空欄なら対戦と同じ。自己採点を避けるなら対戦と別のモデル。例: claude-opus-5-5)"
         required: false
         default: ""
       max_cost_per_game:
@@ -56,7 +56,7 @@ on:
         required: true
         default: "15"
       model:
-        description: "モデル(空欄なら変数 WEREWOLF_ANTHROPIC_MODEL、なければ claude-opus-5-5。luna なら LUNA_MODEL)"
+        description: "モデル(空欄なら変数 WEREWOLF_ANTHROPIC_MODEL、なければ claude-sonnet-5-5。Opus なら claude-opus-5-5。luna なら LUNA_MODEL)"
         required: false
         default: ""
 
@@ -129,7 +129,7 @@ jobs:
           PROVIDER: ${{ inputs.provider }}
           WEREWOLF_LLM_PROVIDER: ${{ inputs.provider }}
           WEREWOLF_ANTHROPIC_API_KEY: ${{ inputs.provider == 'anthropic' && secrets.WEREWOLF_ANTHROPIC_API_KEY || '' }}
-          WEREWOLF_ANTHROPIC_MODEL: ${{ inputs.model || vars.WEREWOLF_ANTHROPIC_MODEL || 'claude-opus-5-5' }}
+          WEREWOLF_ANTHROPIC_MODEL: ${{ inputs.model || vars.WEREWOLF_ANTHROPIC_MODEL || 'claude-sonnet-5-5' }}
           WEREWOLF_ANTHROPIC_FALLBACKS: ${{ vars.WEREWOLF_ANTHROPIC_FALLBACKS || 'default' }}
           WEREWOLF_ANTHROPIC_EFFORT_DISCUSSION: ${{ inputs.effort_discussion }}
           WEREWOLF_ANTHROPIC_EFFORT_CHAT: ${{ inputs.effort_discussion }}
@@ -179,7 +179,7 @@ jobs:
           WEREWOLF_LLM_PROVIDER: ${{ inputs.provider }}
           WEREWOLF_REASONING_ENGINE: ${{ inputs.reasoning_engine }}
           WEREWOLF_ANTHROPIC_API_KEY: ${{ inputs.provider == 'anthropic' && secrets.WEREWOLF_ANTHROPIC_API_KEY || '' }}
-          WEREWOLF_ANTHROPIC_MODEL: ${{ inputs.model || vars.WEREWOLF_ANTHROPIC_MODEL || 'claude-opus-5-5' }}
+          WEREWOLF_ANTHROPIC_MODEL: ${{ inputs.model || vars.WEREWOLF_ANTHROPIC_MODEL || 'claude-sonnet-5-5' }}
           WEREWOLF_ANTHROPIC_FALLBACKS: ${{ vars.WEREWOLF_ANTHROPIC_FALLBACKS || 'default' }}
           WEREWOLF_ANTHROPIC_EFFORT_DISCUSSION: ${{ inputs.effort_discussion }}
           WEREWOLF_ANTHROPIC_EFFORT_CHAT: ${{ inputs.effort_discussion }}
