@@ -44,6 +44,11 @@ class DecisionAuditRecord:
     attempted_public_evidence_ids: tuple[str, ...] = ()
     brief_public_evidence_ids: tuple[str, ...] = ()
     emitted_public_evidence_ids: tuple[str, ...] = ()
+    # A ballot cast by a seat that had no discussion turn that day. Only a
+    # turn used to open an audit, so those ballots were never checked at all
+    # (22 of 69 in the first Claude game, an ally vote among them). The record
+    # carries the vote and nothing else: the seat decided nothing in public.
+    vote_only: bool = False
 
 
 @dataclass(frozen=True)
@@ -61,6 +66,14 @@ class NightActionAuditRecord:
 
 @dataclass(frozen=True)
 class WolfAllyVotePlan:
+    """Why a werewolf's ballot on its own partner was a decision, not a slip.
+
+    `basis` names the rule that recognised it: ``wolf_chat`` when the team
+    talked about voting the partner before the ballot, ``public_mark`` when
+    the table already held the partner as a wolf or a proven fake claimant.
+    Empty for a plan some other caller recorded by hand.
+    """
+
     plan_id: str
     voter_id: str
     target_id: str
@@ -70,6 +83,7 @@ class WolfAllyVotePlan:
     story_reason: str
     strategy_reason: str
     source_event_id: str
+    basis: str = ""
 
 
 @dataclass(frozen=True)

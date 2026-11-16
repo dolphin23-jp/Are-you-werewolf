@@ -50,6 +50,7 @@ from app.ai.reasoning.dialogue import (
 from app.ai.reasoning.facts import PublicFactLedger
 from app.ai.reasoning.observations import ObservationSet
 from app.ai.reasoning.perspectives import (
+    ClaimedStoryPerspective,
     CommonPublicPerspective,
     Perspective,
     PlayerPrivatePerspective,
@@ -119,6 +120,22 @@ class SpeechCandidate:
     player_id: str
     value: float
     reasons: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class PublicMark:
+    """Something the whole table already holds against a seat.
+
+    Either a black published on it, or a role claim the public record proves
+    it cannot hold. Both are public: any seat could cite them, so a werewolf
+    voting a partner marked this way is distancing itself from a lost cause,
+    not betraying a teammate nobody suspected. The id is stable so an audit
+    can point at the mark it relied on.
+    """
+
+    evidence_id: str
+    source_message_id: str
+    explanation: str
 
 
 class ReasoningRuntime:
@@ -498,6 +515,57 @@ class ReasoningRuntime:
             if self._published_colour_contradicts_own(ledger, observations, seat):
                 required.append(player_id)
         return tuple(dict.fromkeys(required))
+
+    def impossible_claim_reasons(self, state: GameState, player_id: str) -> tuple[str, ...]:
+        """Why the public record proves this seat does not hold the role it claims.
+
+        Empty when it might. The test is the claimant's own public story taken
+        at its word -- the claimed card, and the looks it published as the
+        looks it took -- run through the same hard rules every seat uses. If no
+        world fits, nobody needs private knowledge to call the claim fake:
+        a seer CO whose night-1 look survived a two-body night (one body a
+        cursed fox, so the real seer looked at one of the dead) is out. That
+        was ダイキ in the first Claude game, provable from day 2 on.
+        """
+        claimed = PublicFactLedger(state).claimed_role_of(player_id)
+        if claimed is None:
+            return ()
+        self.refresh(state)
+        solver = build_solver(
+            self.observations, ClaimedStoryPerspective(player_id, claimed), cache=self._cache
+        )
+        result = solver.explain_contradiction()
+        return tuple(result.explanations) if result.is_contradictory else ()
+
+    def public_marks(self, state: GameState, player_id: str) -> tuple[PublicMark, ...]:
+        """Everything public that already marks this seat: blacks, a disproved claim."""
+        ledger = PublicFactLedger(state)
+        marks = [
+            PublicMark(
+                evidence_id=f"black:{result.claimant_id}:{result.result_type}:{player_id}",
+                source_message_id=result.source_message_id,
+                explanation=(
+                    f"{result.claimant_id}の{'霊媒' if result.result_type == 'medium' else '占い'}"
+                    f"結果で{player_id}は黒"
+                ),
+            )
+            for result in ledger.public_results()
+            if result.target_id == player_id and result.is_werewolf
+        ]
+        reasons = self.impossible_claim_reasons(state, player_id)
+        if reasons:
+            claim = next(
+                (c for c in ledger.co_declarations() if c.player_id == player_id), None
+            )
+            role = claim.claimed_role.value if claim is not None else "unknown"
+            marks.append(
+                PublicMark(
+                    evidence_id=f"impossible_claim:{player_id}:{role}",
+                    source_message_id=claim.source_message_id if claim is not None else "",
+                    explanation="".join(reasons),
+                )
+            )
+        return tuple(marks)
 
     def _published_colour_contradicts_own(
         self, ledger: PublicFactLedger, observations: ObservationSet, seat: SeatReasoning

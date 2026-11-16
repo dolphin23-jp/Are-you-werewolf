@@ -17,8 +17,10 @@ from __future__ import annotations
 
 import asyncio
 import random
+import re
 import time
 from collections import Counter
+from collections.abc import Sequence
 from dataclasses import replace
 
 from app.ai.co_detection import detect_claimed_role
@@ -45,6 +47,7 @@ from app.ai.reasoning.claims import (
     register_claim_drafts,
 )
 from app.ai.reasoning.dialogue import DiscussionDecision
+from app.ai.reasoning.facts import mentions_player
 from app.ai.reasoning.rendering import (
     displayed_execution_target,
     enforce_execution_target,
@@ -62,7 +65,12 @@ from app.engine.game import GameError
 from app.engine.phases import Phase
 from app.engine.roles import ROLE_DEFINITIONS, RoleName
 from app.engine.speech_events import SpeechEventType
-from app.engine.state import FreemasonPartnerClaim, GameState, PendingQuestion
+from app.engine.state import (
+    ChatChannel,
+    FreemasonPartnerClaim,
+    GameState,
+    PendingQuestion,
+)
 from app.eval.transcript import (
     CorrectionAuditRecord,
     DecisionAuditRecord,
@@ -70,6 +78,7 @@ from app.eval.transcript import (
     ResultPublicationAuditRecord,
     TranscriptRecorder,
     Utterance,
+    WolfAllyVotePlan,
 )
 from app.sessions.models import DiscussionRoundState
 
@@ -130,6 +139,29 @@ _REACTION_MAX_CHARS = 60
 # Private-channel messages are capped at 100 chars by `generate_wolf_chat`; the
 # evaluation harness needs the same number to flag overruns.
 _PRIVATE_CHAT_MAX_CHARS = 100
+
+# A wolf-chat sentence that names a partner and puts it up for the ballot:
+# cutting it loose, voting it, letting it hang, sacrificing it. Read per
+# sentence, so a line about tonight's attack that merely names the partner is
+# no plan to vote for them.
+_SENTENCE_BREAK_RE = re.compile(r"[。！？!?\n]")
+_ALLY_BALLOT_RE = re.compile(
+    r"身内切り|切[るりっろ]|投票|票を?(?:入れ|合わせ|乗せ|集め|置)"
+    r"|吊(?:り|る|ろ|らせ)|処刑|見捨て|捨て[るよろ]|犠牲"
+)
+# What turns that same verb into its opposite ("吊りは避けたい", "投票しない").
+# Checked on the words right after the verb, through at most two particles.
+_NEGATED_AFTER_RE = re.compile(
+    r"^[はをにもで]{0,2}(?:ない|ません|たくない|しない|させない|せない|避け|ダメ|駄目|なし|無し|やめ)"
+)
+
+
+def _plans_ballot_on(sentence: str) -> bool:
+    """Whether a sentence proposes voting (or sacrificing) whoever it names."""
+    for match in _ALLY_BALLOT_RE.finditer(sentence):
+        if not _NEGATED_AFTER_RE.match(sentence[match.end() :]):
+            return True
+    return False
 
 
 def _unwrap_provider(provider: object) -> object:
@@ -1185,13 +1217,7 @@ class AICoordinator:
                     brief_public_evidence_ids=tuple(r.evidence_id for r in public_records),
                     emitted_public_evidence_ids=tuple(r.evidence_id for r in public_records),
                     board_version=self.reasoning.observations.board_version,
-                    public_result_ids_at_decision=tuple(
-                        sorted(
-                            f"{r.claimant_id}:{r.result_type}:{r.referenced_day}:"
-                            f"{r.target_id}:{r.is_werewolf}"
-                            for r in PublicFactLedger(state).public_results()
-                        )
-                    ),
+                    public_result_ids_at_decision=self._public_result_ids(state),
                     correction_ids_at_decision=tuple(
                         sorted(
                             {
@@ -1654,53 +1680,18 @@ class AICoordinator:
         if self._recorder is not None and hasattr(
             self._recorder, "update_latest_decision"
         ):
-            change_kind = "none"
-            change_reason = ""
-            if isinstance(stated_target, str) and actual_target != stated_target:
-                if state.phase is Phase.RUNOFF and stated_target not in candidates:
-                    change_kind = "runoff_restriction"
-                    change_reason = "決選投票の対象制限"
-                elif stated_target not in state.alive_ids():
-                    change_kind = "target_became_invalid"
-                    change_reason = "発言後に対象が無効化"
-                else:
-                    audited = self._recorder.latest_decision(player_id, state.day)
-                    current_results = {
-                        f"{r.claimant_id}:{r.result_type}:{r.referenced_day}:"
-                        f"{r.target_id}:{r.is_werewolf}"
-                        for r in PublicFactLedger(state).public_results()
-                    }
-                    current_corrections = {
-                        item.correction_id for item in self._recorder.transcript.correction_audits
-                    }
-                    if audited and current_corrections - set(
-                        audited.correction_ids_at_decision
-                    ):
-                        change_kind = "correction_accepted"
-                        change_reason = "発言後に事実訂正を受理"
-                    elif audited and current_results - set(
-                        audited.public_result_ids_at_decision
-                    ):
-                        change_kind = "new_public_evidence"
-                        change_reason = "発言後に能力結果が公開"
-                    else:
-                        change_kind = "unexplained"
-                        change_reason = output.reason
-            player = state.players[player_id]
-            ally_vote = bool(
-                actual_target
-                and state.players[actual_target].role is RoleName.WEREWOLF
-                and player.role is RoleName.WEREWOLF
+            # Classified before a ballot-only audit can exist: the comparison
+            # is with what the seat had seen when it last spoke.
+            change_kind, change_reason = self._classify_vote_change(
+                state,
+                player_id,
+                stated_target=stated_target if isinstance(stated_target, str) else None,
+                actual_target=actual_target,
+                candidates=candidates,
+                reason=output.reason,
             )
-            ally_plan = (
-                self._recorder.matching_wolf_ally_vote_plan(
-                    player_id, actual_target, state.day, state.vote_round
-                )
-                if ally_vote
-                and actual_target is not None
-                and hasattr(self._recorder, "matching_wolf_ally_vote_plan")
-                else None
-            )
+            self._ensure_ballot_audit(state, player_id, candidates)
+            ally_vote, ally_vote_planned = self._audit_ally_vote(state, player_id, actual_target)
             self._recorder.update_latest_decision(
                 player_id,
                 state.day,
@@ -1708,9 +1699,7 @@ class AICoordinator:
                 target_change_classification=change_kind,
                 target_change_reason=change_reason,
                 ally_vote=ally_vote,
-                # A strategic team decision must be explicitly recorded; no
-                # such plan exists in the current strategy state.
-                ally_vote_planned=ally_plan is not None,
+                ally_vote_planned=ally_vote_planned,
             )
         # Voting against your own stated plan is legal play, not corruption, so
         # this is recorded rather than corrected -- but silently losing it means
@@ -1728,17 +1717,257 @@ class AICoordinator:
         )
         if mismatch is not None:
             self.validation.vote_plan_mismatches.append(mismatch)
+            # Where the baseline came from. Under v2 it is read back from the
+            # sentence the table saw; under v3 (and legacy) it is the seat's
+            # own plan note, which nobody else ever saw -- calling it a public
+            # statement made the record claim something no one said.
+            baseline = "公開発言では" if self._decides_in_code else "メモでは"
             self._record(
                 state,
                 player_id,
                 "vote_change",
                 text=(
-                    f"公開発言では{mismatch.stated_target}を第一候補としたが、"
+                    f"{baseline}{mismatch.stated_target}を第一候補としたが、"
                     f"最終判断で{mismatch.actual_target}へ変更した。{output.reason}"
                 ),
                 target=mismatch.actual_target,
                 alternative_target=mismatch.stated_target,
             )
+
+    @staticmethod
+    def _public_result_ids(state: GameState) -> tuple[str, ...]:
+        """Every published verdict, in the form decision audits record them."""
+        return tuple(
+            sorted(
+                f"{r.claimant_id}:{r.result_type}:{r.referenced_day}:"
+                f"{r.target_id}:{r.is_werewolf}"
+                for r in PublicFactLedger(state).public_results()
+            )
+        )
+
+    def _classify_vote_change(
+        self,
+        state: GameState,
+        player_id: str,
+        *,
+        stated_target: str | None,
+        actual_target: str | None,
+        candidates: Sequence[str],
+        reason: str,
+    ) -> tuple[str, str]:
+        """Why the ballot left the seat's stated candidate, if it did.
+
+        Each kind below is something the table could see happen after the seat
+        last spoke: a runoff that left the candidate off the ballot, the
+        candidate's death, a correction, a new ability result, or another seat
+        arguing about the old or the new target. Only a change none of them
+        covers is unexplained. The reason the seat wrote is kept either way,
+        but it is not a cause on its own -- the vote prompt asks every ballot
+        for one, so having a reason cannot be what separates the two.
+        """
+        if stated_target is None or actual_target == stated_target:
+            return "none", ""
+        if state.phase is Phase.RUNOFF and stated_target not in candidates:
+            return "runoff_restriction", "決選投票の対象制限"
+        if stated_target not in state.alive_ids():
+            return "target_became_invalid", "発言後に対象が無効化"
+        recorder = self._recorder
+        audited = (
+            recorder.latest_decision(player_id, state.day)
+            if recorder is not None and hasattr(recorder, "latest_decision")
+            else None
+        )
+        if recorder is not None and audited is not None:
+            current_corrections = {
+                item.correction_id for item in recorder.transcript.correction_audits
+            }
+            if current_corrections - set(audited.correction_ids_at_decision):
+                return "correction_accepted", "発言後に事実訂正を受理"
+            if set(self._public_result_ids(state)) - set(audited.public_result_ids_at_decision):
+                return "new_public_evidence", "発言後に能力結果が公開"
+        arguments = self._later_public_arguments(state, player_id, (stated_target, actual_target))
+        if arguments:
+            cited = "、".join(arguments)
+            return "public_argument", f"発言後の公開発言({cited})を受けて変更: {reason}"
+        return "unexplained", reason
+
+    @staticmethod
+    def _later_public_arguments(
+        state: GameState, player_id: str, target_ids: Sequence[str | None]
+    ) -> tuple[str, ...]:
+        """Other seats' public messages today, after this seat's last one, naming a target.
+
+        After its own last word, because the seat named its candidate having
+        already heard everything before it -- an argument it had heard and
+        answered by keeping the candidate cannot be what changed its mind. A
+        message that names only its own author is a defence, not an argument
+        about that seat.
+        """
+        wanted = {target for target in target_ids if target}
+        today = [
+            message
+            for message in state.chat_log
+            if message.day == state.day and message.channel is ChatChannel.PUBLIC
+        ]
+        last_own = max(
+            (index for index, message in enumerate(today) if message.author_id == player_id),
+            default=-1,
+        )
+        ledger = PublicFactLedger(state)
+        return tuple(
+            message.message_id
+            for message in today[last_own + 1 :]
+            if message.author_id != player_id
+            and (set(ledger.mentioned_player_ids(message.content)) - {message.author_id})
+            & wanted
+        )
+
+    def _ensure_ballot_audit(
+        self, state: GameState, player_id: str, candidates: Sequence[str]
+    ) -> None:
+        """Open a ballot-only audit for a seat that had no discussion turn today.
+
+        Audits used to start at a discussion turn, so a seat that never spoke
+        cast a ballot nobody checked -- 22 of the 69 in the first Claude game,
+        a werewolf's vote on its partner among them, so the gate's zero for
+        ally votes was a zero over the seats that happened to speak. v2 and v3
+        only, like the turn audits: legacy keeps no audit at all.
+        """
+        recorder = self._recorder
+        if (
+            recorder is None
+            or self.reasoning is None
+            or not hasattr(recorder, "latest_decision")
+            or recorder.latest_decision(player_id, state.day) is not None
+        ):
+            return
+        recorder.record_decision_audit(
+            DecisionAuditRecord(
+                game_id=state.session_id,
+                day=state.day,
+                phase=state.phase.value,
+                player_id=player_id,
+                board_version=self.reasoning.observations.board_version,
+                public_result_ids_at_decision=self._public_result_ids(state),
+                correction_ids_at_decision=tuple(
+                    sorted({item.correction_id for item in recorder.transcript.correction_audits})
+                ),
+                votable_ids_at_decision=tuple(candidates),
+                vote_only=True,
+            )
+        )
+
+    def _audit_ally_vote(
+        self, state: GameState, player_id: str, actual_target: str | None
+    ) -> tuple[bool, bool]:
+        """Whether this ballot is a werewolf's vote on its partner, and whether it was planned.
+
+        A plan someone recorded beforehand counts first. Otherwise one is
+        recognised from what existed before the ballot (see
+        `_derive_wolf_ally_vote_plan`) and written down, so the transcript
+        says why the gate let it through.
+        """
+        if actual_target is None or actual_target not in state.players:
+            return False, False
+        if not (
+            state.players[player_id].role is RoleName.WEREWOLF
+            and state.players[actual_target].role is RoleName.WEREWOLF
+        ):
+            return False, False
+        recorder = self._recorder
+        if recorder is None:
+            return True, False
+        if (
+            hasattr(recorder, "matching_wolf_ally_vote_plan")
+            and recorder.matching_wolf_ally_vote_plan(
+                player_id, actual_target, state.day, state.vote_round
+            )
+            is not None
+        ):
+            return True, True
+        if self.reasoning is None:
+            return True, False
+        plan = self._derive_wolf_ally_vote_plan(state, player_id, actual_target)
+        if plan is None:
+            return True, False
+        recorder.record_wolf_ally_vote_plan(plan)
+        return True, True
+
+    def _derive_wolf_ally_vote_plan(
+        self, state: GameState, voter_id: str, ally_id: str
+    ) -> WolfAllyVotePlan | None:
+        """Recognise a vote on a partner as a decision already made, or return None.
+
+        Two grounds, both fixed before the ballot was cast:
+
+        * the wolf chat since the last night proposed voting or cutting this
+          partner -- the team decided it together;
+        * the table already marks the partner: a black on them, or a claim the
+          public record proves impossible (`ReasoningRuntime.public_marks`).
+          Voting a partner everyone can see is lost is how a wolf distances
+          itself, not a betrayal -- the first Claude game's day-3 vote by
+          カイト on ダイキ, a seer claim dead since day 2, is the case.
+
+        Anything else is a wolf hanging a teammate nobody had given up on, and
+        stays unplanned: a hard failure at the release gate.
+        """
+        assert self.reasoning is not None
+        marks = self.reasoning.public_marks(state, ally_id)
+        evidence_ids = tuple(mark.evidence_id for mark in marks)
+        plan_id = f"{state.session_id}:{state.day}:{state.vote_round}:{voter_id}:{ally_id}"
+        agreed = self._wolf_chat_ballot_plan(state, ally_id)
+        if agreed is not None:
+            message_id, sentence = agreed
+            return WolfAllyVotePlan(
+                plan_id=plan_id,
+                voter_id=voter_id,
+                target_id=ally_id,
+                day=state.day,
+                round_number=state.vote_round,
+                public_evidence_ids=evidence_ids,
+                story_reason=sentence,
+                strategy_reason="人狼チャットで仲間への投票を決めていた",
+                source_event_id=message_id,
+                basis="wolf_chat",
+            )
+        if not marks:
+            return None
+        return WolfAllyVotePlan(
+            plan_id=plan_id,
+            voter_id=voter_id,
+            target_id=ally_id,
+            day=state.day,
+            round_number=state.vote_round,
+            public_evidence_ids=evidence_ids,
+            story_reason=marks[0].explanation,
+            strategy_reason="公開情報で既に狼か偽と見られている仲間から距離を取る",
+            source_event_id=marks[0].source_message_id or marks[0].evidence_id,
+            basis="public_mark",
+        )
+
+    @staticmethod
+    def _wolf_chat_ballot_plan(state: GameState, ally_id: str) -> tuple[str, str] | None:
+        """The wolf-chat sentence, since last night, that put this partner up for the ballot.
+
+        A leading vocative is dropped first: wolves address each other by
+        name ("ダイキ、明日はミオに投票しよう"), and that names the partner
+        without proposing to vote for them.
+        """
+        name = state.players[ally_id].name
+        vocative = re.compile(
+            rf"^\s*(?:{re.escape(name)}|{re.escape(ally_id)})(?:さん|くん|ちゃん)?\s*[、,，]"
+        )
+        for message in state.chat_log:
+            if message.channel is not ChatChannel.WOLF or message.day not in (
+                state.day - 1,
+                state.day,
+            ):
+                continue
+            for sentence in _SENTENCE_BREAK_RE.split(message.content):
+                body = vocative.sub("", sentence)
+                if mentions_player(body, ally_id, name) and _plans_ballot_on(body):
+                    return message.message_id, sentence.strip()
+        return None
 
     async def _generate_day_summary(self, controller: object, state: GameState) -> None:
         # The factual half is rendered from the ledger, not asked for: who died,
