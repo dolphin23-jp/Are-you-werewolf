@@ -17,6 +17,12 @@ class VoteChangeKind(StrEnum):
     PUBLIC_RESULT_CHANGED = "public_result_changed"
     CORRECTION_ACCEPTED = "correction_accepted"
     STRATEGIC_TEAM_DECISION = "strategic_team_decision"
+    # Someone else named the old or the new target in public after the seat's
+    # own last word that day. Being moved by an argument you heard later is
+    # the listening the game asks for; without this kind it was filed as
+    # unexplained, and the release gate failed on the one change in the first
+    # Claude game that cited exactly such an argument.
+    PUBLIC_ARGUMENT = "public_argument"
     UNEXPLAINED = "unexplained"
 
 
@@ -113,7 +119,9 @@ class ReasoningTranscriptAnalyzer:
             if record.accepted
         ]
         return ReasoningQualityReport(
-            decision_count=len(decisions),
+            # A ballot-only audit records a vote, not a decision made in public:
+            # it counts towards `vote_count` and the ally checks, not here.
+            decision_count=sum(not record.vote_only for record in decisions),
             vote_count=len(changes),
             dead_target_selection_count=sum(
                 not record.target_alive for record in decisions if record.decision_target

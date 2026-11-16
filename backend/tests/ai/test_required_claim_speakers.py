@@ -40,13 +40,79 @@ def test_the_freemason_leader_is_required_until_the_claim_is_made():
 
 
 def test_a_planned_fake_claimant_is_required_until_the_claim_is_made():
+    """...and, being a seer claim, until it carries the morning's result too."""
     state = _board()
     runtime = ReasoningRuntime(state, AI_IDS, seed=1)
     plan = {"p1": RoleName.SEER}
 
     assert "p1" in runtime.required_claim_speakers(state, planned_fake_roles=plan)
     boards.claim(state, "p1", RoleName.SEER, day=2)
+    boards.verdict(state, "p1", "seer", "p9", False, day=2, referenced_day=1)
     assert "p1" not in runtime.required_claim_speakers(state, planned_fake_roles=plan)
+
+
+def test_a_standing_fake_seer_is_a_duty_speaker_each_morning_until_it_reports():
+    """The first Claude game's madman seer reported late twice and once not at all."""
+    state = _board(day=3)
+    boards.claim(state, "p1", RoleName.SEER, day=1)
+    boards.verdict(state, "p1", "seer", "p9", False, day=1, referenced_day=0)
+    boards.verdict(state, "p1", "seer", "p10", False, day=2, referenced_day=1)
+    runtime = ReasoningRuntime(state, AI_IDS, seed=1)
+
+    assert runtime.owes_morning_result(state, "p1") is True
+    assert "p1" in runtime.required_claim_speakers(state)
+    boards.verdict(state, "p1", "seer", "p11", False, day=3, referenced_day=2)
+    assert runtime.owes_morning_result(state, "p1") is False
+    assert "p1" not in runtime.required_claim_speakers(state)
+
+
+def test_a_fake_medium_owes_a_result_only_after_an_execution():
+    state = _board(day=2)
+    boards.claim(state, "p1", RoleName.MEDIUM, day=1)
+    runtime = ReasoningRuntime(state, AI_IDS, seed=1)
+    assert runtime.owes_morning_result(state, "p1") is False
+
+    boards.execute(state, "p9", day=2)
+    state.day = 3
+    assert runtime.owes_morning_result(state, "p1") is True
+    boards.verdict(state, "p1", "medium", "p9", False, day=3, referenced_day=2)
+    assert runtime.owes_morning_result(state, "p1") is False
+
+
+def test_a_real_seer_claimant_holding_last_nights_look_owes_it():
+    state = _board(day=2)
+    boards.claim(state, "p4", RoleName.SEER, day=1)
+    boards.divine(state, "p4", "p9", night=1)
+    runtime = ReasoningRuntime(state, AI_IDS, seed=1)
+
+    assert runtime.owes_morning_result(state, "p4") is True
+    assert "p4" in runtime.required_claim_speakers(state)
+
+
+def test_a_seer_claimant_who_died_overnight_owes_nothing():
+    state = _board(day=2)
+    boards.claim(state, "p1", RoleName.SEER, day=1)
+    boards.die_by_attack(state, "p1", night=1)
+    runtime = ReasoningRuntime(state, AI_IDS, seed=1)
+
+    assert runtime.owes_morning_result(state, "p1") is False
+
+
+def test_a_standing_fake_seer_opens_the_morning_in_a_real_round():
+    """Through `_coded_discussion_round`: in the duty prefix, told what the claim owes."""
+    state = _board(day=3)
+    boards.claim(state, "p1", RoleName.SEER, day=1)
+    boards.verdict(state, "p1", "seer", "p9", False, day=1, referenced_day=0)
+    boards.verdict(state, "p1", "seer", "p10", False, day=2, referenced_day=1)
+    runtime = ReasoningRuntime(state, AI_IDS, seed=1)
+    coordinator = AICoordinator(state, AI_IDS, MockProvider(seed=1), seed=1, reasoning=runtime)
+
+    round_state = asyncio.run(coordinator._start_discussion_round(state))
+
+    assert "p1" in round_state.order[: round_state.immediate_count]
+    decision = runtime.discussion_decision(state, "p1")
+    lines = coordinator._required_lines(state, "p1", decision)
+    assert any("2日目夜の占い結果" in line for line in lines)
 
 
 def test_a_result_holder_without_its_co_is_required():
