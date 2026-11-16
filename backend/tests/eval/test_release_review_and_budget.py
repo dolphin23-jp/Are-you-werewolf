@@ -38,6 +38,60 @@ def test_missing_prices_are_unknown_not_free():
     assert budget.pricing_supplied is False
 
 
+def test_reserve_claims_a_request_and_holds_its_worst_case():
+    budget = EvaluationBudget(max_requests=2, max_estimated_cost=1.0)
+    budget.reserve(0.4)
+    assert budget.used_requests == 1
+    assert budget.reserved_cost == pytest.approx(0.4)
+    # Not spent yet, only held.
+    assert budget.spent_cost == 0.0
+
+
+def test_reserve_refuses_on_the_request_count_like_claim_request():
+    budget = EvaluationBudget(max_requests=1)
+    budget.reserve(0.0)
+    with pytest.raises(BudgetExceeded, match="request budget"):
+        budget.reserve(0.0)
+    assert budget.used_requests == 1
+
+
+def test_in_flight_reservations_count_against_the_cap():
+    """Sixteen parallel votes must not all pass a check only one of them fits."""
+    budget = EvaluationBudget(max_requests=10, max_estimated_cost=1.0)
+    budget.reserve(0.6)
+    with pytest.raises(BudgetExceeded, match="estimated cost"):
+        budget.reserve(0.6)
+    # The refused reservation left nothing behind.
+    assert budget.used_requests == 1
+    assert budget.reserved_cost == pytest.approx(0.6)
+
+
+def test_settle_replaces_the_reservation_with_the_actual_cost():
+    budget = EvaluationBudget(max_requests=10, max_estimated_cost=1.0)
+    budget.reserve(0.6)
+    budget.settle(0.6, 0.05)
+    assert budget.reserved_cost == pytest.approx(0.0)
+    assert budget.spent_cost == pytest.approx(0.05)
+    # Room again now that the worst case did not happen.
+    budget.reserve(0.6)
+    # Costs priced by the provider are known even without per-million prices.
+    assert budget.estimated_cost == pytest.approx(0.05)
+    assert budget.pricing_supplied is True
+    snapshot = budget.snapshot()
+    assert snapshot["spent_cost"] == pytest.approx(0.05)
+    assert snapshot["reserved_cost"] == pytest.approx(0.6)
+
+
+def test_settle_never_raises_but_the_next_reserve_refuses():
+    """The response is already paid for; throwing it away would waste it."""
+    budget = EvaluationBudget(max_requests=10, max_estimated_cost=0.1)
+    budget.reserve(0.1)
+    budget.settle(0.1, 0.15)  # the estimate was too low
+    assert budget.spent_cost == pytest.approx(0.15)
+    with pytest.raises(BudgetExceeded):
+        budget.reserve(0.0)
+
+
 def test_review_is_complete_only_when_every_answer_is_present(tmp_path):
     review = empty_review("game-1")
     assert review.complete is False
