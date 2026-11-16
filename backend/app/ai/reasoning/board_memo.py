@@ -44,8 +44,8 @@ from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
 
-from app.ai.reasoning.facts import MEDIUM_RESULT, SEER_RESULT, PublicFactLedger, PublicResultFact
-from app.ai.reasoning.observations import ObservationSet
+from app.ai.reasoning.facts import MEDIUM_RESULT, SEER_RESULT, PublicFactLedger
+from app.ai.reasoning.observations import ObservationSet, PublicVerdict
 from app.ai.reasoning.perspectives import PlayerPrivatePerspective
 from app.ai.reasoning.solver.backend import AnyOf, Certainty, Hypothesis, RoleIs, has_role
 from app.ai.reasoning.solver.queries import RoleSolver
@@ -289,7 +289,7 @@ def _freemason_note(state: GameState, ledger: PublicFactLedger, claimants: list[
 
 def _verdict_lines(ledger: PublicFactLedger, observations: ObservationSet) -> list[str]:
     """Seer accounts night by night, then medium results by claimant."""
-    lines = _divination_lines(ledger, observations) + _medium_lines(ledger)
+    lines = _divination_lines(ledger, observations) + _medium_lines(ledger, observations)
     return lines or ["- 公開された判定: なし"]
 
 
@@ -352,12 +352,16 @@ def _divination_lines(ledger: PublicFactLedger, observations: ObservationSet) ->
     concluded "only two seats were divined on night 1" by forgetting a dead
     seer's unpublished night. A night a claimant could not act (already dead or
     hanged) has no cell.
+
+    Verdicts are read from the observations, not the raw ledger: the projection
+    dates a restated verdict by the statement it repeats, so mentioning
+    yesterday's result again does not move it into last night's row.
     """
     claimants = _seer_claimants(ledger)
     if not claimants:
         return []
-    published: dict[tuple[str, int], list[PublicResultFact]] = defaultdict(list)
-    for result in ledger.public_results():
+    published: dict[tuple[str, int], list[PublicVerdict]] = defaultdict(list)
+    for result in observations.verdicts:
         if result.result_type == SEER_RESULT:
             published[(result.claimant_id, result.source_night)].append(result)
     nights = sorted(set(range(max(0, observations.day))) | {night for _, night in published})
@@ -382,7 +386,7 @@ def _divination_cell(
     observations: ObservationSet,
     claimant: str,
     night: int,
-    results: list[PublicResultFact],
+    results: list[PublicVerdict],
 ) -> str | None:
     name = ledger.name_of(claimant)
     if results:
@@ -397,8 +401,8 @@ def _divination_cell(
     return f"{name}→未公開"
 
 
-def _medium_lines(ledger: PublicFactLedger) -> list[str]:
-    results = [r for r in ledger.public_results() if r.result_type == MEDIUM_RESULT]
+def _medium_lines(ledger: PublicFactLedger, observations: ObservationSet) -> list[str]:
+    results = [r for r in observations.verdicts if r.result_type == MEDIUM_RESULT]
     if not results:
         return []
     by_claimant: dict[str, list[str]] = defaultdict(list)

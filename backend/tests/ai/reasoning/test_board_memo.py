@@ -289,6 +289,20 @@ def test_day_four_keeps_the_dead_and_drops_nights_a_claimant_could_not_act():
     assert "ダイキは真の占い師ではありえない" in public
 
 
+def test_a_verdict_said_again_stays_on_the_night_and_day_it_was_first_published():
+    state = g1.day_two_morning()
+    boards.execute(state, g1.REN, day=2)
+    boards.verdict(state, g1.DAIKI, "seer", g1.KAITO, False, day=3, referenced_day=2)
+    boards.verdict(state, g1.DAIKI, "seer", g1.SHION, False, day=3)  # mentioned again
+    state.day = 3
+
+    public = _public_part(_g1_memo(state, g1.YUI))
+
+    assert "ダイキ→シオン=白[2日目公開]" in public
+    assert "2日目夜（死体なし）: ダイキ→カイト=白[3日目公開] / アオイ→未公開" in public
+    assert "ダイキは真の占い師ではありえない" in public
+
+
 def test_the_first_games_memo_is_names_only_and_the_same_for_every_seat():
     state = g1.day_two_morning()
     memos = {seat: _g1_memo(state, seat) for seat in (g1.YUI, g1.DAIKI, g1.AOI, g1.MIO, g1.SOTA)}
