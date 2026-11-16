@@ -10,6 +10,8 @@ checks whether the seat actually named it today.
 
 from __future__ import annotations
 
+import pytest
+
 from app.ai.context import ContextBuilder, DaySummaryManager
 from app.ai.deception import FakeClaimGuard, WolfDeceptionAssignment
 from app.ai.personalities import assign_personalities
@@ -93,6 +95,85 @@ def test_only_the_seats_own_lines_from_today_count_as_naming_the_target():
     line = _memo_line(_vote_body(state, "p1", voter="p3"))
 
     assert line == "【今日のメモの吊り先】Player1(卓ではまだ名指ししていない)"
+
+
+FLAGGED = "【今日のメモの吊り先】Player2(卓ではまだ名指ししていない)"
+NAMED = "【今日のメモの吊り先】Player2"
+
+
+@pytest.mark.parametrize(
+    "said",
+    [
+        # The review's flag_repro2.py: a mention is not a push.
+        "Player2さん、私の投票理由は発言の少なさです。",
+        "Player2の説明で納得した。Player2は吊らない。",
+        # flag_repro.py: talked about, cleared, asked about.
+        "Player2さんは白っぽいし信用してる。",
+        "Player3さんに質問。Player2をどう見てる？",
+        # Negated in other words.
+        "Player2さんは吊るべきではない。",
+        "Player2さんへの投票はしない。",
+        "Player2はまだ吊るのは早い。",
+        # The target's own vote, not a vote for the target.
+        "Player2さんの投票先が気になる。",
+        "Player2さんが投票したのはPlayer3。",
+        # A report of an earlier ballot, not today's push.
+        "昨日Player2に投票した。",
+        "僕もPlayer2に入れてたので、そこは材料にならない。",
+        # Someone else's words, quoted.
+        "Player3さんの「Player2吊り」は早いと思う。",
+        # The hang word has another object.
+        "Player2は白だからグレー吊り。",
+    ],
+)
+def test_a_line_that_does_not_put_the_target_up_keeps_the_flag(said: str) -> None:
+    state = _day_two()
+    _say(state, "p1", said, day=2)
+
+    assert _memo_line(_vote_body(state, "p2")) == FLAGGED
+
+
+@pytest.mark.parametrize(
+    "said",
+    [
+        "今日はPlayer2吊り。",
+        "Player2に投票します。",
+        "Player2怪しい、吊りたい。",
+        "今日の吊り先はPlayer2。",
+        "吊りたいのはPlayer2さん。",
+        "Player2さんが第一候補。",
+        "Player2を吊るしかない。",
+        "俺はPlayer2吊りで変えない。",
+        "Player3かPlayer2に投票。",
+        "現時点の第一処刑候補はPlayer2(p2)です。",
+    ],
+)
+def test_a_line_that_puts_the_target_up_drops_the_flag(said: str) -> None:
+    state = _day_two()
+    _say(state, "p1", said, day=2)
+
+    assert _memo_line(_vote_body(state, "p2")) == NAMED
+
+
+def test_a_name_followed_by_a_digit_is_still_named():
+    """「ソウタ1択」: the trailing-digit guard is for labels that end in a digit."""
+    state = _day_two()
+    state.players["p2"].name = "ソウタ"
+    _say(state, "p1", "今日はソウタ1択。", day=2)
+
+    assert _memo_line(_vote_body(state, "p2")) == "【今日のメモの吊り先】ソウタ"
+
+
+def test_a_name_inside_a_longer_seats_name_is_that_seat():
+    """A human サク is not named by a line about サクラ."""
+    state = _day_two()
+    state.players["p2"].name = "サク"
+    state.players["p3"].name = "サクラ"
+    _say(state, "p1", "サクラさん吊りで。", day=2)
+
+    line = _memo_line(_vote_body(state, "p2"))
+
+    assert line == "【今日のメモの吊り先】サク(卓ではまだ名指ししていない)"
 
 
 def test_no_memo_target_is_said_plainly():
