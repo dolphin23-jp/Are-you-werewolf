@@ -1,0 +1,24 @@
+=== 1. 設定の確認 ===
+  [--]  WEREWOLF_LLM_PROVIDER = luna
+  [--]  LUNA_BASE_URL         = ***
+  [--]  LUNA_MODEL            = gpt-6-luna
+  [--]  LUNA_API_KEY          = [redacted] (長さ164)
+
+=== 2. 疎通と認証 ===
+  [--]  このエンドポイント向けに調整: トークン上限パラメータ=max_completion_tokens / temperature=送信しない(既定値のみ対応) / reasoning_effort=送信する
+  [OK]  応答あり (2.61 秒)
+  [--]  送信パラメータ: トークン上限パラメータ=max_completion_tokens / temperature=送信しない(既定値のみ対応) / reasoning_effort=送信する
+  [--]  生の応答: {"vote_target":"p1","reason":"判断材料がないため、ひとまず投票します。"}
+  [OK]  usage を返しています (入力65 / 出力68トークン)
+
+=== 3. 構造化出力の対応状況 ===
+  [NG]  strict JSON-schema 非対応: BadRequestError: Error code: 400 - {'error': {'message': "Invalid schema for response_format 'VoteOutput': In context=(), 'additionalProperties' is required to 
+  [OK]  json_object モードに対応 (1.76 秒)
+
+=== 判定 ===
+  [--]  strict は使えませんが、フォールバック経路で動作します。
+  [--]  レポートの「strict schema で成功」が低く出るのは想定どおりです。
+
+次のステップ:
+  python scripts/evaluate.py --games 1 --provider luna --out eval-out
+  (1ゲームは約280回の呼び出し。今回の1回が入力65トークンだったので、レポートの合計値で実コストを確認してください)
