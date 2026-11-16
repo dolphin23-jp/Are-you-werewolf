@@ -325,21 +325,25 @@ def _dated_by_first_statement(ledger: PublicFactLedger, result: PublicResultFact
     night that nobody made. Saying a verdict again is not a new verdict
     (docs/real_game_log_reasoning_plan.md, principle 3), so a plain restatement
     takes the publication day, night and source message of the run of
-    same-colour statements it continues. A correction, a re-publication after a
-    retraction, and a restatement that names a night of its own are new
-    statements and keep their own date.
+    same-colour statements it continues. Naming the same night again ("昨日も
+    言ったが1日目の夜はp2黒") is still a restatement. A correction, a
+    re-publication after a retraction, and a restatement that names a
+    different night are new statements and keep their own date.
     """
     day, referenced, source = result.day, result.referenced_day, result.source_message_id
-    if referenced is None:
-        run = _restatement_run(
-            ledger.result_versions(
-                claimant_id=result.claimant_id,
-                result_type=result.result_type,
-                target_id=result.target_id,
-            )
+    run = _restatement_run(
+        ledger.result_versions(
+            claimant_id=result.claimant_id,
+            result_type=result.result_type,
+            target_id=result.target_id,
         )
-        if len(run) > 1:
-            origin = run[0]
+    )
+    if len(run) > 1:
+        origin = run[0]
+        origin_night = next(
+            (v.referenced_day for v in run if v.referenced_day is not None), origin.day - 1
+        )
+        if referenced is None or referenced == origin_night:
             day = origin.day
             source = origin.source_message_id or source
             referenced = next((v.referenced_day for v in run if v.referenced_day is not None), None)

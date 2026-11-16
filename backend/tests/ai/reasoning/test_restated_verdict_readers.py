@@ -229,3 +229,32 @@ def test_a_black_restated_with_a_new_night_is_a_new_black_and_owes_a_reply():
 
     assert (speaker, stage) == ("p2", "rebuttal_or_reassessment")
     assert "p2" in round_state.major_targets
+
+
+# -- a restatement that names the same night again --
+#
+# 「昨日も言ったが、1日目の夜はp9黒」 repeats the statement; only a different
+# night is a new account of the timing.
+
+
+def test_a_restatement_naming_the_same_night_is_dated_by_the_statement_it_repeats():
+    state = _board_with_restatement(restated_night=1)
+
+    record = _verdict_evidence(_fresh_engine(state), BLACKED)
+    assert record.explanation == (
+        f"2日目、{SEER}の占い判定で{BLACKED}は黒と公開された（対象の夜: 1日目）。"
+    )
+    assert record.source_event_ids == ("m20",)
+    line = _published_line(render_public_fact_summary(PublicFactLedger(state)))
+    assert f"({BLACKED})" not in line
+    assert f"Player{WHITED[1:]}({WHITED})=白" in line
+
+
+def test_a_black_restated_for_the_same_night_owes_its_target_no_second_reply():
+    state, coordinator = _day_three_table(restated_night=1)
+    round_state = _round(state)
+
+    speaker, stage = coordinator._next_discussion_speaker(state, round_state)
+
+    assert (speaker, stage) != ("p2", "rebuttal_or_reassessment")
+    assert round_state.max_total == 10

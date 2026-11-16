@@ -175,6 +175,9 @@ def render_report(
 
     add(f"\n## 3. {HARD_CORRECTNESS_HEADING}\n")
     add(_render_hard_correctness(per_game))
+    wolf_chat_plans = _render_wolf_chat_plans(games)
+    if wolf_chat_plans:
+        add(f"\n{wolf_chat_plans}")
 
     add("\n## 4. ルールベース検査(役職整合性・矛盾・人狼の連携)\n")
     add(_render_findings(games))
@@ -418,6 +421,51 @@ def _render_hard_correctness(per_game: Sequence[Mapping[str, Any]] | None) -> st
             "止まるまでの分だけを数えています。"
         )
     return "\n".join(out)
+
+
+WOLF_CHAT_PLANS_HEADING = "### 人狼チャットの文から「計画あり」と読んだ仲間への投票"
+
+
+def _render_wolf_chat_plans(games: list[tuple[GameTranscript, AnalysisResult]]) -> str:
+    """Every ballot on a partner that counted as planned because of a wolf-chat line.
+
+    Whether a line planned that ballot is read from its wording by a pattern
+    rule (`coordinator._wolf_chat_ballot_plan`), not established as a fact. It
+    is conservative, and a misreading still makes a betrayal pass the gate as
+    planned -- so each such ballot is listed with the line it rests on, and a
+    reader checks it instead of trusting a count. A ballot planned by a public
+    mark rests on the table's own record and is not listed.
+    """
+    rows: list[str] = []
+    for transcript, _analysis in games:
+        names = transcript.names
+        for plan in transcript.wolf_ally_vote_plans:
+            if plan.basis != "wolf_chat":
+                continue
+            voter = names.get(plan.voter_id, plan.voter_id)
+            target = names.get(plan.target_id, plan.target_id)
+            sentence = plan.story_reason.replace("|", "｜").replace("\n", " ")
+            round_note = f"(決選{plan.round_number}回目)" if plan.round_number > 1 else ""
+            rows.append(
+                f"| {transcript.seed if transcript.seed is not None else '—'} "
+                f"| {plan.day}{round_note} | {voter} → {target} | {sentence} |"
+            )
+    if not rows:
+        return ""
+    return "\n".join(
+        [
+            WOLF_CHAT_PLANS_HEADING,
+            "",
+            "上の「計画のない人狼の仲間投票」に数えなかった投票のうち、人狼チャットの1文を"
+            "コードが「仲間に投票する計画」と読んだものです。読み取りは文の形だけによるので、"
+            "誤読なら実際には計画のない投票です。引用した文を確かめてください"
+            "(公開の黒や偽の確定を根拠にした投票は、卓の記録に基づくので載せていません)。",
+            "",
+            "| seed | 日 | 投票者 → 仲間 | 計画と読んだ文 |",
+            "|---|---|---|---|",
+            *rows,
+        ]
+    )
 
 
 def _render_findings(games: list[tuple[GameTranscript, AnalysisResult]]) -> str:
