@@ -579,9 +579,13 @@ def judgments_needed(
     return math.ceil(z * z * true_accuracy * (1 - true_accuracy) / (threshold - true_accuracy) ** 2)
 
 
+# How far `judgments_needed_exact` searches before answering "more than this".
+EXACT_SEARCH_LIMIT = 20_000
+
+
 @functools.lru_cache(maxsize=64)
 def judgments_needed_exact(
-    true_accuracy: float, threshold: float = ACCURACY_THRESHOLD, limit: int = 20_000
+    true_accuracy: float, threshold: float = ACCURACY_THRESHOLD, limit: int = EXACT_SEARCH_LIMIT
 ) -> int | None:
     """The same question with the Clopper-Pearson bound this report uses:
     the smallest n whose bound is at or below `threshold` when the correct
@@ -589,16 +593,50 @@ def judgments_needed_exact(
     accuracy by rounding). The exact bound is wider than the normal one, so
     this comes out larger than `judgments_needed` (about 76 and 289 for 50%
     and 55%, against 68 and 268); a few more than that make it stable,
-    because the integer rounding makes the pass/fail line jagged in n."""
+    because the integer rounding makes the pass/fail line jagged in n.
+    None when no n up to `limit` passes.
+
+    The jagged line rules out a bisection over n, so every n is tried, and
+    trying one must be cheap: an accuracy just under 60% -- the range this
+    target produces -- is thousands of n from passing. Two things make it
+    O(1) per n instead of a bisected bound over an O(n) sum (which took up
+    to half an hour). The bound is at or below `threshold` exactly when
+    P(X <= correct) <= 1 - confidence at p = `threshold`, because the CDF
+    falls as p rises; so one CDF value per n decides it. And that value is
+    carried from n to n + 1 by the binomial recurrences rather than summed
+    afresh.
+    """
     if true_accuracy >= threshold:
         return None
-    start = max(1, (judgments_needed(true_accuracy, threshold) or 2) // 2)
-    for n in range(start, limit + 1):
+    alpha = 1.0 - CONFIDENCE
+    p, q = threshold, 1.0 - threshold
+
+    def correct_at(n: int) -> int:
         # The epsilon keeps 0.55 * 20 = 11.000000000000002 from rounding to 12.
-        correct = math.ceil(true_accuracy * n - 1e-9)
-        if clopper_pearson_upper(correct, n) <= threshold:
+        return max(0, math.ceil(true_accuracy * n - 1e-9))
+
+    n = max(1, (judgments_needed(true_accuracy, threshold) or 2) // 2)
+    if n > limit:
+        return None
+    k = correct_at(n)  # never above n, since true_accuracy < threshold <= 1
+    # cdf = P(X_n <= k) and pmf = P(X_n = k) for X_n ~ Binomial(n, threshold).
+    cdf = binomial_cdf(k, n, p)
+    log_pmf = math.lgamma(n + 1) - math.lgamma(k + 1) - math.lgamma(n - k + 1)
+    pmf = math.exp(log_pmf + k * math.log(p) + (n - k) * math.log(q))
+    while True:
+        if cdf <= alpha:
             return n
-    return None
+        if n >= limit:
+            return None
+        # One more judgment, same k: X_{n+1} <= k unless the new one is a
+        # success landing on X_n = k.
+        cdf -= p * pmf
+        pmf *= q * (n + 1) / (n + 1 - k)
+        n += 1
+        if correct_at(n) > k:  # k grows by at most one per judgment
+            pmf *= (n - k) / (k + 1) * (p / q)
+            k += 1
+            cdf += pmf
 
 
 @dataclass
@@ -767,7 +805,12 @@ def render_score(report: ScoreReport) -> str:
     if report.accuracy < ACCURACY_THRESHOLD:
         observed = judgments_needed(report.accuracy)
         observed_exact = judgments_needed_exact(report.accuracy)
-        lines.append(f"| 観測値 {_pct(report.accuracy)} | 約{observed} | 約{observed_exact} |")
+        exact_text = (
+            f"約{observed_exact}"
+            if observed_exact is not None
+            else f"{EXACT_SEARCH_LIMIT:,}超"  # past the search, not "None"
+        )
+        lines.append(f"| 観測値 {_pct(report.accuracy)} | 約{observed} | {exact_text} |")
     lines += [
         "",
         "各判定を独立とみなしている。少ない評価者が少ない発言を何度も判定すると、上限は"
@@ -793,6 +836,7 @@ __all__ = [
     "ACCURACY_THRESHOLD",
     "AI_LABEL",
     "CONFIDENCE",
+    "EXACT_SEARCH_LIMIT",
     "HUMAN_LABEL",
     "LABELS",
     "LENGTH_BIN_EDGES",

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import time
 from collections import Counter
 
 import pytest
@@ -346,6 +347,55 @@ def test_judgments_needed_exact_is_the_first_n_the_exact_bound_passes():
     assert judgments_needed_exact(0.5) == 76
     assert judgments_needed_exact(0.55) == 289
     assert judgments_needed_exact(0.61) is None
+
+
+def _first_passing_n_by_definition(accuracy: float, limit: int) -> int | None:
+    """The definition, spelled out: scan n and compute the bound each time."""
+    for n in range(1, limit + 1):
+        if clopper_pearson_upper(math.ceil(accuracy * n - 1e-9), n) <= ACCURACY_THRESHOLD:
+            return n
+    return None
+
+
+@pytest.mark.parametrize("accuracy", [0.0, 0.1, 0.3, 0.45, 0.5, 0.52, 0.55])
+def test_judgments_needed_exact_agrees_with_its_definition(accuracy: float):
+    assert judgments_needed_exact(accuracy) == _first_passing_n_by_definition(accuracy, 400)
+
+
+@pytest.mark.parametrize("accuracy", [117 / 200, 0.59])
+def test_judgments_needed_exact_is_right_near_the_threshold_too(accuracy: float):
+    n = judgments_needed_exact(accuracy)
+    assert n is not None
+    assert clopper_pearson_upper(math.ceil(accuracy * n - 1e-9), n) <= ACCURACY_THRESHOLD
+    before = n - 1
+    assert clopper_pearson_upper(math.ceil(accuracy * before - 1e-9), before) > 0.60
+
+
+@pytest.mark.parametrize("correct", [116, 117, 118, 119])
+def test_scoring_just_under_sixty_percent_is_quick(correct: int):
+    """Observed accuracy just under 60% is exactly what this target produces;
+    the planning row for it used to take from a minute to half an hour."""
+    answers = {f"Q{i:03d}": (AI_LABEL if i % 2 else HUMAN_LABEL) for i in range(200)}
+    ratings = [
+        Rating("r1", item, answers[item] if i < correct else _other(answers[item]))
+        for i, item in enumerate(answers)
+    ]
+    started = time.perf_counter()
+    rendered = render_score(score(ratings, answers))
+    assert time.perf_counter() - started < 5.0
+    assert "None" not in rendered
+
+
+def test_an_observed_accuracy_too_close_to_sixty_percent_says_beyond_the_search():
+    assert judgments_needed_exact(0.599) is None  # past the 20,000-judgment search
+    answers = {f"Q{i:04d}": (AI_LABEL if i % 2 else HUMAN_LABEL) for i in range(1000)}
+    ratings = [
+        Rating("r1", item, answers[item] if i < 599 else _other(answers[item]))
+        for i, item in enumerate(answers)
+    ]
+    rendered = render_score(score(ratings, answers))
+    assert "| 観測値 59.9% |" in rendered
+    assert "20,000超" in rendered and "約None" not in rendered
 
 
 def _ratings(pattern: dict[str, list[tuple[str, str]]]) -> list[Rating]:
