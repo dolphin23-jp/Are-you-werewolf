@@ -258,3 +258,37 @@ def test_a_bluffers_story_check_is_unchanged():
     # ダイキ's own story ("I am the seer and looked at シオン") still collapses
     # against the corpses, through the curse rule on the story's own divines.
     assert story.is_possible(Hypothesis()) is False
+
+
+# -- the logic layer's standing checks (docs/real_game_log_reasoning_plan.md) --
+
+
+def _curse_night_board(claimant: str, target: str, corpses: tuple[str, str]) -> GameState:
+    state = boards.deal({"p1": RoleName.WEREWOLF, "p4": RoleName.SEER, "p6": RoleName.FOX})
+    boards.kill_first_victim(state, "p16")
+    boards.claim(state, claimant, RoleName.SEER, day=1)
+    boards.verdict(state, claimant, "seer", target, False, day=2, referenced_day=1)
+    boards.die_by_curse(state, corpses[0], night=1)
+    boards.die_by_attack(state, corpses[1], night=1)
+    state.day = 2
+    return state
+
+
+def test_the_same_board_under_other_seats_gives_the_same_answer():
+    first = _public(_curse_night_board("p5", "p8", ("p6", "p9")))
+    relabelled = _public(_curse_night_board("p11", "p13", ("p6", "p10")))
+
+    assert first.is_possible(has_role("p5", RoleName.SEER)) is False
+    assert relabelled.is_possible(has_role("p11", RoleName.SEER)) is False
+    assert first.is_possible(has_role("p8", RoleName.SEER)) is True
+    assert relabelled.is_possible(has_role("p13", RoleName.SEER)) is True
+
+
+def test_unrelated_events_do_not_move_the_conclusion():
+    state = g1.day_two_morning()
+    before = sorted(c.constraint_id for c in _module_constraints(state))
+    boards.claim(state, g1.MIO, RoleName.HUNTER, day=2)
+    boards.verdict(state, g1.AKARI, "medium", g1.HARUTO, True, day=2, referenced_day=1)
+
+    assert sorted(c.constraint_id for c in _module_constraints(state)) == before
+    assert _public(state).is_possible(has_role(g1.DAIKI, RoleName.SEER)) is False
