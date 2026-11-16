@@ -343,6 +343,58 @@ def test_the_round_posts_nothing_once_the_vote_opens_mid_generation() -> None:
     assert len(state.chat_log) == posted
 
 
+def _run_to_the_next_morning(controller: GameController, spare: set[str]) -> None:
+    """End the day, hang someone outside `spare`, and open the next discussion."""
+    state = controller.state
+    controller.end_discussion()
+    target = next(pid for pid in state.alive_ids() if pid not in spare and pid != "p0")
+    for voter in state.alive_ids():
+        controller.vote(voter, target if voter != target else "p0")
+    controller.resolve_votes()
+    controller.start_night()
+    controller.resolve_night()
+    controller.start_discussion()
+
+
+def test_a_segment_stranded_by_a_day_turn_does_not_speak_on_the_new_day() -> None:
+    """A segment waiting on a slow request while the table votes, sleeps and
+    wakes up again. Its stale line is dropped -- but the loop used to carry on
+    with yesterday's round, because DISCUSSION is open again on the new day, and
+    speak in yesterday's order ahead of the new morning's duty speakers."""
+    controller, _seer, _target = _seer_holding_a_result()
+    state = controller.state
+    provider = SlowProvider()
+    coordinator = AICoordinator(
+        state,
+        AI_IDS,
+        provider,
+        seed=1,
+        reasoning=ReasoningRuntime(state, AI_IDS, seed=1),
+        model_decides=True,
+    )
+    session = SimpleNamespace(
+        controller=controller, discussion_lock=asyncio.Lock(), human_id="p0"
+    )
+
+    async def scenario() -> None:
+        segment = asyncio.create_task(coordinator.advance_discussion(session))
+        await asyncio.wait_for(provider.started.wait(), timeout=5)
+        day_one = session.discussion_round
+        assert day_one.day == 1 and day_one.immediate_count > 1
+        _run_to_the_next_morning(controller, set(day_one.order))
+        assert (state.phase, state.day) == (Phase.DISCUSSION, 2)
+        provider.release.set()
+        await asyncio.wait_for(segment, timeout=5)
+
+    asyncio.run(scenario())
+
+    assert [m.content for m in state.chat_log if m.day == 2 and m.channel.value == "public"] == []
+    # The stale round is finished; the next segment opens the new day's own.
+    assert session.discussion_round.complete is True
+    asyncio.run(coordinator.advance_discussion(session))
+    assert session.discussion_round.day == 2
+
+
 # -- a segment nobody can speak in --
 
 

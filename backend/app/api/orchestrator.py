@@ -30,6 +30,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from app.ai.provider.budget import BudgetExceeded
+from app.engine.phases import Phase
 from app.engine.roles import RoleName
 from app.sessions.models import GameSession
 
@@ -136,14 +137,22 @@ async def after_discussion_phase_entered(session: GameSession) -> None:
             return
         # There may be more immediate COs than fit in one segment. Drain only
         # those opening segments, releasing the lock between each, then pause.
+        # The table can move on mid-drain (the human ends the discussion from
+        # another tab, say). A dropped morning turn leaves the round in its
+        # "immediate" stage for good, and `advance_discussion` then returns
+        # without awaiting anything -- so this loop, checking the round alone,
+        # spun without ever yielding and froze every session on the server.
         while True:
             await coordinator.advance_discussion(session)
             round_state = session.discussion_round
+            state = session.controller.state
             if (
                 round_state is None
                 or round_state.complete
                 or round_state.awaiting_human
                 or round_state.stage != "immediate"
+                or state.phase != Phase.DISCUSSION
+                or round_state.day != state.day
             ):
                 break
 

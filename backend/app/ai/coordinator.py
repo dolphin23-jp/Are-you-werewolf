@@ -396,9 +396,14 @@ class AICoordinator:
         async with session.discussion_lock:  # type: ignore[attr-defined]
             controller = session.controller  # type: ignore[attr-defined]
             state = controller.state
-            if state.phase != Phase.DISCUSSION:
-                return
             round_state = getattr(session, "discussion_round", None)
+            if state.phase != Phase.DISCUSSION:
+                if round_state is not None and round_state.day == state.day:
+                    # DISCUSSION opens once a day, so today's round is over, not
+                    # paused. Left open, it reads as a morning still to drain to
+                    # any caller that loops until the round settles.
+                    round_state.complete = True
+                return
             if round_state is None or round_state.day != state.day:
                 round_state = await self._start_discussion_round(state)
                 session.discussion_round = round_state  # type: ignore[attr-defined]
@@ -433,7 +438,15 @@ class AICoordinator:
             consecutive_failures = 0
             stalled = False
             while spoken < self._segment_size and not round_state.complete:
-                if state.phase != Phase.DISCUSSION:
+                if state.phase != Phase.DISCUSSION or round_state.day != state.day:
+                    # The table moved on while a turn was generating. The phase
+                    # check alone is not enough: a vote, a night and a new
+                    # morning can all pass inside one slow request, DISCUSSION is
+                    # open again, and this segment would go on speaking in
+                    # yesterday's order ahead of the new morning's duty speakers.
+                    # Closing the round also keeps a caller looping until it
+                    # settles from spinning on one that can no longer move.
+                    round_state.complete = True
                     return
                 pid, stage = self._next_discussion_speaker(state, round_state)
                 if pid is None:

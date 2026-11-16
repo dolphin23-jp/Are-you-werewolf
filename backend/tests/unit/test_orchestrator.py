@@ -7,10 +7,17 @@ from types import SimpleNamespace
 
 import pytest
 
+from app.ai.coordinator import AICoordinator
+from app.ai.provider.base import Message, SchemaT
 from app.ai.provider.budget import BudgetExceeded
+from app.ai.reasoning.runtime import ReasoningRuntime
+from app.ai.schemas import MorningIntentOutput
 from app.api import orchestrator
 from app.api.orchestrator import after_human_chat
 from app.api.ws_hub import SessionWSHub
+from app.engine.game import GameController
+from app.engine.phases import Phase
+from app.engine.roles import RoleName
 from app.sessions.models import GameSession
 from tests.conftest import make_controller
 
@@ -274,3 +281,98 @@ async def test_an_awaited_hook_still_raises_anything_but_a_spent_budget() -> Non
     with pytest.raises(RuntimeError, match="bug"):
         await orchestrator.after_human_vote(session)
     assert session.ai_budget_exhausted is False
+
+
+# -- the table moving on while the morning is still being drained --
+
+
+class _HeldDiscussionProvider:
+    """Holds every discussion request until released, so the table can move on."""
+
+    def __init__(self) -> None:
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def generate_structured(
+        self, *, system: str, messages: list[Message], response_schema: type[SchemaT], **kwargs
+    ):  # type: ignore[no-untyped-def]
+        del system, messages, kwargs
+        if "Discussion" in response_schema.__name__:
+            self.started.set()
+            await self.release.wait()
+            return response_schema.model_validate({"public_message": "まだ決め手がありません。"})
+        if response_schema is MorningIntentOutput:
+            return MorningIntentOutput()
+        return None
+
+
+def _morning_with_several_duty_speakers() -> GameController:
+    """A real day 1 whose opening has more than one duty speaker: an AI seer
+    holding its night-0 look plus the planned claims. Seed 1 opens with three."""
+    controller = make_controller(seed=1)
+    state = controller.state
+    controller.start_game()
+    seer = next(p.player_id for p in state.players.values() if p.role is RoleName.SEER)
+    target = next(pid for pid in state.alive_ids() if pid not in (seer, state.first_victim_id))
+    controller.submit_night_action(seer, "divine", target)
+    controller.resolve_night()
+    controller.start_discussion()
+    return controller
+
+
+async def test_ending_the_discussion_mid_morning_lets_the_opening_return() -> None:
+    """The vote opened while a morning duty speaker was still generating. The
+    turn is dropped, so the morning stage never closes -- and the opening loop
+    used to call `advance_discussion` again and again on a round that could not
+    move. Nothing in that call awaits once the phase has left DISCUSSION, so the
+    loop never yielded and froze every session on the server."""
+    controller = _morning_with_several_duty_speakers()
+    state = controller.state
+    ai_ids = [f"p{i}" for i in range(1, 17)]
+    provider = _HeldDiscussionProvider()
+    coordinator = AICoordinator(
+        state,
+        ai_ids,
+        provider,
+        seed=1,
+        reasoning=ReasoningRuntime(state, ai_ids, seed=1),
+        model_decides=True,
+    )
+    session = GameSession(
+        session_id="s-morning",
+        controller=controller,
+        human_id="p0",
+        ai_player_ids=ai_ids,
+        ws_hub=SessionWSHub(),
+        coordinator=coordinator,
+    )
+    assert state.players["p0"].alive  # a living human: the opening drains, then pauses
+    calls = 0
+    real_advance = coordinator.advance_discussion
+
+    async def counted_advance(session: object, **kwargs: bool) -> None:
+        # Without this bound the old loop never yields, so `wait_for` below
+        # could not even time out: the test would hang instead of failing.
+        nonlocal calls
+        calls += 1
+        if calls > 20:
+            raise AssertionError("the opening kept re-entering a round that cannot move")
+        await real_advance(session, **kwargs)
+
+    coordinator.advance_discussion = counted_advance  # type: ignore[method-assign]
+
+    opening = asyncio.create_task(orchestrator.after_discussion_phase_entered(session))
+    await asyncio.wait_for(provider.started.wait(), timeout=5)
+    round_state = session.discussion_round
+    assert round_state is not None and round_state.immediate_count > 1
+    posted = len(state.chat_log)
+    controller.end_discussion()
+    provider.release.set()
+
+    await asyncio.wait_for(opening, timeout=5)
+
+    assert state.phase is Phase.VOTING
+    assert len(state.chat_log) == posted
+    assert calls == 1
+    # Nothing is left that a later call could mistake for a live morning.
+    assert session.discussion_round is round_state and round_state.complete
