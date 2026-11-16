@@ -11,6 +11,7 @@ from collections.abc import Sequence
 
 from app.ai.reasoning.solver.rules.allies import AllyKnowledgeRuleModule
 from app.ai.reasoning.solver.rules.base import BaseRuleModule, RuleModule
+from app.ai.reasoning.solver.rules.claimed_divination import ClaimedDivinationRuleModule
 from app.ai.reasoning.solver.rules.first_victim import FirstVictimRuleModule
 from app.ai.reasoning.solver.rules.night import (
     AttackRuleModule,
@@ -34,6 +35,7 @@ def default_rule_modules() -> Sequence[RuleModule]:
         AttackRuleModule(),
         GuardRuleModule(),
         FoxCurseRuleModule(),
+        ClaimedDivinationRuleModule(),
         OwnAbilityResultRuleModule(),
     )
 
@@ -42,6 +44,7 @@ __all__ = [
     "AllyKnowledgeRuleModule",
     "AttackRuleModule",
     "BaseRuleModule",
+    "ClaimedDivinationRuleModule",
     "DeathRuleModule",
     "FirstVictimRuleModule",
     "FoxCurseRuleModule",
