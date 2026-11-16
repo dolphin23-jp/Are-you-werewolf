@@ -14,7 +14,9 @@ does not end that way -- not because a list of refusals happened to hold it.
 A pronoun stands for the partner only with a request: お前 when the partner
 alone was addressed ("ダイキ、お前を切っていいな"), 俺/私 in the partner's own
 line ("俺を切ってくれ"). And a plan the team goes on to doubt or refuse
-("俺を切るのはまだ早い") is no longer one.
+("俺を切るのはまだ早い"), take back ("やっぱやめた"), replace with another
+seat ("やっぱりミオを吊ろう") or that the partner objects to ("嫌だ") is no
+longer one.
 
 The labelled corpus below holds every line the reviews and verifiers tried
 (the fix and repro scripts, allyplan/allyplan2, the wolfchat_stress scripts
@@ -136,6 +138,7 @@ PLANS: list[tuple[str, str]] = [
     # -- the partner addressed alone, then called お前 / あなた, with a request --
     ("{a}、悪いがお前を切っていいな。", V),
     ("{a}さん、悪いけどあなたに入れてもいいですね。", V),
+    ("{a}。悪いがお前を切っていいな。", V),
     # -- the partner offering itself up: 俺/私 with a request --
     ("俺を切っていいぞ。", P),
     ("明日は俺に入れてくれ。", P),
@@ -145,6 +148,21 @@ PLANS: list[tuple[str, str]] = [
     ("明日は自分に投票していいよ。", P),
     ("俺に票を合わせてくれ。", P),
     ("私に入れておいて。", P),
+    # -- another seat before the partner that is no subject: compared, bitten,
+    # given a result, or replaced --
+    ("{o}より{a}を吊ろう。", V),
+    ("{o}じゃなくて{a}に入れよう。", V),
+    ("{o}ではなく{a}に投票しよう。", V),
+    ("{o}の代わりに{a}を吊ろう。", V),
+    ("今夜は{o}噛み、明日は{a}吊りで決まり。", V),
+    ("{o}を噛んで{a}を吊ろう。", V),
+    ("{o}に黒を出して{a}を吊ろう。", V),
+    ("{o}吊りは無理だから{a}を切ろう。", V),
+    # the whole team, and a precaution that still votes
+    ("みんなで{a}に投票しよう。", V),
+    ("全員で{a}に入れよう。", V),
+    ("念のため{a}に入れておこう。", V),
+    ("一応{a}に入れておこう。", V),
 ]
 
 NOT_PLANS: list[tuple[str, str]] = [
@@ -423,6 +441,72 @@ NOT_PLANS: list[tuple[str, str]] = [
     # the partner putting its own vote on itself asks nobody
     ("俺に入れておく。", P),
     ("俺を切っておきます。", P),
+    # -- found on the third review pass --
+    # the next sentence of the same message quotes it, or marks it a joke,
+    # after an ellipsis or a bracket too
+    ("{a}を吊ろう！と{o}が言ってた。", V),
+    ("{a}を吊ろう！と村人が叫んでる。", V),
+    ("{a}を吊ろう。……なんてね。", V),
+    ("{a}を吊ろう。（嘘）", V),
+    ("{a}を吊ろう。なんちゃって。", V),
+    ("{a}を吊ろう。なーんてね。", V),
+    ("{a}を吊ろう。ジョークだよ。", V),
+    ("{a}を吊ろう。なわけない。", V),
+    ("{a}を吊ろう。……嘘だよ。", V),
+    ("{a}を吊ろう。笑", V),
+    ("{a}を吊ろう。www", V),
+    ("{a}を吊ろう。……と言いたいところだけど。", V),
+    # the same message goes on to another target
+    ("{a}を吊ろう、いや{o}を吊ろう。", V),
+    ("{a}を吊ろう。{o}に投票しよう。", V),
+    # another seat before the partner as a subject or a source, however marked
+    ("{o}たちは{a}に入れる。", V),
+    ("{o}陣営は{a}に投票する。", V),
+    ("{o}だけ{a}に入れる。", V),
+    ("{o}すら{a}に投票する。", V),
+    ("{o}まで{a}吊りで決まり。", V),
+    ("{o}って{a}に入れるよ。", V),
+    ("{o}なんか{a}に入れる。", V),
+    ("{o}ら{a}に入れる。", V),
+    ("{o}の意見は{a}吊りで決まり。", V),
+    ("{o}の予想だと{a}吊り。", V),
+    ("{o}目線{a}吊り一択。", V),
+    ("{o}的には{a}吊り。", V),
+    ("{o}曰く{a}吊りで。", V),
+    ("{o}によると{a}吊り。", V),
+    # the village, a crowd, a rival or a third person before the partner
+    ("村も{a}を吊る。", V),
+    ("みんな{a}に投票する。", V),
+    ("全員{a}に入れる。", V),
+    ("対抗は{a}に入れる。", V),
+    ("過半数が{a}に入れる。", V),
+    ("あいつ、{a}に入れる。", V),
+    # a reading of the table, a report, or a show for the village
+    ("票読みだと{a}吊り。", V),
+    ("今の流れだと{a}吊り一択。", V),
+    ("どうやら{a}吊りで決まり。", V),
+    ("表向きは{a}に投票しよう。", V),
+    # wait and see: a condition nobody can check yet
+    ("様子を見て{a}を吊ろう。", V),
+    ("情勢を見て{a}を切ろう。", V),
+    ("空気を読んで{a}に投票しよう。", V),
+    ("結果を見てから{a}を吊ろう。", V),
+    ("あわよくば{a}を吊ろう。", V),
+    ("保険で{a}を吊ろう。", V),
+    ("決選投票では{a}に入れよう。", V),
+    # some later day, not this ballot
+    ("最終的には{a}を切ろう。", V),
+    ("最後は{a}を切ろう。", V),
+    ("最終日には{a}を吊ろう。", V),
+    ("いずれ{a}を吊ろう。", V),
+    ("そのうち{a}を吊ろう。", V),
+    ("いつか{a}を吊ろう。", V),
+    ("{a}を吊ってもいい、最終日に。", V),
+    # a taunt closing a て-chain
+    ("俺に入れて負けろ。", P),
+    # お前 after two seats were called, each in a sentence of its own
+    ("{a}、{o}。お前を切っていいな。", V),
+    ("{o}、{a}。お前を切っていいな。", V),
 ]
 
 # Real plans the rule does not recognise. It errs this way on purpose: each of
@@ -574,6 +658,33 @@ TAKEN_BACK: list[list[tuple[str, str]]] = [
     [(V, "{a}を切ろう。"), (V, "いや、{a}は残そう。")],
     [(V, "{a}吊りでいこう。"), (V, "{a}を守ろう。")],
     [(V, "{a}を切ろう。"), (P, "いや、俺はまだ戦える。")],
+    # a later line takes it back without naming the partner
+    [(V, "{a}を吊ろう。"), (V, "いや、やっぱりやめよう。")],
+    [(V, "{a}を吊ろう。"), (V, "やっぱやめた。")],
+    [(V, "{a}を吊ろう。"), (V, "今のなし。")],
+    [(V, "{a}を吊ろう。"), (V, "撤回する。")],
+    [(V, "{a}を吊ろう。"), (V, "冗談だよ。")],
+    [(V, "{a}を吊ろう。"), (V, "やっぱり{o}にしよう。")],
+    # a later line proposes another seat instead
+    [(V, "{a}を吊ろう。"), (V, "{o}を吊ろう。")],
+    [(V, "{a}を吊ろう。"), (P, "いや、{o}を吊ろう。")],
+    [(V, "{a}を吊ろう。"), (P, "それより{o}を吊ろう。")],
+    [(V, "{a}吊りでいこう。"), (V, "俺は{o}に入れる。")],
+    [(V, "{a}吊りでいこう。"), (V, "{o}は明日吊ろう。")],
+    # a turn-around word opens even an agreement: read as taken back, a
+    # documented conservative miss
+    [(V, "{a}吊りでいこう。"), (V, "やっぱそれしかないね。")],
+    [(V, "{a}吊りでいこう。"), (V, "いや、それでいい。")],
+    # the partner objects without naming itself
+    [(V, "{a}を吊ろう。"), (P, "嫌だ。")],
+    [(V, "{a}を吊ろう。"), (P, "やめてくれ。")],
+    [(V, "{a}を吊ろう。"), (P, "反対。")],
+    [(V, "{a}を吊ろう。"), (P, "待ってくれ。")],
+    [(V, "{a}を吊ろう。"), (P, "勘弁してくれ。")],
+    [(V, "{a}を吊ろう。"), (P, "それは困る。")],
+    [(V, "{a}を吊ろう。"), (P, "ふざけるな。")],
+    [(V, "{a}を吊ろう。"), (P, "断る。")],
+    [(V, "{a}を吊ろう。"), (P, "それはない。")],
 ]
 
 
@@ -598,6 +709,18 @@ def test_a_later_doubt_or_refusal_takes_the_plan_back(
             [(V, "{a}を切ろう。"), (P, "俺を切るのはまだ早い。"), (V, "それでも{a}を切ろう。")],
             "それでも{a}を切ろう",
         ),
+        # the partner accepts, or talks of something else, even with a negation
+        ([(V, "{a}吊りでいこう。"), (P, "わかった、仕方ない。")], "{a}吊りでいこう"),
+        ([(V, "{a}吊りでいこう。"), (P, "了解、問題ない。")], "{a}吊りでいこう"),
+        ([(V, "{a}吊りでいこう。"), (P, "{o}は占い師じゃない。")], "{a}吊りでいこう"),
+        # the bite, or the partner told where its own vote goes, is no other ballot
+        ([(V, "{a}吊りでいこう。"), (V, "{o}は噛もう。")], "{a}吊りでいこう"),
+        ([(V, "{a}を切ろう。{a}は{o}に投票して。")], "{a}を切ろう"),
+        ([(V, "{a}吊りでいこう。"), (V, "{o}には入れないで。")], "{a}吊りでいこう"),
+        # the partner telling where its own vote goes -- it cannot vote itself
+        ([(V, "{a}吊りでいこう。"), (P, "了解。俺は{o}に入れる。")], "{a}吊りでいこう"),
+        ([(V, "{a}吊りでいこう。"), (P, "{o}に投票する。")], "{a}吊りでいこう"),
+        ([(V, "{a}吊りでいこう。"), (P, "わかった、俺は{o}に入れておく。")], "{a}吊りでいこう"),
     ],
 )
 def test_the_latest_plan_still_standing_is_the_one_returned(
@@ -613,6 +736,23 @@ def test_a_partner_pleading_after_the_plan_leaves_the_vote_unplanned():
     state, voter, ally = _wolf_pair_board()
     _wolf_line(state, voter, _text(state, ally, "{a}を切ろう。"), day=1)
     _wolf_line(state, ally, "俺を切るのはまだ早い。", day=1)
+
+    recorder, _ = _ally_vote(state, voter, ally)
+
+    assert _latest_audit(recorder, voter, state.day).ally_vote_planned is False
+    report = ReasoningTranscriptAnalyzer().analyze(recorder.transcript)
+    assert report.unplanned_wolf_ally_vote_count == 1
+
+
+@pytest.mark.parametrize(
+    "later",
+    [(V, "{o}を吊ろう。"), (V, "やっぱやめた。"), (P, "嫌だ。")],
+)
+def test_a_plan_replaced_or_refused_later_leaves_the_vote_unplanned(later: tuple[str, str]):
+    state, voter, ally = _wolf_pair_board()
+    _wolf_line(state, voter, _text(state, ally, "{a}を切ろう。"), day=1)
+    author, template = later
+    _wolf_line(state, ally if author == P else voter, _text(state, ally, template), day=1)
 
     recorder, _ = _ally_vote(state, voter, ally)
 
@@ -674,6 +814,13 @@ THROUGH_THE_BALLOT: list[tuple[str, str, bool]] = [
     ("{a}吊りで。って村が言ってる。", V, False),
     ("俺を吊ってみろ。", P, False),
     ("俺に入れておく。", P, False),
+    # found on the third review pass
+    ("{a}を吊ろう。……なんてね。", V, False),
+    ("{a}を吊ろう、いや{o}を吊ろう。", V, False),
+    ("{o}たちは{a}に入れる。", V, False),
+    ("様子を見て{a}を吊ろう。", V, False),
+    ("俺に入れて負けろ。", P, False),
+    ("{o}より{a}を吊ろう。", V, True),
 ]
 
 

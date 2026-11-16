@@ -171,14 +171,16 @@ _HONORIFIC = r"(?:さん|くん|ちゃん|君)?"
 _FINAL_PARTICLES = r"[よねなぜぞわ〜～ー]*"
 # How a proposal closes: the sentence ends, or a comma follows that does not go
 # on to quote it, take it back or hedge it. Right after the comma: a quoting
-# particle or a but (吊ろう、って村が言ってる / 吊ろう、が村の総意 / 吊ろう、
-# けど迷う); anywhere after it: a doubt, a guess or a condition (吊ろう、ただし
-# 明日次第 / 吊ろう、多分 / 吊ろう、もし黒が出たら).
+# particle, a but or a turn-around (吊ろう、って村が言ってる / 吊ろう、が村の
+# 総意 / 吊ろう、けど迷う / 吊ろう、いやミオを吊ろう); anywhere after it: a
+# doubt, a guess, a condition or a later day (吊ろう、ただし明日次第 / 吊ろう、
+# 多分 / 吊ろう、もし黒が出たら / 吊ってもいい、最終日に).
 _AFTER_THE_COMMA_UNDOES = (
     r"\s*(?:と|って|なんて|とか|という|みたい|じゃな|ではな|どう|[がはをの]|も(?!う)"
-    r"|けど|けれど|だけど|でも|ただ|しかし|とはいえ|か)"
+    r"|けど|けれど|だけど|でも|ただ|しかし|とはいえ|か|いや|やっぱ|やはり)"
     r"|.*?(?:迷|かも|次第|多分|たぶん|おそらく|恐らく|きっと|保留|冗談|嘘|うそ|なんてね"
-    r"|たら|なら|もし|仮に|場合)"
+    r"|たら|なら|もし|仮に|場合"
+    r"|最終|最後|明後日|あさって|以降|後で|あとで|いずれ|そのうち|いつか)"
 )
 _CLOSE = _FINAL_PARTICLES + rf"(?:$|(?=[、,，](?!{_AFTER_THE_COMMA_UNDOES})))"
 # A plain form decides only when it ends the sentence, and never with な (吊るな
@@ -196,9 +198,10 @@ _TE_AHEAD = r"(?:おこう|おく|おきます|おきましょう)"
 # that verb proposes or asks (切って信用を取ってくれ, 入れて白く見せよう,
 # 切って信用を取れ). The words in between must not undo it: a negation, a past
 # or ongoing act, a report, a condition, a question, a pretence, a quotation
-# (吊って欲しいと村に思わせよう), someone else acting, a relative clause.
+# (吊って欲しいと村に思わせよう), someone else acting, a relative clause, a
+# taunt (俺に入れて負けろ).
 _UNDOES = (
-    r"な(?:い|く|かっ|けれ)|ません|ず|回避|阻止|防|控え|論外|ありえ|早い|必要"
+    r"な(?:い|く|かっ|けれ)|ません|ず|回避|阻止|防|控え|論外|ありえ|早い|必要|負け|後悔"
     r"|た|て[るいく]|そう|流れ|声|ふり|振り|フリ|つもり|もら|させ|られ"
     r"|ば|なら|ても|でも|けど|けれど|のに|から|ので|か|べき|どう"
     r"|[がはと]|人|奴|やつ|者|方"
@@ -301,62 +304,100 @@ _MOODS: dict[str, dict[str, re.Pattern[str]]] = {
 # since ダイキは吊って asks ダイキ to vote.
 _ANY_MOOD: tuple[str, ...] = ("propose", "ask", "decide")
 _REQUESTING: tuple[str, ...] = ("request",)
+# The partner's own ballot on another seat (俺はミオに入れる, ミオに投票する,
+# 入れておく) is no counter-proposal -- it cannot vote itself; only its
+# proposal or request (ミオを吊ろう, ミオに入れてくれ) replaces a plan.
+_COUNTER_PROPOSING: tuple[str, ...] = ("propose", "request")
 # Who お前 means when the partner alone was addressed, and who 俺 means when
 # the partner wrote the line (自分で is "by oneself", not "me").
 _SECOND_PERSON = r"(?:お前|おまえ|あなた|あんた|貴方|きみ|(?<![ァ-ヶー一-龥A-Za-z0-9])君)"
 _FIRST_PERSON = r"(?:私|わたし|あたし|俺|おれ|オレ|僕|ぼく|ボク|自分(?!で))(?!たち|達|ら)"
 # Before the partner, anywhere in the sentence:
 # - a subject other than the team: the village or a crowd (村はダイキを吊り
-#   たがってる), a third person (あいつはダイキに入れる), a role (占い師は
-#   ダイキに投票する), the one addressed (お前はダイキに投票して), and --
-#   added per board -- another seat followed by が/は/も;
-# - a guess (多分) or an earlier day (昨日) or a quotation;
+#   たがってる, みんなダイキに投票する -- not みんなでダイキに投票しよう), a
+#   third person (あいつはダイキに入れる, あいつ、ダイキに入れる), a role or a
+#   rival (占い師はダイキに投票する, 対抗はダイキに入れる), the one addressed
+#   (お前はダイキに投票して), and -- added per board -- another seat that is
+#   anything but an object, a comparison or a vocative (ミオたちは, ミオだけ,
+#   ミオ曰く, ミオの予想だと; see `_SEAT_NOT_A_SUBJECT`);
+# - a guess (多分), a reading of the table (票読みだと, 今の流れだと, どうやら),
+#   a show for the village (表向きは), an earlier day (昨日) or a quotation;
 # - a condition nobody can check yet (黒が出ればダイキに入れよう, 最悪ダイキ
-#   を切ろう, 状況次第でダイキを吊ろう).
+#   を切ろう, 状況次第でダイキを吊ろう, 様子を見てダイキを吊ろう, 決選では),
+#   or some later day rather than this ballot (最終的には, いずれ, 最終日には).
 _NOT_THE_TEAM = (
-    r"村人?(?:は|が|の|目線|視点|側)|(?:みんな|皆|全員|誰か|他の人)(?:さん)?[はが]"
+    r"村人?(?:は|が|の|も|目線|視点|側|的|だと|では)"
+    r"|(?:みんな|皆|全員|誰か|他の人)(?!さん[で、,，]|[で、,，])"
+    r"|(?:あいつ|こいつ|そいつ|どいつ|彼女?|奴|やつ|ヤツ)(?:ら|たち|達)?[、,，]"
     r"|(?:あいつ|こいつ|そいつ|どいつ|彼女?|奴|やつ|ヤツ|相方|相手|向こう"
     r"|他の(?:狼|人狼|仲間|奴|やつ)|もう(?:一人|ひとり)"
     r"|占い師?|霊媒師?|霊能者?|共有者?|狩人|騎士|狂人|妖狐|狐|背徳者?|猫又|グレー"
+    r"|対抗|過半数|半数|大半|多数"
     rf"|{_SECOND_PERSON}|[人者陣勢組側派])(?:ら|たち|達)?(?:さん)?[はがも]"
     r"|多分|たぶん|おそらく|恐らく|きっと|どうせ|このまま|もし|仮に"
-    r"|たら|だら|なら|[えけげせてねべめれ]ば|あらば|最悪|場合|次第|によって"
-    r"|(?:時|とき|際)(?:は|に)|万が?一|いざ"
+    r"|票読み|予想|予測|見立て|流れ(?:だと|では|的|から|上|で|なら)|どうやら|残念ながら"
+    r"|表向き|建前"
+    r"|たら|だら|なら|[えけげせてねべめれ]ば|あらば|最悪|場合|次第|によ(?:って|ると|れば|り)"
+    r"|(?:時|とき|際)(?:は|に)|万が?一|いざ|あわよくば|保険|決[選戦]"
+    r"|見て|読んで|見極め|見計ら|伺って|うかがって|窺って"
+    r"|最終(?:的|日|局面)|最後(?:は|に|の)|いずれ|そのうち|いつか|後で|あとで|後々"
+    r"|ゆくゆく|明後日|あさって|終盤"
     r"|昨日|前日|さっき|前回|[「『“\"]"
+)
+# What may follow another seat that stands before the partner without making
+# it the one who votes or the one who says so: an object (ミオを噛んで, ミオに
+# 黒を出して), a bite or a ballot of its own (ミオ噛み、ミオ吊りは無理だから), a
+# comparison or replacement (ミオより, ミオじゃなくて, ミオの代わりに), or a
+# vocative (ミオ、ダイキに入れる). Anything else -- が/は/も, たち, だけ, まで,
+# って, 曰く, 目線, の予想, によると -- is no plan of the team's.
+_SEAT_NOT_A_SUBJECT = (
+    r"(?:さん|くん|ちゃん|君)?"
+    r"(?:を|に(?![はもよと])|へ|噛|吊|より|じゃ|では?なく|でなく|の代わり|[、,，])"
 )
 # Groups addressed at the head of a sentence, beside player names.
 _GROUP_VOCATIVE = r"(?:みんな|皆|みなさん|二人とも|ふたりとも|お前ら|おまえら)"
 # A plan stops being one when a later line unsettles it: it names the
 # partner's ballot to doubt or refuse it (俺を切るなよ, ダイキは吊らない,
-# 俺を切る？), keeps the partner (ダイキは残そう, ダイキを守ろう), or opens on
-# the partner with a turn-around (いや、俺はまだ戦える). In the same message
-# that turn-around takes the plan back on its own (…吊ろう。冗談だよ).
+# 俺を切る？), keeps the partner (ダイキは残そう, ダイキを守ろう), opens on a
+# turn-around or an objection (いや、俺はまだ戦える / やっぱやめた / 今のなし /
+# 反対), proposes another seat instead (やっぱりミオを吊ろう), or -- written
+# by the partner -- objects (嫌だ, 勘弁してくれ, それは困る).
 _REFUSAL_RE = re.compile(
     r"な(?:い|く|かっ|けれ|よ|$)|ません|ず|やめ|止め|反対|ダメ|だめ|駄目|避け|待|早い"
     r"|控え|回避|阻止|防|守|論外|ありえ"
 )
 _KEEP = rf"(?:を|は|も)?{_WHEN}(?:残|守|庇|生か|助け)"
+# What may come before the first word of a sentence: an ellipsis, a dash, an
+# opening bracket (……なんてね, （嘘）).
+_LEAD = r"[\s…‥・ー〜～.．、]*[（(「『【\[]?\s*"
 _RETRACTION_RE = re.compile(
-    r"\s*(?:いや|やっぱ|やはり|待って|待て|冗談|嘘|うそ|撤回|取り消|なんてね|今のなし"
-    r"|と言|という|って言)"
+    _LEAD + r"(?:いや|やっぱ|やはり|待って|待て|冗談|嘘|うそ|撤回|前言撤回|取り消|今のなし"
+    r"|なんてね|な[ー〜～]*んて|なんちゃって|ジョーク|やめ|反対|嫌|やだ|勘弁|断"
+    r"|ダメ|だめ|駄目|無理|と言|という|って言)"
+)
+# What the partner says against a plan to vote it, anywhere in the line: 嫌だ,
+# 困る, 勘弁して, ふざけるな, 断る, 待ってくれ, それはない. Its acceptance
+# (仕方ない, 了解) and its other news (ミオは占い師じゃない) leave the plan.
+_OBJECTION_RE = re.compile(
+    r"嫌|やだ|困|勘弁|ふざけ|断[るりわ]|反対|待って|待て|無理|やめ|止め|ダメ|だめ|駄目"
+    r"|ありえ|論外|納得(?:でき|いか)|それは(?:ない|無い|ねえ|なし|ナシ)"
 )
 # A sentence of the same message that only continues the plan's sentence, to
 # quote or refuse it: …吊りで。って村が言ってる / …投票。は避けたい /
-# …入れる。わけない / …投票する。と見せかけて -- or hands it to the village:
-# …吊る。それが村の考えだ. A sentence of its own never opens on a particle
-# (とりあえず and とにかく are not one).
+# …入れる。わけない / …投票する。と見せかけて / …吊ろう！と村人が叫んでる --
+# hands it to the village: …吊る。それが村の考えだ -- or laughs it off: …吊ろう。
+# 笑 / www. A sentence of its own never opens on a particle (とりあえず,
+# とにかく and ところで are not one).
 _CONTINUES_RE = re.compile(
-    r"\s*(?:って|なんて|と(?:か|は|言|い|思|見|して|の|で)|わけ|みたい|らしい|っぽい"
-    r"|を|は(?![んっい])|が(?![んっ])|それ(?:が|は|って)(?:村|みんな|皆|全員))"
+    _LEAD + r"(?:って|なんて|と(?!りあえず|にかく|ころで|もかく|もあれ|っとと|りま|ても)"
+    r"|ん?な?わけ|みたい|らしい|っぽい|を|は(?![んっい])|が(?![んっ])"
+    r"|それ(?:が|は|って)(?:村|みんな|皆|全員)|笑|草|[wｗ]+$)"
 )
 
 
 def _unsettles_ballot_on(sentence: str, seat: str, asked: bool) -> bool:
-    """Whether `sentence` doubts, refuses or takes back a ballot on the seat `seat` matches."""
-    mentioned = re.search(rf"{seat}{_HONORIFIC}", sentence) is not None
-    if mentioned and (
-        _RETRACTION_RE.match(sentence) or re.search(rf"{seat}{_HONORIFIC}{_KEEP}", sentence)
-    ):
+    """Whether `sentence` doubts, refuses or keeps the seat `seat` matches from a ballot."""
+    if re.search(rf"{seat}{_HONORIFIC}{_KEEP}", sentence):
         return True
     return any(
         asked or _REFUSAL_RE.search(sentence, match.end()) is not None
@@ -2622,9 +2663,10 @@ class AICoordinator:
         question or a check (吊りでいいよね), a report (吊りたがってる, 流れ,
         入れてた), a prohibition (切るなよ), a negation (吊らなくていい), a
         dare (吊ってみろ), a guess, a quotation, a condition nobody can check
-        yet (最悪, 次第, 〜たら), a hedge after the comma (吊ろう、けど迷う),
-        or another subject standing before the partner -- another seat, the
-        village, a third person, a role -- is no plan.
+        yet (最悪, 次第, 〜たら, 様子を見て) or a later day (いずれ, 最終日には),
+        a hedge after the comma (吊ろう、けど迷う), or another subject or
+        source standing before the partner -- another seat (ミオたちは, ミオ
+        曰く), the village, a crowd, a third person, a role -- is no plan.
 
         The partner is that object by name; by pronoun only with a request:
         as お前 when it alone was addressed at the head of that sentence or
@@ -2635,23 +2677,46 @@ class AICoordinator:
 
         A plan holds until a later line doubts or refuses the partner's
         ballot ("俺を切るのはまだ早い", "やっぱりダイキは吊らない"), keeps the
-        partner ("いや、ダイキは残そう"), or the same message takes it back
-        or goes on to quote it ("…吊ろう。冗談だよ", "…吊りで。って村が
-        言ってる"): a team still arguing has not decided. The latest plan
-        still standing is returned.
+        partner ("いや、ダイキは残そう"), opens on a turn-around ("やっぱ
+        やめた", "今のなし"), proposes another seat ("やっぱりミオを吊ろう";
+        not the partner naming its own vote, "俺はミオに入れる"), or is the
+        partner objecting ("嫌だ", "それは困る"); or until the same
+        message takes it back, laughs it off or goes on to quote it ("…吊ろう。
+        冗談だよ", "…吊ろう。笑", "…吊りで。って村が言ってる"): a team still
+        arguing has not decided. A sentence that proposes the partner and
+        another seat at once is no plan either. The latest plan still
+        standing is returned.
         """
         ally = _seat_pattern(ally_id, state.players[ally_id].name)
+        # A name that ends its sentence is called too: "ダイキ、ミオ。お前を…"
+        # calls both, so お前 is neither.
         vocatives = {
-            pid: re.compile(_seat_pattern(pid, player.name) + _HONORIFIC + r"\s*[、,，]\s*")
+            pid: re.compile(
+                _seat_pattern(pid, player.name) + _HONORIFIC + r"\s*(?:[、,，]\s*|$)"
+            )
             for pid, player in state.players.items()
         }
-        group = re.compile(_GROUP_VOCATIVE + r"\s*[、,，]\s*")
+        group = re.compile(_GROUP_VOCATIVE + r"\s*(?:[、,，]\s*|$)")
         other_seats = "|".join(
             _seat_pattern(pid, player.name)
             for pid, player in state.players.items()
             if pid != ally_id
         )
-        not_the_team = re.compile(rf"(?:{other_seats}){_HONORIFIC}[がはも]|{_NOT_THE_TEAM}")
+        every_seat = "|".join(
+            _seat_pattern(pid, player.name) for pid, player in state.players.items()
+        )
+        not_the_team = re.compile(
+            rf"(?:{other_seats})(?!{_SEAT_NOT_A_SUBJECT})|{_NOT_THE_TEAM}"
+        )
+        # A ballot proposed on another seat replaces the plan; who proposes it
+        # is read the same way, the partner included (ダイキはミオに投票して
+        # tells the partner where its own vote goes, and replaces nothing).
+        not_the_team_for_another = re.compile(
+            rf"(?:{every_seat})(?!{_SEAT_NOT_A_SUBJECT})|{_NOT_THE_TEAM}"
+        )
+        not_the_team_for_partners_own = re.compile(
+            rf"{_FIRST_PERSON}[はがも]|{not_the_team_for_another.pattern}"
+        )
         plan: tuple[str, str] | None = None
         for message in state.chat_log:
             if message.channel is not ChatChannel.WOLF or message.day not in (
@@ -2661,6 +2726,7 @@ class AICoordinator:
                 continue
             addressee: str | None = None
             planned_in_this_message = False
+            by_partner = message.author_id == ally_id
             for sentence in _SENTENCE_RE.finditer(message.content):
                 body = sentence["body"].rstrip()
                 called = _leading_vocatives(body, vocatives, group)
@@ -2669,19 +2735,26 @@ class AICoordinator:
                 seats = [(ally, _ANY_MOOD)]
                 if addressee == ally_id:
                     seats.append((_SECOND_PERSON, _REQUESTING))
-                if message.author_id == ally_id:
+                if by_partner:
                     seats.append((_FIRST_PERSON, _REQUESTING))
                 asked = bool(set(sentence["end"]) & {"？", "?"} or _QUESTION_RE.search(body))
-                if not asked and any(
+                on_partner = not asked and any(
                     _proposes_ballot_on(body, seat, moods, not_the_team) for seat, moods in seats
-                ):
+                )
+                on_another = not asked and _proposes_ballot_on(
+                    body,
+                    f"(?:{other_seats})",
+                    _COUNTER_PROPOSING if by_partner else _ANY_MOOD,
+                    not_the_team_for_partners_own if by_partner else not_the_team_for_another,
+                )
+                if on_partner and not on_another:
                     plan = (message.message_id, body.strip())
                     planned_in_this_message = True
                 elif plan is not None and (
-                    (
-                        planned_in_this_message
-                        and (_RETRACTION_RE.match(body) or _CONTINUES_RE.match(body))
-                    )
+                    on_another
+                    or _RETRACTION_RE.match(body)
+                    or (planned_in_this_message and _CONTINUES_RE.match(body))
+                    or (by_partner and _OBJECTION_RE.search(body))
                     or any(_unsettles_ballot_on(body, seat, asked) for seat, _ in seats)
                 ):
                     plan = None
