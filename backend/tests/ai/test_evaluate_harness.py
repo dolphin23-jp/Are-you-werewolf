@@ -513,3 +513,19 @@ def test_commit_sha_tolerates_a_missing_git(monkeypatch: pytest.MonkeyPatch) -> 
 
     monkeypatch.setattr(evaluate.subprocess, "run", no_git)
     assert evaluate.commit_sha() is None
+
+
+def test_provider_flag_keeps_the_model_named_in_the_provider_field(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`evaluate.py --provider anthropic` must bill the model the preflight
+    checked, not the default one the provider keyword would fall back to."""
+    import argparse
+
+    monkeypatch.setenv("WEREWOLF_LLM_PROVIDER", "claude-haiku-5-5")
+    parser = argparse.ArgumentParser()
+    args = argparse.Namespace(games=1, provider="anthropic", max_cost=5.0)
+    for name in ("price_in", "price_out", "judge", "judge_model"):
+        setattr(args, name, None)
+    settings = evaluate.resolve_settings(args, parser)
+    assert settings.werewolf_anthropic_model == "claude-haiku-5-5"

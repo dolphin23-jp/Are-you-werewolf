@@ -224,7 +224,7 @@ python scripts/evaluate.py --games 1 --provider luna \
 ### Claude の設定(思考量・同時実行など)
 
 どれも環境変数で、省略すれば既定値です。Codespaces やローカルでは Codespaces secrets・
-`backend/.env` が渡します。下の表のうち Actions の AI評価が渡すのは次の2つだけで、
+`backend/.env` が渡します。下の表のうち Actions の AI評価が渡すのは次の3つだけで、
 ほかの設定は既定値で走ります(リポジトリの変数に同じ名前で入れても読まれません)。
 
 - 思考量: 入力の `effort_discussion` が `_DISCUSSION` と `_CHAT` に、`effort_decisions` が

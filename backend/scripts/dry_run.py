@@ -34,7 +34,7 @@ from app.ai.provider.budget import (  # noqa: E402
     EvaluationBudget,
 )
 from app.ai.provider.factory import build_llm_provider  # noqa: E402
-from app.config import Settings  # noqa: E402
+from app.config import Settings, settings_for_provider  # noqa: E402
 from app.engine.game import GameController, PlayerSpec  # noqa: E402
 from app.engine.phases import Phase  # noqa: E402
 from app.engine.roles import ROLE_DEFINITIONS, RoleName  # noqa: E402
@@ -105,8 +105,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def resolve_settings(args: argparse.Namespace, parser: argparse.ArgumentParser) -> Settings:
-    overrides = {"werewolf_llm_provider": args.provider} if args.provider else {}
-    settings = Settings(**overrides)
+    settings = settings_for_provider(args.provider)
     if args.max_cost is not None and not args.max_cost > 0:
         parser.error("--max-cost は0より大きいUSDの金額にしてください。")
     # The resolved provider, so WEREWOLF_LLM_PROVIDER=anthropic is covered too.

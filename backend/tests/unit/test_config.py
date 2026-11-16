@@ -412,3 +412,32 @@ def test_access_password_ignores_a_captured_inline_comment(
 ) -> None:
     monkeypatch.setenv("WEREWOLF_ACCESS_PASSWORD", raw)
     assert Settings(_env_file=None).werewolf_access_password == expected
+
+
+@pytest.mark.parametrize("family", ["claude-opus", "claude-sonnet", "claude-code"])
+def test_a_bare_family_name_selects_anthropic_but_keeps_the_default_model(
+    monkeypatch: pytest.MonkeyPatch, family: str
+) -> None:
+    """Only a versioned id names a callable model. A family name moved into the
+    model would make every call 404, so it selects the provider only."""
+    monkeypatch.setenv("WEREWOLF_LLM_PROVIDER", family)
+    settings = Settings(_env_file=None)
+    assert settings.werewolf_llm_provider == "anthropic"
+    assert settings.werewolf_anthropic_model == DEFAULT_ANTHROPIC_MODEL
+
+
+def test_scripts_forcing_the_provider_keep_the_model_named_in_the_provider_field(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.config import settings_for_provider
+
+    monkeypatch.setenv("WEREWOLF_LLM_PROVIDER", "claude-haiku-5-5")
+    assert settings_for_provider("anthropic").werewolf_anthropic_model == "claude-haiku-5-5"
+    assert settings_for_provider(None).werewolf_anthropic_model == "claude-haiku-5-5"
+    assert (
+        settings_for_provider("anthropic", werewolf_anthropic_model="claude-sonnet-5-5")
+        .werewolf_anthropic_model
+        == "claude-sonnet-5-5"
+    )
+    # Forcing another provider leaves the anthropic model untouched.
+    assert settings_for_provider("mock").werewolf_llm_provider == "mock"

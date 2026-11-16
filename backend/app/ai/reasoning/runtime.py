@@ -947,7 +947,9 @@ class ReasoningRuntime:
         views = self.ranked_view(player_id)
         return views[0].rank if views else None
 
-    def conflict_points(self, state: GameState) -> list[str]:
+    def conflict_points(
+        self, state: GameState, *, stated_targets_are_public: bool = True
+    ) -> list[str]:
         """The day's disagreements, from structured public events rather than prose.
 
         Every seat reads the day summary this feeds, so nothing here may come
@@ -959,6 +961,12 @@ class ReasoningRuntime:
         candidate, in a sentence that puts them forward for execution. A seat
         that only mentioned its private target, to clear or question them, has
         not told the table it wants them hanged.
+
+        Under v3 even that is not enough: the stated target is the model's
+        private plan note, and a keyword match cannot tell "X を吊りたい" from
+        "X は吊るべきではない". So the split is reported only when stated
+        targets are themselves public -- v2, where code writes the candidate
+        into the message -- and v3 seats read the disagreement from the log.
         """
         ledger = PublicFactLedger(state)
         points: list[str] = []
@@ -979,6 +987,8 @@ class ReasoningRuntime:
         # message need not name. Only a candidate the seat declared out loud
         # today is public; a bare mention is no declaration, and a seat with no
         # declaring sentence is left out rather than guessed at.
+        if not stated_targets_are_public:
+            return points
         named_today: dict[str, set[str]] = {}
         for message in state.chat_log:
             if message.day == state.day and message.channel is ChatChannel.PUBLIC:

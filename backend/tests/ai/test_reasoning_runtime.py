@@ -482,3 +482,22 @@ def test_a_human_correction_splits_the_table_rather_than_resetting_it():
     assert runtime.seats["p8"].belief.state.reasons_for("p0") == ()
     # And the table still disagrees about who to execute.
     assert runtime.opinion_spread() > 0.0
+
+
+def test_under_v3_no_split_is_reported_because_stated_targets_are_private():
+    """A v3 stated target is the model's private plan note. Keyword matching
+    cannot tell 'Xを吊りたい' from 'Xは吊るべきではない', so under v3 the
+    day summary carries no split at all; the seats read the log instead."""
+    state = _played_board()
+    runtime = _runtime(state)
+    for speaker, target, day in (("p2", "p5", 2), ("p3", "p5", 2), ("p7", "p8", 2)):
+        _says(state, speaker, target, day)
+        runtime.record_stated_target(speaker, target, day)
+
+    v2_points = runtime.conflict_points(state)
+    v3_points = runtime.conflict_points(state, stated_targets_are_public=False)
+
+    assert any("割れている" in point for point in v2_points)
+    assert not any("割れている" in point for point in v3_points)
+    # The public facts are still summarised.
+    assert [p for p in v2_points if "割れている" not in p] == v3_points

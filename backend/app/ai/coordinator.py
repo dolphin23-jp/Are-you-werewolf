@@ -1757,7 +1757,11 @@ class AICoordinator:
             # The disagreements are already structured events; narrating them
             # back through a model adds a request and a chance to lose one.
             self.reasoning.refresh(state)
-            commentary = "。".join(self.reasoning.conflict_points(state))
+            commentary = "。".join(
+                self.reasoning.conflict_points(
+                    state, stated_targets_are_public=not self.model_decides
+                )
+            )
             if self.model_decides:
                 commentary = namify(commentary, PublicFactLedger(state))
             self._record(state, narrator_id, "summary", text=commentary)

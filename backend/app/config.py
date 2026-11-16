@@ -34,6 +34,11 @@ DEFAULT_ANTHROPIC_MODEL = "claude-opus-5-5"
 # into the *provider* field. Unambiguous for the same reason as the luna
 # pattern: no other provider's models are named `claude-*`.
 _CLAUDE_MODEL_NAME_RE = re.compile(r"claude-[a-z0-9-]+")
+# A model id with a version (`claude-opus-5-5`, `claude-haiku-5-5`, a dated
+# snapshot). Only such an id typed into the provider field becomes the model;
+# a bare family name (`claude-opus`, `claude-code`) names no callable model and
+# would 404 every call, so it selects the provider and keeps the default model.
+_VERSIONED_CLAUDE_MODEL_RE = re.compile(r"claude-[a-z]+-\d+(?:-\d+)*(?:-\d{8})?")
 
 # Every value `output_config.effort` accepts. Validated at startup so a typo
 # fails here instead of as a 400 on the first paid request of a game.
@@ -183,7 +188,7 @@ class Settings(BaseSettings):
         if not isinstance(provider, str):
             return data
         model_id = _unquote(provider).lower()
-        if not _CLAUDE_MODEL_NAME_RE.fullmatch(model_id):
+        if not _VERSIONED_CLAUDE_MODEL_RE.fullmatch(model_id):
             return data
         configured = data.get("werewolf_anthropic_model")
         if configured is None or (isinstance(configured, str) and not _unquote(configured)):
@@ -355,3 +360,27 @@ def get_settings() -> Settings:
     if _settings is None:
         _settings = Settings()
     return _settings
+
+
+def settings_for_provider(provider: str | None, **overrides: object) -> Settings:
+    """Settings with `provider` forced, keeping the model the configuration chose.
+
+    A script that passes the provider as a keyword hides the raw environment
+    value, so a model id typed into WEREWOLF_LLM_PROVIDER (which Settings turns
+    into the model) would silently fall back to the default model -- and the
+    run would bill a different model from the one the owner named and the
+    preflight checked. When the forced and the configured provider are both
+    anthropic, the configured model is carried over unless overridden.
+    """
+    if provider is None:
+        return Settings(**overrides)  # type: ignore[arg-type]
+    configured = Settings()
+    values: dict[str, object] = {"werewolf_llm_provider": provider}
+    if (
+        configured.werewolf_llm_provider == "anthropic"
+        and Settings(werewolf_llm_provider=provider).werewolf_llm_provider == "anthropic"
+    ):
+        values["werewolf_anthropic_model"] = configured.werewolf_anthropic_model
+    values.update(overrides)
+    return Settings(**values)  # type: ignore[arg-type]
+

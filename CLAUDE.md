@@ -15,7 +15,8 @@
   fails at startup.
 - Keep every comment in `backend/.env.example` on its own line, never
   `KEY=value  # comment`: `docker run --env-file` keeps the comment as part of the
-  value, so a blank `WEREWOLF_ACCESS_PASSWORD` would become a published password.
+  value. Settings treats a whitespace-then-`#` access password as empty, but nothing
+  else is protected that way.
 - Keep every schema a v3 game or an evaluation run sends within Anthropic's
   structured-output limits (24 optional / 16 union-typed parameters per request,
   nested included); `backend/tests/ai/test_schema_complexity.py` enforces it. v3
