@@ -60,10 +60,12 @@ def test_the_code_written_fact_sentences_are_counted(first_game: AnalysisResult)
     speech = first_game.stats["speech"]
 
     # 11 of the 77 AI discussion lines open with a CO or result sentence
-    # `ensure_fact_sentences` prepended; the prompt vocabulary is 2 more.
+    # `ensure_fact_sentences` prepended. The prompt vocabulary is 7 more: 2
+    # with the structured-era words, and 5 on days 5-6 reciting the v3
+    # checklist's own labels (反対仮説, 二番手, 吊らない一番の理由).
     assert speech["code_fact_sentence_lines"] == 11
-    assert speech["prompt_template_phrase_rate"] == round(2 / 77, 4)
-    assert speech["template_phrase_rate"] == round(13 / 77, 4)
+    assert speech["prompt_template_phrase_rate"] == round(7 / 77, 4)
+    assert speech["template_phrase_rate"] == round(18 / 77, 4)
 
 
 def test_unanswered_questions_are_split_by_whether_the_target_had_a_turn(

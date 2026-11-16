@@ -56,7 +56,7 @@ HARD_FAILURE_LABELS: dict[str, str] = {
     "duplicate_required_result_count": "同じ能力結果を重ねて出した",
     "displayed_target_mismatch_count": "表示した対象と決めた対象が違った",
     "stale_evidence_publicly_emitted_count": "訂正済みの古い根拠を公開発言に出した",
-    "unexplained_vote_change_count": "理由のない投票先の変更",
+    "unexplained_vote_change_count": "説明のつかない投票先の変更",
     "unplanned_wolf_ally_vote_count": "計画のない人狼の仲間投票",
     "duplicate_night_action_count": "同じ夜の行動の重複",
 }
@@ -68,7 +68,7 @@ VALIDATION_LABELS: dict[str, str] = {
     "dead_target_selections": "死亡者・選べない相手を対象にした",
     "public_fact_flips": "公開結果と逆の白黒を書いた",
     "vote_history_misreads": "投票の記録を読み違えた",
-    "vote_plan_mismatches": "言った吊り先と違う相手に投票した",
+    "vote_plan_mismatches": "メモ(v3)・発言(v2)の吊り先と違う相手に投票した",
 }
 
 _PRICING_SOURCE_LABELS = {

@@ -116,7 +116,9 @@ class AIPlayerAgent:
         self, system: str, messages: list[Message]
     ) -> DiscussionOutput | None:
         self.last_discussion_was_brief = False
-        _minimum, maximum = discussion_length_range(self._personality.verbosity)
+        _minimum, maximum = discussion_length_range(
+            self._personality.verbosity, chat=self._chat_contract
+        )
         budget = _discussion_token_budget(maximum)
         result: DiscussionOutput | None
         if self._chat_contract:

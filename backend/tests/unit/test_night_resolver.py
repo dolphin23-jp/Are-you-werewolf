@@ -209,7 +209,56 @@ def test_a_regular_night_curse_and_bite_are_unchanged():
         for d in state.death_records
         if d.day == 1 and d.cause is not DeathCause.EXECUTED
     ]
-    assert tonight == [(fox_id, DeathCause.CURSED, 1), (prey, DeathCause.ATTACKED, 1)]
+    assert sorted(tonight) == sorted(
+        [(fox_id, DeathCause.CURSED, 1), (prey, DeathCause.ATTACKED, 1)]
+    )
+
+
+def _seat(controller: GameController, player_id: str) -> int:
+    return list(controller.state.players).index(player_id)
+
+
+def test_two_corpses_come_out_in_seat_order_whichever_was_the_fox():
+    """The curse resolves before the bite. Listed in that order, the first of
+    two corpses was always the fox -- in the events every client receives and
+    in every prompt that names the morning's dead. Seat order says nothing."""
+    # Seed 6 seats the fox mid-table (seat 9), so there is prey on both sides.
+    checked: list[bool] = []
+    for prey_before_fox in (True, False):
+        controller = _night_zero(seed=6)
+        _to_night_one(controller)
+        state = controller.state
+        seer_id = _find_role(controller, RoleName.SEER)
+        fox_id = _find_role(controller, RoleName.FOX)
+        fox_seat = _seat(controller, fox_id)
+        candidates = [
+            pid
+            for pid in state.alive_ids()
+            if state.players[pid].role in (RoleName.VILLAGER, RoleName.FREEMASON)
+            and (_seat(controller, pid) < fox_seat) == prey_before_fox
+        ]
+        if not candidates:
+            continue
+        prey = candidates[0]
+        died: list[str] = []
+
+        def listen(event: GameEvent, died: list[str] = died) -> None:
+            if event.type is GameEventType.PLAYER_DIED:
+                died.append(str(event.payload["player_id"]))
+
+        controller.events.subscribe(listen)
+        controller.submit_night_action(seer_id, "divine", fox_id)
+        controller.submit_night_action(controller.alpha_wolf_id, "attack", prey)
+        controller.resolve_night()
+
+        in_seat_order = sorted([fox_id, prey], key=lambda pid: _seat(controller, pid))
+        assert died == in_seat_order
+        assert [
+            d.player_id for d in state.death_records if d.cause is not DeathCause.EXECUTED
+        ][-2:] == in_seat_order
+        checked.append(prey_before_fox)
+    # Both orders ran, including the one resolution order would have reversed.
+    assert checked == [True, False]
 
 
 def test_a_regular_night_bite_on_the_fox_still_misses():

@@ -58,14 +58,14 @@ ROLE_DEFINITIONS: dict[RoleName, RoleDefinition] = {
         has_night_action=True,
     ),
     RoleName.MEDIUM: RoleDefinition(
-        RoleName.MEDIUM, Team.VILLAGE, 1, "霊媒師", "処刑者の正体を自動で知る"
+        RoleName.MEDIUM, Team.VILLAGE, 1, "霊媒師", "処刑された人が人狼かどうかを自動で知る"
     ),
     RoleName.HUNTER: RoleDefinition(
         RoleName.HUNTER,
         Team.VILLAGE,
         1,
         "狩人",
-        "2日目夜から毎夜1人を護衛する",
+        "1日目夜から毎夜1人を護衛する（自分は不可・連続護衛は可）",
         has_night_action=True,
     ),
     RoleName.FOX: RoleDefinition(

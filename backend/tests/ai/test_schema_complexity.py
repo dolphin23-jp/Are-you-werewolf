@@ -66,7 +66,20 @@ def test_the_full_discussion_contract_is_over_the_limit_which_is_why_v3_uses_the
 
 
 def test_the_wire_form_has_headroom_under_both_limits():
-    assert count_schema_parameters(transform_schema(ChatDiscussionOutput)) == (18, 6)
+    assert count_schema_parameters(transform_schema(ChatDiscussionOutput)) == (17, 6)
+
+
+def test_the_plan_note_is_written_before_the_message():
+    """Structured outputs emit required properties first, in schema order. The
+    note is required on the wire so the comparison precedes the line; inside
+    it, the comparison (`plan`) precedes the pick."""
+    sent = transform_schema(ChatDiscussionOutput)
+
+    assert sent["required"] == ["plan_note", "public_message"]
+    assert list(sent["properties"])[:2] == ["plan_note", "public_message"]
+    assert list(sent["$defs"]["PlanNote"]["properties"])[:2] == ["plan", "execution_target"]
+    # Parsing stays lenient: the json_object path is not grammar-enforced.
+    assert ChatDiscussionOutput.model_validate({"public_message": "x"}).plan_note.plan == ""
 
 
 def test_the_limits_are_the_documented_ones():

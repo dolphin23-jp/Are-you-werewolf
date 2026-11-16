@@ -131,16 +131,17 @@ SUMMARY_OUTPUT_INSTRUCTION = """以下のJSON形式で回答してください:
 # small enough for Anthropic structured outputs to compile, and none of its
 # keys or descriptions ask the model to write out its thinking, which can be
 # refused as reasoning extraction (see `PlanNote`).
-CHAT_DISCUSSION_OUTPUT_INSTRUCTION = """次のJSONだけを返してください（前後に説明文を付けない）:
-{"public_message": "卓に送るチャット1通。相手は名前で呼び、player_idは書かない", \
-"reply_to": "直前の誰かの発言に返すならその発言ID(mN)、なければnull", \
-"plan_note": {"execution_target": "今いちばん吊りたい相手のplayer_id。決めきれていなくても今の\
+CHAT_DISCUSSION_OUTPUT_INSTRUCTION = """次のJSONだけを返してください（前後に説明文を付けない）。\
+plan_noteを先に書き、そのメモに沿ってpublic_messageを書く:
+{"plan_note": {"plan": "非公開の方針メモ。内訳の見立て、候補の比べ合い、今日の方針を2〜3文で", \
+"execution_target": "今いちばん吊りたい相手のplayer_id。決めきれていなくても今の\
 いちばんを書き、材料が何もないときだけnull", \
 "suspects": ["怪しいと思う順のplayer_id"], "trusted": ["信用しているplayer_id"], \
 "trusted_seer": "真と見ている占いCO者のplayer_idまたはnull", \
 "fox_candidates": ["妖狐候補のplayer_id"], \
-"plan": "非公開の方針メモ。内訳の見立て、候補の比べ合い、今日の方針を2〜3文で", \
 "team_plan": "非公開。人狼・狂人は陣営としての狙いと次の一手を短く。それ以外は空文字"}, \
+"public_message": "卓に送るチャット1通。相手は名前で呼び、player_idは書かない", \
+"reply_to": "直前の誰かの発言に返すならその発言ID(mN)、なければnull", \
 "public_claim_role": "この発言でCOする役職(seer/medium/hunter/freemason)。しないならnull", \
 "public_results": [{"result_type": "seerまたはmedium", "target_id": "pN", \
 "is_werewolf": trueまたはfalse, "referenced_day": その結果の夜(霊媒は処刑日)の日数}], \

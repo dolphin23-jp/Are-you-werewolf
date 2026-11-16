@@ -135,6 +135,10 @@ class Utterance:
     # The message this turn answered, by the id the model gave. With the stated
     # candidate it shows whether a change of mind was a reply to someone.
     reply_to: str | None = None
+    # The discussion stage the turn was asked for (`initial_view`, `reaction`,
+    # `consensus_summary`, `final_designation`, ...); None for other kinds and
+    # for transcripts written before it was recorded.
+    stage: str | None = None
 
 
 @dataclass

@@ -95,6 +95,7 @@ class NightResolver:
         attack_death = self._apply_attack(state, guard_target)
         if attack_death is not None:
             deaths.append(attack_death)
+        _in_seat_order(state, deaths)
 
         state.pending_divine = None
         state.pending_guard = None
@@ -180,3 +181,24 @@ class NightResolver:
         record = DeathRecord(player_id=target_id, cause=DeathCause.ATTACKED, day=state.day)
         state.death_records.append(record)
         return record
+
+
+def _in_seat_order(state: GameState, deaths: list[DeathRecord]) -> None:
+    """Put a night's corpses in seat order, in the result and in the record.
+
+    The curse is applied before the attack, so in resolution order the first of
+    two corpses was always the fox. Every reader that lists the morning's dead
+    from these lists -- the PLAYER_DIED events every client receives, the
+    prompts, the replay -- would hand that away. Seat order carries nothing.
+    The night's records are the last ones appended, so they are reordered in
+    place there too.
+    """
+    if len(deaths) < 2:
+        return
+    seat = {player_id: index for index, player_id in enumerate(state.players)}
+    tail = state.death_records[-len(deaths) :]
+    if [id(record) for record in tail] != [id(record) for record in deaths]:
+        raise RuntimeError("night deaths are not the last death records")
+    deaths.sort(key=lambda record: seat[record.player_id])
+    state.death_records[-len(deaths) :] = deaths
+

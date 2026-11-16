@@ -26,7 +26,11 @@ from dataclasses import dataclass, field, replace
 from app.ai.co_detection import detect_claimed_role
 from app.ai.context import ContextBuilder, DaySummaryManager
 from app.ai.deception import FakeClaimGuard, assign_madman_strategy, assign_wolf_deception
-from app.ai.personalities import assign_personalities, discussion_length_range
+from app.ai.personalities import (
+    assign_personalities,
+    chat_stage_max_chars,
+    discussion_length_range,
+)
 from app.ai.player_agent import AIPlayerAgent, truncate_at_sentence
 from app.ai.provider.base import LLMProvider, Message
 from app.ai.reasoning import (
@@ -445,6 +449,7 @@ class AICoordinator:
         countercase: str = "",
         alternative_target: str | None = None,
         reply_to: str | None = None,
+        stage: str | None = None,
     ) -> None:
         if self._recorder is None:
             return
@@ -476,6 +481,7 @@ class AICoordinator:
                 countercase=countercase,
                 alternative_target=alternative_target,
                 reply_to=reply_to,
+                stage=stage,
             )
         )
 
@@ -1445,9 +1451,14 @@ class AICoordinator:
             public_results=[item.model_dump() for item in output.public_results],
             directed_question_targets=[item.target_id for item in output.directed_questions],
             ready_to_vote=output.ready_to_vote,
-            effective_length_limit=discussion_length_range(
-                self._personalities[player_id].verbosity
-            )[1],
+            # v3: the cap this turn's prompt named for its stage, so an overrun
+            # counts what the model was told, not the hard cut at 160.
+            effective_length_limit=(
+                chat_stage_max_chars(context_stage)
+                if self.model_decides
+                else discussion_length_range(self._personalities[player_id].verbosity)[1]
+            ),
+            stage=stage,
             key_point=output.key_point,
             agrees_with=output.agrees_with,
             reply_to=output.reply_to,

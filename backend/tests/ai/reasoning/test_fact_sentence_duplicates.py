@@ -132,9 +132,9 @@ def test_a_white_result_said_in_an_everyday_way_is_not_said_twice(message: str) 
     [
         # The opposite verdict: the canonical one has to be heard.
         "Player5は白でした。",
-        # Impressions and hypotheticals are not a published result. ("黒っぽい"
-        # and "黒なら" are not listed: `detect_public_results` itself still
-        # reads them as a result, which is its own defect.)
+        # Impressions and hypotheticals are not a published result.
+        "Player5は黒っぽい。",
+        "Player5が黒なら吊る。",
         "Player5は黒寄りに見える。",
         "Player5は黒だと思う。",
         "Player5の黒要素は票だけ。",

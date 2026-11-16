@@ -605,7 +605,9 @@ def test_chat_discussion_contract_names_the_wire_keys():
     body = messages[0].content
 
     assert "自分の見立てと方針はplan_noteに短く書く" in system
-    assert '"plan_note": {"execution_target"' in body
+    assert '"plan_note": {"plan": "非公開の方針メモ。' in body
+    # The note is listed before the message, the order it is written in.
+    assert body.index('"plan_note"') < body.index('"public_message"')
     assert '"plan": "非公開の方針メモ。' in body
     assert '"team_plan": "非公開。人狼・狂人は陣営としての狙いと次の一手を短く' in body
     assert '"needs_another_statement": このあともう一言続けたいならtrue' in body

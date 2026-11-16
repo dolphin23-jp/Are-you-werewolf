@@ -50,6 +50,11 @@ _TEMPLATE_PHRASE_RE = re.compile(
     r"|独立した根拠"
     r"|反対材料"
     r"|第二候補は"
+    # The v3 prompt's own checklist words until 2026-11-16 (the first Claude
+    # game repeated them back); kept so a regression to recited labels shows.
+    r"|反対仮説"
+    r"|二番手"
+    r"|吊らない一番の理由"
 )
 # The canonical fact sentences `ensure_fact_sentences` (app/ai/reasoning/claims.py)
 # prepends when the prose does not state a declared CO or result -- the
