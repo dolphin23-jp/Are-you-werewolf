@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""Evaluate models with the phase-aware expert cutoff benchmark v2."""
+"""Evaluate models with the phase-aware expert cutoff benchmark v2.
+
+    python scripts/evaluate_expert_scenarios_v2.py --provider baseline
+    python scripts/evaluate_expert_scenarios_v2.py --provider anthropic --max-cost 5
+
+Providers, the spending cap and its exit code 3 work exactly as in
+`scripts/evaluate_expert_scenarios.py`, whose helpers this reuses.
+"""
 
 from __future__ import annotations
 
@@ -7,15 +14,14 @@ import argparse
 import asyncio
 import json
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.ai.metrics import MetricsCollector  # noqa: E402
-from app.ai.provider.factory import build_llm_provider  # noqa: E402
-from app.ai.provider.json_instruction import JsonInstructionProvider  # noqa: E402
-from app.config import Settings  # noqa: E402
+from app.ai.provider.budget import EvaluationBudget  # noqa: E402
 from app.eval.expert_scenarios_v2 import (  # noqa: E402
     BaselineV2AnswerProvider,
     ExpertScenarioV2Answer,
@@ -27,6 +33,16 @@ from app.eval.expert_scenarios_v2 import (  # noqa: E402
     render_v2_report,
     score_v2_answer,
     summarize_v2_scores,
+)
+from app.eval.report import BUDGET_STOP_BANNER  # noqa: E402
+from scripts.evaluate import EXIT_BUDGET_STOPPED, build_budget  # noqa: E402
+from scripts.evaluate_expert_scenarios import (  # noqa: E402
+    PROVIDERS,
+    add_cost_arguments,
+    answer_all,
+    budget_banner,
+    build_answer_llm,
+    check_cost_arguments,
 )
 
 
@@ -40,29 +56,28 @@ async def _generate_answers(
     provider_name: str,
     metrics: MetricsCollector,
     concurrency: int,
-) -> dict[str, ExpertScenarioV2Answer | None]:
+    budget: EvaluationBudget | None = None,
+) -> tuple[dict[str, ExpertScenarioV2Answer | None], str, str | None]:
+    """`(answers, model_label, budget_stop)`."""
     if provider_name == "baseline":
-        provider = BaselineV2AnswerProvider()
-    else:
-        settings = Settings(werewolf_llm_provider="luna")
-        llm_provider = JsonInstructionProvider(build_llm_provider(settings, metrics=metrics))
-        provider = LLMV2AnswerProvider(llm_provider)
-
-    semaphore = asyncio.Semaphore(max(1, concurrency))
-
-    async def run_one(
-        case: ExpertScenarioV2Case,
-    ) -> tuple[str, ExpertScenarioV2Answer | None]:
-        async with semaphore:
-            return case.scenario_id, await provider.answer(case)
-
-    pairs = await asyncio.gather(*(run_one(case) for case in cases))
-    return dict(pairs)
+        baseline = BaselineV2AnswerProvider()
+        answers, stop = await answer_all(
+            cases, baseline.answer, lambda case: case.scenario_id, concurrency
+        )
+        return answers, "baseline-v2", stop
+    llm, label = build_answer_llm(provider_name, metrics, budget)
+    provider = LLMV2AnswerProvider(llm)
+    answers, stop = await answer_all(
+        cases, provider.answer, lambda case: case.scenario_id, concurrency
+    )
+    return answers, label, stop
 
 
-async def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--provider", choices=["baseline", "luna"], default="baseline")
+async def main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument("--provider", choices=PROVIDERS, default="baseline")
     parser.add_argument("--answers-dir", type=Path, default=None)
     parser.add_argument(
         "--scenarios-root",
@@ -78,10 +93,10 @@ async def main() -> int:
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--concurrency", type=int, default=2)
     parser.add_argument("--out", type=Path, default=Path("expert-eval-v2-out"))
-    parser.add_argument("--price-in", type=float, default=0.0)
-    parser.add_argument("--price-out", type=float, default=0.0)
+    add_cost_arguments(parser)
     parser.add_argument("--fail-under", type=float, default=None)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
+    check_cost_arguments(args, parser)
 
     scenario_ids = set(args.scenario_id) if args.scenario_id else None
     cases = load_v2_cases(
@@ -104,6 +119,8 @@ async def main() -> int:
         )
 
     metrics = MetricsCollector()
+    budget = build_budget(args) if args.answers_dir is None else None
+    budget_stop: str | None = None
     if args.answers_dir is not None:
         answers: dict[str, ExpertScenarioV2Answer | None] = {}
         for case in cases:
@@ -112,17 +129,16 @@ async def main() -> int:
                 load_external_v2_answer(path) if path.exists() else None
             )
         provider_label = "external-answers"
-        model_label = "external-v2"
+        model = "external-v2"
     else:
-        answers = await _generate_answers(
+        answers, model, budget_stop = await _generate_answers(
             cases,
             provider_name=args.provider,
             metrics=metrics,
             concurrency=args.concurrency,
+            budget=budget,
         )
         provider_label = args.provider
-        settings = Settings()
-        model_label = settings.luna_model if args.provider == "luna" else "baseline-v2"
 
     scores = []
     for case in cases:
@@ -144,26 +160,31 @@ async def main() -> int:
 
     summary = summarize_v2_scores(scores)
     metrics_summary: dict[str, Any] | None = None
-    if args.answers_dir is None and args.provider == "luna":
+    if args.answers_dir is None and args.provider != "baseline":
         metrics_summary = metrics.summary(args.price_in, args.price_out)
 
     report = render_v2_report(
         provider=provider_label,
-        model=model_label,
+        model=model,
         scores=scores,
         summary=summary,
         metrics_summary=metrics_summary,
     )
+    if budget_stop is not None:
+        report = budget_banner(budget_stop) + report
     (args.out / "report.md").write_text(report, encoding="utf-8")
     (args.out / "summary.json").write_text(
         json.dumps(
             {
                 "benchmark_version": "v2",
                 "provider": provider_label,
-                "model": model_label,
+                "model": model,
                 "seed": args.seed,
                 "summary": summary.to_dict(),
                 "metrics": metrics_summary,
+                "budget": budget.snapshot() if budget is not None else None,
+                "stopped_by_budget": budget_stop is not None,
+                "budget_stop": budget_stop,
                 "scores": [score.to_dict() for score in scores],
             },
             ensure_ascii=False,
@@ -175,6 +196,10 @@ async def main() -> int:
     print()
     print(report)
     print(f"==> 出力先: {args.out}/")
+
+    if budget_stop is not None:
+        print(f"STOPPED: {BUDGET_STOP_BANNER}: {budget_stop}", file=sys.stderr)
+        return EXIT_BUDGET_STOPPED
 
     if summary.valid_answer_rate == 0.0:
         print(

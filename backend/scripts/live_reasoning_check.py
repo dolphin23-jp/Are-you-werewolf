@@ -8,10 +8,15 @@ so "v2 reasons well" cannot be concluded from mock runs alone. This is the
 script that goes and looks.
 
 Manual on purpose. It spends real requests, so it is never run by CI and never
-imported by a test:
+plays a real game from a test:
+
+    WEREWOLF_LLM_PROVIDER=anthropic WEREWOLF_ANTHROPIC_API_KEY=... \\
+        python scripts/live_reasoning_check.py --seed 11 --engine v3 --max-cost 15
 
     WEREWOLF_LLM_PROVIDER=luna LUNA_API_KEY=... \\
         python scripts/live_reasoning_check.py --seed 11
+
+`--max-cost` (USD) is required for `anthropic`, as in `scripts/evaluate.py`.
 
 Run `scripts/check_llm.py` first -- one call to find a bad key beats a few
 hundred. What this reports beyond the mock comparison:
@@ -32,6 +37,7 @@ import asyncio
 import json
 import random
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 from time import perf_counter
 from typing import Any
@@ -41,14 +47,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from app.ai.coordinator import AICoordinator  # noqa: E402
 from app.ai.engine_mode import build_reasoning_runtime, model_decides  # noqa: E402
 from app.ai.metrics import MetricsCollector  # noqa: E402
-from app.ai.provider.budget import BudgetedProvider, EvaluationBudget  # noqa: E402
+from app.ai.provider.base import LLMProvider  # noqa: E402
+from app.ai.provider.budget import (  # noqa: E402
+    BudgetedProvider,
+    BudgetExceeded,
+    EvaluationBudget,
+)
 from app.ai.provider.factory import build_llm_provider  # noqa: E402
 from app.ai.reasoning.timeline import find_timeline_conflicts  # noqa: E402
-from app.config import get_settings  # noqa: E402
+from app.config import Settings, get_settings  # noqa: E402
 from app.engine.game import GameController, PlayerSpec  # noqa: E402
 from app.engine.phases import Phase  # noqa: E402
 from app.engine.roles import RoleName  # noqa: E402
+from app.eval.report import BUDGET_STOP_BANNER  # noqa: E402
 from app.eval.transcript import TranscriptRecorder  # noqa: E402
+from scripts.evaluate import EXIT_BUDGET_STOPPED, model_label  # noqa: E402
 
 MAX_LOOPS = 150
 HUMAN_ID = "p0"
@@ -99,12 +112,14 @@ async def run(
     settings = get_settings()
     if settings.werewolf_llm_provider == "mock":
         raise SystemExit(
-            "この確認は実プロバイダ用です。WEREWOLF_LLM_PROVIDER=luna を設定してください。"
+            "この確認は実プロバイダ用です。WEREWOLF_LLM_PROVIDER=anthropic"
+            "(または休眠中の luna)を設定してください。"
         )
     metrics = MetricsCollector()
-    provider = build_llm_provider(settings, seed=seed, metrics=metrics)
-    if request_budget is not None:
-        provider = BudgetedProvider(provider, request_budget)
+    inner = build_llm_provider(settings, seed=seed, metrics=metrics)
+    provider: LLMProvider = (
+        BudgetedProvider(inner, request_budget) if request_budget is not None else inner
+    )
     controller = GameController(
         session_id=f"live-{seed}-{engine}", player_specs=_specs(), seed=seed
     )
@@ -122,6 +137,8 @@ async def run(
         model_decides=model_decides(engine),
         pacing_scale=0.0,
     )
+    # The budget proxy is plumbing; the transcript names the provider measured.
+    recorder.transcript.provider = type(inner).__name__
     session = _Session(controller, coordinator)
     controller.start_game()
     rng = random.Random(seed)
@@ -169,7 +186,7 @@ async def run(
         "engine": engine,
         "game_id": controller.state.session_id,
         "provider": settings.werewolf_llm_provider,
-        "model": settings.luna_model,
+        "model": model_label(provider, settings),
         "days": controller.state.day,
         "llm_requests": metric_summary.get("total_calls", 0),
         "http_requests": metric_summary.get("http_requests", 0),
@@ -200,8 +217,10 @@ async def run(
     return report
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("--seed", type=int, default=11)
     parser.add_argument("--engine", choices=("legacy", "v2", "v3"), default="v2")
     parser.add_argument(
@@ -210,10 +229,40 @@ def main() -> None:
         default=None,
         help="どこへ解析用ログを書くか。指定しなければ書かない。",
     )
-    args = parser.parse_args()
-    report = asyncio.run(run(args.seed, args.transcript, args.engine))
+    parser.add_argument(
+        "--max-cost",
+        type=float,
+        default=None,
+        help="推定費用の上限(USD)。anthropic では必須。超えそうなら送らずに止めて終了コード3",
+    )
+    args = parser.parse_args(argv)
+    budget = budget_for(args, parser, get_settings())
+    try:
+        report = asyncio.run(run(args.seed, args.transcript, args.engine, budget))
+    except BudgetExceeded as exc:
+        print(f"{BUDGET_STOP_BANNER}: {exc}", file=sys.stderr)
+        return EXIT_BUDGET_STOPPED
     print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
+    return 0
+
+
+def budget_for(
+    args: argparse.Namespace, parser: argparse.ArgumentParser, settings: Settings
+) -> EvaluationBudget | None:
+    """The cap for a single checked game; required where the provider prices itself."""
+    if args.max_cost is not None and not args.max_cost > 0:
+        parser.error("--max-cost は0より大きいUSDの金額にしてください。")
+    if settings.werewolf_llm_provider == "anthropic" and args.max_cost is None:
+        parser.error("anthropic で動かすときは --max-cost(USD)が必須です。例: --max-cost 15")
+    if args.max_cost is None:
+        return None
+    if settings.werewolf_llm_provider == "luna":
+        parser.error(
+            "luna では --max-cost を計算できません(単価が無い)。"
+            "単価つきの上限は scripts/live_ab_reasoning_check.py を使ってください。"
+        )
+    return EvaluationBudget(max_requests=10_000_000, max_estimated_cost=args.max_cost)
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

@@ -104,7 +104,19 @@ async def judge_transcript(
             "comment": scored.comment,
         }
 
-    scored_pairs = await asyncio.gather(*(score_one(pid) for pid in speakers))
+    # Plain `gather` would leave the other players' calls running after the
+    # first one raised -- in particular after `BudgetExceeded`, which must stop
+    # the run, not let the in-flight calls finish after the report is written.
+    # Cancel and await them, so whatever they spent is settled before the
+    # caller reads the budget, then re-raise the original error.
+    tasks = [asyncio.ensure_future(score_one(pid)) for pid in speakers]
+    try:
+        scored_pairs = await asyncio.gather(*tasks)
+    except BaseException:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        raise
     per_player = {pid: data for pid, data in scored_pairs if data is not None}
     unscored = [pid for pid, data in scored_pairs if data is None]
 
