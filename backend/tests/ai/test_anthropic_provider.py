@@ -326,6 +326,53 @@ async def test_a_request_with_fallbacks_reserves_a_second_attempt():
     assert budget.reserved_cost == pytest.approx(0.0)
 
 
+async def test_a_sonnet_game_reserves_at_sonnet_family_rates():
+    """A declined Sonnet 5.5 turn is re-run on Sonnet 5, not on an Opus model.
+    The fallback set used to be a fixed Opus pair, so every Sonnet call was
+    reserved at Opus 5 rates -- 2 x 12000 output tokens at $25 per million,
+    $0.60 before any input -- and a per-game cap refused calls whose real
+    worst case was well under it."""
+    reserved: list[float] = []
+    budget = EvaluationBudget(max_requests=10, max_estimated_cost=0.40)
+
+    def served(request: httpx2.Request) -> httpx2.Response:
+        reserved.append(budget.reserved_cost)
+        return _message(model="claude-sonnet-5-5")
+
+    server = _Server(served)
+    provider = _provider(server, model="claude-sonnet-5-5", fallbacks=True)
+    provider.set_request_budget(budget)
+
+    assert await _vote(provider) is not None
+
+    (in_flight,) = reserved
+    sonnet_family = price_for("claude-sonnet-5-5")[0].elementwise_max(
+        price_for("claude-sonnet-5")[0]
+    )
+    output_part = 2 * cost_usd(sonnet_family, output_tokens=12000)
+    # Two attempts' output at Sonnet-family rates, plus a few cents of input.
+    assert output_part <= in_flight < output_part + 0.01
+    assert server.bodies[0]["fallbacks"] == "default"
+
+
+async def test_an_opus_game_still_reserves_for_its_opus_fallbacks():
+    reserved: list[float] = []
+    budget = EvaluationBudget(max_requests=10, max_estimated_cost=5.0)
+
+    def served(request: httpx2.Request) -> httpx2.Response:
+        reserved.append(budget.reserved_cost)
+        return _message()
+
+    provider = _provider(_Server(served), model="claude-opus-5-5", fallbacks=True)
+    provider.set_request_budget(budget)
+
+    assert await _vote(provider) is not None
+
+    (in_flight,) = reserved
+    # Opus 5.5 declines are re-run on Opus 5 or Opus 4.8, the dearer rows.
+    assert in_flight >= 2 * cost_usd(price_for("claude-opus-5")[0], output_tokens=12000)
+
+
 # --- credentials and endpoint are ours, never the environment's --------------
 
 
