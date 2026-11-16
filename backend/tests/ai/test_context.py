@@ -9,9 +9,13 @@ in place.
 
 from __future__ import annotations
 
+import json
+import re
+
 from app.ai.context import ContextBuilder, DaySummaryManager
 from app.ai.deception import FakeClaimGuard, WolfDeceptionAssignment
-from app.ai.personalities import assign_personalities
+from app.ai.personalities import PERSONALITIES, assign_personalities
+from app.ai.schemas import ChatDiscussionOutput, PlanNote
 from app.ai.strategy import StrategyAnalyzer, render_board_analysis
 from app.engine.phases import Phase
 from app.engine.roles import RoleName
@@ -496,3 +500,272 @@ def test_chat_night_prompt_names_the_action_in_japanese_and_carries_the_roster()
 
     assert "【夜行動: 占い(divine)】候補: Player2、Player3" in body
     assert "【名簿(JSONのplayer_id用)】" in body
+
+
+# -- v3: nothing asks for the model's thinking --
+#
+# A prompt or schema that asks the model to write out its thinking can be
+# refused as reasoning extraction, and that refusal is not retried. The v3
+# prompts speak of a plan note instead; v2 and legacy keep their wording.
+
+_THINKING_WORDS = re.compile(r"思考|thought|reasoning", re.IGNORECASE)
+
+
+def _every_v3_prompt(state, builder) -> list[str]:  # type: ignore[no-untyped-def]
+    stages = [
+        "initial_view",
+        "immediate",
+        "reaction",
+        "rebuttal_or_reassessment",
+        "freemason_confirmation",
+        "minority_review:p2",
+        "consensus_summary",
+        "human_followup",
+    ]
+    texts: list[str] = []
+    for player_id in state.players:
+        # A memo as the coordinator stores it: ReasoningMemo's own field names.
+        builder.set_reasoning_memo(
+            player_id,
+            {
+                "execution_target": "p2",
+                "overall_thought": "方針",
+                "private_team_thought": "狙い",
+                "role_hypotheses": ["p1真"],
+            },
+        )
+        built = [
+            builder.build_discussion_context(state, player_id, stage, board_memo="【盤面メモ】")
+            for stage in stages
+        ]
+        built.append(
+            builder.build_vote_context(state, player_id, ["p2", "p3"], board_memo="【盤面メモ】")
+        )
+        built += [
+            builder.build_night_action_context(
+                state, player_id, action, ["p2", "p3"], board_memo="【盤面メモ】"
+            )
+            for action in ("divine", "guard", "attack")
+        ]
+        built.append(builder.build_wolf_chat_context(state, player_id, board_memo="【盤面メモ】"))
+        built.append(
+            builder.build_freemason_chat_context(state, player_id, board_memo="【盤面メモ】")
+        )
+        built.append(builder.build_morning_intent_context(state, player_id))
+        built.append(builder.build_summary_context(state, player_id))
+        for system, messages in built:
+            texts.append(system)
+            texts.extend(message.content for message in messages)
+    return texts
+
+
+def test_no_v3_prompt_asks_for_thinking_for_any_seat_or_personality():
+    controller = make_controller(seed=4)
+    state = controller.state
+    state.day = 2
+    controller.chat("p2", "おはよう。", "public")
+    wolf_ids = [p.player_id for p in state.players_by_role(RoleName.WEREWOLF)]
+    builder = ContextBuilder(
+        # Every preset, so a personality trait that says 思考 is caught too.
+        personalities={
+            pid: PERSONALITIES[index % len(PERSONALITIES)]
+            for index, pid in enumerate(state.players)
+        },
+        day_summaries=DaySummaryManager(),
+        wolf_deception=WolfDeceptionAssignment(
+            pattern_name="fake_seer",
+            pattern_label="偽占い",
+            fake_role_by_player={wolf_ids[0]: RoleName.SEER},
+            lurking_player_ids=wolf_ids[1:],
+        ),
+        madman_fake_role=RoleName.SEER,
+        fake_claim_guard=FakeClaimGuard(wolf_team_ids=set(wolf_ids)),
+        engine="v3",
+    )
+
+    offending = [
+        text[max(0, match.start() - 30) : match.end() + 10]
+        for text in _every_v3_prompt(state, builder)
+        for match in _THINKING_WORDS.finditer(text)
+    ]
+
+    assert offending == []
+
+
+def test_chat_discussion_contract_names_the_wire_keys():
+    state = make_controller(seed=4).state
+    state.day = 1
+    builder = _chat_builder(state)
+
+    system, messages = builder.build_discussion_context(
+        state, "p1", "initial_view", board_memo="【盤面メモ】"
+    )
+    body = messages[0].content
+
+    assert "自分の見立てと方針はplan_noteに短く書く" in system
+    assert '"plan_note": {"execution_target"' in body
+    assert '"plan": "非公開の方針メモ。' in body
+    assert '"team_plan": "非公開。人狼・狂人は陣営としての狙いと次の一手を短く' in body
+    assert '"needs_another_statement": このあともう一言続けたいならtrue' in body
+    # Every key the contract names is a key of the schema actually sent.
+    contract = body.split("次のJSONだけを返してください", 1)[1]
+    named = set(re.findall(r'"([a-z_]+)":', contract))
+    sent = set(ChatDiscussionOutput.model_fields) | set(PlanNote.model_fields)
+    sent |= {"result_type", "target_id", "is_werewolf", "referenced_day", "question"}
+    assert named <= sent
+
+
+def test_chat_previous_memo_is_shown_under_the_wire_names():
+    state = make_controller(seed=4).state
+    state.day = 1
+    builder = _chat_builder(state)
+    builder.set_reasoning_memo(
+        "p1",
+        {
+            "trusted_seer": "p3",
+            "suspects": ["p2"],
+            "trusted": [],
+            "execution_target": "p2",
+            "overall_thought": "継続方針",
+            "role_hypotheses": ["p3真なら"],
+            "fox_candidates": [],
+            "private_team_thought": "",
+        },
+    )
+
+    _, messages = builder.build_discussion_context(
+        state, "p1", "initial_view", board_memo="【盤面メモ】"
+    )
+    body = messages[0].content
+    layer = body.split("【前回の方針メモ】\n", 1)[1].split("\n", 1)[0]
+
+    assert json.loads(layer) == {
+        "execution_target": "p2",
+        "suspects": ["p2"],
+        "trusted": [],
+        "trusted_seer": "p3",
+        "fox_candidates": [],
+        "plan": "継続方針",
+        "team_plan": "",
+    }
+    assert "前回の非公開思考メモ" not in body
+
+
+def test_chat_previous_memo_placeholder_uses_the_new_title():
+    state = make_controller(seed=4).state
+    builder = _chat_builder(state)
+
+    _, messages = builder.build_discussion_context(state, "p1", "initial_view", board_memo="")
+
+    assert "【前回の方針メモ】(まだありません)" in messages[0].content
+
+
+def test_structured_previous_memo_keeps_its_title_and_keys():
+    state = make_controller(seed=4).state
+    builder = _builder(state)
+    builder.set_reasoning_memo("p1", {"overall_thought": "継続", "role_hypotheses": ["x"]})
+
+    _, messages = builder.build_discussion_context(state, "p1")
+
+    assert '【前回の非公開思考メモ】\n{"overall_thought": "継続", "role_hypotheses": ["x"]}' in (
+        messages[0].content
+    )
+
+
+def test_chat_personality_section_avoids_the_thinking_label_but_structured_keeps_it():
+    for personality in PERSONALITIES:
+        chat = personality.to_prompt_section(chat=True)
+        assert "思考" not in chat
+        assert "- 考え方の癖: " in chat
+        assert f"- 思考スタイル: {personality.thinking_style}" in personality.to_prompt_section()
+
+
+# -- v3: night and private chat read the day's public discussion --
+
+
+def _played_into_night():  # type: ignore[no-untyped-def]
+    """A real day 1, through the engine's own transitions, ending at night."""
+    controller = make_controller(seed=4)
+    state = controller.state
+    controller.start_game()
+    controller.resolve_night()
+    controller.start_discussion()
+    controller.chat("p2", "Player5の票の理由が気になる。", "public")
+    controller.chat("p5", "昨日は情報がなかっただけ。", "public")
+    controller.end_discussion()
+    for voter in state.alive_ids():
+        controller.vote(voter, "p5" if voter != "p5" else "p2")
+    controller.resolve_votes()
+    controller.start_night()
+    return controller, state
+
+
+def test_during_the_night_the_day_is_still_the_discussion_that_just_ended():
+    # The filter the night layer relies on: the engine only advances the day
+    # when the next discussion starts.
+    _controller, state = _played_into_night()
+
+    assert state.phase == Phase.NIGHT
+    assert state.day == 1
+    assert {m.day for m in state.chat_log if m.channel.value == "public"} == {1}
+
+
+def _night_seat(state, role: RoleName) -> str:  # type: ignore[no-untyped-def]
+    return next(p.player_id for p in state.players_by_role(role) if p.alive)
+
+
+def _in_order(body: str, *headings: str) -> bool:
+    positions = [body.index(heading) for heading in headings]
+    return positions == sorted(positions)
+
+
+def test_chat_night_action_prompt_carries_the_days_public_discussion():
+    _controller, state = _played_into_night()
+    builder = _chat_builder(state)
+    seer = _night_seat(state, RoleName.SEER)
+
+    _, messages = builder.build_night_action_context(
+        state, seer, "divine", ["p2", "p3"], board_memo="【盤面メモ】"
+    )
+    body = messages[0].content
+
+    assert "【今日の公開議論のログ】\n" in body
+    assert "] Player2: Player5の票の理由が気になる。" in body
+    assert "] Player5: 昨日は情報がなかっただけ。" in body
+    # Placed right after the past-day summaries, before the seat's own memo.
+    assert _in_order(body, "【過去日の要約】", "【今日の公開議論のログ】", "【前回の方針メモ】")
+
+
+def test_chat_private_chat_prompts_carry_summaries_and_the_days_public_discussion():
+    controller, state = _played_into_night()
+    wolf = _night_seat(state, RoleName.WEREWOLF)
+    controller.chat(wolf, "今夜は占いを噛もう。", "wolf")
+    builder = _chat_builder(state)
+
+    memo = "【盤面メモ】"
+    _, wolf_messages = builder.build_wolf_chat_context(state, wolf, board_memo=memo)
+    mason = _night_seat(state, RoleName.FREEMASON)
+    _, mason_messages = builder.build_freemason_chat_context(state, mason, board_memo=memo)
+
+    for body in (wolf_messages[0].content, mason_messages[0].content):
+        assert "] Player2: Player5の票の理由が気になる。" in body
+        assert _in_order(
+            body, "【過去日の要約】", "【今日の公開議論のログ】", "【過去を含む内輪ログ】"
+        )
+    assert "今夜は占いを噛もう。" in wolf_messages[0].content
+    assert "今夜は占いを噛もう。" not in mason_messages[0].content
+
+
+def test_structured_night_and_private_prompts_are_unchanged_by_the_public_layer():
+    controller, state = _played_into_night()
+    builder = _builder(state)
+    seer = _night_seat(state, RoleName.SEER)
+    wolf = _night_seat(state, RoleName.WEREWOLF)
+
+    _, night = builder.build_night_action_context(state, seer, "divine", ["p2", "p3"])
+    _, private = builder.build_wolf_chat_context(state, wolf)
+
+    for body in (night[0].content, private[0].content):
+        assert "【今日の公開議論のログ】" not in body
+        assert "Player5の票の理由が気になる。" not in body
+    assert "【過去日の要約】" not in private[0].content

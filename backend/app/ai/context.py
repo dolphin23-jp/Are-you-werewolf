@@ -22,6 +22,7 @@ from app.ai.personalities import Personality, discussion_length_range
 from app.ai.provider.base import Message
 from app.ai.reasoning.board_memo import render_roster
 from app.ai.reasoning.facts import PublicFactLedger
+from app.ai.schemas import PLAN_NOTE_MEMO_FIELDS
 from app.ai.strategy import (
     StrategyAnalyzer,
     player_label,
@@ -107,21 +108,27 @@ SUMMARY_OUTPUT_INSTRUCTION = """以下のJSON形式で回答してください:
 # Deliberately a fraction of `DISCUSSION_OUTPUT_INSTRUCTION`. On the seed-11
 # live game the full contract plus a reasoning model's hidden thinking ran out
 # of completion budget on half of all turns; every field cut from here is a
-# field that cannot truncate the sentence the table was waiting for.
+# field that cannot truncate the sentence the table was waiting for. The keys
+# are those of `ChatDiscussionOutput`, the schema actually sent: it has to stay
+# small enough for Anthropic structured outputs to compile, and none of its
+# keys or descriptions ask the model to write out its thinking, which can be
+# refused as reasoning extraction (see `PlanNote`).
 CHAT_DISCUSSION_OUTPUT_INSTRUCTION = """次のJSONだけを返してください（前後に説明文を付けない）:
 {"public_message": "卓に送るチャット1通。相手は名前で呼び、player_idは書かない", \
 "reply_to": "直前の誰かの発言に返すならその発言ID(mN)、なければnull", \
-"reasoning_memo": {"execution_target": "今日吊りたい相手のplayer_idまたはnull", \
+"plan_note": {"execution_target": "今日吊りたい相手のplayer_idまたはnull", \
 "suspects": ["怪しいと思う順のplayer_id"], "trusted": ["信用しているplayer_id"], \
 "trusted_seer": "真と見ている占いCO者のplayer_idまたはnull", \
 "fox_candidates": ["妖狐候補のplayer_id"], \
-"overall_thought": "非公開の思考メモ。内訳の見立てと今日の方針を2〜3文", \
-"private_team_thought": "非公開。人狼・狂人は本当の陣営の狙いを隠さず書く"}, \
+"plan": "非公開の方針メモ。内訳の見立てと今日の方針を2〜3文で", \
+"team_plan": "非公開。人狼・狂人は陣営としての狙いと次の一手を短く。それ以外は空文字"}, \
 "public_claim_role": "この発言でCOする役職(seer/medium/hunter/freemason)。しないならnull", \
 "public_results": [{"result_type": "seerまたはmedium", "target_id": "pN", \
 "is_werewolf": trueまたはfalse, "referenced_day": その結果の夜(霊媒は処刑日)の日数}], \
 "directed_questions": [{"target_id": "pN", "question": "名指しで聞く一つの質問"}], \
-"ready_to_vote": trueまたはfalse}
+"ready_to_vote": trueまたはfalse, \
+"needs_another_statement": このあともう一言続けたいならtrue(短い補足・相槌・追加の質問)、\
+なければfalse}
 player_idは【名簿】で引いてください。public_messageの中にはplayer_idを書きません。
 public_resultsは本当に自分が持っている結果（騙りなら騙りとして出す結果）だけを入れます。"""
 
@@ -228,6 +235,19 @@ class ContextBuilder:
 
     def _layer_previous_memo(self, player_id: str) -> str:
         memo = self._reasoning_memos.get(player_id)
+        if self._chat:
+            # Shown back under the wire names the model wrote it with, so the
+            # v3 prompt never asks for (or echoes) a "thought" field. The stored
+            # memo keeps ReasoningMemo's names, because code reads those; fields
+            # the wire form does not carry (role_hypotheses) are left out.
+            if memo is None:
+                return "【前回の方針メモ】(まだありません)"
+            note = {
+                note_field: memo[memo_field]
+                for note_field, memo_field in PLAN_NOTE_MEMO_FIELDS.items()
+                if memo_field in memo
+            }
+            return "【前回の方針メモ】\n" + json.dumps(note, ensure_ascii=False)
         if memo is None:
             return "【前回の非公開思考メモ】(まだありません)"
         return "【前回の非公開思考メモ】\n" + json.dumps(memo, ensure_ascii=False)
@@ -324,8 +344,8 @@ class ContextBuilder:
             "【考え方】\n"
             "- 【盤面メモ】の事実(CO・判定・投票・死亡)は正確に使う。メモにない判定や投票を"
             "作らない。思い込みで誰かのCOや結果を言い換えない\n"
-            "- 思考はreasoning_memoに書く。発言はあなたの人格と、あなたの役職(騙っているなら"
-            "騙り役)として自然な範囲で選ぶ\n"
+            "- 自分の見立てと方針はplan_noteに短く書く。発言はあなたの人格と、あなたの役職"
+            "(騙っているなら騙り役)として自然な範囲で選ぶ\n"
             "- 発言で推した吊り先と投票先は原則そろえる。変えるときは一言理由を言う\n"
             "- 自分の陣営の勝ちを目指す。人狼・狂人は本当の目的を発言で漏らさない。"
             "妖狐は占われないこと・最後まで生き残ることを目指す\n"
@@ -516,12 +536,29 @@ class ContextBuilder:
 
     # -- layer [E] --
 
-    def _layer_e_current_log(self, state: GameState, channel: ChatChannel) -> str:
+    def _layer_e_current_log(
+        self, state: GameState, channel: ChatChannel, heading: str = "【当日のログ】"
+    ) -> str:
         todays = [m for m in state.chat_log if m.channel == channel and m.day == state.day]
         if not todays:
-            return "【当日のログ】(まだ発言はありません)"
+            return f"{heading}(まだ発言はありません)"
         lines = [self._format_chat_line(state, message) for message in todays]
-        return "【当日のログ】\n" + "\n".join(lines)
+        return f"{heading}\n" + "\n".join(lines)
+
+    def _layer_todays_public_discussion(self, state: GameState) -> str:
+        """The day's public discussion, for prompts written after (or beside) it.
+
+        A night action or a private chat line decided without what the table
+        just argued is decided blind: who was pushed, who defended whom, which
+        claim drew fire. The engine only advances `state.day` when the next
+        discussion starts (`GameController.start_discussion`), so during the
+        night `state.day` is still the day whose discussion just ended and the
+        current-day filter returns exactly that discussion. The heading says
+        "public" because these prompts also carry the private channel's log.
+        """
+        return self._layer_e_current_log(
+            state, ChatChannel.PUBLIC, heading="【今日の公開議論のログ】"
+        )
 
     def _layer_private_history(self, state: GameState, channel: ChatChannel) -> str:
         messages = [m for m in state.chat_log if m.channel == channel]
@@ -919,6 +956,10 @@ class ContextBuilder:
         user_layers = [
             self._layer_c_state(state, player_id, guides, board_memo=board_memo),
             self._layer_d_summaries(),
+        ]
+        if self._chat:
+            user_layers.append(self._layer_todays_public_discussion(state))
+        user_layers += [
             self._layer_previous_memo(player_id),
             f"【夜行動: {action_label}({action_type})】候補: {candidates}{extra}",
         ]
@@ -968,6 +1009,15 @@ class ContextBuilder:
                 self._role_specific_guides(state, player_id),
                 board_memo=board_memo,
             ),
+        ]
+        if self._chat:
+            # v3 teammates plan from what the table said, as people do; v2's
+            # private chat prompt is left as it was measured.
+            user_layers += [
+                self._layer_d_summaries(),
+                self._layer_todays_public_discussion(state),
+            ]
+        user_layers += [
             self._layer_previous_memo(player_id),
             self._layer_private_history(state, channel),
         ]

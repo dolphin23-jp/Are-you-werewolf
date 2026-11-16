@@ -7,7 +7,7 @@ from __future__ import annotations
 import asyncio
 
 from app.ai.provider.scenario import ScenarioProvider
-from app.ai.schemas import DiscussionOutput, VoteOutput
+from app.ai.schemas import ChatDiscussionOutput, DiscussionOutput, VoteOutput
 
 _PROMPT = """あなたは人狼ゲームに参加しているプレイヤー「P3」です。
 あなた自身のplayer_idは p3 です。
@@ -75,3 +75,35 @@ def test_vote_targets_a_player_other_than_itself():
     )
     assert result is not None
     assert result.vote_target in {"p1", "p2", "p4"}
+
+
+# The v3 prompt: names in prose and in the log, ids only in the roster.
+_CHAT_PROMPT = """あなたは17人村(17A)のチャット人狼に参加しているプレイヤー「P3」です。
+【当日のログ】
+[m1] P1: おはよう
+[m2 →m1] P2: 挨拶だけですね
+【名簿(JSONのplayer_id用)】あなた=P3(p3)、P1=p1、P2=p2、P4=p4
+"""
+
+
+def _chat_discussion(prompt: str, seed: int) -> ChatDiscussionOutput:
+    provider = ScenarioProvider(seed=seed)
+    result = asyncio.run(
+        provider.generate_structured(
+            system=prompt, messages=[], response_schema=ChatDiscussionOutput
+        )
+    )
+    assert isinstance(result, ChatDiscussionOutput)
+    return result
+
+
+def test_answers_the_v3_wire_contract_and_finds_itself_in_the_roster():
+    for seed in range(25):
+        output = _chat_discussion(_CHAT_PROMPT, seed=seed)
+        assert output.plan_note.execution_target in {"p1", "p2", "p4", None}
+        assert "p3" not in output.plan_note.suspects
+        assert all(q.target_id != "p3" for q in output.directed_questions)
+        if output.reply_to is not None:
+            assert output.reply_to in {"m1", "m2"}
+        # The engine form it converts to is valid, whatever the branch taken.
+        assert output.to_discussion_output().public_message
