@@ -31,12 +31,19 @@ cat <<'EOF'
   ブラウザで遊べます。
 
   API キーは未設定でもモックAI相手に遊べます。
-  実際の gpt-6-luna を使うには、GitHub の
-  Settings → Codespaces → Secrets に次を登録してください:
+  実際の Claude を使うには、GitHub の
+  Settings → Codespaces → Secrets に次を登録してください
+  (Repository access はこのリポジトリだけに):
 
-      WEREWOLF_LLM_PROVIDER = luna
-      LUNA_API_KEY          = 実際のキー
-      LUNA_BASE_URL         = エンドポイントURL
+      WEREWOLF_LLM_PROVIDER      = anthropic
+      WEREWOLF_ANTHROPIC_API_KEY = 実際のキー
+      WEREWOLF_ACCESS_PASSWORD   = 長いランダムなパスワード
+
+  パスワードが空だと anthropic ではサーバーが起動しません。
+  モデルを変えるときだけ WEREWOLF_ANTHROPIC_MODEL を登録します
+  (既定 claude-opus-5-5)。キーは、Anthropic Console で月の
+  利用上限を設定した専用ワークスペースで発行するのがおすすめです。
+  luna (gpt-6-luna) を使う場合は README を参照してください。
 
   登録後は Codespace を作り直す(または再起動する)と反映されます。
 ============================================================

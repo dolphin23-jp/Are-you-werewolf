@@ -1,7 +1,10 @@
 # v2 reasoning release qualification
 
-PR15 measures the engines; it does not tune their behaviour. The configured default remains
-`legacy`. Only a later PR may change it after a human reviews live-model results.
+PR15 measures the engines; it does not tune their behaviour. When PR15 landed the configured
+default was `legacy`, and only a later PR could change it after a human reviewed live-model
+results. That has since happened twice. The default moved to `v2` first, then to `v3` on 2026-10-03
+after the developer read a live game (`docs/approach-reset-2026-10.md` §6.1), so the default is now
+`v3`. The qualification below still describes how v2 is measured against legacy.
 
 ## Audit model
 

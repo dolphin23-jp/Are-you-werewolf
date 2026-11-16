@@ -1,3 +1,5 @@
+> **凍結中** — 優先順位は docs/approach-reset-2026-10.md §5 を参照。記録として残しているが、新規投資はしない。
+
 # Self-play training architecture
 
 This document describes the reinforcement-learning path for the 17-player game.
