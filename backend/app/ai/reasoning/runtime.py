@@ -36,7 +36,7 @@ from app.ai.reasoning.belief import (
     summarise,
 )
 from app.ai.reasoning.belief.state import EvidenceRecord, tiebreak
-from app.ai.reasoning.board_memo import render_board_memo
+from app.ai.reasoning.board_memo import fake_claim_floor, render_board_memo, role_label
 from app.ai.reasoning.citations import VoteCitation, parse_vote_citations
 from app.ai.reasoning.dialogue import (
     ArgumentEvent,
@@ -62,7 +62,7 @@ from app.ai.reasoning.solver import (
     has_role,
 )
 from app.engine.roles import RoleName
-from app.engine.state import GameState
+from app.engine.state import ChatChannel, GameState
 
 # How many seats open the day. More than this and the morning is a wall of text
 # nobody reads; fewer and the board never gets stated.
@@ -156,9 +156,12 @@ class ReasoningRuntime:
         # Measurement, not behaviour. The roadmap's targets are claims about
         # this layer, and a claim you cannot measure is a hope.
         self.human_messages_considered = 0
-        # What each seat last told the table. A vote is compared against this,
-        # never against another internal candidate.
-        self.stated_targets: dict[str, str | None] = {}
+        # What each seat last told the table, and on which day. A vote is
+        # compared against this, never against another internal candidate --
+        # and only against what was said that day: yesterday's candidate was
+        # argued on a board that no longer exists, so reading it back as today's
+        # plan reports a change of mind nobody made.
+        self.stated_targets: dict[str, tuple[int, str | None]] = {}
         self.argument_log: list[ArgumentEvent] = []
         self.vote_citations: list[VoteCitation] = []
         self.reassessment_queue: list[str] = []
@@ -737,13 +740,32 @@ class ReasoningRuntime:
             seat_solver=seat.solver,
         )
 
-    def record_stated_target(self, player_id: str, target: str | None) -> None:
-        """Remember what a seat told the table, so the ballot is checked against
-        the statement rather than against another internal number."""
-        self.stated_targets[player_id] = target
+    def record_stated_target(self, player_id: str, target: str | None, day: int) -> None:
+        """Remember what a seat told the table on `day`, so the ballot is checked
+        against the statement rather than against another internal number."""
+        self.stated_targets[player_id] = (day, target)
 
-    def stated_target(self, player_id: str) -> str | None:
-        return self.stated_targets.get(player_id)
+    def stated_target(self, player_id: str, day: int | None = None) -> str | None:
+        """The seat's last stated candidate; with `day`, only one stated that day.
+
+        Every caller that compares or shows the statement passes the day. The
+        undated form is the last thing the seat said, whenever it said it.
+        """
+        entry = self.stated_targets.get(player_id)
+        if entry is None:
+            return None
+        stated_day, target = entry
+        if day is not None and stated_day != day:
+            return None
+        return target
+
+    def stated_targets_on(self, day: int) -> dict[str, str]:
+        """Every seat's candidate as stated on `day`, seats that named nobody left out."""
+        return {
+            player_id: target
+            for player_id, (stated_day, target) in self.stated_targets.items()
+            if stated_day == day and target is not None
+        }
 
     # -- human input --
 
@@ -925,27 +947,51 @@ class ReasoningRuntime:
         return views[0].rank if views else None
 
     def conflict_points(self, state: GameState) -> list[str]:
-        """The day's disagreements, from structured events rather than prose."""
+        """The day's disagreements, from structured public events rather than prose.
+
+        Every seat reads the day summary this feeds, so nothing here may come
+        from what a seat privately believes. The split in execution candidates
+        used to be read off each seat's belief engine, which weighs what only
+        that seat knows -- a seer's unpublished black, a wolf's own team -- and
+        was handed to the whole table as if someone had said it. Only
+        candidates a seat named in public today count now.
+        """
         ledger = PublicFactLedger(state)
         points: list[str] = []
         by_role: dict[RoleName, list[str]] = {}
         for claim in ledger.co_declarations():
             by_role.setdefault(claim.claimed_role, []).append(claim.player_id)
         for role, claimants in sorted(by_role.items()):
-            if len(claimants) > 1:
-                points.append(f"{role.value}CO対抗: {'、'.join(sorted(claimants))}")
+            # The same rule the board memo states: a contest is more claimants
+            # than the role has seats, so a freemason pair is not one.
+            if fake_claim_floor(role, len(claimants)):
+                points.append(f"{role_label(role)}CO対抗: {'、'.join(sorted(claimants))}")
         for result in ledger.public_results():
             colour = "黒" if result.is_werewolf else "白"
             points.append(
                 f"{result.claimant_id}→{result.target_id}={colour}({result.day}日目)"
             )
-        targets = {
-            seat.player_id: seat.belief.state.current_execution_target
-            for seat in self.seats.values()
-        }
-        distinct = sorted({target for target in targets.values() if target})
-        if len(distinct) > 1:
-            points.append(f"処刑候補が割れている: {'、'.join(distinct)}")
+        # Under v3 a stated target is the model's structured answer, which its
+        # message need not name. Only a name the seat said out loud today is
+        # public; anything else stays in its own notes.
+        named_today: dict[str, set[str]] = {}
+        for message in state.chat_log:
+            if message.day == state.day and message.channel is ChatChannel.PUBLIC:
+                named_today.setdefault(message.author_id, set()).update(
+                    ledger.mentioned_player_ids(message.content)
+                )
+        backers: dict[str, list[str]] = {}
+        for speaker_id, target_id in sorted(self.stated_targets_on(state.day).items()):
+            # A candidate who has since died -- usually the one just executed --
+            # is no longer a choice anyone can disagree about.
+            if ledger.is_alive(target_id) and target_id in named_today.get(speaker_id, ()):
+                backers.setdefault(target_id, []).append(speaker_id)
+        if len(backers) > 1:
+            ranked = sorted(backers.items(), key=lambda item: (-len(item[1]), item[0]))
+            points.append(
+                "吊り先の意見が割れている: "
+                + "、".join(f"{target}←{'・'.join(seats)}" for target, seats in ranked)
+            )
         return points
 
     # -- measurement --
