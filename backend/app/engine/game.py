@@ -326,6 +326,7 @@ class GameController:
                     "quote": quote,
                     "references": valid_references,
                 },
+                recipient_ids=self._channel_audience(chat_channel),
             )
         )
         return message_id
@@ -586,14 +587,35 @@ class GameController:
             self.state.typing_channels[player_id] = channel
         else:
             self.state.typing_channels.pop(player_id, None)
+        # "Seat X is typing in the wolf channel" names a wolf as surely as the
+        # message that follows, so it goes to the same audience.
         self.events.publish(
             GameEvent(
                 GameEventType.TYPING_CHANGED,
                 {"player_id": player_id, "typing": typing, "channel": channel},
+                recipient_ids=self._channel_audience(channel),
             )
         )
 
     # -- internals --
+
+    def _channel_audience(self, channel: str) -> tuple[str, ...] | None:
+        """Who may be told about activity on `channel`; None means everyone.
+
+        The same membership rule `GameState.get_player_view` uses to show a
+        private channel's log -- by role, dead members included -- so a push
+        never reaches a seat whose view would not show the message anyway.
+        An unrecognised channel fails closed (nobody), not open.
+        """
+        if channel == ChatChannel.PUBLIC:
+            return None
+        if channel == ChatChannel.WOLF:
+            role = RoleName.WEREWOLF
+        elif channel == ChatChannel.FREEMASON:
+            role = RoleName.FREEMASON
+        else:
+            return ()
+        return tuple(player.player_id for player in self.state.players_by_role(role))
 
     def _require_alive(self, player_id: str) -> PlayerState:
         player = self.state.players.get(player_id)
