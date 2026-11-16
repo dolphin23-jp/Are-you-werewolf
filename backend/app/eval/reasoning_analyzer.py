@@ -18,10 +18,13 @@ class VoteChangeKind(StrEnum):
     CORRECTION_ACCEPTED = "correction_accepted"
     STRATEGIC_TEAM_DECISION = "strategic_team_decision"
     # Someone else named the old or the new target in public after the seat's
-    # own last word that day. Being moved by an argument you heard later is
-    # the listening the game asks for; without this kind it was filed as
-    # unexplained, and the release gate failed on the one change in the first
-    # Claude game that cited exactly such an argument.
+    # own last word that day, and the seat's ballot reason names that someone.
+    # Being moved by an argument you heard later is the listening the game
+    # asks for; without this kind it was filed as unexplained, and the release
+    # gate failed on the one change in the first Claude game that cited
+    # exactly such an argument. A later mention the reason does not cite is
+    # no cause: the day's summary and designation name the candidate after
+    # nearly everyone has spoken.
     PUBLIC_ARGUMENT = "public_argument"
     UNEXPLAINED = "unexplained"
 

@@ -158,6 +158,8 @@ CHAT_VOTE_OUTPUT_INSTRUCTION = """次のJSONだけを返してください:
 "countercase": "その相手が村側でも説明がつく最も強い見方", \
 "alternative_target": "次点のplayer_idまたはnull"}
 卓で名指しした吊り先と違う相手に入れるなら、reasonに理由を書く。\
+誰かの発言を聞いて票を変えたなら、誰の発言で変えたのかをreasonに名前で書く\
+（例:『〇〇さんの指摘で変えます』）。\
 卓で言っていないことを『昼に言った』と書かない。"""
 
 CHAT_PRIVATE_CHAT_INSTRUCTION = """次のJSONだけを返してください:

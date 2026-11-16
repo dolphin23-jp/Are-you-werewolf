@@ -15,6 +15,7 @@ from collections import Counter
 
 import pytest
 
+from app.ai.context import CHAT_VOTE_OUTPUT_INSTRUCTION
 from app.ai.coordinator import AICoordinator
 from app.ai.provider.base import Message, SchemaT
 from app.ai.reasoning.runtime import ReasoningRuntime
@@ -118,14 +119,95 @@ def test_a_change_after_another_seat_argued_for_the_new_target_is_a_public_argum
 def test_an_argument_about_the_old_target_also_explains_leaving_it():
     controller, state, coordinator, provider, recorder, speaker, plan, other = _v3_table()
     asyncio.run(coordinator._speak(controller, state, speaker, "initial_view"))
-    controller.chat("p5", f"{_name(state, plan)}の訂正は素直だったと思う。")
+    argued = controller.chat("p5", f"{_name(state, plan)}の訂正は素直だったと思う。")
     provider.vote = other
+    provider.reason = f"{_name(state, 'p5')}さんの話を聞いて変えます。"
     state.phase = Phase.VOTING
 
     asyncio.run(coordinator._cast_vote(controller, state, speaker))
 
     audit = _latest_audit(recorder, speaker, state.day)
     assert audit.target_change_classification == VoteChangeKind.PUBLIC_ARGUMENT
+    assert argued in audit.target_change_reason
+
+
+def _change_after(line: str, reason: str = "気が変わった。", author: str = "p5"):  # type: ignore[no-untyped-def]
+    """The seat names `plan`, `author` then posts `line`, and the seat votes `other`.
+
+    `{plan}` and `{other}` in `line` and `reason` become those seats' names.
+    """
+    controller, state, coordinator, provider, recorder, speaker, plan, other = _v3_table()
+    asyncio.run(coordinator._speak(controller, state, speaker, "initial_view"))
+    names = {"plan": _name(state, plan), "other": _name(state, other)}
+    message_id = controller.chat(author, line.format(**names))
+    provider.vote = other
+    provider.reason = reason.format(**names)
+    state.phase = Phase.VOTING
+
+    asyncio.run(coordinator._cast_vote(controller, state, speaker))
+
+    return _latest_audit(recorder, speaker, state.day), message_id, recorder
+
+
+# Lines that name the old or the new target without arguing for the move. The
+# seat's reason cites nobody, so none of them can be what changed its mind.
+@pytest.mark.parametrize(
+    "line",
+    [
+        # agreement with the seat's own plan
+        "今日は{plan}さん吊りで決まりですね、異論なし。",
+        # an argument against the target the seat then voted
+        "{other}さんは白確定なので吊りません。",
+        # greetings
+        "{other}さん、おはようございます。",
+        "{plan}さん、おはようございます。",
+        # the day's designation, naming the seat's own plan
+        "本日の吊り先は{plan}さんとします。",
+    ],
+    ids=["agreement", "against_new", "greeting_new", "greeting_old", "designation"],
+)
+def test_a_later_mention_the_reason_does_not_cite_leaves_the_change_unexplained(line: str):
+    audit, _message_id, recorder = _change_after(line)
+
+    assert audit.target_change_classification == VoteChangeKind.UNEXPLAINED
+    assert audit.target_change_reason == "気が変わった。"
+    report = ReasoningTranscriptAnalyzer().analyze(recorder.transcript)
+    assert report.unexplained_vote_change_count == 1
+
+
+def test_a_reason_that_cites_the_later_speaker_by_name_is_a_public_argument():
+    audit, message_id, _ = _change_after(
+        "{other}さんの昨日の票、浮いてる。", reason="Player5さんの指摘で{other}さんにします。"
+    )
+
+    assert audit.target_change_classification == VoteChangeKind.PUBLIC_ARGUMENT
+    assert message_id in audit.target_change_reason
+    assert "Player5さんの指摘で" in audit.target_change_reason
+
+
+def test_citing_a_seat_that_said_nothing_later_explains_nothing():
+    audit, _message_id, _ = _change_after(
+        "{other}さんの昨日の票、浮いてる。", reason="Player6さんの指摘で{other}さんにします。"
+    )
+
+    assert audit.target_change_classification == VoteChangeKind.UNEXPLAINED
+
+
+def test_the_cited_name_is_matched_whole_so_player1_is_not_player11():
+    """Player11 spoke later; a reason naming Player1 cites somebody else."""
+    cited_wrong = _change_after(
+        "{other}さんの昨日の票、浮いてる。",
+        reason="Player1さんの指摘で{other}さんにします。",
+        author="p11",
+    )[0]
+    cited_right = _change_after(
+        "{other}さんの昨日の票、浮いてる。",
+        reason="Player11さんの指摘で{other}さんにします。",
+        author="p11",
+    )[0]
+
+    assert cited_wrong.target_change_classification == VoteChangeKind.UNEXPLAINED
+    assert cited_right.target_change_classification == VoteChangeKind.PUBLIC_ARGUMENT
 
 
 def test_an_argument_made_before_the_seats_own_turn_explains_nothing():
@@ -171,6 +253,18 @@ def test_the_v3_change_record_calls_the_baseline_a_note_not_a_statement():
     change = next(u for u in recorder.transcript.utterances if u.kind == "vote_change")
     assert change.text.startswith(f"メモでは{plan}を第一候補としたが")
     assert "公開発言では" not in change.text
+
+
+def test_the_vote_instruction_asks_a_seat_that_moves_to_name_who_moved_it():
+    """The audit reads the cause from the reason, so the prompt has to ask for it."""
+    instruction = CHAT_VOTE_OUTPUT_INSTRUCTION
+
+    assert "卓で名指しした吊り先と違う相手に入れるなら" in instruction
+    assert "誰の発言で変えたのか" in instruction
+    assert "名前" in instruction
+    # Plain wording: a request to write out the model's thinking can be refused.
+    for word in ("思考", "推論", "thought", "reasoning", "考え"):
+        assert word not in instruction
 
 
 # -- every ballot is audited --
@@ -344,14 +438,22 @@ def test_first_game_day_3_kaito_voting_his_proven_fake_partner_daiki_is_planned(
 # -- the first game, re-classified offline --
 
 
+def _vote_reasons() -> dict[tuple[str, int], str]:
+    """The reason each seat wrote with its ballot in the first game."""
+    original = GameTranscript.from_dict(game1.load_transcript())
+    return {(u.player_id, u.day): u.text for u in original.by_kind("vote")}
+
+
 def _reclassify_first_game() -> Counter[tuple[int, str, str]]:
     """Every audited ballot of the first game, put through today's classifier.
 
     The audits carry what each seat had seen when it spoke (the published
     results, the corrections); the replayed board carries everything said
-    before the vote. Together they are exactly what `_cast_vote` looked at.
+    before the vote. Together they are exactly what `_cast_vote` looked at,
+    with the reason each seat wrote on its ballot.
     """
     original = GameTranscript.from_dict(game1.load_transcript())
+    reasons = _vote_reasons()
     latest: dict[tuple[str, int], int] = {}
     for index, audit in enumerate(original.decision_audits):
         latest[(audit.player_id, audit.day)] = index
@@ -373,7 +475,7 @@ def _reclassify_first_game() -> Counter[tuple[int, str, str]]:
                 stated_target=audit.displayed_target,
                 actual_target=audit.vote_target,
                 candidates=state.votable_ids(player_id),
-                reason="(投票理由)",
+                reason=reasons[(player_id, day)],
             )
             kinds[(day, player_id, kind)] += 1
     return kinds
@@ -392,3 +494,85 @@ def test_the_first_games_ballots_reclassify_with_no_unexplained_change():
     assert kinds[(3, ids["ミオ"], VoteChangeKind.NEW_PUBLIC_EVIDENCE)] == 1
     assert kinds[(4, ids["ツムギ"], VoteChangeKind.NEW_PUBLIC_EVIDENCE)] == 1
     assert by_kind[VoteChangeKind.NONE] == 44
+
+
+def test_aoi_s_day_2_change_cites_makoto_and_without_that_it_would_be_unexplained():
+    """The reason names マコト, who spoke after アオイ: that is what makes it persuasion.
+
+    The same move with a reason that names nobody who spoke later is filed as
+    unexplained, although マコト's later lines still name both レン and ミオ.
+    """
+    ids = game1.name_to_id()
+    aoi, ren, mio = ids["アオイ"], ids["レン"], ids["ミオ"]
+    reason = _vote_reasons()[(aoi, 2)]
+    assert "マコトさんの指摘で変えます" in reason
+    state = game1.state_at_vote(2)
+    recorder = TranscriptRecorder()
+    recorder.transcript = GameTranscript.from_dict(game1.load_transcript())
+    coordinator = AICoordinator(
+        state, game1.AI_IDS, _PlanAndBallot("p1"), seed=1, recorder=recorder
+    )
+
+    def classify(text: str) -> tuple[str, str]:
+        return coordinator._classify_vote_change(
+            state,
+            aoi,
+            stated_target=ren,
+            actual_target=mio,
+            candidates=state.votable_ids(aoi),
+            reason=text,
+        )
+
+    kind, why = classify(reason)
+    assert kind == VoteChangeKind.PUBLIC_ARGUMENT
+    makoto_lines = [
+        m.message_id
+        for m in state.chat_log
+        if m.day == 2 and m.author_id == ids["マコト"] and m.channel is ChatChannel.PUBLIC
+    ]
+    assert any(message_id in why for message_id in makoto_lines)
+    assert classify("気が変わった。")[0] == VoteChangeKind.UNEXPLAINED
+
+
+def test_on_the_first_games_boards_no_move_with_a_vague_reason_counts_as_persuasion():
+    """Every seat with a stated candidate, moved to every other legal candidate.
+
+    Counting any later mention of either target as the cause filed 167 of
+    these 257 hypothetical moves as persuaded, because the day's summary and
+    designation name the candidate after nearly everyone has spoken. With a
+    reason that cites nobody, none is.
+    """
+    original = GameTranscript.from_dict(game1.load_transcript())
+    latest: dict[tuple[str, int], int] = {}
+    for index, audit in enumerate(original.decision_audits):
+        latest[(audit.player_id, audit.day)] = index
+    kinds: Counter[str] = Counter()
+    for day in sorted({audit.day for audit in original.decision_audits}):
+        state = game1.state_at_vote(day)
+        recorder = TranscriptRecorder()
+        recorder.transcript = GameTranscript.from_dict(game1.load_transcript())
+        coordinator = AICoordinator(
+            state, game1.AI_IDS, _PlanAndBallot("p1"), seed=1, recorder=recorder
+        )
+        for (player_id, audit_day), index in latest.items():
+            audit = original.decision_audits[index]
+            if audit_day != day or audit.vote_target is None or audit.displayed_target is None:
+                continue
+            for moved_to in state.votable_ids(player_id):
+                if moved_to == audit.displayed_target:
+                    continue
+                kind, _reason = coordinator._classify_vote_change(
+                    state,
+                    player_id,
+                    stated_target=audit.displayed_target,
+                    actual_target=moved_to,
+                    candidates=state.votable_ids(player_id),
+                    reason="気が変わった。",
+                )
+                kinds[kind] += 1
+
+    assert sum(kinds.values()) == 257
+    assert kinds[VoteChangeKind.PUBLIC_ARGUMENT] == 0
+    # A result published after the seat spoke still explains a move.
+    assert kinds[VoteChangeKind.NEW_PUBLIC_EVIDENCE] == 57
+    assert kinds[VoteChangeKind.UNEXPLAINED] == 200

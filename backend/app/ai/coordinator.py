@@ -2088,6 +2088,14 @@ class AICoordinator:
         covers is unexplained. The reason the seat wrote is kept either way,
         but it is not a cause on its own -- the vote prompt asks every ballot
         for one, so having a reason cannot be what separates the two.
+
+        A later message is the cause only when the reason names its author.
+        Merely naming a target is no argument: the day's summary and
+        designation name the candidate after almost everyone has spoken, and
+        agreeing with the old plan or greeting the new target names one too,
+        so counting any mention made nearly every change "persuaded". The vote
+        prompt asks a seat that leaves its candidate to say whose remark moved
+        it, by name.
         """
         if stated_target is None or actual_target == stated_target:
             return "none", ""
@@ -2109,7 +2117,15 @@ class AICoordinator:
                 return "correction_accepted", "発言後に事実訂正を受理"
             if set(self._public_result_ids(state)) - set(audited.public_result_ids_at_decision):
                 return "new_public_evidence", "発言後に能力結果が公開"
-        arguments = self._later_public_arguments(state, player_id, (stated_target, actual_target))
+        # Matched whole, as the ledger matches names: Player1 is not Player11.
+        cited_authors = set(PublicFactLedger(state).mentioned_player_ids(reason)) - {player_id}
+        arguments = tuple(
+            message_id
+            for message_id, author_id in self._later_public_arguments(
+                state, player_id, (stated_target, actual_target)
+            )
+            if author_id in cited_authors
+        )
         if arguments:
             cited = "、".join(arguments)
             return "public_argument", f"発言後の公開発言({cited})を受けて変更: {reason}"
@@ -2118,14 +2134,14 @@ class AICoordinator:
     @staticmethod
     def _later_public_arguments(
         state: GameState, player_id: str, target_ids: Sequence[str | None]
-    ) -> tuple[str, ...]:
+    ) -> tuple[tuple[str, str], ...]:
         """Other seats' public messages today, after this seat's last one, naming a target.
 
-        After its own last word, because the seat named its candidate having
-        already heard everything before it -- an argument it had heard and
-        answered by keeping the candidate cannot be what changed its mind. A
-        message that names only its own author is a defence, not an argument
-        about that seat.
+        Returned as (message id, author) pairs. After its own last word,
+        because the seat named its candidate having already heard everything
+        before it -- an argument it had heard and answered by keeping the
+        candidate cannot be what changed its mind. A message that names only
+        its own author is a defence, not an argument about that seat.
         """
         wanted = {target for target in target_ids if target}
         today = [
@@ -2139,7 +2155,7 @@ class AICoordinator:
         )
         ledger = PublicFactLedger(state)
         return tuple(
-            message.message_id
+            (message.message_id, message.author_id)
             for message in today[last_own + 1 :]
             if message.author_id != player_id
             and (set(ledger.mentioned_player_ids(message.content)) - {message.author_id})
