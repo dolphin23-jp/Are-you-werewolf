@@ -233,6 +233,29 @@ async def test_a_failed_wire_contract_falls_back_to_the_brief_one_and_says_so():
 
 
 @pytest.mark.asyncio
+async def test_the_agent_says_whether_its_last_turn_came_from_the_brief_contract():
+    """A brief turn carries no notes. The coordinator has to know, or it stores
+    the empty memo over the seat's real one; and the flag must not stick to the
+    next turn, or a full answer's notes would be thrown away."""
+    provider = _ScriptedProvider(
+        {BriefDiscussionOutput: BriefDiscussionOutput(public_message="占い理由を説明します。")}
+    )
+    agent = AIPlayerAgent(provider, PERSONALITIES[0], chat_contract=True)
+    assert agent.last_discussion_was_brief is False
+
+    await agent.generate_discussion("system", _HI)
+    assert agent.last_discussion_was_brief is True
+
+    provider.answers[ChatDiscussionOutput] = ChatDiscussionOutput(public_message="おはよう。")
+    await agent.generate_discussion("system", _HI)
+    assert agent.last_discussion_was_brief is False
+
+    provider.answers.clear()  # both contracts fail: no turn, and no brief one either
+    assert await agent.generate_discussion("system", _HI) is None
+    assert agent.last_discussion_was_brief is False
+
+
+@pytest.mark.asyncio
 async def test_a_turn_that_needed_no_repair_records_nothing():
     events = _Events()
     provider = _ScriptedProvider(

@@ -396,9 +396,14 @@ class AICoordinator:
         async with session.discussion_lock:  # type: ignore[attr-defined]
             controller = session.controller  # type: ignore[attr-defined]
             state = controller.state
-            if state.phase != Phase.DISCUSSION:
-                return
             round_state = getattr(session, "discussion_round", None)
+            if state.phase != Phase.DISCUSSION:
+                if round_state is not None and round_state.day == state.day:
+                    # DISCUSSION opens once a day, so today's round is over, not
+                    # paused. Left open, it reads as a morning still to drain to
+                    # any caller that loops until the round settles.
+                    round_state.complete = True
+                return
             if round_state is None or round_state.day != state.day:
                 round_state = await self._start_discussion_round(state)
                 session.discussion_round = round_state  # type: ignore[attr-defined]
@@ -433,7 +438,15 @@ class AICoordinator:
             consecutive_failures = 0
             stalled = False
             while spoken < self._segment_size and not round_state.complete:
-                if state.phase != Phase.DISCUSSION:
+                if state.phase != Phase.DISCUSSION or round_state.day != state.day:
+                    # The table moved on while a turn was generating. The phase
+                    # check alone is not enough: a vote, a night and a new
+                    # morning can all pass inside one slow request, DISCUSSION is
+                    # open again, and this segment would go on speaking in
+                    # yesterday's order ahead of the new morning's duty speakers.
+                    # Closing the round also keeps a caller looping until it
+                    # settles from spinning on one that can no longer move.
+                    round_state.complete = True
                     return
                 pid, stage = self._next_discussion_speaker(state, round_state)
                 if pid is None:
@@ -916,10 +929,14 @@ class AICoordinator:
         # would otherwise land in the middle of the vote.
         epoch = (state.phase, state.day)
         controller.set_typing(player_id, True)  # type: ignore[attr-defined]
+        agent = self._agents[player_id]
         try:
-            output = await self._agents[player_id].generate_discussion(system, messages)
+            output = await agent.generate_discussion(system, messages)
         finally:
             controller.set_typing(player_id, False)  # type: ignore[attr-defined]
+        # The brief fallback asks for the sentence alone, so like a turn written
+        # in code it carries no notes: an empty memo and no target, by omission.
+        brief_turn = output is not None and agent.last_discussion_was_brief
         if self._metrics is not None:
             self._metrics.record_discussion_result(skipped=output is None)
         owes_coded_line = decision is not None and self._owes_coded_line(
@@ -941,6 +958,7 @@ class AICoordinator:
             # seer whose request failed lost its result for the whole day.
             output = DiscussionOutput(public_message="")
             posted_by_code = True
+        notes_missing = posted_by_code or brief_turn
         model_requested_target = output.reasoning_memo.execution_target
         if freemason_opening is not None:
             output.public_message = freemason_opening
@@ -948,10 +966,16 @@ class AICoordinator:
             output.contains_co_claim = True
             if "死亡" in freemason_opening:
                 self._freemason_death_announced.add(player_id)
-        elif freemason_must_hide and detect_claimed_role(output.public_message) is not None:
-            output.public_message = "現時点ではCOしません。既出の判定と灰の発言を比較します。"
+        elif freemason_must_hide:
+            # Every route to a CO is closed, not only the prose. A claim set in
+            # the structured fields alone is drafted into a ROLE_CLAIM and given
+            # its canonical sentence below, so checking the sentence let the
+            # code meant to keep the partner hidden be the thing that outed it.
+            if detect_claimed_role(output.public_message) is not None:
+                output.public_message = "現時点ではCOしません。既出の判定と灰の発言を比較します。"
             output.public_claim_role = None
             output.contains_co_claim = False
+            output.claim_action = None
         valid_reassessments = [
             item
             for item in output.reassessments
@@ -1028,9 +1052,10 @@ class AICoordinator:
             # Agreement with no new argument is a reaction, not an analysis. Cut at a
             # sentence boundary so the shortened line still reads as finished Japanese.
             output.public_message = truncate_at_sentence(output.public_message, _REACTION_MAX_CHARS)
-        if not posted_by_code:
-            # A turn written in code carries no notes. Storing its empty memo
-            # would wipe the last thing the model actually thought.
+        if not notes_missing:
+            # A turn written in code, or answered through the brief contract,
+            # carries no notes. Storing its empty memo would wipe the last thing
+            # the model actually thought.
             self._context.set_reasoning_memo(player_id, output.reasoning_memo.model_dump())
         # The claims this turn publishes are decided before it is spoken, so the
         # message can be made to state them. Dropping a declared verdict because
@@ -1111,10 +1136,11 @@ class AICoordinator:
                 displayed_target = displayed_execution_target(
                     output.public_message, PublicFactLedger(state)
                 )
-            if not (posted_by_code and displayed_target is None):
-                # A v3 turn written in code names no candidate because the
-                # model said nothing, not because the seat dropped its earlier
-                # one; recording None would erase what it did say today.
+            if not (notes_missing and displayed_target is None):
+                # A v3 turn written in code or through the brief contract names
+                # no candidate because nobody asked the model for one, not
+                # because the seat dropped its earlier one; recording None would
+                # erase what it did say today.
                 self.reasoning.record_stated_target(player_id, displayed_target, state.day)
         required_ids: tuple[str, ...] = ()
         if self._recorder is not None and decision is not None and self.reasoning is not None:
