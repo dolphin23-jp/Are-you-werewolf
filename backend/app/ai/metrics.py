@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import statistics
 import threading
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -118,6 +118,35 @@ class MetricsCollector:
     # safety nets rather than by the model.
     events: dict[str, int] = field(default_factory=dict)
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+
+    @classmethod
+    def merged(cls, collectors: Iterable[MetricsCollector]) -> MetricsCollector:
+        """One collector holding everything the given ones recorded.
+
+        The evaluation harness keeps a collector per game, so one game's
+        failures or cost are never averaged away by another's, and merges them
+        for the run-wide figures. Summing the counters (wall time, utterances,
+        days, solver time) rather than averaging them keeps every ratio in
+        `summary()` -- seconds per utterance, per day -- a pooled ratio over
+        all the games, the same as if one collector had recorded them all.
+        The inputs are copied, not shared: recording into a source afterwards
+        does not change the merge.
+        """
+        merged = cls()
+        for collector in collectors:
+            with collector._lock:
+                merged.records.extend(collector.records)
+                merged.discussion_attempts += collector.discussion_attempts
+                merged.discussion_skips += collector.discussion_skips
+                merged.total_game_wall_time += collector.total_game_wall_time
+                merged.public_utterances += collector.public_utterances
+                merged.game_days += collector.game_days
+                merged.time_spent_in_solver += collector.time_spent_in_solver
+                merged.solver_query_count += collector.solver_query_count
+                merged.solver_cache_hits += collector.solver_cache_hits
+                for name, count in collector.events.items():
+                    merged.events[name] = merged.events.get(name, 0) + count
+        return merged
 
     def record(self, record: CallRecord) -> None:
         with self._lock:
