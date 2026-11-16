@@ -18,7 +18,13 @@ from typing import Any
 
 from app.ai.deception import FakeClaimGuard, WolfDeceptionAssignment
 from app.ai.knowledge_base import KnowledgeBase, KnowledgeContext
-from app.ai.personalities import Personality, discussion_length_range
+from app.ai.personalities import (
+    CHAT_STAGE_MAX_CHARS,
+    CHAT_TURN_CHARS,
+    Personality,
+    chat_stage_max_chars,
+    discussion_length_range,
+)
 from app.ai.provider.base import Message
 from app.ai.reasoning.board_memo import render_roster
 from app.ai.reasoning.facts import PublicFactLedger, mentions_player
@@ -128,11 +134,12 @@ SUMMARY_OUTPUT_INSTRUCTION = """以下のJSON形式で回答してください:
 CHAT_DISCUSSION_OUTPUT_INSTRUCTION = """次のJSONだけを返してください（前後に説明文を付けない）:
 {"public_message": "卓に送るチャット1通。相手は名前で呼び、player_idは書かない", \
 "reply_to": "直前の誰かの発言に返すならその発言ID(mN)、なければnull", \
-"plan_note": {"execution_target": "今日吊りたい相手のplayer_idまたはnull", \
+"plan_note": {"execution_target": "今いちばん吊りたい相手のplayer_id。決めきれていなくても今の\
+いちばんを書き、材料が何もないときだけnull", \
 "suspects": ["怪しいと思う順のplayer_id"], "trusted": ["信用しているplayer_id"], \
 "trusted_seer": "真と見ている占いCO者のplayer_idまたはnull", \
 "fox_candidates": ["妖狐候補のplayer_id"], \
-"plan": "非公開の方針メモ。内訳の見立てと今日の方針を2〜3文で", \
+"plan": "非公開の方針メモ。内訳の見立て、候補の比べ合い、今日の方針を2〜3文で", \
 "team_plan": "非公開。人狼・狂人は陣営としての狙いと次の一手を短く。それ以外は空文字"}, \
 "public_claim_role": "この発言でCOする役職(seer/medium/hunter/freemason)。しないならnull", \
 "public_results": [{"result_type": "seerまたはmedium", "target_id": "pN", \
@@ -327,16 +334,22 @@ class ContextBuilder:
         """
         player = state.players[player_id]
         personality = self._personalities[player_id]
-        minimum, maximum = discussion_length_range(personality.verbosity)
+        # One band for every persona. The first Claude game was asked for
+        # 80-100 and 180-200 characters and averaged 130; a persona's cadence
+        # is now said in its own section, in words.
+        low, high = CHAT_TURN_CHARS
+        longest = max(CHAT_STAGE_MAX_CHARS.values())
         return (
             f"あなたは17人村(17A)のチャット人狼に参加しているプレイヤー「{player.name}」です。"
             "相手は人間のプレイヤーだと思って、人間のプレイヤーとして話してください。\n"
             f"{personality.to_prompt_section(chat=True)}\n"
             "【チャットの話し方】\n"
-            f"- 1発言は短く。ふだんは1〜3文、{minimum}〜{max(minimum + 20, maximum // 3)}字くらい。"
-            f"CO・結果発表・投票前の整理のときだけ長くてよい(最大{maximum}字)\n"
+            f"- 1発言は短く。ふだんは1文、{low}〜{high}字。"
+            "場面ごとの上限は【いまの場面】に書いてある。"
+            f"CO・結果発表・投票前のまとめでも{longest}字まで\n"
             "- 相手は名前で呼ぶ。「(p3)」のようなIDは絶対に書かない\n"
-            "- 毎回同じ書き出しをしない。毎回「吊り候補は〇〇」と宣言しない。盤面の復唱をしない。"
+            "- 毎回同じ書き出しをしない。毎回名前の呼びかけから始めない。"
+            "毎回「吊り候補は〇〇」と宣言しない。盤面の復唱をしない。"
             "いま言いたいことを一つだけ言う\n"
             "- 誰かの発言に反応するときは、その人の名前を出して具体的に反応する"
             "(同意・反論・質問・回答)。名指しで聞かれたことには最初に答える\n"
@@ -349,21 +362,25 @@ class ContextBuilder:
             "一言で言い、その発言にreply_toを向ける\n"
             "- 筋が通らない、根拠が薄いと思うときは、変えずに理由を短く言う。強く言われただけで"
             "折れない。多数に合わせるだけで変えることもしない\n"
-            "- 「認める」「撤回する」と言ったなら、そのとおりに動く。認めたうえで変えないなら、"
-            "「そこは認めるけど、〜だから変えない」と理由を言う\n"
+            "- 「認める」「撤回する」と言ったなら、そのとおりに動く。考えを変えないなら、"
+            "同意の言葉を前置きせず、残る理由だけを言う\n"
+            "- 直前の人と同じ結論なら『〇〇に同意』と一言で。同じ理由を言い直さない\n"
             "- 一度答えたことは繰り返さない。同じ反論には「さっきの通り」と短く返す\n"
             "- 人狼・狂人・妖狐は陣営の目的を優先する。聞き入れたふりをするか、変えないかは"
             "戦術として選ぶ\n"
             "【考え方】\n"
             "- 【盤面メモ】の事実(CO・判定・投票・死亡)は正確に使う。メモにない判定や投票を"
             "作らない。思い込みで誰かのCOや結果を言い換えない\n"
-            "- 自分の見立てと方針はplan_noteに短く書く。発言はあなたの人格と、あなたの役職"
+            "- 自分の見立てと方針はplan_noteに短く書く。候補を比べるのもplan_noteで、"
+            "発言では比べた候補を並べない。発言はあなたの人格と、あなたの役職"
             "(騙っているなら騙り役)として自然な範囲で選ぶ\n"
+            "- plan_noteのexecution_targetには、決めきれていなくても今いちばん吊りたい相手を"
+            "毎回書く。材料が何もないときだけnull\n"
             "- 発言で推した吊り先と投票先は原則そろえる。変えるときは一言理由を言う\n"
             "- 自分の陣営の勝ちを目指す。人狼・狂人は本当の目的を発言で漏らさない。"
             "妖狐は占われないこと・最後まで生き残ることを目指す\n"
             "- 「もっとも狼らしい人」と「今日吊るべき人」は別。縄数、霊結果の価値、真役職を"
-            "失う損失、狐の生存を考えてから決める\n"
+            "失う損失、狐の生存はplan_noteで比べてから決める\n"
             "- 自分自身を疑い先・吊り先・能力の対象にしない"
         )
 
@@ -605,6 +622,18 @@ class ContextBuilder:
             f"「{item.question}」"
             for item in questions
         ]
+        if self._chat:
+            # "Answer them together" came back as an opener -- five seats in
+            # the first Claude game began 「A、B、まとめて答える」. The same
+            # instruction, without a shape to copy.
+            return (
+                "【あなたへの未回答の質問】\n"
+                + "\n".join(lines)
+                + "\n最初にこれへ直接答える。何人かに聞かれていても、この1回の発言で答える"
+                "(答える前の前置きは要らない)。答えられないなら理由を言う。"
+                "答えるときはreply_toにその発言ID(mN)を入れる。"
+                "これらの質問はこの発言のあとで片づく扱いなので、次の発言で同じ答えを繰り返さない。"
+            )
         return (
             "【あなたへの未回答の質問】\n"
             + "\n".join(lines)
@@ -835,34 +864,47 @@ class ContextBuilder:
         )
 
     def _chat_stage_instruction(self, state: GameState, stage: str) -> str:
+        """What this turn is for, and its length cap.
+
+        Nothing here lists what to weigh: a checklist in the stage text ("the
+        second candidate, the strongest reason not to hang") came back as
+        speech in the first Claude game, and the table noticed. Comparisons go
+        in the plan note; the message says the conclusion. A stage this method
+        does not know gets the ordinary turn's text and cap.
+        """
+        cap = chat_stage_max_chars(stage)
         if stage == "immediate":
-            return "朝一。結果やCOがあるなら最初にそれを言い、必要なら一言添える。"
+            return f"朝一。結果やCOがあるなら最初にそれを言い、必要なら一言添える。{cap}字以内。"
         if stage == "reaction":
-            return "直前の発言への短い反応(同意・驚き・一言の反論・質問)。1〜2文でよい。"
+            return f"直前の発言への短い反応(同意・驚き・ツッコミ・質問)。1文、{cap}字以内。"
         if stage == "rebuttal_or_reassessment":
             return (
-                "自分が疑われている、または反論を受けた場面。相手の言い分の妥当な点は認め、"
-                "それでも残る根拠か反論を短く返す。"
+                "自分が疑われている、または反論を受けた場面。納得したなら考えを変えたと言い、"
+                f"納得しないなら反論を一つだけ返す。{cap}字以内。"
             )
         if stage == "freemason_confirmation":
             return (
                 "共有の相方として名指しされた。本当の相方なら最初に確認COし、"
-                "違うなら明確に否定する。他の話は後。"
+                f"違うなら明確に否定する。他の話は後。{cap}字以内。"
             )
         if stage.startswith("minority_review:"):
             target_id = stage.split(":", 1)[1]
             target = self._label(state, target_id) if target_id in state.players else target_id
             return (
-                f"票や疑いが{target}に集中している。多数派の繰り返しではなく、"
-                f"{target}が村側である可能性と別の候補を一言で出す。"
+                f"票や疑いが{target}に集まっている。{target}が村側だった場合とほかの候補は"
+                f"plan_noteで比べ、発言では自分の結論を一言で。多数派の理由は繰り返さない。{cap}字以内。"
             )
         if stage == "consensus_summary":
-            return "投票前の整理。今日の吊り先候補と理由、残る対立点を短くまとめる。"
+            return (
+                f"投票前のまとめ。今日の吊り先と理由を一行で。{cap}字以内。"
+                "候補の比べ合いはplan_noteに書き、発言では並べない。"
+                "候補本人にまだ反論を聞いていなければ、一つだけ聞いてよい。"
+            )
         if stage == "human_followup":
-            return "人間のプレイヤーの発言に応答する。"
+            return f"人間のプレイヤーの発言に応答する。{cap}字以内。"
         return (
             "今日の最初の発言。盤面を見て一番言いたいこと(内訳の見立て、吊り方針、"
-            "誰かへの質問のどれか)を一つ。"
+            f"誰かへの質問のどれか)を一つ。{cap}字以内。"
         )
 
     def build_morning_intent_context(
