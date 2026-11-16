@@ -21,7 +21,7 @@ from app.ai.metrics import CallRecord, MetricsCollector, ParsePath
 from app.ai.provider.anthropic_claude import AnthropicClaudeProvider
 from app.ai.provider.base import Message
 from app.ai.schemas import DiscussionOutput
-from app.config import Settings
+from app.config import DEFAULT_ANTHROPIC_MODEL, Settings
 from scripts import check_llm
 
 KEY = "sk-ant-api03-SECRETSECRET-0123456789-tail"
@@ -51,7 +51,8 @@ def _message(payload: dict[str, Any], *, stop_reason: str = "end_turn", **extra:
         "id": "msg_test",
         "type": "message",
         "role": "assistant",
-        "model": "claude-opus-5-5",
+        # The model the preflight asks for (the default) served the turn.
+        "model": DEFAULT_ANTHROPIC_MODEL,
         "content": [
             {"type": "thinking", "thinking": "", "signature": "sig"},
             {"type": "text", "text": json.dumps(payload, ensure_ascii=False)},
@@ -315,7 +316,8 @@ def test_a_healthy_endpoint_passes_in_six_requests_without_printing_secrets() ->
     assert len(server.paths) == 6  # five calls and one count_tokens
     text = "\n".join(lines)
     assert "設定済み(長さ" in text and "example.invalid" not in text.split("=== 2.")[1]
-    assert "strict_schema" in text and "stop=end_turn" in text and "model=claude-opus-5-5" in text
+    assert "strict_schema" in text and "stop=end_turn" in text
+    assert f"model={DEFAULT_ANTHROPIC_MODEL}" in text
     assert "5,000 トークン" in text and f"{5_000 * 197:,}" in text
     _assert_nothing_secret(lines)
 
