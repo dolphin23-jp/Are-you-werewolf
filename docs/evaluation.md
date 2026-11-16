@@ -19,6 +19,7 @@ GitHubのリポジトリページ → **Settings → Secrets and variables → A
 | Secret | `WEREWOLF_ANTHROPIC_API_KEY` | Anthropic Console で発行した実際のキー |
 | Variable | `WEREWOLF_ANTHROPIC_MODEL` | `claude-opus-5-5`(既定値なので省略可) |
 | Variable | `WEREWOLF_ANTHROPIC_MAX_TOKENS` | `12000`(既定値なので省略可。途中切れが多いときに上げる。AI評価だけが読みます) |
+| Variable | `WEREWOLF_ANTHROPIC_FALLBACKS` | `default`(既定値なので省略可。キーがサーバー側フォールバックのベータを使えないなら `off` にすると、1試合1要求の失敗を省けます。AI評価と Expert cutoff評価が読みます) |
 
 > Codespaces secrets とは別枠です。Codespacesに登録済みでも、Actions用に改めて
 > 登録が必要です。キーは手動実行だけの評価ワークフローに渡り、CI(`ci.yml`)には
@@ -120,7 +121,9 @@ python scripts/check_llm.py --provider anthropic   # WEREWOLF_LLM_PROVIDER=anthr
 2. 通信なしで、ゲームが送るスキーマ(`ChatDiscussionOutput`・`BriefDiscussionOutput`・
    `VoteOutput`・`NightActionOutput`・`WolfChatOutput`)が構造化出力の上限
    (任意パラメータ24・union 16)の内側にあるか。
-3. スキーマごとに1回ずつの実呼び出し(合わせて最大5要求)。ゲームと同じプロバイダを
+3. スキーマごとに1回ずつの実呼び出し(合わせて最大5要求。キーがサーバー側フォールバックの
+   ベータを使えない場合は、それを外して送り直す1要求が加わり、失敗ではなく
+   「このキーではフォールバックが使えない」と表示されます)。ゲームと同じプロバイダを
    通し、成否・読めた経路・応答時間・`stop_reason`・実際に答えたモデル・トークン・
    費用を出します。失敗、拒否、strict schema 以外の経路での読み取り、スキーマの400、
    別モデルによるフォールバック応答は、すべて不合格です。再試行が要った呼び出しも、
@@ -135,7 +138,7 @@ python scripts/check_llm.py --provider anthropic   # WEREWOLF_LLM_PROVIDER=anthr
 
 luna(`--provider luna`)では、`LUNA_API_KEY` が空、`LUNA_BASE_URL` が
 プレースホルダーのまま、URLの誤り、認証エラーが、それぞれ具体的な対処つきで表示されます。
-キーは長さだけ、接続先はホスト名だけを出します。
+キーは長さだけを出し、`LUNA_BASE_URL` はシークレットなので「設定済み/プレースホルダーのまま/空」だけを出します(ホスト名も出しません)。
 
 > Codespaces secrets は登録しただけでは反映されません。**Codespace の再起動**
 > (または作り直し)が必要です。
@@ -227,8 +230,9 @@ python scripts/evaluate.py --games 1 --provider luna \
 - 思考量: 入力の `effort_discussion` が `_DISCUSSION` と `_CHAT` に、`effort_decisions` が
   `_VOTE` と `_NIGHT` に入ります(`_DEFAULT` は既定値のまま)。
 - `WEREWOLF_ANTHROPIC_MAX_TOKENS`: リポジトリの変数から。未設定なら `12000`。
+- `WEREWOLF_ANTHROPIC_FALLBACKS`: リポジトリの変数から。未設定なら `default`。
 
-Expert cutoff評価はこの表の設定を1つも渡さないので、すべて既定値です。
+Expert cutoff評価が渡すのは `WEREWOLF_ANTHROPIC_MODEL` と `WEREWOLF_ANTHROPIC_FALLBACKS` だけで、ほかは既定値です。
 
 | 環境変数 | 既定 | 意味 |
 |---|---|---|
@@ -241,7 +245,7 @@ Expert cutoff評価はこの表の設定を1つも渡さないので、すべて
 | `WEREWOLF_ANTHROPIC_MAX_CONCURRENCY` | `8` | プロセス全体の同時呼び出し数 |
 | `WEREWOLF_ANTHROPIC_TIMEOUT_SECONDS` | `120` | 1呼び出しのタイムアウト(秒) |
 | `WEREWOLF_ANTHROPIC_MAX_RETRIES` | `2` | 再試行の回数(429 は `retry-after` を守る) |
-| `WEREWOLF_ANTHROPIC_FALLBACKS` | `default` | 拒否された手番を別モデルが答え直すサーバー側フォールバック(`default` / `off`) |
+| `WEREWOLF_ANTHROPIC_FALLBACKS` | `default` | 拒否された手番を別モデルが答え直すサーバー側フォールバック(`default` / `off`)。Actions ではリポジトリ変数 `WEREWOLF_ANTHROPIC_FALLBACKS` から渡ります |
 
 思考量は `low` / `medium` / `high` / `xhigh` / `max` から選びます(空は既定値)。Opus 5.5 は
 思考を切れないので、待ち時間と費用は主にこの値で調整します。既定値は仮置きで、

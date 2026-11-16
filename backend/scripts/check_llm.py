@@ -760,9 +760,16 @@ def resolve_settings(args: argparse.Namespace) -> Settings:
     """The provider to check: `--provider`, else the configured one when it is
     real, else anthropic -- this preflight exists for the real providers, and
     the configured default (`mock`) has nothing to connect to."""
-    configured = Settings().werewolf_llm_provider
+    configured_settings = Settings()
+    configured = configured_settings.werewolf_llm_provider
     provider = args.provider or (configured if configured in PROVIDERS else "anthropic")
     overrides: dict[str, Any] = {"werewolf_llm_provider": provider}
+    if provider == configured == "anthropic":
+        # Passing the provider back as a keyword hides the raw environment
+        # value, so a model id typed into WEREWOLF_LLM_PROVIDER (which Settings
+        # turns into the model) would be lost and the preflight would check the
+        # default model while the game bills the one the owner named.
+        overrides["werewolf_anthropic_model"] = configured_settings.werewolf_anthropic_model
     if args.model:
         overrides["werewolf_anthropic_model" if provider == "anthropic" else "luna_model"] = (
             args.model

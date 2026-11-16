@@ -130,6 +130,7 @@ jobs:
           WEREWOLF_LLM_PROVIDER: ${{ inputs.provider }}
           WEREWOLF_ANTHROPIC_API_KEY: ${{ inputs.provider == 'anthropic' && secrets.WEREWOLF_ANTHROPIC_API_KEY || '' }}
           WEREWOLF_ANTHROPIC_MODEL: ${{ inputs.model || vars.WEREWOLF_ANTHROPIC_MODEL || 'claude-opus-5-5' }}
+          WEREWOLF_ANTHROPIC_FALLBACKS: ${{ vars.WEREWOLF_ANTHROPIC_FALLBACKS || 'default' }}
           WEREWOLF_ANTHROPIC_EFFORT_DISCUSSION: ${{ inputs.effort_discussion }}
           WEREWOLF_ANTHROPIC_EFFORT_CHAT: ${{ inputs.effort_discussion }}
           WEREWOLF_ANTHROPIC_EFFORT_VOTE: ${{ inputs.effort_decisions }}
@@ -179,6 +180,7 @@ jobs:
           WEREWOLF_REASONING_ENGINE: ${{ inputs.reasoning_engine }}
           WEREWOLF_ANTHROPIC_API_KEY: ${{ inputs.provider == 'anthropic' && secrets.WEREWOLF_ANTHROPIC_API_KEY || '' }}
           WEREWOLF_ANTHROPIC_MODEL: ${{ inputs.model || vars.WEREWOLF_ANTHROPIC_MODEL || 'claude-opus-5-5' }}
+          WEREWOLF_ANTHROPIC_FALLBACKS: ${{ vars.WEREWOLF_ANTHROPIC_FALLBACKS || 'default' }}
           WEREWOLF_ANTHROPIC_EFFORT_DISCUSSION: ${{ inputs.effort_discussion }}
           WEREWOLF_ANTHROPIC_EFFORT_CHAT: ${{ inputs.effort_discussion }}
           WEREWOLF_ANTHROPIC_EFFORT_VOTE: ${{ inputs.effort_decisions }}

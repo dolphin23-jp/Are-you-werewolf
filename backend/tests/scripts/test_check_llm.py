@@ -506,3 +506,17 @@ def test_model_override_goes_to_the_checked_provider() -> None:
     assert check_llm.resolve_settings(args).werewolf_anthropic_model == "claude-sonnet-5-5"
     args = type("Args", (), {"provider": "luna", "model": "gpt-7-luna"})()
     assert check_llm.resolve_settings(args).luna_model == "gpt-7-luna"
+
+
+def test_a_model_id_in_the_provider_field_is_the_model_the_preflight_checks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Settings turns `WEREWOLF_LLM_PROVIDER=claude-haiku-5-5` into provider
+    anthropic plus that model. The preflight re-passes the provider as a
+    keyword, which hides the raw value, so it must carry the model over or it
+    would check the default model while the game bills the named one."""
+    monkeypatch.setenv("WEREWOLF_LLM_PROVIDER", "claude-haiku-5-5")
+    args = type("Args", (), {"provider": None, "model": None})()
+    settings = check_llm.resolve_settings(args)
+    assert settings.werewolf_llm_provider == "anthropic"
+    assert settings.werewolf_anthropic_model == "claude-haiku-5-5"

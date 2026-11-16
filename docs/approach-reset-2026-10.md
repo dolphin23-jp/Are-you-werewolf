@@ -471,7 +471,7 @@ Codespaces には、別のツールのためにそれらが入っていること
 | `WEREWOLF_ANTHROPIC_MAX_RETRIES` | 2 | 再試行の回数 |
 | `WEREWOLF_ANTHROPIC_FALLBACKS` | `default` | 拒否時のサーバー側フォールバック（`default` / `off`） |
 | `WEREWOLF_SESSION_MAX_COST_USD` | 30 | 人間が遊ぶ1セッションあたりの推定費用の上限 |
-| `WEREWOLF_ALLOW_OPEN_ACCESS` | `false` | `true` のときだけ、パスワード無しで `anthropic` のサーバーを起動できる（ローカル専用） |
+| `WEREWOLF_ALLOW_OPEN_ACCESS` | `false` | `true` のときだけ、パスワード無しで課金のあるプロバイダ（`anthropic`・`luna`）のサーバーを起動できる（ローカル専用） |
 
 **思考量は呼び出し種別ごとに決める。** Opus 5.5 は思考を切れない（`thinking` は送らず、
 深さを `output_config.effort` で決める。モデルの既定は `medium`）。思考のトークンは
@@ -574,8 +574,9 @@ Codespaces には、別のツールのためにそれらが入っていること
 - タイムアウトは120秒にした。luna の30秒は、v3 の p95（26.7秒）に近かった（§10.4）。
 
 **開けたままでは起動しない。** キーを入れた時点から、サーバーに届く人は誰でも課金の試合を
-作れる。公開デプロイの段階を待たずに、`anthropic` で `WEREWOLF_ACCESS_PASSWORD` が空なら
-サーバーは起動を拒む。`WEREWOLF_ALLOW_OPEN_ACCESS=true` のときだけ外せる（ローカルで自分だけが
+作れる。公開デプロイの段階を待たずに、課金のあるプロバイダ（`anthropic`・`luna`）で
+`WEREWOLF_ACCESS_PASSWORD` が空ならサーバーは起動を拒む（luna は料金表が無いので、セッションの
+上限は金額ではなく要求数で掛かる）。`WEREWOLF_ALLOW_OPEN_ACCESS=true` のときだけ外せる（ローカルで自分だけが
 使う場合に限る）。
 
 **観測。** 呼び出しの記録（`CallRecord`）に、キャッシュの書き込み・読みのトークン、元の

@@ -68,6 +68,15 @@ case "$PROVIDER" in
       echo "!!! WEREWOLF_LLM_PROVIDER=luna ですが LUNA_API_KEY が空です。" >&2
       echo "!!! GitHub の Settings → Codespaces → Secrets を確認してください。" >&2
     fi
+    case "$(normalize "${WEREWOLF_ALLOW_OPEN_ACCESS:-}")" in
+      1 | on | t | true | y | yes) OPEN_ACCESS="true" ;;
+      *) OPEN_ACCESS="false" ;;
+    esac
+    if [ -z "${WEREWOLF_ACCESS_PASSWORD:-}" ] && [ "$OPEN_ACCESS" != "true" ]; then
+      echo "!!! WEREWOLF_ACCESS_PASSWORD が空です。課金のあるプロバイダ(luna も)ではパスワード無しでは" >&2
+      echo "!!! 起動しません。Codespaces Secrets に WEREWOLF_ACCESS_PASSWORD を登録してください。" >&2
+      echo "!!! 自分のパソコンだけで使う場合に限り WEREWOLF_ALLOW_OPEN_ACCESS=true で外せます。" >&2
+    fi
     ;;
   mock)
     echo "    (モックAIで動作します。実APIを使うには Codespaces Secrets を設定)"

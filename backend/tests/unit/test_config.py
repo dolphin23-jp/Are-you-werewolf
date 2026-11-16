@@ -8,6 +8,7 @@ win over it (so a deployment can inject secrets with no .env file present).
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -351,3 +352,63 @@ def test_start_sh_warns_when_the_provider_and_model_settings_disagree(tmp_path: 
         },
     )
     assert "claude-haiku-5-5" in result.stderr and "claude-opus-5-5" in result.stderr
+
+
+# -- docker --env-file and the access password --------------------------------
+
+_ENV_EXAMPLE = Path(__file__).resolve().parents[2] / ".env.example"
+
+
+def _docker_env_file(path: Path) -> dict[str, str]:
+    """Parse KEY=VALUE lines the way `docker run --env-file` does: the value is
+    kept verbatim, with no trimming and no inline-comment stripping."""
+    parsed: dict[str, str] = {}
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.lstrip()
+        if not line or line.startswith("#"):
+            continue
+        key, sep, value = line.partition("=")
+        assert sep, f"a line without '=' is taken from the host environment: {raw!r}"
+        parsed[key] = value
+    return parsed
+
+
+def test_env_example_value_lines_survive_docker_env_file_unchanged() -> None:
+    """The README deploys with `--env-file backend/.env` copied from the
+    template, so a trailing `# comment` would become part of the value."""
+    captured = {
+        key: value
+        for key, value in _docker_env_file(_ENV_EXAMPLE).items()
+        if "#" in value or value != value.strip()
+    }
+    assert not captured
+
+
+def test_env_example_through_docker_keeps_the_password_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for key in list(os.environ):
+        if key.startswith(("WEREWOLF_", "LUNA_", "ANTHROPIC_")):
+            monkeypatch.delenv(key)
+    for key, value in _docker_env_file(_ENV_EXAMPLE).items():
+        monkeypatch.setenv(key, value)
+    settings = Settings(_env_file=None)
+    assert settings.werewolf_llm_provider == "mock"
+    assert settings.werewolf_access_password == ""
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("   # 公開デプロイでは長いランダム値を設定", ""),
+        ("\t#comment", ""),
+        ("  s3cret-pass \n", "s3cret-pass"),
+        ("#starts-with-hash", "#starts-with-hash"),
+        ("", ""),
+    ],
+)
+def test_access_password_ignores_a_captured_inline_comment(
+    monkeypatch: pytest.MonkeyPatch, raw: str, expected: str
+) -> None:
+    monkeypatch.setenv("WEREWOLF_ACCESS_PASSWORD", raw)
+    assert Settings(_env_file=None).werewolf_access_password == expected

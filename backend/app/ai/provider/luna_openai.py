@@ -48,7 +48,7 @@ from openai import APIConnectionError, APIStatusError, APITimeoutError, AsyncOpe
 from app.ai.dialect import EndpointDialect
 from app.ai.metrics import CallRecord, MetricsCollector, ParsePath
 from app.ai.provider.base import Message, SchemaT
-from app.ai.provider.budget import EvaluationBudget
+from app.ai.provider.budget import BudgetExceeded, EvaluationBudget
 
 # Shared with the anthropic provider so both salvage exactly the same shapes.
 from app.ai.provider.json_parsing import parse_permissive as _parse_permissive
@@ -307,6 +307,11 @@ class LunaOpenAIProvider:
                     self._request_budget.claim_request()
                 requests += 1
                 return await self._client.chat.completions.create(**kwargs), requests
+            except BudgetExceeded:
+                # A spent cap is a stop, not a failed request: wrapping it
+                # like one made a capped session carry on with fallback lines
+                # and never raise the budget-exhausted notice.
+                raise
             except Exception as exc:
                 last_error = exc
                 adapted = self._dialect.adapt(exc)
@@ -334,6 +339,8 @@ class LunaOpenAIProvider:
             response, requests = await self._create(
                 openai_messages, response_format, max_tokens, temperature
             )
+        except BudgetExceeded:
+            raise
         except Exception as exc:
             root = _root_error(exc)
             return _Attempt(
@@ -404,6 +411,8 @@ class LunaOpenAIProvider:
             response, requests = await self._create(
                 openai_messages, {"type": "json_object"}, max_tokens, temperature
             )
+        except BudgetExceeded:
+            raise
         except Exception as exc:
             return _Attempt(error=_describe(_root_error(exc)), http_requests=_request_count(exc))
 

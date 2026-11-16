@@ -100,6 +100,9 @@ APIキーを発行します。キーが漏れても、使われる額はその�
 Codespaces secrets に `WEREWOLF_LLM_PROVIDER=luna`、`LUNA_API_KEY`(実際のキー)、
 `LUNA_BASE_URL`(OpenAI互換エンドポイントURL)を登録します。モデルは `LUNA_MODEL`
 (既定 `gpt-6-luna`)、思考量は `LUNA_REASONING_EFFORT=low` などで変えられます。
+luna も課金があるので、`WEREWOLF_ACCESS_PASSWORD` が空ならサーバーは起動しません
+(ローカル専用の `WEREWOLF_ALLOW_OPEN_ACCESS=true` は anthropic と同じ)。luna には料金表が
+無いため、セッションの上限は金額ではなく要求数(1セッション5000要求)で掛かります。
 
 ## 推論エンジン(v3 / v2 / legacy)
 

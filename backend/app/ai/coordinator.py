@@ -224,9 +224,11 @@ class AICoordinator:
         )
 
         # v3 seats speak through the compact chat wire schema: the full
-        # `DiscussionOutput` exceeds Anthropic's structured-output limits and
-        # would degrade every turn to the brief contract (approach-reset §11).
-        # Agents still hand back a `DiscussionOutput`, so nothing below changes.
+        # `DiscussionOutput` exceeds Anthropic's structured-output limits, so
+        # sending it costs one rejected request per game and then runs without
+        # grammar enforcement (schema embedded in the prompt, parsed leniently).
+        # v2 and legacy still send it; see approach-reset §11. Agents hand back a
+        # `DiscussionOutput` either way, so nothing below changes.
         self._agents: dict[str, AIPlayerAgent] = {
             pid: AIPlayerAgent(
                 provider,

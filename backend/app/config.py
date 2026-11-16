@@ -256,6 +256,25 @@ class Settings(BaseSettings):
             )
         return normalized
 
+    @field_validator("werewolf_access_password", mode="before")
+    @classmethod
+    def _drop_captured_comment(cls, value: object) -> object:
+        """Treat a value that is only a captured inline comment as no password.
+
+        `docker run --env-file` keeps everything after `=` verbatim, so a hand
+        edited `.env` line such as `WEREWOLF_ACCESS_PASSWORD=   # set me`
+        arrives as a non-empty "password". The server would then start "with
+        a password" nobody knows, and the refusal to serve a paid provider
+        without one would never fire. Whitespace before `#` is the signature of
+        that capture; a real password is also stripped of the padding and
+        trailing newline a pasted secret tends to carry.
+        """
+        if not isinstance(value, str):
+            return value
+        if re.match(r"\s+#", value):
+            return ""
+        return value.strip()
+
     @field_validator("werewolf_anthropic_api_key", "luna_api_key", mode="before")
     @classmethod
     def _unquote_api_key(cls, value: object) -> object:
