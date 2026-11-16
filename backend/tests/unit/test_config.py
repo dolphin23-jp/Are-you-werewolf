@@ -10,7 +10,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.config import Settings
+import pytest
+from pydantic import ValidationError
+
+from app.config import DEFAULT_ANTHROPIC_MODEL, Settings
 
 
 def _write_env(tmp_path: Path, body: str) -> Path:
@@ -111,3 +114,97 @@ def test_omitted_flag_leaves_the_environment_in_charge(monkeypatch):
     monkeypatch.setenv("WEREWOLF_LLM_PROVIDER", "luna")
     overrides: dict[str, str] = {}  # what the scripts build when --provider is absent
     assert Settings(**overrides).werewolf_llm_provider == "luna"
+
+
+# --- anthropic -----------------------------------------------------------------
+
+
+def test_anthropic_defaults(tmp_path: Path):
+    settings = Settings(_env_file=str(tmp_path / "does-not-exist.env"))
+    assert settings.werewolf_anthropic_api_key == ""
+    assert settings.werewolf_anthropic_base_url == "https://api.anthropic.com"
+    assert settings.werewolf_anthropic_model == DEFAULT_ANTHROPIC_MODEL == "claude-opus-5-5"
+    assert settings.werewolf_anthropic_max_concurrency == 8
+    assert settings.werewolf_anthropic_timeout_seconds == 120.0
+    assert settings.werewolf_anthropic_max_retries == 2
+    assert settings.werewolf_anthropic_max_tokens == 12000
+    assert settings.anthropic_effort_by_kind == {
+        "discussion": "low",
+        "vote": "medium",
+        "night": "medium",
+        "chat": "low",
+        "default": "medium",
+    }
+    assert settings.werewolf_anthropic_fallbacks == "default"
+    # Paid provider + no password must be opted into, never the default.
+    assert settings.werewolf_allow_open_access is False
+    assert settings.werewolf_session_max_cost_usd == 30.0
+
+
+def test_the_sdks_own_variables_are_never_read(monkeypatch):
+    """`ANTHROPIC_*` on a developer machine usually belongs to another tool;
+    the game reads only its namespaced settings."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "ambient-key")
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://ambient.invalid")
+    settings = Settings()
+    assert settings.werewolf_anthropic_api_key == ""
+    assert settings.werewolf_anthropic_base_url == "https://api.anthropic.com"
+
+    monkeypatch.setenv("WEREWOLF_ANTHROPIC_API_KEY", "game-key")
+    monkeypatch.setenv("WEREWOLF_ANTHROPIC_BASE_URL", "https://example.invalid")
+    settings = Settings()
+    assert settings.werewolf_anthropic_api_key == "game-key"
+    assert settings.werewolf_anthropic_base_url == "https://example.invalid"
+
+
+def test_effort_is_normalized_and_validated(monkeypatch):
+    monkeypatch.setenv("WEREWOLF_ANTHROPIC_EFFORT_VOTE", " HIGH ")
+    monkeypatch.setenv("WEREWOLF_ANTHROPIC_EFFORT_NIGHT", '"xhigh"')
+    # Blank, as `.env.example` lines may be: the field's own default.
+    monkeypatch.setenv("WEREWOLF_ANTHROPIC_EFFORT_DISCUSSION", "")
+    settings = Settings()
+    assert settings.werewolf_anthropic_effort_vote == "high"
+    assert settings.werewolf_anthropic_effort_night == "xhigh"
+    assert settings.werewolf_anthropic_effort_discussion == "low"
+
+    # A typo fails at startup, not as a 400 on the first paid request.
+    monkeypatch.setenv("WEREWOLF_ANTHROPIC_EFFORT_CHAT", "extreme")
+    with pytest.raises(ValidationError, match="WEREWOLF_ANTHROPIC_EFFORT_CHAT"):
+        Settings()
+
+
+def test_fallbacks_accept_only_default_or_off(monkeypatch):
+    monkeypatch.setenv("WEREWOLF_ANTHROPIC_FALLBACKS", " OFF ")
+    assert Settings().werewolf_anthropic_fallbacks == "off"
+    monkeypatch.setenv("WEREWOLF_ANTHROPIC_FALLBACKS", "")
+    assert Settings().werewolf_anthropic_fallbacks == "default"
+    monkeypatch.setenv("WEREWOLF_ANTHROPIC_FALLBACKS", "sometimes")
+    with pytest.raises(ValidationError, match="WEREWOLF_ANTHROPIC_FALLBACKS"):
+        Settings()
+
+
+def test_a_blank_model_or_base_url_means_the_default(tmp_path: Path):
+    env_file = _write_env(tmp_path, "WEREWOLF_ANTHROPIC_MODEL=\nWEREWOLF_ANTHROPIC_BASE_URL=\n")
+    settings = Settings(_env_file=str(env_file))
+    assert settings.werewolf_anthropic_model == DEFAULT_ANTHROPIC_MODEL
+    assert settings.werewolf_anthropic_base_url == "https://api.anthropic.com"
+
+
+def test_a_quoted_model_is_unquoted(monkeypatch):
+    monkeypatch.setenv("WEREWOLF_ANTHROPIC_MODEL", ' "claude-sonnet-5-5" ')
+    assert Settings().werewolf_anthropic_model == "claude-sonnet-5-5"
+
+
+def test_shipped_env_example_configures_anthropic_with_placeholders_only():
+    """What a fresh `cp .env.example .env` gets: the default model, no key,
+    the mock provider still selected, and the open-access guard on."""
+    example = Path(__file__).resolve().parents[2] / ".env.example"
+    text = example.read_text(encoding="utf-8")
+    assert f"WEREWOLF_ANTHROPIC_MODEL={DEFAULT_ANTHROPIC_MODEL}" in text
+
+    settings = Settings(_env_file=str(example))
+    assert settings.werewolf_llm_provider == "mock"
+    assert settings.werewolf_anthropic_api_key == ""
+    assert settings.werewolf_anthropic_model == DEFAULT_ANTHROPIC_MODEL
+    assert settings.werewolf_anthropic_fallbacks == "default"
+    assert settings.werewolf_allow_open_access is False

@@ -16,7 +16,17 @@ _LIVE_PROVIDER_KEYS = (
     "LUNA_API_KEY",
     "LUNA_BASE_URL",
     "LUNA_MODEL",
+    # The Anthropic SDK's own variables. The provider never reads them, but
+    # other tools on a developer machine (a coding agent, a proxy) commonly
+    # set them, and a test that builds a real SDK client must see the same
+    # clean environment CI does.
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_BASE_URL",
+    "ANTHROPIC_CUSTOM_HEADERS",
 )
+# Every `WEREWOLF_ANTHROPIC_*` setting, whatever new ones are added later.
+_LIVE_PROVIDER_PREFIXES = ("WEREWOLF_ANTHROPIC_",)
 
 
 @pytest.fixture(autouse=True, scope="session")
@@ -36,7 +46,12 @@ def isolate_tests_from_developer_credentials():
     environment variable outranks it.
     """
     original_env_file = Settings.model_config.get("env_file")
-    removed = {key: os.environ.pop(key) for key in _LIVE_PROVIDER_KEYS if key in os.environ}
+    scrubbed = [
+        key
+        for key in os.environ
+        if key in _LIVE_PROVIDER_KEYS or key.startswith(_LIVE_PROVIDER_PREFIXES)
+    ]
+    removed = {key: os.environ.pop(key) for key in scrubbed}
     Settings.model_config["env_file"] = None
     config._settings = None
     try:

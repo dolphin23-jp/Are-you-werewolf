@@ -8,6 +8,12 @@ dependencies = [
     "uvicorn[standard]>=0.30.0",
     "pydantic>=2.8.0",
     "pydantic-settings>=2.4.0",
+    # The real LLM provider (app/ai/provider/anthropic_claude.py). Capped below
+    # 3: the provider leans on 2.x specifics (httpx2 transport, the beta
+    # `fallbacks` parameter, `transform_schema`), and a major bump should be a
+    # deliberate migration rather than a surprise on the next install.
+    "anthropic>=2.8,<3",
+    # The dormant luna provider (OpenAI-compatible); still selectable.
     "openai>=1.50.0",
     "websockets>=13.0",
     # Role deduction (app/ai/reasoning/solver). The 17-player composition with

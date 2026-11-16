@@ -1,7 +1,7 @@
 import re
 from typing import Literal
 
-from pydantic import field_validator
+from pydantic import ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Shared by the field default below and by `_normalize_reasoning_engine`'s
@@ -23,6 +23,38 @@ DEFAULT_LUNA_MODEL = "gpt-6-luna"
 # shape rather than one literal means the next model generation, and the one
 # already deployed in somebody's Codespaces secret, both keep working.
 _LUNA_MODEL_NAME_RE = re.compile(r"gpt-[0-9]+(?:\.[0-9]+)*-luna")
+
+# The Claude model the `anthropic` provider asks for when
+# `WEREWOLF_ANTHROPIC_MODEL` is not set. Exactly this id: Opus 5.5 always
+# thinks, and its depth is steered by `output_config.effort` (below), not by a
+# thinking budget.
+DEFAULT_ANTHROPIC_MODEL = "claude-opus-5-5"
+
+# A Claude model id (`claude-opus-5-5`, `claude-sonnet-5-5-20261101`, ...) typed
+# into the *provider* field. Unambiguous for the same reason as the luna
+# pattern: no other provider's models are named `claude-*`.
+_CLAUDE_MODEL_NAME_RE = re.compile(r"claude-[a-z0-9-]+")
+
+# Every value `output_config.effort` accepts. Validated at startup so a typo
+# fails here instead of as a 400 on the first paid request of a game.
+ANTHROPIC_EFFORT_LEVELS: frozenset[str] = frozenset({"low", "medium", "high", "xhigh", "max"})
+
+# Per call kind, how hard the model thinks. One mapping, shared by the field
+# defaults below, their blank-value fallback and the provider's own default,
+# so none of them can drift from the others. Discussion and wolf chat are many
+# short turns where latency is what the player feels; a vote or a night action
+# is one decision per day that the whole game turns on.
+DEFAULT_ANTHROPIC_EFFORT_BY_KIND: dict[str, str] = {
+    "discussion": "low",
+    "vote": "medium",
+    "night": "medium",
+    "chat": "low",
+    "default": "medium",
+}
+
+DEFAULT_ANTHROPIC_BASE_URL = "https://api.anthropic.com"
+
+_ANTHROPIC_FALLBACK_MODES = ("default", "off")
 
 
 class Settings(BaseSettings):
@@ -74,6 +106,49 @@ class Settings(BaseSettings):
     # this is the first knob to turn for that.
     luna_reasoning_effort: str = ""
 
+    # --- Anthropic (Claude) -- the real provider. ---
+    # Namespaced on purpose rather than the SDK's own `ANTHROPIC_API_KEY` /
+    # `ANTHROPIC_BASE_URL`: those are routinely set by other tools on the same
+    # machine (a coding agent, a proxy), and picking one up would silently bill
+    # the wrong account or send hidden-role prompts to the wrong host. The
+    # provider passes the key and the base URL to the SDK explicitly, so the
+    # SDK never falls back to its ambient variables either.
+    werewolf_anthropic_api_key: str = ""
+    werewolf_anthropic_base_url: str = DEFAULT_ANTHROPIC_BASE_URL
+    werewolf_anthropic_model: str = DEFAULT_ANTHROPIC_MODEL
+    # One limiter for the whole process, shared by every provider instance
+    # (each game builds its own): the rate limit is per API key, not per game.
+    werewolf_anthropic_max_concurrency: int = 8
+    # Generous because a thinking model at `max_tokens` 12000 can legitimately
+    # run for a minute or more; a short timeout would bill the call and then
+    # discard it.
+    werewolf_anthropic_timeout_seconds: float = 120.0
+    werewolf_anthropic_max_retries: int = 2
+    # Floor for every request's `max_tokens`: the larger of this and the
+    # caller's value is sent. Thinking is always on for Opus 5.5 and is billed
+    # against the same budget as the visible JSON, so the small budgets the
+    # agent asks for (sized for a non-thinking model) would truncate mid-object.
+    # Only tokens actually produced are billed, so a high ceiling costs nothing
+    # by itself.
+    werewolf_anthropic_max_tokens: int = 12000
+    werewolf_anthropic_effort_discussion: str = DEFAULT_ANTHROPIC_EFFORT_BY_KIND["discussion"]
+    werewolf_anthropic_effort_vote: str = DEFAULT_ANTHROPIC_EFFORT_BY_KIND["vote"]
+    werewolf_anthropic_effort_night: str = DEFAULT_ANTHROPIC_EFFORT_BY_KIND["night"]
+    werewolf_anthropic_effort_chat: str = DEFAULT_ANTHROPIC_EFFORT_BY_KIND["chat"]
+    werewolf_anthropic_effort_default: str = DEFAULT_ANTHROPIC_EFFORT_BY_KIND["default"]
+    # "default": a refused turn is re-run server-side on the fallback model
+    # inside the same call (beta). "off": a refusal just fails the call, and
+    # the agent's own fallback line takes over.
+    werewolf_anthropic_fallbacks: str = "default"
+
+    # A real provider costs money per call, so a publicly reachable server
+    # with no access password is an open tab on the owner's account. Starting
+    # with provider=anthropic and an empty WEREWOLF_ACCESS_PASSWORD has to be
+    # opted into with this flag; it is never the default.
+    werewolf_allow_open_access: bool = False
+    # Ceiling on the estimated spend of one human-play session, in USD.
+    werewolf_session_max_cost_usd: float = 30.0
+
     @field_validator("werewolf_llm_provider", mode="before")
     @classmethod
     def _normalize_llm_provider(cls, value: object) -> object:
@@ -81,11 +156,81 @@ class Settings(BaseSettings):
         if not isinstance(value, str):
             return value
         normalized = value.strip().strip('"\'').lower()
-        # The model name is frequently entered in the provider field. There is
-        # currently only one real provider, so this unambiguous alias is safe.
+        # The model name is frequently entered in the provider field. Each
+        # real provider's models have a name shape no other provider uses
+        # (`gpt-*-luna`, `claude-*`), so these aliases cannot pick the wrong
+        # one; anything else stays as typed and fails as an unknown provider.
         if _LUNA_MODEL_NAME_RE.fullmatch(normalized):
             return "luna"
+        if normalized == "claude" or _CLAUDE_MODEL_NAME_RE.fullmatch(normalized):
+            return "anthropic"
         return normalized
+
+    @field_validator(
+        "werewolf_anthropic_effort_discussion",
+        "werewolf_anthropic_effort_vote",
+        "werewolf_anthropic_effort_night",
+        "werewolf_anthropic_effort_chat",
+        "werewolf_anthropic_effort_default",
+        mode="before",
+    )
+    @classmethod
+    def _normalize_anthropic_effort(cls, value: object, info: ValidationInfo) -> object:
+        """Fail at startup on an effort the API would reject with a 400.
+
+        A blank line (the `.env.example` form) means "the default for this
+        call kind", taken from the same mapping as the field default.
+        """
+        if not isinstance(value, str):
+            return value
+        normalized = value.strip().strip('"\'').lower()
+        if not normalized:
+            kind = (info.field_name or "").removeprefix("werewolf_anthropic_effort_")
+            return DEFAULT_ANTHROPIC_EFFORT_BY_KIND[kind]
+        if normalized not in ANTHROPIC_EFFORT_LEVELS:
+            raise ValueError(
+                f"{info.field_name.upper() if info.field_name else 'effort'}={value!r} is not "
+                f"one of {sorted(ANTHROPIC_EFFORT_LEVELS)}"
+            )
+        return normalized
+
+    @field_validator("werewolf_anthropic_fallbacks", mode="before")
+    @classmethod
+    def _normalize_anthropic_fallbacks(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        normalized = value.strip().strip('"\'').lower() or "default"
+        if normalized not in _ANTHROPIC_FALLBACK_MODES:
+            raise ValueError(
+                f"WEREWOLF_ANTHROPIC_FALLBACKS={value!r} is not one of {_ANTHROPIC_FALLBACK_MODES}"
+            )
+        return normalized
+
+    @field_validator("werewolf_anthropic_model", "werewolf_anthropic_base_url", mode="before")
+    @classmethod
+    def _blank_anthropic_string_is_default(cls, value: object, info: ValidationInfo) -> object:
+        # A blank `WEREWOLF_ANTHROPIC_MODEL=` must mean "the default model",
+        # not an empty model id that only fails on the first paid request.
+        # Quotes are stripped as for the provider field (Codespaces secrets).
+        if not isinstance(value, str):
+            return value
+        normalized = value.strip().strip('"\'')
+        if normalized:
+            return normalized
+        if info.field_name == "werewolf_anthropic_model":
+            return DEFAULT_ANTHROPIC_MODEL
+        return DEFAULT_ANTHROPIC_BASE_URL
+
+    @property
+    def anthropic_effort_by_kind(self) -> dict[str, str]:
+        """The five effort settings in the shape the provider consumes."""
+        return {
+            "discussion": self.werewolf_anthropic_effort_discussion,
+            "vote": self.werewolf_anthropic_effort_vote,
+            "night": self.werewolf_anthropic_effort_night,
+            "chat": self.werewolf_anthropic_effort_chat,
+            "default": self.werewolf_anthropic_effort_default,
+        }
 
     @field_validator("werewolf_reasoning_engine", mode="before")
     @classmethod
