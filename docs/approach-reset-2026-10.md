@@ -460,7 +460,7 @@ Codespaces には、別のツールのためにそれらが入っていること
 
 | 設定 | 既定 | 用途 |
 |---|---|---|
-| `WEREWOLF_LLM_PROVIDER` | `mock` | `anthropic` で Claude。`claude` やモデル名（`claude-…`）を入れても `anthropic` と読む |
+| `WEREWOLF_LLM_PROVIDER` | `mock` | `anthropic` で Claude。`claude` やモデル名（`claude-…`）を入れても `anthropic` と読む。モデル名なら、`WEREWOLF_ANTHROPIC_MODEL` が未設定のときはそのモデルを使い、別のモデル名が設定されていれば起動時に止める（黙って既定の Opus 5.5 で課金しないため） |
 | `WEREWOLF_ANTHROPIC_API_KEY` | 空 | キー。GitHub Actions の secret か Codespaces の secret にだけ置く |
 | `WEREWOLF_ANTHROPIC_MODEL` | `claude-opus-5-5` | モデル |
 | `WEREWOLF_ANTHROPIC_BASE_URL` | `https://api.anthropic.com` | 接続先 |
@@ -500,15 +500,23 @@ Codespaces には、別のツールのためにそれらが入っていること
 **任意パラメータ24個・union 型のパラメータ16個**を上限とし、超えると
 400 "Schema is too complex for compilation" を返す。再試行では直らない。
 
-- `DiscussionOutput` は入れ子まで数えると任意パラメータが36個ある。送ると400になり、
-  `AIPlayerAgent` の既存の降格で `BriefDiscussionOutput`（`public_message` だけ）に落ちる。
-  試合は進み、成功率は100%のまま、CO・結果の公開・名指しの質問・吊り先が**黙って消える**。
-  見える失敗より危ない。
+- `DiscussionOutput` は入れ子まで数えると任意パラメータが36個ある。送ると文法の変換に
+  400で拒まれる。プロバイダはそのスキーマを記憶し（下の「文法の変換に拒まれたスキーマ」）、
+  同じ呼び出しを送り直してから、そのプロバイダ（評価では1試合、人間の卓では1セッション）が
+  続くあいだ、議論の手番をすべてスキーマをシステムプロンプトに入れた寛容パース
+  （`json_object` 経路）で送る。項目は残るが、文法による強制は無い。読めなかった手番は
+  `AIPlayerAgent` の降格で `BriefDiscussionOutput`（`public_message` だけ）に落ち、
+  CO・結果の公開・名指しの質問・吊り先がその手番から**黙って消える**。
 - そこで v3 は **`ChatDiscussionOutput`** を送る。v3 のプロンプトが実際に求める8項目と、
   メモの代わりの `plan_note`（7項目）だけで、変換後は任意18・union 6。受け取ったら
   `DiscussionOutput` に戻すので、呼び出し側は今までどおり `DiscussionOutput` を受け取る。
-- `backend/tests/ai/test_schema_complexity.py` が、試合と評価で送りうるすべてのスキーマを
-  上限の内側に留める。項目を足して上限を超えれば、ライブより先にここで落ちる。
+- v2 と legacy は今も `DiscussionOutput` を送る（保守のみで、v3 の契約に移していない）。
+  Claude では上の経路で議論が文法の強制なしに読まれるので、v2・legacy と v3 を Claude で
+  比べると、議論の手番はパースの条件が違う。レポートの「うち strict schema で成功」が下がり、
+  `summary.json` の `metrics.parse_path_counts` に `json_object` として出る。
+- `backend/tests/ai/test_schema_complexity.py` が、v3 の試合と評価（判定・専門家ベンチ）で
+  送りうるすべてのスキーマを上限の内側に留める。項目を足して上限を超えれば、ライブより
+  先にここで落ちる。`DiscussionOutput` は上限を超えていること自体を確かめている。
 - 文法の変換に拒まれたスキーマは、**そのスキーマだけ**を記憶し、スキーマをシステム
   プロンプトに入れた寛容パースに切り替える。luna の「strict 非対応を学習する」仕組みを
   プロセス全体に効かせると、1回の400で投票・夜行動までスキーマの強制が外れるため。
@@ -659,8 +667,9 @@ effort を足した。コードがモデルの代わりに埋めた箇所は、�
 **Phase 2: 基準線は計測であって、合格判定ではない。**
 
 - 異なるシードを6〜8個、比べる条件のあいだで対にして使う。`evaluate.py` は2戦目以降のシードを
-  1ずつ進め、指標を試合をまたいで合算するので、**1ジョブ1試合**で並列に回す（180分のジョブ
-  上限にも収まる）。
+  1ずつ進め、指標を試合をまたいで合算するので、**1ジョブ1試合**で並列に回す（ジョブの
+  上限は120分。effort を上げる、遅いモデルにするなど1試合が延びる条件では、まず1試合の
+  所要を確かめてから回す）。
 - 指標の単位で必要な試合数が違う。呼び出し単位（応答時間・費用・パース経路・拒否）は2試合でも
   読める。発言・手番単位（聞き入れ率、定型句率、文字数）は1条件あたり4〜8試合が要る
   （たとえば自発的な変更 9.4% と 19% を見分けるには、1条件あたり後続手番が約200、1試合64手番

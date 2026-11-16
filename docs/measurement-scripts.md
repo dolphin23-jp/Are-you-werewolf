@@ -240,7 +240,7 @@ python scripts/human_judgment_quiz.py score \
 ## 3. 記録の扱い（常設のルール）
 
 §11.6 のとおり、残す価値のある結果は `backend/artifacts/` にコミットする。Actions の成果物は
-保持期間が切れると消える（このワークフローは90日、評価のワークフローは14〜30日）。run #11 の
+保持期間が切れると消える（レイテンシ測定も評価のワークフローも90日）。run #11 の
 対戦記録はこれで失われた。
 
 - ディレクトリを1回の測定ごとに作り（例: `backend/artifacts/latency-sweep-2026-11-20-seed1/`）、

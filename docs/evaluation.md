@@ -18,6 +18,7 @@ GitHubのリポジトリページ → **Settings → Secrets and variables → A
 |---|---|---|
 | Secret | `WEREWOLF_ANTHROPIC_API_KEY` | Anthropic Console で発行した実際のキー |
 | Variable | `WEREWOLF_ANTHROPIC_MODEL` | `claude-opus-5-5`(既定値なので省略可) |
+| Variable | `WEREWOLF_ANTHROPIC_MAX_TOKENS` | `12000`(既定値なので省略可。途中切れが多いときに上げる。AI評価だけが読みます) |
 
 > Codespaces secrets とは別枠です。Codespacesに登録済みでも、Actions用に改めて
 > 登録が必要です。キーは手動実行だけの評価ワークフローに渡り、CI(`ci.yml`)には
@@ -44,7 +45,7 @@ GitHubのリポジトリページ → **Settings → Secrets and variables → A
    |---|---|---|
    | `provider` | `anthropic` | `anthropic`(Claude)か `luna`(休眠中の gpt-6-luna) |
    | `seeds` | `1` | シードをカンマ区切りで(例: `1,2,3`。最大20個)。**1シード=1ジョブ=1試合**で、最大4つを並列に回します |
-   | `reasoning_engine` | `v3` | 推理エンジン(`v3` / `v2` / `legacy`) |
+   | `reasoning_engine` | `v3` | 推理エンジン(`v3` / `v2` / `legacy`)。`v2` と `legacy` は議論に `DiscussionOutput` を送るので、Claude では議論の手番が文法の強制なし(`json_object` 経路)で読まれます。v3 と比べるときはこの違いを含めて読んでください(`docs/approach-reset-2026-10.md` の §11.2)。接続確認は v3 のスキーマだけを確かめます |
    | `effort_discussion` | `low` | 議論と狼・共有チャットの思考量(`low` / `medium` / `high`。Claude のみ) |
    | `effort_decisions` | `medium` | 投票と夜行動の思考量(`low` / `medium` / `high`。Claude のみ) |
    | `judge` | オフ | 日本語・人格をLLMで採点する(追加費用。上限は対戦と共有) |
@@ -88,7 +89,10 @@ GitHubのリポジトリページ → **Settings → Secrets and variables → A
   途中切れ・平均応答時間**が付きます。途中切れ(`finish_reason=length`。Claude の
   `stop_reason=max_tokens` もこれとして数えます)が増えているなら、思考量を下げるか
   (Claude は `WEREWOLF_ANTHROPIC_EFFORT_*`、luna は `LUNA_REASONING_EFFORT`)、Claude なら
-  出力上限 `WEREWOLF_ANTHROPIC_MAX_TOKENS` を上げて再実行する合図です。
+  出力上限 `WEREWOLF_ANTHROPIC_MAX_TOKENS` を上げて再実行する合図です。Actions の AI評価
+  では、思考量は入力の `effort_discussion` / `effort_decisions` で、出力上限はリポジトリの
+  変数 `WEREWOLF_ANTHROPIC_MAX_TOKENS`(**Settings → Secrets and variables → Actions** の
+  Variables)で変えます。
 - `[フォールバック]` は、モデルの応答が使えず定型文で代用された発言です。
 - 2分間なにも出ないと `… 生成中` の行が出ます。**出続けていれば遅いだけ**、
   **出ていなければ止まっている**と読めます。
@@ -216,10 +220,15 @@ python scripts/evaluate.py --games 1 --provider luna \
 
 ### Claude の設定(思考量・同時実行など)
 
-どれも環境変数で、省略すれば既定値です。Actions では評価ワークフローが渡します
-(入力の `effort_discussion` が `_DISCUSSION` と `_CHAT` に、`effort_decisions` が
-`_VOTE` と `_NIGHT` に入ります)。Codespaces やローカルでは Codespaces secrets・
-`backend/.env` が渡します。
+どれも環境変数で、省略すれば既定値です。Codespaces やローカルでは Codespaces secrets・
+`backend/.env` が渡します。下の表のうち Actions の AI評価が渡すのは次の2つだけで、
+ほかの設定は既定値で走ります(リポジトリの変数に同じ名前で入れても読まれません)。
+
+- 思考量: 入力の `effort_discussion` が `_DISCUSSION` と `_CHAT` に、`effort_decisions` が
+  `_VOTE` と `_NIGHT` に入ります(`_DEFAULT` は既定値のまま)。
+- `WEREWOLF_ANTHROPIC_MAX_TOKENS`: リポジトリの変数から。未設定なら `12000`。
+
+Expert cutoff評価はこの表の設定を1つも渡さないので、すべて既定値です。
 
 | 環境変数 | 既定 | 意味 |
 |---|---|---|

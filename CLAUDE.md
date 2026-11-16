@@ -10,10 +10,20 @@
   lives only as a GitHub Actions secret for the manually dispatched eval workflows or
   as a Codespaces secret — never in `ci.yml`, never in a committed file. The app reads
   only `WEREWOLF_ANTHROPIC_*`, never the SDK's ambient `ANTHROPIC_*` variables.
-- Keep every schema a provider sends within Anthropic's structured-output limits
-  (24 optional / 16 union-typed parameters per request, nested included);
-  `backend/tests/ai/test_schema_complexity.py` enforces it. v3 sends
-  `ChatDiscussionOutput`, not `DiscussionOutput` (36 optional parameters).
+  A `claude-*` id typed into `WEREWOLF_LLM_PROVIDER` selects `anthropic` and becomes
+  the model when `WEREWOLF_ANTHROPIC_MODEL` is unset; a different explicit model
+  fails at startup.
+- Keep every comment in `backend/.env.example` on its own line, never
+  `KEY=value  # comment`: `docker run --env-file` keeps the comment as part of the
+  value, so a blank `WEREWOLF_ACCESS_PASSWORD` would become a published password.
+- Keep every schema a v3 game or an evaluation run sends within Anthropic's
+  structured-output limits (24 optional / 16 union-typed parameters per request,
+  nested included); `backend/tests/ai/test_schema_complexity.py` enforces it. v3
+  sends `ChatDiscussionOutput`. v2 and legacy still send `DiscussionOutput` (36
+  optional parameters): Claude refuses its grammar once per provider, and from then
+  on those discussion turns are parsed from the schema embedded in the prompt
+  (`json_object`, not grammar-enforced), so a v2/legacy arm on Claude is not
+  parsed under the same conditions as v3.
 - Do not word prompts or wire fields as the model's 思考 / thought / reasoning: a
   request to write out its thinking can be refused as `reasoning_extraction`, and
   refusal fallbacks do not retry that.
