@@ -808,6 +808,11 @@ class ContextBuilder:
                 "第一候補だけでなく第二候補、第一候補を処刑しない最強の理由、"
                 "本人の反論後にも残った独立根拠、少数意見を整理してください。"
             )
+        elif stage == "final_designation":
+            stage_instruction = (
+                "まとめのあとの締めです。ここまでに出た返答を踏まえ、今日の処刑先を一人だけ"
+                "短く指定してください。新しい質問・新しい論点は出さず、directed_questionsは空にします。"
+            )
         return self._assemble(
             [self._layer_a_system(state, player_id), self._layer_b_role(state, player_id)],
             [
@@ -902,6 +907,12 @@ class ContextBuilder:
                 f"投票前のまとめ。今日の吊り先と理由を一行で。{cap}字以内。"
                 "候補の比べ合いはplan_noteに書き、発言では並べない。"
                 "候補本人にまだ反論を聞いていなければ、一つだけ聞いてよい。"
+            )
+        if stage == "final_designation":
+            # The round closes on this turn: a question here could not be answered.
+            return (
+                "まとめのあとの締め。ここまでに出た返答を踏まえ、今日の吊り先を一言で決める。"
+                f"質問はしない。1文、{cap}字以内。"
             )
         if stage == "human_followup":
             return f"人間のプレイヤーの発言に応答する。{cap}字以内。"
@@ -1172,5 +1183,6 @@ class ContextBuilder:
             "rebuttal_or_reassessment": "反論・再評価",
             "freemason_confirmation": "共有相方の確認",
             "consensus_summary": "議論の整理",
+            "final_designation": "本指定",
             "human_followup": "人間発言への応答",
         }.get(stage, "議論")

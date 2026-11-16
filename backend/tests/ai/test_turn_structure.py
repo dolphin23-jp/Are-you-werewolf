@@ -154,13 +154,16 @@ def test_every_named_seat_answers_once_and_the_human_is_never_scheduled():
 
 
 def test_the_designation_is_told_to_decide_without_asking_again():
-    systems: list[tuple[str, str]] = []
+    # The designation is a stage of its own: its scene line says what the turn
+    # is for, once, in the user message -- no second note in the system prompt.
+    requests: list[tuple[str, str, str]] = []
     provider = _StagedProvider({"consensus_summary": _summary_asking("p2")})
     original = provider.generate_structured
 
     async def capture(**kwargs: Any) -> Any:
         if kwargs["response_schema"] is not MorningIntentOutput:
-            systems.append((provider.stage, kwargs["system"]))
+            user = "\n".join(message.content for message in kwargs["messages"])
+            requests.append((provider.stage, kwargs["system"], user))
         return await original(**kwargs)
 
     provider.generate_structured = capture  # type: ignore[method-assign]
@@ -168,10 +171,16 @@ def test_the_designation_is_told_to_decide_without_asking_again():
 
     asyncio.run(coordinator.run_discussion_round(_session(controller)))
 
-    designation = [system for stage, system in systems if stage == _FINAL_DESIGNATION_STAGE]
-    assert designation and all("【本指定】" in system for system in designation)
-    others = [system for stage, system in systems if stage != _FINAL_DESIGNATION_STAGE]
-    assert not any("【本指定】" in system for system in others)
+    designation = [
+        (system, user) for stage, system, user in requests if stage == _FINAL_DESIGNATION_STAGE
+    ]
+    assert len(designation) == 1
+    system, user = designation[0]
+    assert "【議論段階】本指定。" in user
+    assert "新しい質問" in user
+    assert "【本指定】" not in system
+    others = [user for stage, _system, user in requests if stage != _FINAL_DESIGNATION_STAGE]
+    assert not any("【議論段階】本指定。" in user for user in others)
 
 
 def test_a_summary_without_questions_still_closes_the_round_at_once():

@@ -242,9 +242,13 @@ def get_view(session_id: str, player_id: str | None = Query(default=None)) -> di
     view["discussion_paused"] = bool(
         session.discussion_paused or session.discussion_pause_requested
     )
+    spoken = len(round_state.outputs) if round_state else 0
     view["discussion_progress"] = {
-        "spoken": len(round_state.outputs) if round_state else 0,
-        "total": round_state.max_total if round_state else 0,
+        "spoken": spoken,
+        # The scheduler counts every turn it hands out past the budget in the
+        # total; the floor keeps "spoken/total" from ever reading 31/29 should
+        # a turn slip through uncounted.
+        "total": max(round_state.max_total, spoken) if round_state else 0,
     }
     # The countdown and its identifier only mean anything to the seat being waited
     # on, so they follow `awaiting_your_speech` rather than the raw round state.

@@ -33,6 +33,8 @@ CHAT_STAGE_MAX_CHARS: dict[str, int] = {
     "human_followup": 60,
     "immediate": 120,
     "consensus_summary": 120,
+    # The close after the summary's answers: today's candidate, in a word.
+    "final_designation": 60,
 }
 # The hard cap: what the agent truncates to and budgets tokens for. Above the
 # longest stage so an overshoot is not cut mid-thought; the code-written fact
