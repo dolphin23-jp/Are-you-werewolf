@@ -948,10 +948,16 @@ class AICoordinator:
             output.contains_co_claim = True
             if "死亡" in freemason_opening:
                 self._freemason_death_announced.add(player_id)
-        elif freemason_must_hide and detect_claimed_role(output.public_message) is not None:
-            output.public_message = "現時点ではCOしません。既出の判定と灰の発言を比較します。"
+        elif freemason_must_hide:
+            # Every route to a CO is closed, not only the prose. A claim set in
+            # the structured fields alone is drafted into a ROLE_CLAIM and given
+            # its canonical sentence below, so checking the sentence let the
+            # code meant to keep the partner hidden be the thing that outed it.
+            if detect_claimed_role(output.public_message) is not None:
+                output.public_message = "現時点ではCOしません。既出の判定と灰の発言を比較します。"
             output.public_claim_role = None
             output.contains_co_claim = False
+            output.claim_action = None
         valid_reassessments = [
             item
             for item in output.reassessments
