@@ -142,6 +142,17 @@ class BudgetedProvider:
         if self._claims_exact_requests:
             cast(Callable[[EvaluationBudget], None], attach)(budget)
 
+    @property
+    def _metrics(self) -> object | None:
+        """The coordinator finds the collector by duck typing (`provider._metrics`).
+        Wrapping a provider in a budget must not hide it, or every event the
+        coordinator and agents record would silently vanish."""
+        return getattr(self.inner, "_metrics", None)
+
+    @property
+    def model(self) -> str | None:
+        return getattr(self.inner, "model", None)
+
     async def generate_structured(
         self,
         *,

@@ -214,8 +214,18 @@ class AICoordinator:
             engine=self._engine,
         )
 
+        # v3 seats speak through the compact chat wire schema: the full
+        # `DiscussionOutput` exceeds Anthropic's structured-output limits and
+        # would degrade every turn to the brief contract (approach-reset §11).
+        # Agents still hand back a `DiscussionOutput`, so nothing below changes.
         self._agents: dict[str, AIPlayerAgent] = {
-            pid: AIPlayerAgent(provider, self._personalities[pid]) for pid in self._ai_player_ids
+            pid: AIPlayerAgent(
+                provider,
+                self._personalities[pid],
+                chat_contract=self.model_decides,
+                metrics=self._metrics,
+            )
+            for pid in self._ai_player_ids
         }
 
         self._recorder = recorder

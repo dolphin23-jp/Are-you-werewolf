@@ -16,6 +16,7 @@ from app.ai.reasoning.board_memo import MEMO_HEADING
 from app.ai.reasoning.facts import PublicFactLedger
 from app.ai.reasoning.runtime import ReasoningRuntime
 from app.ai.schemas import (
+    ChatDiscussionOutput,
     DiscussionOutput,
     MorningIntentOutput,
     NightActionOutput,
@@ -48,10 +49,12 @@ class InsistentProvider:
         self.prompts.append((response_schema, system, "\n".join(m.content for m in messages)))
         if response_schema is MorningIntentOutput:
             return MorningIntentOutput()
-        if response_schema is DiscussionOutput:
+        if response_schema in (DiscussionOutput, ChatDiscussionOutput):
             output = DiscussionOutput(public_message=self.message)
             output.reasoning_memo.execution_target = self.rogue
             output.reasoning_memo.suspects = [self.rogue]
+            if response_schema is ChatDiscussionOutput:
+                return ChatDiscussionOutput.from_discussion_output(output)
             return output
         if response_schema is VoteOutput:
             return VoteOutput(vote_target=self.vote, reason="気が変わった。")
@@ -117,7 +120,7 @@ def test_the_prompt_carries_the_board_memo_and_not_the_brief():
 
     asyncio.run(coordinator._speak(controller, state, speaker, "initial_view"))
 
-    schema, system, user = next(p for p in provider.prompts if p[0] is DiscussionOutput)
+    schema, system, user = next(p for p in provider.prompts if p[0] is ChatDiscussionOutput)
     assert MEMO_HEADING in user
     assert "上の結論・根拠・数値は変更しないでください" not in user
     assert "第一処刑候補" not in user
