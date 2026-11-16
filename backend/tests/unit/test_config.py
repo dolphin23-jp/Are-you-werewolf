@@ -126,7 +126,9 @@ def test_anthropic_defaults(tmp_path: Path):
     settings = Settings(_env_file=str(tmp_path / "does-not-exist.env"))
     assert settings.werewolf_anthropic_api_key == ""
     assert settings.werewolf_anthropic_base_url == "https://api.anthropic.com"
-    assert settings.werewolf_anthropic_model == DEFAULT_ANTHROPIC_MODEL == "claude-opus-5-5"
+    # The owner's 2026-11-16 decision (approach-reset §11.8): the game model is
+    # Sonnet 5.5. Opus 5.5 stays selectable through WEREWOLF_ANTHROPIC_MODEL.
+    assert settings.werewolf_anthropic_model == DEFAULT_ANTHROPIC_MODEL == "claude-sonnet-5-5"
     assert settings.werewolf_anthropic_max_concurrency == 8
     assert settings.werewolf_anthropic_timeout_seconds == 120.0
     assert settings.werewolf_anthropic_max_retries == 2
@@ -230,10 +232,11 @@ def test_a_model_id_in_the_provider_field_is_the_model_asked_for(
 
 
 def test_a_blank_model_setting_leaves_the_provider_fields_model_in_charge(tmp_path: Path):
+    # Not the default model, so the provider field visibly decides.
     env_file = _write_env(
-        tmp_path, "WEREWOLF_LLM_PROVIDER=claude-sonnet-5-5\nWEREWOLF_ANTHROPIC_MODEL=\n"
+        tmp_path, "WEREWOLF_LLM_PROVIDER=claude-opus-5-5\nWEREWOLF_ANTHROPIC_MODEL=\n"
     )
-    assert Settings(_env_file=str(env_file)).werewolf_anthropic_model == "claude-sonnet-5-5"
+    assert Settings(_env_file=str(env_file)).werewolf_anthropic_model == "claude-opus-5-5"
 
 
 def test_the_same_model_named_in_both_settings_is_accepted(monkeypatch: pytest.MonkeyPatch):
@@ -263,10 +266,11 @@ def test_a_provider_without_a_claude_model_id_keeps_the_configured_model(configu
     assert Settings(werewolf_llm_provider=configured).werewolf_anthropic_model == (
         DEFAULT_ANTHROPIC_MODEL
     )
+    # A model other than the default, so keeping it is visible.
     explicit = Settings(
-        werewolf_llm_provider=configured, werewolf_anthropic_model="claude-sonnet-5-5"
+        werewolf_llm_provider=configured, werewolf_anthropic_model="claude-opus-5-5"
     )
-    assert explicit.werewolf_anthropic_model == "claude-sonnet-5-5"
+    assert explicit.werewolf_anthropic_model == "claude-opus-5-5"
 
 
 # --- API keys -------------------------------------------------------------------
@@ -326,8 +330,8 @@ def _run_start_sh(tmp_path: Path, env: dict[str, str]) -> subprocess.CompletedPr
         ({"WEREWOLF_LLM_PROVIDER": "anthropic"}, DEFAULT_ANTHROPIC_MODEL),
         ({"WEREWOLF_LLM_PROVIDER": '"Claude-Haiku-5-5"'}, "claude-haiku-5-5"),
         (
-            {"WEREWOLF_LLM_PROVIDER": "claude", "WEREWOLF_ANTHROPIC_MODEL": ' "claude-sonnet-5-5"'},
-            "claude-sonnet-5-5",
+            {"WEREWOLF_LLM_PROVIDER": "claude", "WEREWOLF_ANTHROPIC_MODEL": ' "claude-opus-5-5"'},
+            "claude-opus-5-5",
         ),
     ],
 )

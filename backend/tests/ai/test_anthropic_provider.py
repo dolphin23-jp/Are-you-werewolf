@@ -34,6 +34,7 @@ from app.ai.schemas import (
     VoteOutput,
     WolfChatOutput,
 )
+from app.config import DEFAULT_ANTHROPIC_MODEL
 
 API_KEY = "test-key"
 BASE_URL = "https://example.invalid"
@@ -192,6 +193,28 @@ async def test_request_shape_matches_the_api_contract():
     assert body["output_config"]["effort"] == "medium"
     assert "fallbacks" not in body
     assert FALLBACK_BETA not in server.requests[0].headers.get("anthropic-beta", "")
+
+
+async def test_the_default_sonnet_request_is_one_the_model_accepts():
+    """Sonnet 5.5 (the default since 2026-11-16) answers 400 to `thinking:
+    disabled`, a thinking budget, a forced `tool_choice` and non-default
+    sampling parameters, and prefers the scalar `fallbacks="default"` form.
+    The provider sends none of the four and the scalar form, with an explicit
+    effort on every call -- Sonnet 5.5's own default is `high`."""
+    server = _Server(_message(model="claude-sonnet-5-5"))
+    provider = _provider(server, model=DEFAULT_ANTHROPIC_MODEL, fallbacks=True)
+
+    assert await _vote(provider, temperature=0.3) is not None
+
+    (body,) = server.bodies
+    assert body["model"] == "claude-sonnet-5-5"
+    for rejected in ("thinking", "tool_choice", "tools", "temperature", "top_p", "top_k"):
+        assert rejected not in body
+    assert body["output_config"]["effort"] == "medium"
+    assert body["fallbacks"] == "default"
+    assert FALLBACK_BETA in server.requests[0].headers["anthropic-beta"]
+    # No prefill: the last message is the user's.
+    assert body["messages"][-1]["role"] == "user"
 
 
 async def test_a_larger_caller_budget_than_the_floor_is_kept():

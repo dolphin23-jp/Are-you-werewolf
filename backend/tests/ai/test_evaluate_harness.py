@@ -238,7 +238,9 @@ def test_model_label_prefers_the_provider_then_the_setting() -> None:
 def test_judge_model_swaps_only_the_judges_model() -> None:
     parser = evaluate.build_parser()
     args = parser.parse_args(["--judge-model", "claude-sonnet-5-5"])
-    game = Settings(werewolf_llm_provider="anthropic")
+    # The game model named explicitly, so the swap stays visible whichever
+    # model is the default.
+    game = Settings(werewolf_llm_provider="anthropic", werewolf_anthropic_model="claude-opus-5-5")
 
     anthropic = evaluate.judge_settings(args, game)
     luna = evaluate.judge_settings(args, Settings(werewolf_llm_provider="luna"))

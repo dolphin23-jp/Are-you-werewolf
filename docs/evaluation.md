@@ -17,7 +17,7 @@ GitHubのリポジトリページ → **Settings → Secrets and variables → A
 | 種別 | 名前 | 値 |
 |---|---|---|
 | Secret | `WEREWOLF_ANTHROPIC_API_KEY` | Anthropic Console で発行した実際のキー |
-| Variable | `WEREWOLF_ANTHROPIC_MODEL` | `claude-opus-5-5`(既定値なので省略可) |
+| Variable | `WEREWOLF_ANTHROPIC_MODEL` | `claude-sonnet-5-5`(既定値なので省略可。Opus で回すなら `claude-opus-5-5`) |
 | Variable | `WEREWOLF_ANTHROPIC_MAX_TOKENS` | `12000`(既定値なので省略可。途中切れが多いときに上げる。AI評価だけが読みます) |
 | Variable | `WEREWOLF_ANTHROPIC_FALLBACKS` | `default`(既定値なので省略可。キーがサーバー側フォールバックのベータを使えないなら `off` にすると、1試合1要求の失敗を省けます。AI評価と Expert cutoff評価が読みます) |
 
@@ -50,9 +50,9 @@ GitHubのリポジトリページ → **Settings → Secrets and variables → A
    | `effort_discussion` | `low` | 議論と狼・共有チャットの思考量(`low` / `medium` / `high`。Claude のみ) |
    | `effort_decisions` | `medium` | 投票と夜行動の思考量(`low` / `medium` / `high`。Claude のみ) |
    | `judge` | オフ | 日本語・人格をLLMで採点する(追加費用。上限は対戦と共有) |
-   | `judge_model` | 空 | 判定に使うモデル(空なら対戦と同じ。例: `claude-sonnet-5-5`) |
+   | `judge_model` | 空 | 判定に使うモデル(空なら対戦と同じ。自己採点を避けるなら別のモデル。例: `claude-opus-5-5`) |
    | `max_cost_per_game` | `15` | 1試合(1ジョブ)あたりの推定費用の上限(USD) |
-   | `model` | 空 | モデル。空なら変数 `WEREWOLF_ANTHROPIC_MODEL`、それも無ければ `claude-opus-5-5`(luna なら `LUNA_MODEL`、なければ `gpt-6-luna`) |
+   | `model` | 空 | モデル。空なら変数 `WEREWOLF_ANTHROPIC_MODEL`、それも無ければ `claude-sonnet-5-5`(luna なら `LUNA_MODEL`、なければ `gpt-6-luna`) |
 
 3. まず `plan` ジョブが入力を確かめてシードを展開し、`preflight` ジョブが接続確認
    (`scripts/check_llm.py`)を1回だけ行います。ここで失敗すれば、試合は1つも始まりません
@@ -156,7 +156,7 @@ python scripts/evaluate.py --games 1 --provider anthropic --max-cost 15 --out ev
 
 # 3) 日本語/人格のLLM判定も行う(追加費用。判定は別モデルで。上限は対戦と共有)
 python scripts/evaluate.py --games 1 --provider anthropic --max-cost 20 \
-    --judge --judge-model claude-sonnet-5-5 --out eval-out
+    --judge --judge-model claude-opus-5-5 --out eval-out
 
 # 別の選択肢: luna(単価を渡すと金額換算。上限も単価があるときだけ使える)
 python scripts/evaluate.py --games 1 --provider luna \
@@ -188,9 +188,11 @@ python scripts/evaluate.py --games 1 --provider luna \
 しても使った額を引き継ぎます。`--engines v3` のように1つだけ指定すれば、そのエンジンの
 試合だけを回します。
 
-1戦の費用はまだ計測していません。run #11(gpt-6-luna)のトークン量を Opus 5.5 の単価に
-当てはめると、キャッシュ無しで約 $7.5 ですが、トークナイザと思考量が違うので±2倍程度の
-幅があります。最初の1戦のレポートで実額を確かめてから、上限と対戦数を決めてください。
+Claude の最初の1戦(Opus 5.5・v3・シード1、2026-11-16。
+`backend/artifacts/live-v3-claude-opus55-seed1-2026-11-16/`)は $7.25・13分36秒でした
+(入力だけで77%。キャッシュ読みは0)。同じ呼び出しを Sonnet 5.5 の単価で数えると約 $3.3 の
+見込みですが、Sonnet での実額はまだ計測していません。最初の1戦のレポートで実額を確かめてから、
+上限と対戦数を決めてください。
 
 出力(`eval-out/`):
 
@@ -247,11 +249,17 @@ Expert cutoff評価が渡すのは `WEREWOLF_ANTHROPIC_MODEL` と `WEREWOLF_ANTH
 | `WEREWOLF_ANTHROPIC_MAX_RETRIES` | `2` | 再試行の回数(429 は `retry-after` を守る) |
 | `WEREWOLF_ANTHROPIC_FALLBACKS` | `default` | 拒否された手番を別モデルが答え直すサーバー側フォールバック(`default` / `off`)。Actions ではリポジトリ変数 `WEREWOLF_ANTHROPIC_FALLBACKS` から渡ります |
 
-思考量は `low` / `medium` / `high` / `xhigh` / `max` から選びます(空は既定値)。Opus 5.5 は
-思考を切れないので、待ち時間と費用は主にこの値で調整します。既定値は仮置きで、
+思考量は `low` / `medium` / `high` / `xhigh` / `max` から選びます(空は既定値)。Sonnet 5.5 も
+Opus 5.5 も思考を `disabled` にできない(400)ので、`thinking` は送らず、待ち時間と費用は主に
+この値で調整します。Sonnet 5.5 の各段階は Sonnet 5 から較正し直されているので、Opus の値を
+そのまま当てはめず測って決めます。既定値は仮置きで、
 応答時間の計測をもとに見直す予定です(`docs/approach-reset-2026-10.md` の §11.2・§11.5)。
 
-フォールバックが有効だと、拒否された手番を `claude-opus-5` などの別モデルが答えます。
+フォールバックが有効だと、拒否された手番を、要求したモデルの代替モデルが答えます
+(Sonnet 5.5 なら `claude-sonnet-5`、Opus 5.5 なら `claude-opus-5` か `claude-opus-4-8`)。
+Sonnet 5.5 で答え直されるのは `cyber`・`frontier_llm` の拒否だけで、`bio`・
+`reasoning_extraction`・`general_harms` は答え直されません。費用の予約もこの代替モデルの
+単価で行います。
 実際に答えたモデルは呼び出しごとに記録され、`summary.json` の `metrics` に
 `served_model_counts` と `fallback_served_calls` として出ます。基準線として比べる試合では、
 この数を確かめてください。
@@ -290,6 +298,10 @@ python scripts/evaluate_expert_scenarios_v2.py --provider anthropic --max-cost 5
 | 人狼側の欺瞞・連携 | 仲間への明示的な狼視、仲間投票の観測、騙り担当がCOしたか、潜伏担当が黙れたか |
 | 自己同一性 | 自分自身を疑い・処刑対象として扱う、p0以外がp0本人を名乗る |
 | 形式 | 200文字超過率、フォールバック定型文の発生率、同一発言の繰り返し、日本語比率、メタ発言の漏れ |
+| 定型句 | プロンプトの語彙(「第二候補は」など)を含むAI発言と、コードが文頭に足したCO・結果の文(`占いCO。`・`霊媒結果、Xは黒(人狼)です。` などの決まった言い方。対戦記録には何をコードが足したかが残らないので、言い方から読む)を、合計と内訳で数える |
+| 聞き入れ | 同じ席の続く2手番の吊り先(`execution_target`)を比べる。変化を観測できるのは両方の手番に吊り先があり、元の吊り先が生きていた対だけなので、自発的な変更はその対を分母にする。「認める言葉を言いながら同じ吊り先のまま」は、両方の手番が同じ吊り先を書いた対だけを数え、逆接(でも・ただ・それでも…)のあとに理由を添えた部分的な譲歩と、理由のない空約束に分ける。「認めてくださって」「認めたのは」「前に認めた」は数えない。片方でも吊り先が空欄の対は別に出す |
+| 未回答の質問 | 名指しの質問のうち、最後まで返信リンクが付かなかったもの。相手に手番が来なかった質問と、手番は来たが返信リンクが無い質問(本文で答えたか、答えなかった)に分ける |
+| 言い直し | 同じ日の直前の発言(別の席)との bigram Jaccard。全組の平均では1件の言い直しが埋もれるため、隣り合う発言だけで平均と 0.25 以上の割合を出し、大きい組をレポートに示す |
 
 これらは `backend/app/eval/analyzers.py` にあり、判定モデルの気分に左右されません。
 
@@ -304,7 +316,7 @@ python scripts/evaluate_expert_scenarios_v2.py --provider anthropic --max-cost 5
 
 1. **自己採点バイアス** — 既定では発言したモデル自身が採点します。自分の出力には
    甘くなる傾向があるため、可能なら `--judge-model` で別モデル(たとえば
-   `claude-sonnet-5-5`)を指定してください。
+   `claude-opus-5-5`)を指定してください。
    絶対値より **プロンプト変更前後の相対比較** に使うのが実用的です。
 2. **追加費用** — ゲーム本体とは別に呼び出しが発生します。判定分のコストは
    本体の集計には混ぜていません(本体の応答時間・コストが汚れないようにするため。
