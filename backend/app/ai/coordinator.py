@@ -52,6 +52,7 @@ from app.ai.reasoning.claims import (
 )
 from app.ai.reasoning.dialogue import DiscussionDecision
 from app.ai.reasoning.facts import mentions_player
+from app.ai.reasoning.observations import ObservationSet
 from app.ai.reasoning.rendering import (
     displayed_execution_target,
     enforce_execution_target,
@@ -1308,9 +1309,15 @@ class AICoordinator:
         vote. Each black is looked at once, so a seat that answered (or whose
         owed turn was spent, even on a failed generation) is not called back
         for the same accusation.
+
+        Today's blacks are read as the projection dates them: a black said
+        again today without naming a night is the one published on an earlier
+        day, and its target was owed its answer then. Only a black first
+        stated today -- or restated for a night of its own, which is a new
+        statement -- opens the floor.
         """
         positions = {message.message_id: index for index, message in enumerate(state.chat_log)}
-        for result in PublicFactLedger(state).public_results():
+        for result in ObservationSet.from_state(state).verdicts:
             if not result.is_werewolf or result.day != state.day:
                 continue
             key = (result.claimant_id, result.result_type, result.target_id)

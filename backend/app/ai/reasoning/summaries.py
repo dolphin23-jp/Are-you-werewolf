@@ -15,6 +15,7 @@ mistake it for something that happened.
 from __future__ import annotations
 
 from app.ai.reasoning.facts import MEDIUM_RESULT, PublicFactLedger
+from app.ai.reasoning.observations import _dated_by_first_statement
 from app.engine.roles import RoleName
 from app.engine.state import PublicDeathCause
 
@@ -70,7 +71,16 @@ def render_public_fact_summary(
         )
         lines.append(f"- 本日のCO: {rendered}")
 
-    todays_results = [result for result in ledger.public_results() if result.day == target_day]
+    # Dated as `ObservationSet` dates them: a verdict said again on a later day
+    # without naming a night belongs to the day it was first published, so it
+    # is neither listed as today's nor lost from its own day's summary.
+    todays_results = [
+        verdict
+        for verdict in (
+            _dated_by_first_statement(ledger, result) for result in ledger.public_results()
+        )
+        if verdict.day == target_day
+    ]
     if todays_results:
         rendered = "、".join(
             f"{label(result.claimant_id)}の"

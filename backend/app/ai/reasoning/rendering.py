@@ -32,7 +32,21 @@ from app.ai.reasoning.facts import PublicFactLedger
 # A sentence that commits to who should be executed. Covers the forms models
 # actually produce, not only the literal "第一候補": "第一処刑候補" is not a
 # substring match for it, and "吊りたい" / "投票します" commit just as hard.
+#
+# A declaring word followed by a plain negation is the opposite of a
+# declaration: 「Xは吊るべきではない」 argues against hanging X, and reading it
+# as backing X is how a defence reached the day summary as support. The
+# rhetorical 「〜ではないか」 / 「〜ではないでしょうか」 / 「〜じゃない？」
+# proposes rather than denies, so a negation followed by a question is left
+# declaring; 「〜ではないかもしれない」 is still a (hedged) negation.
+_NEGATED_TAIL = (
+    r"(?:で|じゃ)(?:は|も)?(?:ない|無い|ありません|なく)"
+    r"(?!か(?!も)|でしょうか|ですか|だろうか|[？?])"
+    r"|とは(?:思わ|思えな|思いませ|言えな|限らな)"
+    r"|つもりは(?:ない|無い|ありません)"
+)
 _DECLARES_CANDIDATE = re.compile(
+    r"(?:"
     r"第一(?:処刑)?候補"
     r"|本命|最有力"
     r"|(?:吊|つ)(?:り|る)(?:たい|べき|ます|ましょう)"
@@ -40,6 +54,7 @@ _DECLARES_CANDIDATE = re.compile(
     r"|処刑(?:したい|すべき|します|しましょう|先)"
     r"|投票(?:します|する|先|したい|しましょう)"
     r"|に入れ(?:ます|る|たい)"
+    rf")(?!{_NEGATED_TAIL})"
 )
 _SENTENCE = re.compile(r"[^。！？!?\n]*[。！？!?\n]?")
 _CANONICAL = re.compile(r"現時点の第一処刑候補は(?P<label>[^。]+?)です。")

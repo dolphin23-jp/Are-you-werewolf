@@ -813,7 +813,31 @@ class ContextBuilder:
         elif stage == "final_designation":
             stage_instruction = (
                 "まとめのあとの締めです。ここまでに出た返答を踏まえ、今日の処刑先を一人だけ"
-                "短く指定してください。新しい質問・新しい論点は出さず、directed_questionsは空にします。"
+                "1〜2文で短く指定してください。新しい質問・新しい論点は出さず、"
+                "directed_questionsは空にします。"
+            )
+        reply_note = (
+            "当日のログは各行の先頭に[mN]の発言IDが付いています。"
+            "誰かの発言を受けて話すなら、そのIDをreply_toに、該当箇所の原文をquoteに入れてください。"
+        )
+        if stage == "final_designation":
+            # The round closes on this turn. The shared trailer below asks for a
+            # length band and for one point nobody has raised yet, which is the
+            # opposite of "name one seat, briefly, nothing new"; telling the
+            # model both left it to pick. This turn hears only what it is for.
+            stage_text = (
+                f"【議論段階】{self._stage_label(stage)}。" + stage_instruction + reply_note
+            )
+        else:
+            stage_text = (
+                f"【議論段階】{self._stage_label(stage)}。発言長の目安は{target_chars}字です。"
+                + stage_instruction
+                + "直近の複数人がすでに述べた結論・質問を言い換えて繰り返してはいけません。"
+                "同じ処刑候補を支持する場合も、未提示の投票履歴・死体・能力結果・発言差を"
+                "一つ追加してください。名指しされた本人は質問への直接回答を最初に述べてください。"
+                + reply_note
+                + "consensus_summary段階では新説を広げず、"
+                "対立点と処刑候補を根拠付きでまとめてください。"
             )
         return self._assemble(
             [self._layer_a_system(state, player_id), self._layer_b_role(state, player_id)],
@@ -824,14 +848,7 @@ class ContextBuilder:
                 self._layer_d_summaries(),
                 self._layer_previous_memo(player_id),
                 self._layer_e_current_log(state, ChatChannel.PUBLIC),
-                f"【議論段階】{self._stage_label(stage)}。発言長の目安は{target_chars}字です。"
-                + stage_instruction
-                + "直近の複数人がすでに述べた結論・質問を言い換えて繰り返してはいけません。"
-                "同じ処刑候補を支持する場合も、未提示の投票履歴・死体・能力結果・発言差を"
-                "一つ追加してください。名指しされた本人は質問への直接回答を最初に述べてください。"
-                "当日のログは各行の先頭に[mN]の発言IDが付いています。"
-                "誰かの発言を受けて話すなら、そのIDをreply_toに、該当箇所の原文をquoteに入れてください。"
-                "consensus_summary段階では新説を広げず、対立点と処刑候補を根拠付きでまとめてください。",
+                stage_text,
                 DISCUSSION_OUTPUT_INSTRUCTION,
             ],
         )
