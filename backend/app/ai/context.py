@@ -161,7 +161,8 @@ CHAT_VOTE_OUTPUT_INSTRUCTION = """次のJSONだけを返してください:
 卓で名指しした吊り先と違う相手に入れるなら、reasonに理由を書く。\
 誰かの発言を聞いて票を変えたなら、誰の発言で変えたのかをreasonに名前で書く\
 （例:『〇〇さんの指摘で変えます』）。\
-括弧内の自分の発言に無いことを『昼に言った』と書かない。"""
+当日のログの自分の発言に無いことを『昼に言った』と書かない。\
+【今日のメモの吊り先】に添えた発言はその一部。"""
 
 CHAT_PRIVATE_CHAT_INSTRUCTION = """次のJSONだけを返してください:
 {"message": "内輪チャットの1通。1〜2文、80文字以内。相手は名前で呼ぶ"}"""
@@ -1023,9 +1024,11 @@ class ContextBuilder:
         intent, and word lists read it wrong both ways (they missed
         「灰はレン優先のまま押す」 and took a polite refusal for a push), so it
         is not judged here. What is checked is whether the seat's own public
-        lines today contain the name; when they do, the seat's own sentence
-        that names it is quoted (see `_own_sentences_naming`) and the model
-        reads its words for itself.
+        lines today contain the name; when they do, the seat's own sentences
+        that name it are quoted (see `_own_sentences_naming`) and the model
+        reads its words for itself. When the quote is not every such sentence
+        whole, the line says it is an excerpt: the vote instruction scopes
+        『昼に言った』 to the day's log, and the quote must not read as all of it.
         """
         if target_id is None or target_id not in state.players:
             return "【今日のメモの吊り先】なし"
@@ -1037,11 +1040,12 @@ class ContextBuilder:
             and message.author_id == player_id
         ]
         label = self._label(state, target_id)
-        quotes = _own_sentences_naming(state, lines, target_id)
+        quotes, whole = _own_sentences_naming(state, lines, target_id)
         if not quotes:
             return f"【今日のメモの吊り先】{label}(今日の卓ではまだこの名前を出していない)"
         said = "".join(f"「{quote}」" for quote in quotes)
-        return f"【今日のメモの吊り先】{label}(今日の卓でこの名前に触れた自分の発言:{said})"
+        source = "今日の卓でこの名前に触れた自分の発言" + ("" if whole else "から抜粋")
+        return f"【今日のメモの吊り先】{label}({source}:{said})"
 
     def build_night_action_context(
         self,
@@ -1202,12 +1206,11 @@ class ContextBuilder:
 # -- the seat's own words about its memo target --
 #
 # Read for the vote prompt's 【今日のメモの吊り先】 line. Facts only: whether the
-# seat's public lines today contain the name, and the sentence that does. What
-# the sentence meant is left to the model reading it.
+# seat's public lines today contain the name, and the sentences that do. What
+# a sentence meant is left to the model reading it.
 
 # Two sentences, at most 60 characters each: enough for the seat to see what it
 # said, and the vote prompt grows by a bounded amount however long the day was.
-_QUOTES_SHOWN = 2
 _QUOTE_LIMIT = 60
 # Characters kept before the name when a sentence is cut. A Japanese sentence
 # mostly says what it says about a name after it (「Xに投票」「Xは吊らない」), so
@@ -1220,31 +1223,58 @@ _QUOTE_OPENS = frozenset("「『")
 _QUOTE_CLOSES = frozenset("」』")
 # The seat's sentence goes inside 「」; quotes inside it take the inner form.
 _NESTED_QUOTES = str.maketrans("「」", "『』")
+# Katakana letters (ァ..ヺ, ヽヾヿ) and the long vowel mark. A katakana name
+# inside a longer katakana word is not that name: レン in チャレンジ, サク in
+# サクッと. A long vowel mark that follows a non-katakana character belongs to
+# that word, not to a name (「ねーソウタ」), and one after the name draws out a
+# call (「ソウター、」) unless more katakana follows it.
+_KATAKANA = "\u30a1-\u30fa\u30fd-\u30ff"
+_LONG_VOWEL = "\u30fc"
+_KATAKANA_OR_LONG_RE = re.compile(f"[{_KATAKANA}{_LONG_VOWEL}]")
 
 
-def _own_sentences_naming(state: GameState, lines: Sequence[str], target_id: str) -> list[str]:
-    """The seat's sentences that name `target_id`, most recent first.
+def _own_sentences_naming(
+    state: GameState, lines: Sequence[str], target_id: str
+) -> tuple[list[str], bool]:
+    """The seat's sentences that name `target_id`, most recent first, and
+    whether those are all of them, each whole.
 
-    One per line: the last sentence in the most recent line that names the
-    target, then at most one more from an earlier line, which must differ from
-    the first. Each is cut to `_QUOTE_LIMIT` characters around the name.
+    At most two, picked by position, never by what they say. The first is the
+    day's last sentence naming the target. The second is the last one in the
+    nearest earlier line that names it in a different sentence; when no earlier
+    line does, it is the one before the first in that same line, so a sentence
+    the seat closed its line with does not hide the rest of that line. Each is
+    cut to `_QUOTE_LIMIT` characters around the name.
     """
-    quotes: list[str] = []
-    seen: set[str] = set()
-    for line in reversed(lines):
-        for sentence in reversed(_sentences(line)):
-            span = next(
-                (span for span in _mention_spans(state, sentence) if span[2] == target_id),
-                None,
-            )
-            if span is None or sentence in seen:
-                continue
-            seen.add(sentence)
-            quotes.append(_excerpt(sentence, span[0]).translate(_NESTED_QUOTES))
+    naming: list[list[tuple[str, int]]] = []
+    for line in lines:
+        found = [
+            (sentence, start)
+            for sentence in _sentences(line)
+            if (start := _first_mention(state, sentence, target_id)) is not None
+        ]
+        if found:
+            naming.append(found)
+    if not naming:
+        return [], True
+    *earlier, latest = naming
+    chosen = [latest[-1]]
+    for group in [*(line[::-1] for line in reversed(earlier)), latest[:-1][::-1]]:
+        other = next((item for item in group if item[0] != chosen[0][0]), None)
+        if other is not None:
+            chosen.append(other)
             break
-        if len(quotes) == _QUOTES_SHOWN:
-            break
-    return quotes
+    quotes = [_excerpt(sentence, start) for sentence, start in chosen]
+    distinct = {sentence for line in naming for sentence, _start in line}
+    whole = len(distinct) == len(chosen) and all(
+        quote == sentence for quote, (sentence, _start) in zip(quotes, chosen, strict=True)
+    )
+    return [quote.translate(_NESTED_QUOTES) for quote in quotes], whole
+
+
+def _first_mention(state: GameState, sentence: str, target_id: str) -> int | None:
+    spans = _mention_spans(state, sentence)
+    return next((start for start, _end, player_id in spans if player_id == target_id), None)
 
 
 def _sentences(text: str) -> list[str]:
@@ -1291,18 +1321,16 @@ def _excerpt(sentence: str, start: int) -> str:
 def _mention_spans(state: GameState, text: str) -> list[tuple[int, int, str]]:
     """Every seat the text names, as (start, end, player_id), in order.
 
-    Whole and id-safe, as the ledger's `mentions_player` is, with two
-    differences. The trailing-digit guard applies only to a label that ends in
-    a digit (an id, "Player1"), so Player1 is not read inside Player11 while
-    「ソウタ1択」 still names ソウタ. A label inside a longer seat's label at the
-    same place is that longer seat: サク inside サクラ. Anything may follow a
-    name that does not end in a digit, so an honorific (「ソウタさん」) does.
+    Whole and id-safe: a label is not read inside a longer word of its own
+    script (see `_label_pattern`), so Player1 is not read inside Player11,
+    Ken not inside Kenji, レン not inside チャレンジ, while 「ソウタ1択」 and
+    「ソウタさん」 still name ソウタ. A label inside a longer seat's label at the
+    same place is that longer seat: サク inside サクラ.
     """
     found: list[tuple[int, int, str]] = []
     for player_id, player in state.players.items():
         for label in {player_id, player.name} - {""}:
-            trail = r"(?![0-9])" if label[-1].isdigit() else ""
-            pattern = re.compile(rf"(?<![0-9A-Za-z]){re.escape(label)}{trail}")
+            pattern = _label_pattern(label)
             found.extend((m.start(), m.end(), player_id) for m in pattern.finditer(text))
     found.sort(key=lambda span: (span[0], span[0] - span[1]))
     kept: list[tuple[int, int, str]] = []
@@ -1310,3 +1338,28 @@ def _mention_spans(state: GameState, text: str) -> list[tuple[int, int, str]]:
         if not any(start <= span[0] and span[1] <= end for start, end, _ in kept):
             kept.append(span)
     return kept
+
+
+def _label_pattern(label: str) -> re.Pattern[str]:
+    """`label` as a whole word, guarded by the script at each of its ends.
+
+    No ASCII letter or digit before any label. After it: no digit after a
+    label that ends in one (Player1, p1), no letter after one that ends in an
+    ASCII letter (Ken). A katakana end takes no katakana letter beside it,
+    nor a long vowel mark that joins it to one (see `_KATAKANA`). Anything
+    else may follow, so an honorific, a particle, kanji or a digit after a
+    name (「ソウタ1択」) does.
+    """
+    lead = r"(?<![0-9A-Za-z])"
+    if _KATAKANA_OR_LONG_RE.fullmatch(label[0]):
+        lead += rf"(?<![{_KATAKANA}])(?<![{_KATAKANA}]{_LONG_VOWEL})"
+    last = label[-1]
+    if last.isdigit():
+        trail = r"(?![0-9])"
+    elif last.isascii() and last.isalpha():
+        trail = r"(?![A-Za-z])"
+    elif _KATAKANA_OR_LONG_RE.fullmatch(last):
+        trail = rf"(?!{_LONG_VOWEL}*[{_KATAKANA}])"
+    else:
+        trail = ""
+    return re.compile(f"{lead}{re.escape(label)}{trail}")

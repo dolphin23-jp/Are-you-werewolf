@@ -8,12 +8,21 @@ wrong both ways. It missed pushes worded 「灰はレン優先のまま押す」
 they had pushed. It also counted polite refusals and reported speech as pushes.
 
 The line now states only what code knows: whether the seat's own lines today
-contain the name, and if they do, the seat's own sentence that names it. Each
+contain the name, and if they do, the seat's own sentences that name it. Each
 case below pins that fact. The name is absent, so the flag shows; the name is
-present, so its sentence is quoted verbatim.
+present, so its sentences are quoted verbatim, and the line says so when they
+are an excerpt.
+
+Two sentences cannot hold a seat's day. The first game has seat-days whose
+designation the quote leaves out, and in that game a seat wrote a true
+『昼に言った通り』 about such a designation. So the vote instruction scopes
+『昼に言った』 to the day's log, which the prompt carries whole, and the tests
+below pin that the left-out designations are there.
 """
 
 from __future__ import annotations
+
+import re
 
 import pytest
 
@@ -23,9 +32,11 @@ from tests.ai.test_vote_memo_target import (
     HEADING,
     MEMO,
     NOT_SAID,
+    SAID_IN_DAYS_LOG,
     _chat_builder,
     _day_two,
     _say,
+    excerpted,
     flagged,
     quoted,
 )
@@ -188,9 +199,10 @@ def test_a_question_to_the_target_quotes_the_sentence_that_names_it():
 # that day held; () is the flag. The flag shows on exactly the four pairs whose
 # lines never contain the name. ユイ and サクラ on day 2 and カイト on day 6
 # pushed the name in words the old detector lacked, and it flagged them; each
-# now sees the sentence it said.
+# now sees the sentence it said. Every other line is labelled an excerpt, except
+# the pairs in SHOWN_WHOLE.
 FIRST_GAME: dict[tuple[int, str, str], tuple[str, ...]] = {
-    (2, "p3", "p6"): (  # ユイ, memo target レン
+    (2, "p3", "p6"): (  # ユイ, memo target レン; a push the old detector missed
         "灰はレン優先のまま押す！",
         "訂正は素直だったけど、灰の中ではレン優先で見る方針は変えない！",
     ),
@@ -199,19 +211,23 @@ FIRST_GAME: dict[tuple[int, str, str], tuple[str, ...]] = {
         "呪殺の筋が通るのはアオイの方だから、今んとこダイキがいちばん気になってるよ〜",
         "ダイキとアオイが昨夜どこを占って、それが今朝の死体と合ってるか、結果待ってから考えるよ〜",
     ),
-    (2, "p7", "p6"): (  # サクラ, memo target レン
+    (2, "p7", "p6"): (  # サクラ, memo target レン; likewise
         "ユイと同じく、灰ではレン優先のまま",
         "灰で見るならレン",
     ),
-    (2, "p11", "p5"): ("マコトへの答え、灰で一番気になるのはミオかな",),  # ツムギ
+    (2, "p11", "p5"): (  # ツムギ, memo target ミオ
+        "マコトへの答え、灰で一番気になるのはミオかな",
+    ),
     (2, "p12", "p6"): (),  # ダイキ, memo target レン
     (2, "p15", "p6"): (),  # アオイ, memo target レン
-    (3, "p0", "p12"): (  # マコト, memo target ダイキ
+    (3, "p0", "p12"): (  # マコト, memo target ダイキ; its designation is left out
         "ダイキさん、最後に反論があればどうぞ",
         "アオイさんのグレー詰めの意見も分かるので、ホノカさんと相談して、"
         "ダイキさん吊りか灰吊りかを仮指定で出しますね",
     ),
-    (3, "p1", "p12"): ("ダイキさん、この点はどう説明されますか？",),  # アカリ
+    (3, "p1", "p12"): (  # アカリ, memo target ダイキ
+        "ダイキさん、この点はどう説明されますか？",
+    ),
     (3, "p5", "p11"): (  # ミオ, memo target ツムギ
         "1日目時点でハルトさんへの決め手が弱く、"
         "ツムギさんの発言が様子見に寄っていたのが気になったためです",
@@ -229,7 +245,10 @@ FIRST_GAME: dict[tuple[int, str, str], tuple[str, ...]] = {
         "アオイ、俺が白を出したソウタを重ねて占ったのはなぜだ？",
     ),
     (3, "p15", "p11"): (),  # アオイ, memo target ツムギ
-    (4, "p0", "p11"): ("ツムギさん、アオイさんの黒にどう反論しますか？",),  # マコト
+    (4, "p0", "p11"): (  # マコト, memo target ツムギ; its designation is left out
+        "ツムギさん、アオイさんの黒にどう反論しますか？",
+        "ただ、ツムギさんの反論はまだ聞けていないので、先に聞かせてください…",
+    ),
     (4, "p8", "p11"): (  # カイト, memo target ツムギ
         "ツムギ吊りで検証、白ならアオイ狐か狂で即処理",
         "今日はツムギ吊りでいい",
@@ -237,7 +256,10 @@ FIRST_GAME: dict[tuple[int, str, str], tuple[str, ...]] = {
     (4, "p11", "p8"): (  # ツムギ, memo target カイト
         "仲間に吊り票は入れにくいし、囲いならシオンよりカイトの方を見たいな",
     ),
-    (4, "p15", "p11"): ("今日はツムギさん吊りをお願いしたいです",),  # アオイ
+    (4, "p15", "p11"): (  # アオイ, memo target ツムギ
+        "今日はツムギさん吊りをお願いしたいです",
+        "お待たせしました、昨夜はツムギさんを占って、結果は黒です",
+    ),
     (5, "p0", "p15"): (  # マコト, memo target アオイ
         "でも霊媒対抗が一度も出てないので、変えずにアオイさん本指定のままにします",
         "狼でも狂でも縄に余裕があるうちに処理したいので、アオイさん本指定にします…",
@@ -246,37 +268,45 @@ FIRST_GAME: dict[tuple[int, str, str], tuple[str, ...]] = {
         "それでもアオイさん吊りは変えません",
         "アオイさん、反論があれば聞かせてください",
     ),
-    (5, "p3", "p15"): ("流れは変えない、今日はアオイで押す！",),  # ユイ
-    (5, "p10", "p15"): (  # リク, memo target アオイ
+    (5, "p3", "p15"): (  # ユイ, memo target アオイ
+        "流れは変えない、今日はアオイで押す！",
+        "だからアオイ真で呪殺、アカリ偽という筋も一応は成立する",
+    ),
+    (5, "p10", "p15"): (  # リク, memo target アオイ; the designation comes from the same line
         "そのうえで、シオンがアオイを外したい理由を聞かせてくれ",
+        "今日はアオイ吊りでいい",
     ),
     (5, "p14", "p15"): (  # シオン, memo target アオイ
         "縄にも余裕があるので、今日はアオイさん吊りに同意します",
         "そうなるとアオイさんは狂人寄りです",
     ),
-    (5, "p15", "p5"): (  # アオイ, memo target ミオ; the sentence is cut at its start
+    (5, "p15", "p5"): (  # アオイ, memo target ミオ; cut at its start
         "…で残り縄は4本ほどなので、今日はまだ白黒の出ていないミオさんやサクラさんから選んで、"
         "私は明日以降でも遅くないと思います",
     ),
-    (6, "p0", "p8"): (  # マコト, memo target カイト
+    (6, "p0", "p8"): (  # マコト, memo target カイト; its designation is left out
         "カイトさん、最後に反論あればお願いします…",
         "シオンさん、カイトさん以外で気になる人はいますか…？",
     ),
-    (6, "p3", "p8"): (  # ユイ, memo target カイト
+    (6, "p3", "p8"): (  # ユイ, memo target カイト; the designation comes from the same line
         "ずっと票乗りばかりで、今日もカイトの理由がみんなの丸写しだから",
+        "ただ流れはカイトで押す",
     ),
     (6, "p5", "p8"): (  # ミオ, memo target カイト
         "私もカイトさん吊りで動きます",
         "カイトさんの問いですが、最後の狼はカイトさん本人と見ています",
     ),
     (6, "p7", "p8"): (  # サクラ, memo target カイト
-        "カイトの重ね白を『囲いと決めつけられない』と崩しつつ、"
-        "投票はカイトで二番手は自分、と両取りしている",
+        "カイトの重ね白を『囲いと決めつけられない』と崩しつつ、投票はカイトで二番手は自分、"
+        "と両取りしている",
         "票の乗り方は認めるが、今日はカイト吊りで動く",
     ),
-    (6, "p8", "p5"): ("リク、名前を挙げるならミオ",),  # カイト
+    (6, "p8", "p5"): (  # カイト, memo target ミオ; a push the old detector missed
+        "リク、名前を挙げるならミオ",
+    ),
     (6, "p10", "p8"): (  # リク, memo target カイト
         "カイト、他に誰が最後の狼だと見ているのか、名前を一人挙げてほしい",
+        "一方カイトは、ダイキの白に加えて狂目のアオイからも白をもらっている",
     ),
     (6, "p14", "p8"): (  # シオン, memo target カイト; the first sentence is cut at its end
         "カイトさんのミオさん挙げは、偽陣営の票を根拠にしている点は理解しますが、"
@@ -284,6 +314,34 @@ FIRST_GAME: dict[tuple[int, str, str], tuple[str, ...]] = {
         "カイトさん、1日目にマコトさんと同じくレンさんへ投票した理由を聞かせてください",
     ),
 }
+# The pairs whose quote is every sentence naming the target, each whole.
+SHOWN_WHOLE = {
+    (2, "p11", "p5"),
+    (3, "p1", "p12"),
+    (3, "p5", "p11"),
+    (4, "p11", "p8"),
+    (6, "p5", "p8"),
+    (6, "p8", "p5"),
+}
+
+# The review's seat-days where the seat put its memo target up in a sentence
+# other than the one it closed with. With one sentence per line, none of these
+# was quoted. The second sentence now comes from the same line when no earlier
+# line names the target, which brings in リク's and ユイ's. マコト's stay out:
+# an earlier line names the target (days 3 and 6), or two later sentences in
+# the line do (day 4). On day 5 リク, and on day 6 マコト, wrote a true
+# 『昼に言った通り』 in their vote reasons. The instruction allows it: the
+# designation is in the day's log, and the line says the quote is an excerpt.
+DESIGNATIONS: dict[tuple[int, str, str], str] = {
+    (3, "p0", "p12"): "なので今日はダイキさん仮指定にします",
+    (4, "p0", "p11"): "ツムギ黒で、今日はツムギさん吊りが第一候補だと思います",
+    (5, "p10", "p15"): "今日はアオイ吊りでいい",
+    (6, "p0", "p8"): (
+        "今日の第一候補はカイトさんで、理由は偽目のダイキさんとアオイさんからの重ね白です"
+    ),
+    (6, "p3", "p8"): "ただ流れはカイトで押す",
+}
+QUOTED_FROM_THE_SAME_LINE = {(5, "p10", "p15"), (6, "p3", "p8")}
 
 
 def _memo_targets() -> dict[tuple[int, str], str]:
@@ -296,13 +354,19 @@ def _memo_targets() -> dict[tuple[int, str], str]:
     return targets
 
 
-def _first_game_line(day: int, seat: str, target: str) -> tuple[str, list[str]]:
+def _first_game_body(day: int, seat: str, target: str) -> str:
     state = state_at_vote(day)
     candidates = [pid for pid in state.alive_ids() if pid != seat]
     _system, messages = _chat_builder(state).build_vote_context(
         state, seat, candidates, board_memo=MEMO, stated_target=target
     )
-    line = next(row for row in messages[0].content.splitlines() if row.startswith(HEADING))
+    return messages[0].content
+
+
+def _first_game_line(day: int, seat: str, target: str) -> tuple[str, list[str]]:
+    state = state_at_vote(day)
+    body = _first_game_body(day, seat, target)
+    line = next(row for row in body.splitlines() if row.startswith(HEADING))
     own = [
         message.content
         for message in state.chat_log
@@ -325,7 +389,12 @@ def test_the_first_game_line_is_pinned(day: int, seat: str, target: str) -> None
     name = load_transcript()["names"][target]
     sentences = FIRST_GAME[(day, seat, target)]
 
-    assert line == (quoted(name, *sentences) if sentences else flagged(name))
+    if not sentences:
+        assert line == flagged(name)
+    elif (day, seat, target) in SHOWN_WHOLE:
+        assert line == quoted(name, *sentences)
+    else:
+        assert line == excerpted(name, *sentences)
 
 
 def test_the_first_game_flags_only_the_four_seats_that_never_said_the_name():
@@ -334,12 +403,36 @@ def test_the_first_game_flags_only_the_four_seats_that_never_said_the_name():
     assert never_said == [(2, "p12", "p6"), (2, "p15", "p6"), (2, "p5", "p6"), (3, "p15", "p11")]
 
 
+@pytest.mark.parametrize(("day", "seat", "target"), sorted(DESIGNATIONS))
+def test_a_designation_the_quote_leaves_out_is_in_the_days_log_the_instruction_names(
+    day: int, seat: str, target: str
+) -> None:
+    designation = DESIGNATIONS[(day, seat, target)]
+    body = _first_game_body(day, seat, target)
+    line, _own = _first_game_line(day, seat, target)
+    names = load_transcript()["names"]
+    log = body.split("【当日のログ】\n", 1)[1].split("\n\n", 1)[0]
+
+    assert any(
+        row.split("] ", 1)[1].startswith(f"{names[seat]}: ") and designation in row
+        for row in log.splitlines()
+    )
+    assert body.endswith(SAID_IN_DAYS_LOG)
+    if (day, seat, target) in QUOTED_FROM_THE_SAME_LINE:
+        assert f"「{designation}」" in line
+    else:
+        assert designation not in line
+        assert "自分の発言から抜粋:" in line
+
+
 @pytest.mark.parametrize(("day", "seat", "target"), sorted(FIRST_GAME))
 def test_the_first_game_line_states_facts_about_the_seats_own_lines(
     day: int, seat: str, target: str
 ) -> None:
-    """In that game no seat's name is inside another's, so a plain substring
-    test is an independent check of the name match."""
+    """In that game no seat's name is inside another's or inside a longer
+    katakana word, so a plain substring test is an independent check of the
+    name match, and a plain split on sentence ends of whether the quote is
+    every sentence naming it."""
     line, own = _first_game_line(day, seat, target)
     name = load_transcript()["names"][target]
 
@@ -348,8 +441,16 @@ def test_the_first_game_line_states_facts_about_the_seats_own_lines(
         return
     assert NOT_SAID not in line
     quotes = line.split(":", 1)[1].removesuffix(")").removeprefix("「").removesuffix("」")
+    nested = [content.translate(str.maketrans("「」", "『』")) for content in own]
     for quote in quotes.split("」「"):
         assert name in quote
         assert len(quote) <= 60
-        nested = [content.translate(str.maketrans("「」", "『』")) for content in own]
         assert any(quote.strip("…") in content for content in nested)
+    naming = {
+        sentence.strip().removesuffix("。")
+        for content in nested
+        for sentence in re.split(r"(?<=[。！？!?])(?![。！？!?])|\n", content)
+        if name in sentence
+    }
+    whole = set(quotes.split("」「")) == naming
+    assert ("自分の発言から抜粋:" not in line) == whole

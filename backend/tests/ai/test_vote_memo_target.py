@@ -7,10 +7,14 @@ about names it had never said in public, and one such line was audited as an
 unexplained change of vote. The label now says what the value is.
 
 Code then states only what it can know: whether the seat's own public lines
-today contain the name, and if they do, the seat's own sentence that names it.
-It does not judge whether that sentence pushed the name. An earlier version
-did, with word lists, and was wrong both ways on realistic lines: it missed
+today contain the name, and if they do, the seat's own sentences that name it,
+picked by position and labelled as an excerpt when they are not all of them.
+It does not judge whether a sentence pushed the name. An earlier version did,
+with word lists, and was wrong both ways on realistic lines: it missed
 「灰はレン優先のまま押す」 and read a polite refusal as a push.
+
+What the seat may call 『昼に言った』 is scoped to the day's log, which the
+vote prompt carries whole: the quote is a reminder, never the whole record.
 """
 
 from __future__ import annotations
@@ -27,6 +31,10 @@ from tests.conftest import make_controller
 MEMO = "【盤面メモ】"
 HEADING = "【今日のメモの吊り先】"
 NOT_SAID = "(今日の卓ではまだこの名前を出していない)"
+SAID_IN_DAYS_LOG = (
+    "当日のログの自分の発言に無いことを『昼に言った』と書かない。"
+    "【今日のメモの吊り先】に添えた発言はその一部。"
+)
 
 
 def _chat_builder(state: GameState) -> ContextBuilder:
@@ -81,8 +89,15 @@ def flagged(label: str) -> str:
 
 
 def quoted(label: str, *sentences: str) -> str:
+    """Every sentence naming the target today, each whole."""
     quotes = "".join(f"「{sentence}」" for sentence in sentences)
     return f"{HEADING}{label}(今日の卓でこの名前に触れた自分の発言:{quotes})"
+
+
+def excerpted(label: str, *sentences: str) -> str:
+    """Some of them, or one cut: the line says it is an excerpt."""
+    quotes = "".join(f"「{sentence}」" for sentence in sentences)
+    return f"{HEADING}{label}(今日の卓でこの名前に触れた自分の発言から抜粋:{quotes})"
 
 
 def _line_after(*said: str, target: str = "p2", voter: str = "p1") -> str:
@@ -148,7 +163,10 @@ def test_a_memo_target_the_seat_named_today_is_quoted_from_its_own_line():
             "Player2さん、私の投票理由は発言の少なさです。",
             "Player2さん、私の投票理由は発言の少なさです",
         ),
-        ("Player2の説明で納得した。Player2は吊らない。", "Player2は吊らない"),
+        (
+            "Player2の説明で納得した、Player2は吊らない。",
+            "Player2の説明で納得した、Player2は吊らない",
+        ),
         # flag_repro.py: talked about, cleared, asked about.
         ("Player2さんは白っぽいし信用してる。", "Player2さんは白っぽいし信用してる"),
         ("Player3さんに質問。Player2をどう見てる？", "Player2をどう見てる？"),
@@ -218,6 +236,53 @@ def test_a_name_with_an_honorific_is_named(honorific: str) -> None:
     assert _memo_line(_vote_body(state, "p2")) == quoted("ソウタ", f"ソウタ{honorific}に一票")
 
 
+@pytest.mark.parametrize(
+    ("name", "said"),
+    [
+        # A katakana name inside a longer katakana word is not the name.
+        ("レン", "占いチャレンジしてもいいかも。"),
+        ("レン", "オレンジ色のカードを出しといて。"),
+        ("レン", "カレンダーで日数を数えよう。"),
+        ("レン", "トレンドに乗るだけの票は弱い。"),
+        ("リク", "リクエストがあればどうぞ。"),
+        ("サク", "今日はサクッと決めよう。"),
+        ("ソウタ", "ローソウタって何？"),
+        # An ASCII name inside a longer ASCII word.
+        ("Ken", "Kenjiって誰？"),
+        ("Al", "Also, I think so."),
+    ],
+)
+def test_a_name_inside_a_longer_word_of_its_own_script_is_not_named(name: str, said: str) -> None:
+    state = _day_two()
+    state.players["p2"].name = name
+    _say(state, "p1", said, day=2)
+
+    assert _memo_line(_vote_body(state, "p2")) == flagged(name)
+
+
+@pytest.mark.parametrize(
+    ("name", "said"),
+    [
+        ("ソウタ", "ソウター、どう思う"),  # a drawn-out call
+        ("ソウタ", "ねーソウタ、どう思う"),  # a drawn-out word before it
+        ("ソウタ", "灰はハルト・ソウタ・レン"),
+        ("ソウタ", "ソウタCOは偽だと思う"),
+        ("ソウタ", "灰ソウタ吊りで"),
+        ("Ken", "Kenさんに一票"),
+        ("Ken", "Ken1択"),
+        ("Ken", "灰はKen、ほかは白"),
+    ],
+)
+def test_a_name_next_to_a_long_vowel_a_separator_or_another_script_is_named(
+    name: str, said: str
+) -> None:
+    state = _day_two()
+    state.players["p2"].name = name
+    _say(state, "p1", f"{said}。", day=2)
+
+    assert _memo_line(_vote_body(state, "p2")) == quoted(name, said)
+
+
 # -- which sentences --
 
 
@@ -227,16 +292,51 @@ def test_the_sentence_comes_from_the_most_recent_line_that_names_the_target():
     assert line == quoted("Player2", "今日はPlayer2吊りで", "Player2が怪しい")
 
 
-def test_one_sentence_per_line_the_last_one_that_names_the_target():
+def test_when_no_earlier_line_names_the_target_the_second_comes_from_the_same_line():
     line = _line_after("Player2が怪しい。だからPlayer2に投票する。Player3は白。")
 
-    assert line == quoted("Player2", "だからPlayer2に投票する")
+    assert line == quoted("Player2", "だからPlayer2に投票する", "Player2が怪しい")
 
 
-def test_at_most_two_sentences_are_quoted():
+def test_a_designation_before_a_closing_question_to_the_target_is_quoted():
+    """A facilitator names the hang mid-line, then asks the target to answer.
+    The question alone would hide the seat's own designation."""
+    line = _line_after(
+        "Player2さん、昨日の投票理由は？今日はPlayer2吊りでいいと思う。Player2さん、反論ある？"
+    )
+
+    assert line == excerpted("Player2", "Player2さん、反論ある？", "今日はPlayer2吊りでいいと思う")
+
+
+@pytest.mark.parametrize(
+    "middle", ["今日はPlayer2吊りでいいと思う", "Player2は吊らない", "Player2の白は固い"]
+)
+def test_the_second_sentence_is_picked_by_position_not_by_what_it_says(middle: str) -> None:
+    line = _line_after(f"Player2さん、昨日は？{middle}。Player2さん、反論ある？")
+
+    assert line == excerpted("Player2", "Player2さん、反論ある？", middle)
+
+
+def test_an_earlier_line_that_names_the_target_gives_the_second_sentence():
+    line = _line_after("Player2が怪しい。", "今日はPlayer2吊り。Player2さん、反論ある？")
+
+    assert line == excerpted("Player2", "Player2さん、反論ある？", "Player2が怪しい")
+
+
+def test_an_earlier_line_that_only_repeats_the_first_sentence_gives_no_second():
+    line = _line_after("Player2吊り。", "Player2が怪しい。Player2吊り。")
+
+    assert line == quoted("Player2", "Player2吊り", "Player2が怪しい")
+
+
+def test_a_line_that_repeats_one_sentence_gives_it_once():
+    assert _line_after("Player2吊り。Player2吊り。") == quoted("Player2", "Player2吊り")
+
+
+def test_at_most_two_sentences_are_quoted_and_the_line_says_it_is_an_excerpt():
     line = _line_after("Player2は白っぽい。", "Player2が怪しい。", "Player2吊りで。")
 
-    assert line == quoted("Player2", "Player2吊りで", "Player2が怪しい")
+    assert line == excerpted("Player2", "Player2吊りで", "Player2が怪しい")
 
 
 def test_a_sentence_said_again_is_quoted_once_and_an_earlier_different_one_follows():
@@ -289,6 +389,12 @@ def test_a_long_sentence_is_cut_around_the_name_with_an_ellipsis_where_cut():
     )
 
 
+def test_a_cut_sentence_is_labelled_as_an_excerpt():
+    line = _line_after(f"{LONG_HEAD}今日はPlayer2さん{LONG_TAIL}。")
+
+    assert line.startswith(f"{HEADING}Player2(今日の卓でこの名前に触れた自分の発言から抜粋:「…")
+
+
 def test_a_long_sentence_that_starts_with_the_name_is_cut_only_at_its_end():
     sentence = f"Player2さん{LONG_TAIL}、{LONG_HEAD}"
 
@@ -315,25 +421,31 @@ def test_the_memo_line_is_bounded_however_much_the_seat_said():
     long = f"{LONG_HEAD}今日はPlayer2さん{LONG_TAIL}。" * 3
     line = _line_after(long, f"Player2が{LONG_TAIL}。", long)
 
-    assert len(line) <= len(quoted("Player2", "x" * 60, "x" * 60))
+    assert len(line) <= len(excerpted("Player2", "x" * 60, "x" * 60))
     assert line.count("「") == 2
 
 
 # -- the instruction --
 
 
-def test_the_vote_instruction_points_at_the_quote_not_the_memo():
-    body = _vote_body(_day_two(), "p2")
+def test_the_vote_instruction_scopes_what_was_said_to_the_days_log():
+    """Not to the quote: two sentences cannot hold a seat's day, and a true
+    『昼に言った通り』 about a designation the quote left out must stay allowed."""
+    state = _day_two()
+    _say(state, "p1", "今日はPlayer2吊り。Player2さん、反論ある？", day=2)
+    body = _vote_body(state, "p2")
 
     assert "卓で名指しした吊り先と違う相手に入れるなら" in body
-    assert "括弧内の自分の発言に無いことを『昼に言った』と書かない" in body
+    assert SAID_IN_DAYS_LOG in body
+    assert "[m1] Player1: 今日はPlayer2吊り。Player2さん、反論ある？" in body
+    assert body.index("【当日のログ】") < body.index(HEADING) < body.index(SAID_IN_DAYS_LOG)
+    assert "括弧内" not in body
     assert "昼に言った吊り先と違う相手" not in body
 
 
 def test_the_vote_instruction_stays_plain_and_short():
-    sentence = "括弧内の自分の発言に無いことを『昼に言った』と書かない。"
-    assert CHAT_VOTE_OUTPUT_INSTRUCTION.endswith(sentence)
-    # The sentence it replaced was 24 characters; this one is 28.
-    assert len(CHAT_VOTE_OUTPUT_INSTRUCTION) <= 327
+    assert CHAT_VOTE_OUTPUT_INSTRUCTION.endswith(SAID_IN_DAYS_LOG)
+    # The base's sentence was 24 characters; these two are 53.
+    assert len(CHAT_VOTE_OUTPUT_INSTRUCTION) <= 352
     for word in ("思考", "推論", "考え", "thought", "reasoning"):
         assert word not in CHAT_VOTE_OUTPUT_INSTRUCTION
