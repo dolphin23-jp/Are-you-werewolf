@@ -33,6 +33,18 @@ from app.engine.roles import ROLE_DEFINITIONS, RoleName
 from app.engine.speech_events import SpeechEventType
 from app.engine.state import ChatChannel, ChatMessage, GameState
 
+# Night 0 has no attack: the scripted first victim dies (and is never listed
+# here), and the only other way to die that night is a seer divining the fox.
+# So a body on the first morning is a curse, not "attack or curse" -- saying
+# otherwise would hand the table a doubt the rules have already settled. Before
+# the night-0 curse existed no such body could appear, so the older prompts
+# read exactly as they did on every other morning.
+_NIGHT_ZERO_DEATH_CHAT = "。0日目の夜は襲撃がないので、この死体は占われて呪殺された妖狐。"
+_NIGHT_ZERO_DEATH_STRUCTURED = (
+    "。0日目の夜は襲撃がないため、この死体は占われて呪殺された妖狐です。"
+    "どの占いCO者の0日目の占い先かを照合してください。"
+)
+
 # Upper bound for the key-point digest layer. The same statements appear in full in
 # the current-day log, so an unbounded digest just doubles the prompt as a day runs on.
 _MAX_KEY_POINTS_SHOWN = 12
@@ -454,8 +466,12 @@ class ContextBuilder:
                 parts.append(
                     "【今朝の公開死体（最優先で考察）】"
                     + "、".join(night_names)
-                    + "。公開情報では死因の区別はつきません。"
-                    "死体数と公開占い結果を照合してください。"
+                    + (
+                        _NIGHT_ZERO_DEATH_STRUCTURED
+                        if state.day == 1
+                        else "。公開情報では死因の区別はつきません。"
+                        "死体数と公開占い結果を照合してください。"
+                    )
                 )
         if state.public_result_claims:
             result_lines = [
@@ -514,7 +530,11 @@ class ContextBuilder:
             parts.append(
                 "【今朝の死体】"
                 + self._labels(state, todays_deaths)
-                + "。公開情報では噛みか呪殺かの区別はつかない。"
+                + (
+                    _NIGHT_ZERO_DEATH_CHAT
+                    if state.day == 1
+                    else "。公開情報では噛みか呪殺かの区別はつかない。"
+                )
             )
         observers = [
             self._label(state, pid)
