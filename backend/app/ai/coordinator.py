@@ -155,28 +155,111 @@ _FINAL_DESIGNATION_NOTE = (
     "ここまでの返答を踏まえて今日の吊り先を一言で決める。"
 )
 
-# A wolf-chat sentence that names a partner and puts it up for the ballot:
-# cutting it loose, voting it, letting it hang, sacrificing it. Read per
-# sentence, so a line about tonight's attack that merely names the partner is
-# no plan to vote for them.
+# A wolf-chat sentence that puts a partner up for the ballot: cutting it
+# loose, voting it, letting it hang, sacrificing it. The partner has to be the
+# object of that phrase -- only an honorific and particles between its name
+# and the verb -- so a line that names the partner as the one voting
+# ("ダイキはミオに投票して"), as a vocative ("ハルト、ダイキ、明日はミオを
+# 吊ろう") or in a word that happens to hold a ballot verb ("仕切って",
+# "吊り先") is no plan to vote for it. Read per sentence.
 _SENTENCE_BREAK_RE = re.compile(r"[。！？!?\n]")
-_ALLY_BALLOT_RE = re.compile(
-    r"身内切り|切[るりっろ]|投票|票を?(?:入れ|合わせ|乗せ|集め|置)"
-    r"|吊(?:り|る|ろ|らせ)|処刑|見捨て|捨て[るよろ]|犠牲"
+_HONORIFIC = r"(?:さん|くん|ちゃん|君)?"
+_HANG = r"吊(?:り(?!先|に来)|る|ろ|ら|れ|って)"
+_CUT = r"(?:身内)?切(?:る|ろ|っ|ら|れ|り(?!替|札|込))"
+_GIVE_UP = r"処刑|落と|見捨て|捨て[るよろ]|犠牲"
+# SEAT に投票 / への投票 / に票を合わせる / に入れる / に乗る / に一票
+_VOTE_FOR = (
+    r"(?:に|へ)の?[はもで]?"
+    r"(?:一?票を?(?:投じ|入れ|合わせ|乗せ|集め|置|まとめ|固め)|一票|投票|入れ(?!替)"
+    r"|乗(?:る|ろ|っ(?!か)))"
 )
-# What turns that same verb into its opposite ("吊りは避けたい", "投票しない").
-# Checked on the words right after the verb, through at most two particles.
-_NEGATED_AFTER_RE = re.compile(
-    r"^[はをにもで]{0,2}(?:ない|ません|たくない|しない|させない|せない|避け|ダメ|駄目|なし|無し|やめ)"
+# SEAT を吊る / SEAT 吊り / SEAT を切る / SEAT を処刑 / SEAT を落とす / ...
+_PUT_UP = rf"を?(?:{_HANG}|{_CUT}|{_GIVE_UP})"
+# SEAT は吊ろう -- but not SEAT は吊り票を / 吊りに / 処刑に..., where the seat
+# is the one voting.
+_TOPIC_PUT_UP = rf"[はも](?:{_HANG}|{_CUT}|{_GIVE_UP})(?![票にを])"
+# SEAT には悪いけど(明日は)切る -- the apology names the seat the verb is about.
+_SORRY_THEN = (
+    r"には(?:悪い|すまない|すまん|申し訳ない)(?:けど|が)[、,，]?(?:明日は|今日は)?"
+    rf"(?:{_HANG}|{_CUT}|{_GIVE_UP}|投票|入れ)"
+)
+_BALLOT_ON_SEAT = rf"{_HONORIFIC}(?:{_VOTE_FOR}|{_PUT_UP}|{_TOPIC_PUT_UP}|{_SORRY_THEN})"
+# Who お前 means when the partner alone was addressed, and who 俺 means when
+# the partner wrote the line.
+_SECOND_PERSON = r"(?:お前|おまえ|あなた|あんた|貴方|きみ|(?<![ァ-ヶー一-龥A-Za-z0-9])君)"
+_FIRST_PERSON = r"(?:私|わたし|あたし|俺|おれ|オレ|僕|ぼく|ボク|自分)(?!たち|達|ら)"
+# Groups addressed at the head of a sentence, beside player names.
+_GROUP_VOCATIVE = r"(?:みんな|皆|みなさん|二人とも|ふたりとも|お前ら|おまえら)"
+# Done to the seat rather than by the team: 吊られ / 処刑され / 入れられ.
+_PASSIVE_AFTER_RE = re.compile(r"^(?:さ|ら)?れ(?!ば)")
+# An obligation reads as a negation but is the opposite: 吊らないといけない.
+_MUST_AFTER_RE = re.compile(
+    r"^(?:し|さ|せ)?な(?:きゃ|くちゃ|ければ(?:いけ|なら|だめ|ダメ)|くては(?:いけ|なら)"
+    r"|いと(?:いけ|なら|だめ|ダメ|駄目|まず))"
+)
+# "No choice but to" holds a negation that keeps the plan: 切るしかない.
+_NO_CHOICE_RE = re.compile(
+    r"しか(?:ない|ありません|ねえ)|仕方(?:が)?ない|しょうがない|やむを?得ない|やむをえない"
+)
+# What turns the ballot around anywhere in the rest of its clause:
+# 吊るのは避けたい, 投票は絶対ダメ, 処刑から守りたい, 犠牲にはできない.
+_NEGATED_CLAUSE_RE = re.compile(
+    r"^[^、,，]*?(?:ない|ません|ねえ|避け|ダメ|駄目|だめ|なし|無し|やめ|止め|守|反対|嫌"
+    r"|まずい|保留|待[たちっつてと]|せず|ずに)"
 )
 
 
-def _plans_ballot_on(sentence: str) -> bool:
-    """Whether a sentence proposes voting (or sacrificing) whoever it names."""
-    for match in _ALLY_BALLOT_RE.finditer(sentence):
-        if not _NEGATED_AFTER_RE.match(sentence[match.end() :]):
-            return True
-    return False
+def _ballot_phrase_is_a_plan(rest: str) -> bool:
+    """Whether the words after a ballot phrase leave it a plan to vote the seat."""
+    if _PASSIVE_AFTER_RE.match(rest):
+        return False
+    if _MUST_AFTER_RE.match(rest):
+        return True
+    return not _NEGATED_CLAUSE_RE.match(_NO_CHOICE_RE.sub("", rest))
+
+
+def _puts_up_for_ballot(sentence: str, seat_pattern: str) -> bool:
+    """Whether `sentence` makes the seat `seat_pattern` matches the object of a ballot plan."""
+    return any(
+        _ballot_phrase_is_a_plan(sentence[match.end() :])
+        for match in re.finditer(seat_pattern + _BALLOT_ON_SEAT, sentence)
+    )
+
+
+def _seat_pattern(player_id: str, name: str) -> str:
+    """A seat by id or name, matched whole (p1 is not p11), as `mentions_player` does."""
+    names = "|".join(re.escape(item) for item in (name, player_id) if item)
+    return rf"(?<![0-9A-Za-z])(?:{names})(?![0-9])"
+
+
+def _leading_vocatives(
+    sentence: str, seats: dict[str, re.Pattern[str]], group: re.Pattern[str]
+) -> list[str | None]:
+    """Who a sentence addresses at its head ("ダイキ、ハルト、…"), in order.
+
+    A seat is its id; a group ("みんな、") is None, so it never reads as one
+    partner addressed alone.
+    """
+    called: list[str | None] = []
+    position = len(sentence) - len(sentence.lstrip())
+    while True:
+        match = next(
+            (
+                (pid, found)
+                for pid, pattern in seats.items()
+                if (found := pattern.match(sentence, position)) is not None
+            ),
+            None,
+        )
+        if match is not None:
+            called.append(match[0])
+            position = match[1].end()
+            continue
+        found_group = group.match(sentence, position)
+        if found_group is None:
+            return called
+        called.append(None)
+        position = found_group.end()
 
 
 @dataclass(eq=False)
@@ -2118,13 +2201,12 @@ class AICoordinator:
             if set(self._public_result_ids(state)) - set(audited.public_result_ids_at_decision):
                 return "new_public_evidence", "発言後に能力結果が公開"
         # Matched whole, as the ledger matches names: Player1 is not Player11.
-        cited_authors = set(PublicFactLedger(state).mentioned_player_ids(reason)) - {player_id}
         arguments = tuple(
             message_id
             for message_id, author_id in self._later_public_arguments(
                 state, player_id, (stated_target, actual_target)
             )
-            if author_id in cited_authors
+            if mentions_player(reason, author_id, state.players[author_id].name)
         )
         if arguments:
             cited = "、".join(arguments)
@@ -2289,23 +2371,37 @@ class AICoordinator:
     def _wolf_chat_ballot_plan(state: GameState, ally_id: str) -> tuple[str, str] | None:
         """The wolf-chat sentence, since last night, that put this partner up for the ballot.
 
-        A leading vocative is dropped first: wolves address each other by
-        name ("ダイキ、明日はミオに投票しよう"), and that names the partner
-        without proposing to vote for them.
+        The partner is the object of the ballot phrase by name, or as お前
+        when it alone was addressed at the head of that sentence or an
+        earlier one of the same message, or as 俺/私 in a line it wrote
+        itself ("明日は俺を切って信用を取れ"). Wolves address each other by
+        name ("ダイキ、ハルト、明日はミオに投票しよう"); a vocative is never
+        the object of anything, so it needs no special handling beyond
+        deciding who お前 is.
         """
-        name = state.players[ally_id].name
-        vocative = re.compile(
-            rf"^\s*(?:{re.escape(name)}|{re.escape(ally_id)})(?:さん|くん|ちゃん)?\s*[、,，]"
-        )
+        ally = _seat_pattern(ally_id, state.players[ally_id].name)
+        vocatives = {
+            pid: re.compile(_seat_pattern(pid, player.name) + _HONORIFIC + r"\s*[、,，]\s*")
+            for pid, player in state.players.items()
+        }
+        group = re.compile(_GROUP_VOCATIVE + r"\s*[、,，]\s*")
         for message in state.chat_log:
             if message.channel is not ChatChannel.WOLF or message.day not in (
                 state.day - 1,
                 state.day,
             ):
                 continue
+            addressee: str | None = None
             for sentence in _SENTENCE_BREAK_RE.split(message.content):
-                body = vocative.sub("", sentence)
-                if mentions_player(body, ally_id, name) and _plans_ballot_on(body):
+                called = _leading_vocatives(sentence, vocatives, group)
+                if called:
+                    addressee = called[0] if len(called) == 1 else None
+                seats = [ally]
+                if addressee == ally_id:
+                    seats.append(_SECOND_PERSON)
+                if message.author_id == ally_id:
+                    seats.append(_FIRST_PERSON)
+                if any(_puts_up_for_ballot(sentence, seat) for seat in seats):
                     return message.message_id, sentence.strip()
         return None
 
