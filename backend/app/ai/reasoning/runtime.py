@@ -535,6 +535,13 @@ class ReasoningRuntime:
 
         Read from public facts only -- the standing claim, the published
         results and the public calendar -- plus the seat's own held results.
+
+        The published nights are read from the observations, not the raw
+        ledger. The ledger dates a verdict repeated today without a night as a
+        result for last night; the projection dates it by the statement it
+        repeats, as the board memo does. Saying yesterday's white again is not
+        this morning's result, so it must not cancel the duty while the memo
+        still shows last night as 未公開.
         """
         if player_id not in self.seats or not state.players[player_id].alive:
             return False
@@ -547,9 +554,9 @@ class ReasoningRuntime:
         last_night = state.day - 1
         if last_night < 0:
             return False
-        published = [r for r in ledger.public_results() if r.claimant_id == player_id]
+        observations = ObservationSet.from_state(state)
+        published = observations.verdicts_by(player_id)
         if claimed is RoleName.SEER:
-            observations = ObservationSet.from_state(state)
             if last_night not in disclosable_result_nights(observations, player_id, state.day):
                 return False
             return not any(
@@ -1092,7 +1099,9 @@ class ReasoningRuntime:
             # than the role has seats, so a freemason pair is not one.
             if fake_claim_floor(role, len(claimants)):
                 points.append(f"{role_label(role)}CO対抗: {'、'.join(sorted(claimants))}")
-        for result in ledger.public_results():
+        # Dated through the projection, as the board memo is: a verdict said
+        # again today without a night keeps the day it was first published.
+        for result in ObservationSet.from_state(state).verdicts:
             colour = "黒" if result.is_werewolf else "白"
             points.append(
                 f"{result.claimant_id}→{result.target_id}={colour}({result.day}日目)"
