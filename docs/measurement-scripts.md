@@ -27,6 +27,12 @@
 既定の条件は `claude-opus-5-5:low`、`claude-opus-5-5:medium`、`claude-opus-5-5:low:fast`、
 `claude-sonnet-5-5:low`、`claude-haiku-5-5:low`。
 
+2026-11-16 の最初の測定（`backend/artifacts/latency-sweep-2026-11-16/`）のあと、オーナーは
+ゲームのモデルを Sonnet 5.5 に決めた（approach-reset §11.8）。その測定で Sonnet 5.5 は `low`
+しか測っておらず、Sonnet 5.5 の effort の段階は Opus とも Sonnet 5 とも違う量の思考になるので、
+次に測るなら `--configs claude-sonnet-5-5:low,claude-sonnet-5-5:medium` のように Sonnet の
+effort どうしを比べる（投票・夜行動の既定 `medium` は未測定）。
+
 > **時間だけを測る。発言の質は見ていない。** JSON がスキーマに合うかは数えるが、推理や日本語の
 > 良し悪しは判定しない。速い条件が見つかっても、そのモデル・effort でゲームの評価を回し、
 > 品質が落ちないことを確かめてから既定を変える。**別のモデルに替えるかどうかはオーナーが決める。**
