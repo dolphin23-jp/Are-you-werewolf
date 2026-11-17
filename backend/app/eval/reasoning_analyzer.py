@@ -7,6 +7,7 @@ import statistics
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from enum import StrEnum
+from typing import Any
 
 from app.eval.transcript import DecisionAuditRecord, GameTranscript
 
@@ -29,9 +30,25 @@ class VoteChangeKind(StrEnum):
     # nearly everyone has spoken.
     PUBLIC_ARGUMENT = "public_argument"
     UNEXPLAINED = "unexplained"
+    # Nothing to compare the ballot with: the seat had no turn that day, or its
+    # memo named nobody. Not a change and not "unchanged" -- the record used to
+    # print these as 「変更なし」, a third of the ballots of a game.
+    NO_BASIS = "no_basis"
+    # The seat left a memo target it never said at the table that day (the
+    # name matched whole in its own public lines). The gate measures the
+    # public stance against the vote, and the table saw no stance to leave;
+    # the report lists these with quotes instead of failing them.
+    MEMO_TARGET_UNSPOKEN = "memo_target_unspoken"
 
 
-JUSTIFIED_CHANGES = frozenset(VoteChangeKind) - {VoteChangeKind.NONE, VoteChangeKind.UNEXPLAINED}
+# Changes with a cause the table could see. `no_basis` compared nothing, and
+# `memo_target_unspoken` left a stance nobody heard: neither is judged.
+JUSTIFIED_CHANGES = frozenset(VoteChangeKind) - {
+    VoteChangeKind.NONE,
+    VoteChangeKind.UNEXPLAINED,
+    VoteChangeKind.NO_BASIS,
+    VoteChangeKind.MEMO_TARGET_UNSPOKEN,
+}
 
 
 # -- seat names, matched whole --
@@ -144,6 +161,13 @@ class BallotFacts:
 def classify_vote_change(facts: BallotFacts) -> tuple[VoteChangeKind, str]:
     """Why the ballot left the seat's candidate, if it did. See `VoteChangeKind`.
 
+    The release gate measures the seat's public stance against its vote
+    (owner's decision, 2026-11-17). A ballot with no candidate to compare
+    with is `no_basis`. A memo candidate the seat never said at the table
+    that day is no public stance, so leaving it is `memo_target_unspoken`
+    -- after the runoff and the death, which explain any change whatever
+    the stance was.
+
     Each cause is something the table could see happen after the seat last
     spoke: a runoff that left the candidate off the ballot, the candidate's
     death, a correction, another seat arguing about the old or the new target
@@ -165,12 +189,21 @@ def classify_vote_change(facts: BallotFacts) -> tuple[VoteChangeKind, str]:
     ダイキ as moved by his own result and by アオイ's on ソウタ.
     """
     basis, target, voter = facts.basis, facts.vote_target, facts.voter_id
-    if basis is None or target == basis:
+    own_lines = [line.content for line in facts.day_lines if line.author_id == voter]
+    if basis is None:
+        return VoteChangeKind.NO_BASIS, "メモの吊り先が空" if own_lines else "その日の手番なし"
+    if target == basis:
         return VoteChangeKind.NONE, ""
     if facts.runoff and basis not in facts.candidates:
         return VoteChangeKind.RUNOFF_RESTRICTION, "決選投票の対象制限"
     if basis not in facts.alive_ids:
         return VoteChangeKind.TARGET_BECAME_INVALID, "発言後に対象が無効化"
+    if not any(basis in named_seat_ids(line, facts.names) for line in own_lines):
+        name = facts.names.get(basis, basis)
+        return (
+            VoteChangeKind.MEMO_TARGET_UNSPOKEN,
+            f"メモの吊り先{name}は、その日の自分の発言に一度も出ていない",
+        )
     later = facts.lines_after_voter()
     later_ids = {line.message_id for line in later}
     if later_ids & set(facts.correction_message_ids):
@@ -203,6 +236,243 @@ def classify_vote_change(facts: BallotFacts) -> tuple[VoteChangeKind, str]:
     return VoteChangeKind.UNEXPLAINED, facts.reason
 
 
+# -- every ballot of a transcript --
+
+
+@dataclass(frozen=True)
+class BallotVerdict:
+    """One audited ballot, judged from the transcript it was recorded in."""
+
+    player_id: str
+    day: int
+    # The audit's own round (0 in transcripts written before rounds were
+    # kept) and the round itself, read from the vote records when it is 0.
+    vote_round: int
+    round_number: int
+    vote_target: str | None
+    basis: str | None
+    kind: VoteChangeKind
+    why: str
+    # The ballot's reason, and the seat's own public lines that day.
+    reason: str = ""
+    own_lines: tuple[str, ...] = ()
+    vote_only: bool = False
+    ally_vote: bool = False
+    ally_vote_planned: bool = False
+
+    @property
+    def hard_change(self) -> bool:
+        """A change of the seat's public stance the table saw no cause for."""
+        return self.kind is VoteChangeKind.UNEXPLAINED
+
+    @property
+    def hard_ally_vote(self) -> bool:
+        return self.ally_vote and not self.ally_vote_planned
+
+
+def audit_ballots(transcript: GameTranscript) -> tuple[BallotVerdict, ...]:
+    """Every audited ballot, classified by `classify_vote_change` from the record.
+
+    A transcript carries what the live audit looked at: the day's public
+    lines in its final state's chat log, the results in its speech-event log,
+    the corrections in its audits, each seat's memo on its utterances. So a
+    committed game is re-classified the way a new one is classified live,
+    under today's rules. A hand-built record without a final state keeps the
+    classification it was recorded with.
+    """
+    record = _Record(transcript)
+    verdicts: list[BallotVerdict] = []
+    for audit in transcript.decision_audits:
+        if audit.vote_target is None:
+            continue
+        round_number = audit.vote_round or record.round_of(audit)
+        reason = record.reason(audit.player_id, audit.day, round_number, audit.vote_target)
+        if record.replayable:
+            facts = record.facts(audit, round_number, reason)
+            kind, why = classify_vote_change(facts)
+            basis = facts.basis
+            own_lines = tuple(
+                line.content for line in facts.day_lines if line.author_id == audit.player_id
+            )
+        else:
+            kind, why = _change_kind(audit), audit.target_change_reason
+            basis = audit.decision_target
+            own_lines = record.own_lines_from_utterances(audit.player_id, audit.day)
+        verdicts.append(
+            BallotVerdict(
+                player_id=audit.player_id,
+                day=audit.day,
+                vote_round=audit.vote_round,
+                round_number=round_number,
+                vote_target=audit.vote_target,
+                basis=basis,
+                kind=kind,
+                why=why,
+                reason=reason,
+                own_lines=own_lines,
+                vote_only=audit.vote_only,
+                ally_vote=audit.ally_vote,
+                ally_vote_planned=audit.ally_vote_planned,
+            )
+        )
+    return tuple(verdicts)
+
+
+_NEW_RESULT_EVENT_TYPES = frozenset({"ability_result", "result_correction"})
+_BINDING_CONFIDENCE = 0.8  # `speech_events.CLAIM_CONFIDENCE_THRESHOLD`
+
+
+class _Record:
+    """A transcript, indexed for the ballot audit."""
+
+    def __init__(self, transcript: GameTranscript) -> None:
+        self.t = transcript
+        state = transcript.final_state or {}
+        self.replayable = bool(state.get("chat_log"))
+        self.names = dict(transcript.names)
+        self.lines: dict[int, list[SpokenLine]] = {}
+        for message in state.get("chat_log", []) or []:
+            if message.get("channel") != "public":
+                continue
+            self.lines.setdefault(int(message.get("day", -1)), []).append(
+                SpokenLine(
+                    str(message.get("message_id")),
+                    str(message.get("author_id")),
+                    str(message.get("content") or ""),
+                )
+            )
+        self.results: dict[int, list[PublishedResult]] = {}
+        for event in state.get("speech_events", []) or []:
+            if (
+                event.get("event_type") in _NEW_RESULT_EVENT_TYPES
+                and event.get("target_id")
+                and float(event.get("confidence", 1.0)) >= _BINDING_CONFIDENCE
+            ):
+                self.results.setdefault(int(event.get("day", -1)), []).append(
+                    PublishedResult(
+                        str(event.get("actor_id")),
+                        str(event.get("target_id")),
+                        str(event.get("source_message_id") or ""),
+                    )
+                )
+        self.corrections = tuple(
+            audit.source_message_id for audit in transcript.correction_audits
+        )
+        self.death_day: dict[str, int] = {}
+        for death in state.get("death_records", []) or []:
+            self.death_day.setdefault(str(death.get("player_id")), int(death.get("day", 0)))
+        self.votes: list[dict[str, Any]] = list(state.get("vote_records", []) or [])
+        self.reasons = self._vote_reasons()
+
+    def _vote_reasons(self) -> dict[tuple[str, int, int], str]:
+        """Each ballot's reason by (seat, day, round), rounds read off the vote records."""
+        remaining: dict[tuple[int, str, str | None], list[int]] = {}
+        for vote in self.votes:
+            key = (int(vote.get("day", -1)), str(vote.get("voter_id")), vote.get("target_id"))
+            remaining.setdefault(key, []).append(int(vote.get("round", 1)))
+        reasons: dict[tuple[str, int, int], str] = {}
+        for utterance in self.t.utterances:
+            if utterance.kind != "vote":
+                continue
+            queue = remaining.get((utterance.day, utterance.player_id, utterance.target))
+            round_number = queue.pop(0) if queue else 0
+            reasons[(utterance.player_id, utterance.day, round_number)] = utterance.text
+            # A hand-built record without vote records still finds its reason.
+            reasons.setdefault((utterance.player_id, utterance.day, -1), utterance.text)
+        return reasons
+
+    def round_of(self, audit: DecisionAuditRecord) -> int:
+        """The round of a ballot whose audit predates rounds: the last one it matches."""
+        rounds = [
+            int(vote.get("round", 1))
+            for vote in self.votes
+            if vote.get("day") == audit.day
+            and vote.get("voter_id") == audit.player_id
+            and vote.get("target_id") == audit.vote_target
+        ]
+        return max(rounds, default=1)
+
+    def reason(self, seat: str, day: int, round_number: int, target: str | None) -> str:
+        found = self.reasons.get((seat, day, round_number))
+        if found is not None:
+            return found
+        return next(
+            (
+                u.text
+                for u in reversed(self.t.utterances)
+                if u.kind == "vote" and u.player_id == seat and u.day == day and u.target == target
+            ),
+            "",
+        )
+
+    def basis(self, seat: str, day: int) -> str | None:
+        """The memo target of the seat's last turn that day that carried notes.
+
+        A turn written in code, or answered through the brief contract, has
+        an empty memo and leaves the candidate where it was -- as the live
+        game's record of what each seat stated does.
+        """
+        basis: str | None = None
+        for utterance in self.t.utterances:
+            if (utterance.kind, utterance.player_id, utterance.day) != ("discussion", seat, day):
+                continue
+            memo = utterance.reasoning_memo or {}
+            if any(value not in (None, "", [], {}) for value in memo.values()):
+                target = memo.get("execution_target")
+                basis = str(target) if target else None
+        return basis
+
+    def own_lines_from_utterances(self, seat: str, day: int) -> tuple[str, ...]:
+        return tuple(
+            u.text
+            for u in self.t.utterances
+            if u.kind == "discussion" and u.player_id == seat and u.day == day
+        )
+
+    def tally(self, day: int, round_number: int, *, without: str | None = None) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for vote in self.votes:
+            if vote.get("day") != day or int(vote.get("round", 1)) != round_number:
+                continue
+            if without is not None and vote.get("voter_id") == without:
+                continue
+            target = vote.get("target_id")
+            if target:
+                counts[str(target)] = counts.get(str(target), 0) + 1
+        return counts
+
+    def facts(self, audit: DecisionAuditRecord, round_number: int, reason: str) -> BallotFacts:
+        day = audit.day
+        candidates: tuple[str, ...] = ()
+        if round_number >= 2:
+            candidates = tuple(
+                seat for seat in _top(self.tally(day, round_number - 1)) if seat != audit.player_id
+            )
+        return BallotFacts(
+            voter_id=audit.player_id,
+            basis=self.basis(audit.player_id, day),
+            vote_target=audit.vote_target,
+            reason=reason,
+            names=self.names,
+            day_lines=tuple(self.lines.get(day, ())),
+            results=tuple(self.results.get(day, ())),
+            correction_message_ids=self.corrections,
+            runoff=round_number >= 2,
+            candidates=candidates,
+            alive_ids=frozenset(
+                seat for seat in self.names if self.death_day.get(seat, day) >= day
+            ),
+        )
+
+
+def _top(counts: Mapping[str, int]) -> frozenset[str]:
+    """The most-voted seats of a round: the one executed, or the ones tied."""
+    if not counts:
+        return frozenset()
+    most = max(counts.values())
+    return frozenset(seat for seat, count in counts.items() if count == most)
+
+
 @dataclass(frozen=True)
 class ReasoningQualityReport:
     decision_count: int = 0
@@ -223,6 +493,14 @@ class ReasoningQualityReport:
     stale_evidence_publicly_emitted_count: int = 0
     justified_vote_change_count: int = 0
     unexplained_vote_change_count: int = 0
+    # Ballots with nothing to compare against (no turn that day, or a memo
+    # that named nobody), and the rest: 「比較できた票／全票」 is
+    # compared_vote_count / vote_count.
+    no_basis_vote_count: int = 0
+    compared_vote_count: int = 0
+    # Changes off a memo target the seat never said at the table that day.
+    # Listed with quotes in the report; not a gate failure.
+    memo_target_unspoken_count: int = 0
     wolf_ally_vote_count: int = 0
     planned_wolf_ally_vote_count: int = 0
     unplanned_wolf_ally_vote_count: int = 0
@@ -268,17 +546,18 @@ class ReasoningTranscriptAnalyzer:
         # Every ballot of every round has its own record. A seat that made the
         # same change, or the same vote on its partner, in two rounds of one
         # day did it once; a different change in the runoff is another.
-        ballots = [record for record in decisions if record.vote_target is not None]
+        ballots = audit_ballots(transcript)
         changes = {
-            (record.player_id, record.day, record.vote_target, _change_kind(record))
-            for record in ballots
+            (verdict.player_id, verdict.day, verdict.vote_target, verdict.kind)
+            for verdict in ballots
         }
         change_kinds = [kind for (_seat, _day, _target, kind) in changes]
+        no_basis = sum(verdict.kind is VoteChangeKind.NO_BASIS for verdict in ballots)
         ally_votes: dict[tuple[str, int, str | None], bool] = {}
-        for record in decisions:
-            if record.ally_vote:
-                ballot = (record.player_id, record.day, record.vote_target)
-                ally_votes[ballot] = ally_votes.get(ballot, True) and record.ally_vote_planned
+        for verdict in ballots:
+            if verdict.ally_vote:
+                ballot = (verdict.player_id, verdict.day, verdict.vote_target)
+                ally_votes[ballot] = ally_votes.get(ballot, True) and not verdict.hard_ally_vote
         deltas = [
             abs(delta)
             for correction in corrections
@@ -349,6 +628,9 @@ class ReasoningTranscriptAnalyzer:
             stale_evidence_publicly_emitted_count=stale_emitted,
             justified_vote_change_count=sum(kind in JUSTIFIED_CHANGES for kind in change_kinds),
             unexplained_vote_change_count=change_kinds.count(VoteChangeKind.UNEXPLAINED),
+            no_basis_vote_count=no_basis,
+            compared_vote_count=len(ballots) - no_basis,
+            memo_target_unspoken_count=change_kinds.count(VoteChangeKind.MEMO_TARGET_UNSPOKEN),
             wolf_ally_vote_count=len(ally_votes),
             planned_wolf_ally_vote_count=sum(ally_votes.values()),
             unplanned_wolf_ally_vote_count=sum(not planned for planned in ally_votes.values()),

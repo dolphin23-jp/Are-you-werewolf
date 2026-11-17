@@ -12,6 +12,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any, Literal
 
 from app.eval.analyzers import AnalysisResult
+from app.eval.reasoning_analyzer import VoteChangeKind, audit_ballots
 from app.eval.release_gate import HARD_FAILURE_FIELDS
 from app.eval.transcript import GameTranscript
 
@@ -57,7 +58,9 @@ HARD_FAILURE_LABELS: dict[str, str] = {
     "duplicate_required_result_count": "同じ能力結果を重ねて出した",
     "displayed_target_mismatch_count": "表示した対象と決めた対象が違った",
     "stale_evidence_publicly_emitted_count": "訂正済みの古い根拠を公開発言に出した",
-    "unexplained_vote_change_count": "説明のつかない投票先の変更",
+    "unexplained_vote_change_count": (
+        "卓で名指しした吊り先から、新しい関連の公開情報も引いた論もなく変えた投票"
+    ),
     "unplanned_wolf_ally_vote_count": "計画のない人狼の仲間投票",
     "duplicate_night_action_count": "同じ夜の行動の重複",
 }
@@ -178,6 +181,9 @@ def render_report(
     wolf_chat_plans = _render_wolf_chat_plans(games)
     if wolf_chat_plans:
         add(f"\n{wolf_chat_plans}")
+    ballot_lists = _render_ballot_lists(games)
+    if ballot_lists:
+        add(f"\n{ballot_lists}")
 
     add("\n## 4. ルールベース検査(役職整合性・矛盾・人狼の連携)\n")
     add(_render_findings(games))
@@ -466,6 +472,139 @@ def _render_wolf_chat_plans(games: list[tuple[GameTranscript, AnalysisResult]]) 
             *rows,
         ]
     )
+
+
+BALLOT_LISTS_HEADING = "### 合否に数えない投票（引用つき）"
+
+# The non-hard changes with a cause the table could see, in words.
+_JUSTIFIED_LABELS: dict[VoteChangeKind, str] = {
+    VoteChangeKind.PUBLIC_ARGUMENT: "後の発言者の論を理由に挙げた",
+    VoteChangeKind.NEW_PUBLIC_EVIDENCE: "発言後に、どちらかの吊り先に関わる結果が出た",
+    VoteChangeKind.CORRECTION_ACCEPTED: "発言後に事実の訂正があった",
+    VoteChangeKind.TARGET_BECAME_INVALID: "吊り先が死亡した",
+    VoteChangeKind.RUNOFF_RESTRICTION: "決選の候補から外れた",
+}
+
+
+def _quote(text: str) -> str:
+    """A line as a table cell: whole, on one line, without breaking the table."""
+    flat = " / ".join(part.strip() for part in text.splitlines() if part.strip())
+    return flat.replace("|", "｜") or "—"
+
+
+def _render_ballot_lists(games: list[tuple[GameTranscript, AnalysisResult]]) -> str:
+    """Every ballot the gate does not judge, with the words it rests on.
+
+    The gate measures a seat's public stance against its vote. A ballot with
+    no basis was compared with nothing; a change off a memo target the seat
+    never said aloud left no stance the table saw; a change with a cause the
+    table could see is justified. None of them fails the gate, and each is
+    listed so a reader can check the reading rather than trust a count.
+    """
+    audited = [
+        (transcript, audit_ballots(transcript))
+        for transcript, _analysis in games
+        if any(audit.vote_target is not None for audit in transcript.decision_audits)
+    ]
+    if not audited:
+        return ""
+    out = [
+        BALLOT_LISTS_HEADING,
+        "",
+        "票を比べる基準は、その日の最後の手番のメモの吊り先です。ハードな失敗になるのは、"
+        "その名前を自分の公開発言で言っていて、発言後にどちらの吊り先にも関わる新しい"
+        "公開情報がなく、理由が後の発言者の論を挙げていない変更だけです。",
+        "",
+        "比較できた票／全票（その日の手番がない票と、メモの吊り先が空の票は比較できません）:",
+        "",
+        "| seed | 比較できた票／全票 | 比較できない | 卓で言っていない吊り先からの変更 |",
+        "|---|---|---|---|",
+    ]
+    for transcript, verdicts in audited:
+        no_basis = sum(v.kind is VoteChangeKind.NO_BASIS for v in verdicts)
+        unspoken = sum(v.kind is VoteChangeKind.MEMO_TARGET_UNSPOKEN for v in verdicts)
+        out.append(
+            f"| {_seed(transcript)} | {len(verdicts) - no_basis} / {len(verdicts)} | "
+            f"{no_basis} | {unspoken} |"
+        )
+
+    unspoken_rows: list[str] = []
+    justified_rows: list[str] = []
+    no_basis_lines: list[str] = []
+    for transcript, verdicts in audited:
+        names = transcript.names
+        no_basis_by_day: dict[int, list[str]] = {}
+        for verdict in verdicts:
+            voter = names.get(verdict.player_id, verdict.player_id)
+            basis = names.get(verdict.basis or "", verdict.basis or "—")
+            target = names.get(verdict.vote_target or "", verdict.vote_target or "—")
+            day = _day_label(verdict.day, verdict.round_number)
+            if verdict.kind is VoteChangeKind.MEMO_TARGET_UNSPOKEN:
+                last_line = verdict.own_lines[-1] if verdict.own_lines else ""
+                unspoken_rows.append(
+                    f"| {_seed(transcript)} | {day} | {voter} | {basis} → {target} | "
+                    f"{_quote(last_line)} | {_quote(verdict.reason)} |"
+                )
+            elif verdict.kind in _JUSTIFIED_LABELS:
+                justified_rows.append(
+                    f"| {_seed(transcript)} | {day} | {voter} | {basis} → {target} | "
+                    f"{_JUSTIFIED_LABELS[verdict.kind]} | {_quote(verdict.why)} |"
+                )
+            elif verdict.kind is VoteChangeKind.NO_BASIS:
+                runoff = (
+                    f"、決選{verdict.round_number}回目" if verdict.round_number > 1 else ""
+                )
+                no_basis_by_day.setdefault(verdict.day, []).append(
+                    f"{voter}→{target}（{verdict.why}{runoff}）"
+                )
+        for day_number, items in sorted(no_basis_by_day.items()):
+            no_basis_lines.append(
+                f"- seed {_seed(transcript)} {day_number}日目: {'、'.join(items)}"
+            )
+
+    out += [
+        "",
+        "#### 卓で言っていないメモの吊り先からの変更（`memo_target_unspoken`）",
+        "",
+        "メモの吊り先がその日の自分の発言に一度も出ていないまま、別の相手に入れた票です。"
+        "卓には離れる立場が見えていないので、合否に数えません。",
+        "",
+    ]
+    if unspoken_rows:
+        out += [
+            "| seed | 日 | 投票者 | メモの吊り先 → 票 | その日の自分の最後の発言 | 票の理由 |",
+            "|---|---|---|---|---|---|",
+            *unspoken_rows,
+        ]
+    else:
+        out.append("(ありません)")
+    out += ["", "#### 卓に見える理由のある変更", ""]
+    if justified_rows:
+        out += [
+            "| seed | 日 | 投票者 | 基準 → 票 | 理由の区分 | 記録 |",
+            "|---|---|---|---|---|---|",
+            *justified_rows,
+        ]
+    else:
+        out.append("(ありません)")
+    out += [
+        "",
+        "#### 比較できない票（`no_basis`）",
+        "",
+        "その日に手番がなかった席の票と、メモの吊り先が空のまま投じた票です。"
+        "「変更なし」ではありません。",
+        "",
+        *(no_basis_lines or ["(ありません)"]),
+    ]
+    return "\n".join(out)
+
+
+def _seed(transcript: GameTranscript) -> str:
+    return str(transcript.seed) if transcript.seed is not None else "—"
+
+
+def _day_label(day: int, round_number: int) -> str:
+    return f"{day}(決選{round_number}回目)" if round_number > 1 else str(day)
 
 
 def _render_findings(games: list[tuple[GameTranscript, AnalysisResult]]) -> str:

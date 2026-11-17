@@ -91,6 +91,9 @@ def _v3_table():  # type: ignore[no-untyped-def]
     speaker = "p1"
     plan, other = [pid for pid in state.alive_ids() if pid not in (speaker, "p0")][:2]
     provider = _PlanAndBallot(plan)
+    # The seat says its candidate aloud: a change off a memo target nobody
+    # heard is not judged by the gate (see `test_a_change_off_a_memo_target_...`).
+    provider.line = f"{state.players[plan].name}が一番怪しい。"
     recorder = TranscriptRecorder()
     coordinator = AICoordinator(
         state, AI_IDS, provider, seed=4, reasoning=runtime, model_decides=True, recorder=recorder
@@ -294,11 +297,31 @@ def test_a_seat_that_never_spoke_still_has_its_ballot_audited():
     assert audit.vote_only is True
     assert audit.vote_target == plan
     assert audit.decision_target is None
-    assert audit.target_change_classification == VoteChangeKind.NONE
+    # Compared with nothing -- not "unchanged".
+    assert audit.target_change_classification == VoteChangeKind.NO_BASIS
+    assert audit.target_change_reason == "その日の手番なし"
     report = ReasoningTranscriptAnalyzer().analyze(recorder.transcript)
     assert report.vote_count == 1
+    assert (report.no_basis_vote_count, report.compared_vote_count) == (1, 0)
     # No discussion decision was made, so none is counted.
     assert report.decision_count == 0
+
+
+def test_a_change_off_a_memo_target_the_seat_never_said_is_not_judged():
+    """The gate measures the public stance; the table heard none to leave."""
+    controller, state, coordinator, provider, recorder, speaker, plan, other = _v3_table()
+    provider.line = "灰の発言を比べたい。"
+    asyncio.run(coordinator._speak(controller, state, speaker, "initial_view"))
+    provider.vote = other
+    state.phase = Phase.VOTING
+
+    asyncio.run(coordinator._cast_vote(controller, state, speaker))
+
+    audit = _latest_audit(recorder, speaker, state.day)
+    assert audit.target_change_classification == VoteChangeKind.MEMO_TARGET_UNSPOKEN
+    report = ReasoningTranscriptAnalyzer().analyze(recorder.transcript)
+    assert report.unexplained_vote_change_count == 0
+    assert report.memo_target_unspoken_count == 1
 
 
 def test_a_speaker_keeps_one_audit_for_its_turn_and_ballot():
@@ -501,21 +524,56 @@ def test_the_first_games_ballots_reclassify_with_no_unexplained_change():
     by_kind = Counter(kind for (_day, _seat, kind) in kinds.elements())
     assert by_kind[VoteChangeKind.UNEXPLAINED] == 0
     assert sum(by_kind.values()) == 47
-    # アオイ moved off レン to ミオ after マコト's later point: persuasion, not noise.
-    assert kinds[(2, ids["アオイ"], VoteChangeKind.PUBLIC_ARGUMENT)] == 1
+    # アオイ moved off レン to ミオ citing マコト's later point, but never said
+    # レン at the table that day: a change off an unspoken memo target.
+    assert kinds[(2, ids["アオイ"], VoteChangeKind.MEMO_TARGET_UNSPOKEN)] == 1
     # The two other changes were filed as new evidence live. Each reason names
     # a seat that argued about the old or the new target after the voter's
     # last line (ミオ: ツムギ's m50/m51; ツムギ: m61-m63), and an argument the
     # reason cites outranks a verdict published beside it.
     assert kinds[(3, ids["ミオ"], VoteChangeKind.PUBLIC_ARGUMENT)] == 1
     assert kinds[(4, ids["ツムギ"], VoteChangeKind.PUBLIC_ARGUMENT)] == 1
-    assert by_kind[VoteChangeKind.NONE] == 44
+    # 17 ballots had nothing to compare with (no turn that day, or no memo
+    # target) and used to be counted here as unchanged.
+    assert by_kind[VoteChangeKind.NONE] == 27
+    assert by_kind[VoteChangeKind.NO_BASIS] == 17
 
 
-def test_aoi_s_day_2_change_cites_makoto_and_without_that_it_would_be_unexplained():
+def test_aoi_s_day_2_change_left_a_memo_target_she_never_said():
+    """「昼はレンさんと言いましたが」 -- but neither of her two lines that day names レン.
+
+    The gate measures the stance the table heard, so the change is listed,
+    not judged, whatever the reason cites.
+    """
+    ids = game1.name_to_id()
+    aoi, ren, mio = ids["アオイ"], ids["レン"], ids["ミオ"]
+    state = game1.state_at_vote(2)
+    assert not [
+        m for m in state.chat_log if m.day == 2 and m.author_id == aoi and "レン" in m.content
+    ]
+    recorder = TranscriptRecorder()
+    recorder.transcript = GameTranscript.from_dict(game1.load_transcript())
+    coordinator = AICoordinator(
+        state, game1.AI_IDS, _PlanAndBallot("p1"), seed=1, recorder=recorder
+    )
+
+    for reason in (_vote_reasons()[(aoi, 2)], "気が変わった。"):
+        kind, _why = coordinator._classify_vote_change(
+            state,
+            aoi,
+            stated_target=ren,
+            actual_target=mio,
+            candidates=state.votable_ids(aoi),
+            reason=reason,
+        )
+        assert kind == VoteChangeKind.MEMO_TARGET_UNSPOKEN
+
+
+def test_had_aoi_said_ren_her_citing_makoto_would_make_it_persuasion():
     """The reason names マコト, who spoke after アオイ: that is what makes it persuasion.
 
-    The same move with a reason that names nobody who spoke later is filed as
+    Her last line is made to name レン (the stance is then public). The same
+    move with a reason that names nobody who spoke later is filed as
     unexplained, although マコト's later lines still name both レン and ミオ.
     """
     ids = game1.name_to_id()
@@ -523,6 +581,8 @@ def test_aoi_s_day_2_change_cites_makoto_and_without_that_it_would_be_unexplaine
     reason = _vote_reasons()[(aoi, 2)]
     assert "マコトさんの指摘で変えます" in reason
     state = game1.state_at_vote(2)
+    last_own = [m for m in state.chat_log if m.day == 2 and m.author_id == aoi][-1]
+    last_own.content += "今日はレンさんに入れます。"
     recorder = TranscriptRecorder()
     recorder.transcript = GameTranscript.from_dict(game1.load_transcript())
     coordinator = AICoordinator(
@@ -593,5 +653,8 @@ def test_on_the_first_games_boards_no_move_with_a_vague_reason_counts_as_persuas
     # one about the old or the new target, or by one of them. Any new verdict
     # used to explain every move of the day: 57 of these, 43 of them on
     # verdicts that touched neither seat or were the voter's own.
-    assert kinds[VoteChangeKind.NEW_PUBLIC_EVIDENCE] == 14
-    assert kinds[VoteChangeKind.UNEXPLAINED] == 243
+    # (14 with the four seats that never said their candidate counted; their
+    # 43 moves leave a memo target nobody heard, and are not judged.)
+    assert kinds[VoteChangeKind.NEW_PUBLIC_EVIDENCE] == 13
+    assert kinds[VoteChangeKind.MEMO_TARGET_UNSPOKEN] == 43
+    assert kinds[VoteChangeKind.UNEXPLAINED] == 201

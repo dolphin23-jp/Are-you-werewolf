@@ -27,6 +27,7 @@ from app.engine.speech_events import (
     SpeechEventType,
     role_claim_history,
 )
+from app.eval.reasoning_analyzer import audit_ballots
 from app.eval.transcript import DecisionAuditRecord, GameTranscript, Utterance
 
 _DEATH_CAUSE = {
@@ -55,6 +56,9 @@ _CHANGE_KIND = {
     "strategic_team_decision": "陣営の方針",
     "public_argument": "公開の論による変更",
     "unexplained": "理由のない変更",
+    # Compared with nothing: no turn that day, or a memo that named nobody.
+    "no_basis": "比較できない",
+    "memo_target_unspoken": "卓で言っていないメモの吊り先からの変更（合否に数えない）",
 }
 
 # A discussion utterance's private note, field by field, in reading order.
@@ -158,6 +162,10 @@ class _Renderer:
         self.message_ids = _match_message_ids(transcript.utterances, state.get("chat_log", []))
         self.vote_rounds = _assign_vote_rounds(transcript.utterances, state.get("vote_records", []))
         self.ballot_audits = _ballot_audits(transcript.decision_audits)
+        self.verdicts = {
+            (verdict.player_id, verdict.day, verdict.vote_round): verdict
+            for verdict in audit_ballots(transcript)
+        }
         self.plans = {
             (plan.voter_id, plan.day, plan.round_number): plan
             for plan in transcript.wolf_ally_vote_plans
@@ -354,20 +362,29 @@ class _Renderer:
         return lines
 
     def _audit_lines(self, audit: DecisionAuditRecord, round_number: int | None) -> list[str]:
+        """The ballot's audit as the analyzer judges it now (`audit_ballots`).
+
+        Not the classification recorded live: a record written before the
+        audit's rules were fixed would otherwise keep printing a ballot with
+        nothing to compare against as 「変更なし」.
+        """
         parts: list[str] = []
-        if audit.decision_target:
-            basis = seat_label(self.names, audit.decision_target)
+        verdict = self.verdicts.get((audit.player_id, audit.day, audit.vote_round))
+        basis_id = verdict.basis if verdict is not None else audit.decision_target
+        if basis_id:
+            basis = seat_label(self.names, basis_id)
             parts.append(f"比較の基準（メモの吊り先）: {basis}")
         if audit.model_target_was_overridden:
             parts.append(
                 f"モデルが書いた吊り先 {seat_label(self.names, audit.model_requested_target)} "
                 "をコードが差し替え"
             )
-        kind = audit.target_change_classification
+        kind = verdict.kind.value if verdict is not None else audit.target_change_classification
+        why = verdict.why if verdict is not None else audit.target_change_reason
         if kind:
             text = _CHANGE_KIND.get(kind, kind)
-            if audit.target_change_reason:
-                text += f"（{audit.target_change_reason}）"
+            if why:
+                text += f"（{why}）"
             parts.append(f"判定: {text}")
         if audit.ally_vote:
             plan = self.plans.get((audit.player_id, audit.day, round_number or 1))
