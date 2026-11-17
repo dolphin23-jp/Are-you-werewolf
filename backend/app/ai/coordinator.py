@@ -513,6 +513,11 @@ class _RoundBook:
     provisional_used: bool = False
     unheard_after_summary: bool = False
     provisional_pending: bool = False
+    # Where the summary's line sits in the chat log: who has spoken since.
+    summary_position: int | None = None
+    # The final designation named a seat unheard since the summary, which was
+    # given its defence and the facilitator one more designation. Once a day.
+    redesignation_used: bool = False
     # Seats whose place in the opening order is their partner confirmation:
     # named during the morning, they close the morning block with it.
     confirmation_turns: set[str] = field(default_factory=set)
@@ -963,7 +968,9 @@ class AICoordinator:
                         # here regardless -- one designation, never a new
                         # exchange -- so the miss is counted, not looped on.
                         self._record_event("designation_question_unanswered")
-                    if self._close_round(state, round_state):
+                    if not self._open_redesignation(
+                        state, round_state, pid, output
+                    ) and self._close_round(state, round_state):
                         break
                 if can_pause and (waits_for_human or getattr(session, "discussion_paused", False)):
                     self._set_awaiting(round_state, True)
@@ -1559,9 +1566,18 @@ class AICoordinator:
         designation (`provisional`): its candidate defends, then the final
         designation. Once a day -- a provisional designation that names
         nobody either closes the day.
+
+        The candidate a closing line names (its plan note's hang target) is
+        owed a defence turn whether or not it was asked anything: a seat
+        first named in the closing lines used to go to the vote unheard,
+        though the facilitator doctrine says to hear the candidate before
+        the final designation. Asked and named, it still answers once. A
+        living human named this way is given the floor, as when asked.
         """
         book = self._book_for(round_state)
         book.summary_speaker = speaker_id
+        if not provisional:
+            book.summary_position = len(state.chat_log)
         named = dict.fromkeys(
             question.target_id
             for question in output.directed_questions
@@ -1586,20 +1602,59 @@ class AICoordinator:
             book.summary_asked_human = False
             self._collect_owed_replies(state, round_state, book)
             return True
-        # A provisional designation's candidate defends before the close.
-        defence = target if provisional and target is not None else None
-        if defence is not None and not self._may_schedule(state, defence):
-            defence = None
+        # The candidate defends first, then the others asked answer.
+        defence = target if target is not None and self._may_schedule(state, target) else None
         book.defence_target = defence
-        answers = [book.defence_target] if book.defence_target is not None else []
+        answers = [defence] if defence is not None else []
         answers += [pid for pid in named if self._may_schedule(state, pid)]
         book.summary_answers = list(dict.fromkeys(answers))
-        book.summary_asked_human = waiting_human is not None and waiting_human in named
+        book.summary_asked_human = waiting_human is not None and (
+            waiting_human in named or waiting_human == target
+        )
         self._collect_owed_replies(state, round_state, book)
         book.designation_pending = bool(
             book.summary_answers or book.owed_replies or book.summary_asked_human
         )
         return book.designation_pending
+
+    def _open_redesignation(
+        self,
+        state: GameState,
+        round_state: DiscussionRoundState,
+        speaker_id: str,
+        output: DiscussionOutput,
+    ) -> bool:
+        """The safety net: a final designation on a seat that never spoke after the summary.
+
+        Seed 1's designations could name a seat first raised in the closing
+        lines, and that seat went to the vote without a word. If the final
+        designation's candidate is a living AI seat that has had no line
+        since the summary, it gets one defence turn and the facilitator one
+        more designation. Once a day, so the second designation closes the
+        day whomever it names. The human is never scheduled for it.
+        """
+        book = self._book_for(round_state)
+        if book.redesignation_used:
+            return False
+        target = output.reasoning_memo.execution_target
+        if not (
+            isinstance(target, str) and target != speaker_id and self._may_schedule(state, target)
+        ):
+            return False
+        since = book.summary_position if book.summary_position is not None else 0
+        if any(
+            message.author_id == target
+            and message.channel is ChatChannel.PUBLIC
+            and message.day == state.day
+            for message in state.chat_log[since:]
+        ):
+            return False
+        book.redesignation_used = True
+        book.summary_speaker = speaker_id
+        book.defence_target = target
+        book.summary_answers = [target]
+        book.designation_pending = True
+        return True
 
     def _closing_speaker(
         self, state: GameState, round_state: DiscussionRoundState, book: _RoundBook

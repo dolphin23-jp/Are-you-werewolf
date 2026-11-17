@@ -47,7 +47,8 @@ class _Table:
     `script` answers a stage; `by_seat` answers one seat's turns at a stage,
     as (seat, stage) -> output, and wins over `script`. Anything else is a
     plain line with no candidate and no question. A (seat, stage) in
-    `silent` fails every request of that turn.
+    `silent` fails every request of that turn. `queued` holds outputs a
+    stage gives in turn, one per turn, ahead of everything else.
     """
 
     def __init__(
@@ -55,8 +56,10 @@ class _Table:
         script: dict[str, DiscussionOutput] | None = None,
         by_seat: dict[tuple[str, str], DiscussionOutput] | None = None,
         silent: set[tuple[str, str]] | None = None,
+        queued: dict[str, list[DiscussionOutput]] | None = None,
     ) -> None:
         self.script = script or {}
+        self.queued = queued or {}
         self.by_seat = by_seat or {}
         self.silent = silent or set()
         self.stage = ""
@@ -73,6 +76,12 @@ class _Table:
         self.calls.append((self.speaker, self.stage))
         if (self.speaker, self.stage) in self.silent:
             return None
+        if self.queued.get(self.stage):
+            # One request per turn here: the scripted outputs always parse.
+            output = self.queued[self.stage].pop(0).model_copy(deep=True)
+            if response_schema is ChatDiscussionOutput:
+                return ChatDiscussionOutput.from_discussion_output(output)
+            return output
         output = self.by_seat.get(
             (self.speaker, self.stage),
             self.script.get(self.stage, DiscussionOutput(public_message="見解を述べます。")),
@@ -638,3 +647,135 @@ def test_the_provisional_designation_says_who_speaks_next_and_when_the_vote_star
     assert "弁明" in scene and "投票" in scene
     assert structured.startswith("【議論段階】仮指定。")
     assert "弁明" in structured and "投票" in structured
+
+
+# -- 1-A2 / 4-A1: a designated seat is heard before the vote --
+
+
+def test_the_summary_candidate_defends_even_when_the_summary_does_not_ask():
+    """Seed 1: a seat first named in the closing lines had no turn to answer.
+
+    The facilitator doctrine says to hear the candidate before the final
+    designation; the summary's own candidate now always gets that turn.
+    """
+    table = _Table(
+        {
+            SUMMARY: _line("今日はp5さんで考えています。", target="p5"),
+            DESIGNATION: _line("本指定はp5さん。", target="p5"),
+        }
+    )
+    controller, coordinator = _day_two_table(table)
+
+    asyncio.run(asyncio.wait_for(coordinator.run_discussion_round(_session(controller)), 30))
+
+    assert _after(table.turns) == [("p1", SUMMARY), ("p5", DEFENCE), ("p1", DESIGNATION)]
+    utterances = coordinator._recorder.transcript.utterances  # type: ignore[union-attr]
+    defence = [u for u in utterances if (u.player_id, u.stage) == ("p5", DEFENCE)]
+    assert [u.effective_length_limit for u in defence] == [60]
+
+
+def test_seed1_day4_ask_defend_designate_stays_three_lines():
+    """m69 asks ハルト and names him, m70 he defends, m71 the designation: unchanged.
+
+    The candidate was asked and is the candidate: one turn, not two. The
+    designation names a seat that spoke after the summary, so no safety net.
+    """
+    summary = _asking(
+        "今日はハルトさんに投票します。最後に言いたいことはありますか…？", "p2", target="p2"
+    )
+    table = _Table(
+        {
+            SUMMARY: summary,
+            DEFENCE: _line("村人だと示せる決定的な根拠はない。", target="p5"),
+            DESIGNATION: _line("今日はハルトさんに投票します。", target="p2"),
+        }
+    )
+    controller, coordinator = _day_two_table(table)
+    session = _session(controller)
+
+    asyncio.run(asyncio.wait_for(coordinator.run_discussion_round(session), 30))
+
+    assert _after(table.turns) == [("p1", SUMMARY), ("p2", DEFENCE), ("p1", DESIGNATION)]
+    assert session.discussion_round.complete is True
+
+
+def test_a_designation_on_a_seat_unheard_since_the_summary_gets_one_defence_and_a_redesignation():
+    """Safety net, once a day: the final designation named someone who never answered."""
+    table = _Table(
+        {SUMMARY: _asking("p7さん、どう思う？", "p7")},
+        queued={
+            DESIGNATION: [
+                _line("本指定はp5さん。", target="p5"),
+                # Even a second unheard name does not reopen the floor.
+                _line("本指定はp9さん。", target="p9"),
+            ]
+        },
+    )
+    controller, coordinator = _day_two_table(table)
+    session = _session(controller)
+
+    asyncio.run(asyncio.wait_for(coordinator.run_discussion_round(session), 30))
+
+    assert _after(table.turns) == [
+        ("p1", SUMMARY),
+        ("p7", ANSWER),
+        ("p1", DESIGNATION),
+        ("p5", DEFENCE),
+        ("p1", DESIGNATION),
+    ]
+    assert session.discussion_round.complete is True
+    round_state = session.discussion_round
+    assert len(round_state.outputs) <= round_state.max_total
+
+
+def _human_table(table: _Table) -> tuple[GameController, AICoordinator, SimpleNamespace]:
+    controller, coordinator = _small_table(table)
+    session = SimpleNamespace(
+        controller=controller,
+        discussion_lock=asyncio.Lock(),
+        human_id="p0",
+        discussion_paused=False,
+        discussion_pause_requested=False,
+        discussion_step_budget=None,
+    )
+    return controller, coordinator, session
+
+
+def _press_until_complete(
+    coordinator: AICoordinator, session: SimpleNamespace, table: _Table
+) -> list[tuple[list[tuple[str, str]], bool]]:
+    """Pass-turn presses until the round closes: each press's turns, and whether it waits."""
+    segments: list[tuple[list[tuple[str, str]], bool]] = []
+
+    async def run() -> None:
+        for _ in range(40):
+            round_state = getattr(session, "discussion_round", None)
+            if round_state is not None and round_state.complete:
+                return
+            before = len(table.turns)
+            coordinator.resume_after_human(session)
+            await coordinator.advance_discussion(session)
+            segments.append((table.turns[before:], session.discussion_round.awaiting_human))
+        raise AssertionError("the round never closed")
+
+    asyncio.run(run())
+    return segments
+
+
+def test_a_summary_naming_the_living_human_as_candidate_gives_them_the_floor_first():
+    """The human is never scheduled; the round stops for them, then designates."""
+    table = _Table(
+        {
+            SUMMARY: _line("今日はPlayer0さんで考えています。", target="p0"),
+            DESIGNATION: _line("本指定はPlayer0さん。", target="p0"),
+        }
+    )
+    _controller, coordinator, session = _human_table(table)
+
+    segments = _press_until_complete(coordinator, session, table)
+
+    assert "p0" not in {seat for seat, _stage in table.turns}
+    at = next(i for i, (given, _wait) in enumerate(segments) if ("p1", SUMMARY) in given)
+    assert segments[at][0][-1] == ("p1", SUMMARY) and segments[at][1] is True
+    assert segments[at + 1] == ([("p1", DESIGNATION)], False)
+    assert session.discussion_round.complete is True
