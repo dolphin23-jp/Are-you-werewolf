@@ -15,6 +15,7 @@ from app.eval.analyzers import AnalysisResult
 from app.eval.reasoning_analyzer import AllyVoteKind, VoteChangeKind, audit_ballots
 from app.eval.release_gate import HARD_FAILURE_FIELDS
 from app.eval.transcript import GameTranscript
+from app.eval.transcript_render import team_label
 
 _SEVERITY_ORDER = {"high": 0, "medium": 1, "low": 2}
 
@@ -364,7 +365,11 @@ def _render_call_health(
             days = int(game.get("days") or 0)
             utterances = int(game.get("public_utterances") or 0)
             per_day = f"{utterances / days:.1f}" if days else "—"
-            winner = game.get("winner") or ("(中断)" if not game.get("finished") else "—")
+            winner = (
+                team_label(game["winner"])
+                if game.get("winner")
+                else ("(中断)" if not game.get("finished") else "—")
+            )
             hard = game.get("hard_failures")
             hard_text = "—" if hard is None else str(sum(int(v) for v in hard.values()))
             out.append(

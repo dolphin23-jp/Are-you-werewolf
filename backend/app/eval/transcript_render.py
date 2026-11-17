@@ -38,7 +38,15 @@ _DEATH_CAUSE = {
     "night_death": "夜の死亡",
 }
 
-_TEAM = {"village": "村人陣営", "werewolf": "人狼陣営", "fox": "妖狐陣営"}
+# The factions as the table says them. The one table every display of a
+# faction or a winner reads: the record, the report's per-game table and the
+# live log of `scripts/evaluate.py`.
+TEAM_LABELS: dict[str, str] = {"village": "村人陣営", "werewolf": "人狼陣営", "fox": "妖狐陣営"}
+
+
+def team_label(team: object) -> str:
+    """A faction id as the table says it: `fox` -> 妖狐陣営. Anything else as it is."""
+    return TEAM_LABELS.get(str(team), str(team))
 
 _NIGHT_ACTION = {
     RoleName.SEER.value: "占い",
@@ -210,7 +218,7 @@ class _Renderer:
         for pid, name in self.names.items():
             fake = fake_roles.get(pid)
             label = f"偽{role_label(fake)}" if fake else ("潜伏" if pid in lurkers else "-")
-            team = _TEAM.get(self.t.teams.get(pid, ""), self.t.teams.get(pid, "-"))
+            team = team_label(self.t.teams.get(pid, "-"))
             lines.append(
                 f"| {name} (`{pid}`) | {role_label(self.t.roles.get(pid))} | {team} | "
                 f"{self.t.personalities.get(pid, '-')} | {label} |"
@@ -578,10 +586,7 @@ class _Renderer:
             return ["\n## 結果\n\n(対戦は未完了)"]
         winner = self.state.get("winner")
         reason = self.state.get("victory_reason", "")
-        label = {"village": "村人陣営", "werewolf": "人狼陣営", "fox": "妖狐陣営"}.get(
-            str(winner), str(winner)
-        )
-        return [f"\n## 結果\n\n勝者: {label}（{winner}） / {reason}"]
+        return [f"\n## 結果\n\n勝者: {team_label(winner)}（{winner}） / {reason}"]
 
 
 _SECTION_TITLE = {

@@ -200,9 +200,9 @@ def test_the_per_game_table_reads_on_a_phone() -> None:
     table = [line for line in section.splitlines() if line.startswith("| ") and "|" in line[2:]]
     header = next(line for line in table if line.startswith("| seed"))
     assert header.count("|") - 1 <= 6  # few columns: readable on a phone
-    assert "| 1 | village | 12.0 | 1:02:05 | $7.50 | 0 |" in section
+    assert "| 1 | 村人陣営 | 12.0 | 1:02:05 | $7.50 | 0 |" in section
     assert "| 2 | (中断) | 12.0 | 1:02:05 | $7.50 | 2 |" in section
-    assert "| 3 | village | 12.0 | 1:02:05 | — | — |" in section
+    assert "| 3 | 村人陣営 | 12.0 | 1:02:05 | — | — |" in section
 
 
 def test_hard_correctness_passes_only_when_every_count_is_zero() -> None:
