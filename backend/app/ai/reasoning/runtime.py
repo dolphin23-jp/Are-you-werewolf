@@ -16,6 +16,7 @@ Everything here is deterministic given the same board and seed.
 from __future__ import annotations
 
 import random
+from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 
@@ -67,10 +68,11 @@ from app.ai.reasoning.timeline import disclosable_result_nights
 from app.engine.roles import RoleName
 from app.engine.state import ChatChannel, GameState
 
-# How many seats open the day. More than this and the morning is a wall of text
-# nobody reads; fewer and the board never gets stated.
-MIN_OPENING_SPEAKERS = 3
-MAX_OPENING_SPEAKERS = 5
+# How many seats without a CO open the day beside the duty speakers (the
+# result holders, the planned COs, the seats with a question to answer). More
+# and the morning is a wall of text nobody reads; the rest are heard when
+# answered, challenged, or in the short turn before the summary.
+MAX_OPENING_SPEAKERS = 3
 
 # Speech-value contributions, in one table so the scheduler's priorities are
 # readable rather than buried in branches.
@@ -430,12 +432,23 @@ class ReasoningRuntime:
         pending_question_targets: Sequence[str] = (),
         pressured_ids: Sequence[str] = (),
         planned_claims: Sequence[str] = (),
+        exclude: Sequence[str] = (),
         limit: int = MAX_OPENING_SPEAKERS,
     ) -> list[str]:
-        """The three to five seats that open the day, in a seeded display order.
+        """Up to three seats without a CO that open the day beside the duty speakers.
 
-        Everyone forms an opinion; only the ones with something new to say get
-        the floor. The rest speak when they are answered or challenged.
+        The duty speakers (a held result, a claim to make, a question to
+        answer) open the day in any case; the caller passes them as
+        `exclude`. They used to count toward a cap of five, so from day 2 on
+        one or two gray seats opened at most. A seat with a verdict on it is
+        still eligible -- it holds no role to speak from, only an opinion.
+
+        Ranked by speech value; a tie goes to the seat with the fewest public
+        lines so far, then to a draw seeded by the game. It went to the seat
+        id's string order, and p10, p11 ... sort before p2: in seed 1 the same
+        three seats were silent four days running. Returned in a seeded
+        display order. The rest speak when answered, challenged, or in the
+        short turn every silent seat gets before the summary.
         """
         candidates = self.speech_candidates(
             state,
@@ -443,10 +456,25 @@ class ReasoningRuntime:
             pressured_ids=pressured_ids,
             planned_claims=planned_claims,
         )
-        if not candidates:
+        ledger = PublicFactLedger(state)
+        excluded = set(exclude)
+        eligible = [
+            item
+            for item in candidates
+            if item.player_id not in excluded and ledger.claimed_role_of(item.player_id) is None
+        ]
+        bounded = max(0, min(limit, MAX_OPENING_SPEAKERS))
+        if not eligible or not bounded:
             return []
-        bounded = max(MIN_OPENING_SPEAKERS, min(limit, MAX_OPENING_SPEAKERS))
-        chosen = [item.player_id for item in candidates[:bounded]]
+        lines_so_far = Counter(
+            message.author_id
+            for message in state.chat_log
+            if message.channel is ChatChannel.PUBLIC
+        )
+        # The draw first, then a stable sort: among equals the draw decides.
+        random.Random(f"{self._seed}:opening-ties:{state.day}").shuffle(eligible)
+        eligible.sort(key=lambda item: (-item.value, lines_so_far[item.player_id]))
+        chosen = [item.player_id for item in eligible[:bounded]]
         order_rng = random.Random(f"{self._seed}:opening:{state.day}")
         order_rng.shuffle(chosen)
         return chosen
@@ -455,10 +483,14 @@ class ReasoningRuntime:
         days = sorted({vote.day for vote in ledger.votes()})
         if not days:
             return None
-        counts: dict[str, int] = {}
-        for vote in ledger.votes_on(days[-1]):
-            counts[vote.target_id] = counts.get(vote.target_id, 0) + 1
-        return max(sorted(counts), key=lambda pid: counts[pid]) if counts else None
+        counts = Counter(vote.target_id for vote in ledger.votes_on(days[-1]))
+        ranked = counts.most_common(2)
+        if not ranked or (len(ranked) > 1 and ranked[0][1] == ranked[1][1]):
+            # A tie has no majority. It used to be broken by seat id, which
+            # made every seat leaning the other way a "dissenter" that opened
+            # the next day ahead of the rest.
+            return None
+        return ranked[0][0]
 
     def holds_unpublished_result(self, state: GameState, player_id: str) -> bool:
         """Whether this seat is sitting on a result the table has not heard.

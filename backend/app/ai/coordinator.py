@@ -1052,10 +1052,14 @@ class AICoordinator:
         # without its CO is also a required claimant, and counting it twice made
         # `immediate_count` outrun the speakers actually in the order.
         duty = list(dict.fromkeys([*duty, *planned_claims]))
+        # The duty speakers, then up to three seats without a CO. The three
+        # used to share a cap of five with the duty speakers, so a morning
+        # with three results and two planned COs heard no gray seat at all.
         chosen = self.reasoning.select_opening_speakers(
             state,
             pending_question_targets=[pid for pid in alive if self._open_questions(pid)],
             planned_claims=planned_claims,
+            exclude=[*duty, *self._observer_player_ids],
         )
         order = list(dict.fromkeys(duty + chosen))
         return DiscussionRoundState(
@@ -1070,7 +1074,13 @@ class AICoordinator:
         self, state: GameState, round_state: DiscussionRoundState
     ) -> tuple[str | None, str]:
         if self.reasoning is not None:
-            for player_id in self.reasoning.take_reassessment_speakers():
+            reassessing = self.reasoning.take_reassessment_speakers()
+            # Handed over sorted by seat id. Who answers a correction first is
+            # drawn per game instead, so p10 never outranks p2 by spelling.
+            random.Random(
+                f"{self._seed}:reassessment:{state.day}:{len(round_state.outputs)}"
+            ).shuffle(reassessing)
+            for player_id in reassessing:
                 self._round_queue_reply(state, round_state, player_id)
         book = self._book_for(round_state)
         confirming = self._take_partner_confirmation(state, round_state, book)

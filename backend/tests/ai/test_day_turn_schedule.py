@@ -15,6 +15,7 @@ from typing import Any
 
 from app.ai.coordinator import AICoordinator
 from app.ai.provider.base import Message, SchemaT
+from app.ai.reasoning.facts import PublicFactLedger
 from app.ai.reasoning.runtime import ReasoningRuntime
 from app.ai.schemas import (
     ChatDiscussionOutput,
@@ -24,8 +25,9 @@ from app.ai.schemas import (
 )
 from app.engine.game import GameController
 from app.engine.phases import Phase
-from app.engine.state import ChatChannel, GameState
+from app.engine.state import ChatChannel, GameState, VoteRecord
 from app.eval.transcript import TranscriptRecorder
+from app.sessions.models import DiscussionRoundState
 from scripts import evaluate
 from tests.conftest import make_controller
 
@@ -243,3 +245,121 @@ def test_a_partner_named_in_the_final_designation_still_confirms_and_then_the_da
 
     assert table.turns[-2:] == [("p1", "final_designation"), ("p3", CONFIRMATION)]
     assert session.discussion_round.complete is True
+
+
+# -- 1-A4 / 2-A1 / 3-A1: the opening is the duty speakers plus three seats --
+
+
+def _seer_morning(seed: int = 1) -> GameController:
+    """The all-AI table at day 1 with the seer holding its night-0 result."""
+    controller = GameController(
+        session_id=f"opening-{seed}", player_specs=evaluate._make_specs(), seed=seed
+    )
+    controller.start_game()
+    state = controller.state
+    seer = next(p.player_id for p in state.players.values() if p.role.value == "seer")
+    target = next(pid for pid in state.alive_ids() if pid not in (seer, state.first_victim_id))
+    controller.submit_night_action(seer, "divine", target)
+    controller.resolve_night()
+    controller.start_discussion()
+    return controller
+
+
+def test_the_opening_is_every_duty_speaker_plus_three_seats_without_a_co():
+    """Seed 1's mornings: duty seats filled the cap of five, so one gray seat opened.
+
+    The cap counted the result holders and the planned COs too; from day 2
+    on, one or two gray seats opened the day at most.
+    """
+    controller = _seer_morning(seed=1)
+    state = controller.state
+    coordinator = _v3(controller, _Table())
+    alive = [pid for pid in state.players if state.players[pid].alive]
+
+    round_state = coordinator._coded_discussion_round(state, alive)
+
+    duty = round_state.order[: round_state.immediate_count]
+    opening = round_state.order[round_state.immediate_count :]
+    assert len(duty) >= 4  # the seer's result and the planned COs
+    assert len(opening) == 3
+    assert not set(opening) & set(duty)
+    assert all(not [c for c in state.co_declarations if c.player_id == pid] for pid in opening)
+
+
+def _tied_day_two() -> GameState:
+    """Day 2 where no seat has more to say than another; p1, p10 and p11 spoke on day 1."""
+    controller = make_controller(seed=4)
+    state = controller.state
+    state.phase = Phase.DISCUSSION
+    state.day = 1
+    for pid in ("p1", "p10", "p11"):
+        controller.chat(pid, "見解を述べます。")
+    state.day = 2
+    return state
+
+
+def test_tied_seats_open_by_fewest_lines_then_a_seeded_draw_never_by_seat_id():
+    """Eight of thirteen later days opened with the string-order first gray seats.
+
+    p0, p10, p11 ... sort before p2, so ミオ (p5), レン (p6) and サクラ (p7)
+    sat silent four days running in seed 1.
+    """
+    state = _tied_day_two()
+    ai_ids = [f"p{i}" for i in range(1, 17)]
+    picks = set()
+    for seed in range(1, 7):
+        runtime = ReasoningRuntime(state, ai_ids, seed=seed)
+        runtime.refresh(state)
+        assert len({c.value for c in runtime.speech_candidates(state)}) == 1
+
+        chosen = runtime.select_opening_speakers(state)
+
+        assert len(chosen) == 3
+        # The three who already spoke yield to those who have not.
+        assert not {"p1", "p10", "p11"} & set(chosen)
+        again = ReasoningRuntime(state, ai_ids, seed=seed)
+        again.refresh(state)
+        assert again.select_opening_speakers(state) == chosen
+        picks.add(tuple(sorted(chosen)))
+    # Drawn per game, not read off the seat ids (p12, p13, p14 would be next).
+    assert len(picks) > 1
+    assert ("p12", "p13", "p14") not in picks
+
+
+def test_a_tied_vote_has_no_majority_to_stand_against():
+    """The opening's "against the majority" bonus read a tie as a majority for p3.
+
+    `max(sorted(counts))` broke a 2-2 split by seat id, so every seat leaning
+    to p9 was ranked as a dissenter and opened the next day ahead of others.
+    """
+    state = _tied_day_two()
+    for voter, target in (("p1", "p9"), ("p2", "p9"), ("p4", "p3"), ("p5", "p3")):
+        state.vote_records.append(VoteRecord(voter_id=voter, target_id=target, day=1, round=1))
+    runtime = ReasoningRuntime(state, [f"p{i}" for i in range(1, 17)], seed=1)
+
+    assert runtime._majority_target(PublicFactLedger(state)) is None
+
+    state.vote_records.append(VoteRecord(voter_id="p6", target_id="p9", day=1, round=1))
+    assert runtime._majority_target(PublicFactLedger(state)) == "p9"
+
+
+def test_seats_answering_a_correction_are_queued_in_a_seeded_order_not_by_seat_id():
+    """The runtime hands over the seats a correction moved sorted by id."""
+    state = _tied_day_two()
+    ai_ids = [f"p{i}" for i in range(1, 17)]
+    moved = sorted(["p2", "p3", "p5", "p7", "p10", "p12"])
+
+    def queued(seed: int) -> tuple[str, ...]:
+        runtime = ReasoningRuntime(state, ai_ids, seed=seed)
+        coordinator = AICoordinator(state, ai_ids, _Table(), seed=seed, reasoning=runtime)
+        runtime.queue_reassessment_speakers(moved)
+        round_state = DiscussionRoundState(day=2, order=[], stage="initial_view", max_total=30)
+        speaker, _stage = coordinator._next_discussion_speaker(state, round_state)
+        assert speaker is not None
+        return (speaker, *round_state.reply_queue)
+
+    orders = {queued(seed) for seed in range(1, 7)}
+
+    assert all(sorted(order) == moved for order in orders)
+    assert len(orders) > 1
+    assert queued(3) == queued(3)
