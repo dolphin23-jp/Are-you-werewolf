@@ -42,6 +42,7 @@ class _Asking:
         self.line = line
         self.questions = questions
         self._metrics = MetricsCollector()
+        self.discussion_calls = 0
 
     async def generate_structured(
         self, *, system: str, messages: list[Message], response_schema: type[SchemaT], **kwargs
@@ -49,6 +50,7 @@ class _Asking:
         del system, messages, kwargs
         if response_schema is MorningIntentOutput:
             return MorningIntentOutput()
+        self.discussion_calls += 1
         output = DiscussionOutput(
             public_message=self.line,
             directed_questions=[
@@ -145,7 +147,10 @@ def test_a_line_written_by_code_carries_no_question():
     assert state.players[leader].name in output.public_message
     assert output.directed_questions == []
     assert recorder.transcript.utterances[-1].directed_question_targets == []
-    assert provider._metrics.events.get("directed_question_on_code_line") == 1
+    # The confirmation is written whole by code and no longer asks the model
+    # at all, so there is no model-made question to drop: none is counted.
+    assert provider.discussion_calls == 0
+    assert provider._metrics.events.get("directed_question_on_code_line") is None
     assert provider._metrics.events.get("directed_question_target_unnamed") is None
 
 
@@ -175,8 +180,9 @@ def test_a_question_the_line_does_not_name_books_no_reply():
     named = _closing_turns(_summary("仮指定です。Player2さん、最後に反論はありますか？"))
     unnamed = _closing_turns(_summary("仮指定です。最後に反論はありますか？"))
 
-    assert ("p2", "reaction") in named
-    assert ("p2", "reaction") not in unnamed
+    # A seat the summary names answers in the 60-character `summary_answer` turn.
+    assert ("p2", "summary_answer") in named
+    assert ("p2", "summary_answer") not in unnamed
 
 
 def test_each_dropped_question_has_a_report_label():
