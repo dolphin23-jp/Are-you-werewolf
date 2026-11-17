@@ -81,6 +81,7 @@ from app.eval.reasoning_analyzer import (
     PublishedResult,
     SpokenLine,
     classify_vote_change,
+    declares_grey_random,
     named_seat_ids,
     sentence_naming,
 )
@@ -183,21 +184,6 @@ _PROVISIONAL_STAGE = "provisional_designation"
 # a day.
 _FACILITATOR_FOLLOWUP_STAGE = "facilitator_followup"
 _MAX_FACILITATOR_FOLLOWUPS = 2
-
-# A closing line that declares the day a grey-random one: 「今日はグレランで」,
-# 「グレランにします」, 「灰ラン。」. Only a declaration counts -- 「グレランでは
-# なく」, 「グレランでもいいけど」 and 「グレランにしない」 do not -- because
-# reading a mention as one would close the day with no designation. A miss
-# costs one extra designation turn instead.
-_GREY_RANDOM_DECLARED = re.compile(
-    r"(?:グレー?|灰)ラン(?:ダム)?"
-    r"(?:で(?![はも])|に(?:す|決|し(?!な|ませ))|と(?:す|し)|[。！!]|$)"
-)
-
-# A designation said in the same line: 「仮指定はダイキ」, 「ツムギさんを指定」.
-# 「指定なし」, 「指定はしない」, 「指定せず」 are not one -- they are how a
-# grey-random day is often announced.
-_DESIGNATION_SAID = re.compile(r"指定(?!(?:は|を|も)?(?:なし|無し|しな|しま?せ|せず))")
 
 # The closing lines whose follow-ups the scheduler opens (answers, a defence,
 # the designation) instead of queueing ordinary replies.
@@ -1616,7 +1602,9 @@ class AICoordinator:
         candidate defends -- a plan-note lean is not a designation then --
         and there is no final designation. The vote follows. A line that
         says グレラン and designates in the same breath (「グレランで、仮指定
-        はダイキ」) is a designation: see `_declares_grey_random`.
+        はダイキ」) is a designation; one that only names a seat -- to hear its
+        answer, or the summariser's own lean -- is not: see
+        `reasoning_analyzer.declares_grey_random`.
 
         The candidate is the plan note's hang target only where the line
         itself names that seat (`_named_closing_target`): a lean the table
@@ -1637,7 +1625,7 @@ class AICoordinator:
         target = self._named_closing_target(
             state, speaker_id, output.reasoning_memo.execution_target
         )
-        if self._declares_grey_random(output.public_message, target is not None):
+        if declares_grey_random(output.public_message):
             book.defence_target = None
             book.summary_answers = [pid for pid in named if self._may_schedule(state, pid)]
             book.summary_asked_human = waiting_human is not None and waiting_human in named
@@ -1689,21 +1677,6 @@ class AICoordinator:
         if target not in named_seat_ids(self._last_model_text, names):
             return None
         return target
-
-    @staticmethod
-    def _declares_grey_random(text: str, names_candidate: bool) -> bool:
-        """Whether a closing line declares a grey-random day and so designates nobody.
-
-        「グレラン」 alone is not enough. Run 13's seed 3 closed two days with
-        「今日はグレランで、仮指定はダイキ…」 and 「今日はグレランでツムギさんを
-        仮指定」: read as declarations, the named seat got no defence and there
-        was no final designation, though the line had just designated it. A
-        line that also says 指定 (not 「指定なし」) or names its own candidate
-        (`names_candidate`) designates; the scheduler treats it as a designation.
-        """
-        if not _GREY_RANDOM_DECLARED.search(text):
-            return False
-        return not (names_candidate or _DESIGNATION_SAID.search(text))
 
     def _open_redesignation(
         self,
@@ -2974,9 +2947,27 @@ class AICoordinator:
             runoff=state.phase is Phase.RUNOFF,
             candidates=tuple(candidates),
             alive_ids=frozenset(state.alive_ids()),
+            closing_message_ids=tuple(
+                message_id for _label, message_id in self._context.direction_lines(state.day)
+            ),
+            grey_ids=self._grey_ids(state),
         )
         kind, why = classify_vote_change(facts)
         return kind.value, why
+
+    @staticmethod
+    def _grey_ids(state: GameState) -> frozenset[str]:
+        """The grey now: alive, no claim, no seer claimant's verdict (the board memo's grey)."""
+        claimed = {claim.player_id for claim in state.co_declarations}
+        judged = {
+            event.target_id
+            for event in state.speech_events
+            if event.event_type is SpeechEventType.ABILITY_RESULT
+            and event.role is RoleName.SEER
+            and event.is_binding
+            and event.target_id is not None
+        }
+        return frozenset(seat for seat in state.alive_ids() if seat not in claimed | judged)
 
     def _ensure_ballot_audit(
         self, state: GameState, player_id: str, candidates: Sequence[str]

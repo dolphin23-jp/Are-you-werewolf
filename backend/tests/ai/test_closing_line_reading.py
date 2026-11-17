@@ -27,8 +27,10 @@ from app.ai.metrics import MetricsCollector
 from app.ai.provider.mock import MockProvider
 from app.engine.phases import Phase
 from app.engine.roles import RoleName
+from app.eval.reasoning_analyzer import declares_grey_random
 from app.sessions.models import DiscussionRoundState
 from tests.ai.test_day_turn_schedule import (
+    ANSWER,
     DEFENCE,
     DESIGNATION,
     PROVISIONAL,
@@ -100,10 +102,18 @@ def test_a_summary_with_nobody_to_give_it_is_counted() -> None:
         "今日は指定なしのグレランでいきましょう。",
         "指定はしないので、グレランで。",
         "灰ラン。",
+        # Run 14, seed 1 day 2 and seed 2 day 3: missed, so a final
+        # designation followed a grey-random summary.
+        "えっと、今日はグレランのままでお願いします…。",
+        "今日はグレランのまま、答えが出るかを最後に見るよ。",
+        # Run 14, seed 2 day 2 and seed 3 day 2: a seat named to hear its
+        # answer -- the summariser's own lean -- does not make a designation.
+        "今日はグレランでいくよ。マコトさんの答えと、グレーの発言を見て各自で決めてね。",
+        "今日はグレランで、シオンさんの答えを聞いてから投票に入ろう。",
     ],
 )
 def test_a_plain_grey_random_line_is_a_declaration(line: str) -> None:
-    assert AICoordinator._declares_grey_random(line, names_candidate=False)
+    assert declares_grey_random(line)
 
 
 @pytest.mark.parametrize(
@@ -116,13 +126,34 @@ def test_a_plain_grey_random_line_is_a_declaration(line: str) -> None:
     ],
 )
 def test_a_grey_random_line_that_designates_is_not_a_declaration(line: str) -> None:
-    assert not AICoordinator._declares_grey_random(line, names_candidate=False)
+    assert not declares_grey_random(line)
 
 
-def test_a_grey_random_line_that_names_its_own_candidate_is_not_a_declaration() -> None:
-    assert not AICoordinator._declares_grey_random(
-        "今日はグレランで。ツムギさんが一番怪しい。", names_candidate=True
+def test_a_grey_random_summary_naming_its_own_lean_closes_without_a_final_designation() -> None:
+    """Run 14, seed 3 day 2: the named seat answers; no 本指定 turn turns the day into one.
+
+    The final-designation turn that followed 「今日はグレランで、シオンさんの答えを
+    聞いてから投票に入ろう」 produced 「今日はシオンさんに入れるよ、グレランで」,
+    and the table voted it as the 本指定.
+    """
+    table = _Table(
+        {
+            SUMMARY: _asking(
+                "今日はグレランで、p5さんの答えを聞いてから投票に入ろう。", "p5", target="p5"
+            ),
+            DESIGNATION: _line("今日はp5さんに入れるよ、グレランで。", target="p5"),
+        }
     )
+    controller, coordinator = _day_two_table(table)
+    session = _session(controller)
+
+    asyncio.run(asyncio.wait_for(coordinator.run_discussion_round(session), 30))
+
+    after = _after(table.turns)
+    assert after[0] == ("p1", SUMMARY)
+    assert ("p5", ANSWER) in after
+    assert ("p1", DESIGNATION) not in after
+    assert session.discussion_round.complete is True
 
 
 def test_grey_random_with_a_provisional_designation_hears_the_candidate() -> None:

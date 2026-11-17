@@ -63,6 +63,7 @@ _CHANGE_KIND = {
     "correction_accepted": "訂正を受け入れた",
     "strategic_team_decision": "陣営の方針",
     "public_argument": "公開の論による変更",
+    "grey_random_policy": "進行役のグレラン宣言に沿った変更（グレー外からグレーへ）",
     "unexplained": "理由のない変更",
     # Compared with nothing: no turn that day, or a memo that named nobody.
     "no_basis": "比較できない",

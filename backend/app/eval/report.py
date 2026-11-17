@@ -487,6 +487,7 @@ def _render_wolf_chat_plans(games: list[tuple[GameTranscript, AnalysisResult]]) 
 
 
 BALLOT_LISTS_HEADING = "### 合否に数えない投票（引用つき）"
+UNEXPLAINED_LIST_HEADING = "### 合否に数えた、理由の見えない変更（引用つき）"
 
 # The non-hard changes with a cause the table could see, in words.
 _JUSTIFIED_LABELS: dict[VoteChangeKind, str] = {
@@ -495,6 +496,9 @@ _JUSTIFIED_LABELS: dict[VoteChangeKind, str] = {
     VoteChangeKind.CORRECTION_ACCEPTED: "発言後に事実の訂正があった",
     VoteChangeKind.TARGET_BECAME_INVALID: "吊り先が死亡した",
     VoteChangeKind.RUNOFF_RESTRICTION: "決選の候補から外れた",
+    VoteChangeKind.GREY_RANDOM_POLICY: (
+        "発言後に進行役がグレランを宣言し、グレー外からグレーへ移した"
+    ),
 }
 
 
@@ -505,13 +509,14 @@ def _quote(text: str) -> str:
 
 
 def _render_ballot_lists(games: list[tuple[GameTranscript, AnalysisResult]]) -> str:
-    """Every ballot the gate does not judge, with the words it rests on.
+    """Every ballot the gate fails or does not judge, with the words it rests on.
 
     The gate measures a seat's public stance against its vote. A ballot with
     no basis was compared with nothing; a change off a memo target the seat
     never said aloud left no stance the table saw; a change with a cause the
     table could see is justified. None of them fails the gate, and each is
-    listed so a reader can check the reading rather than trust a count.
+    listed so a reader can check the reading rather than trust a count. The
+    unexplained changes the gate does fail come first, quoted the same way.
     """
     audited = [
         (transcript, audit_ballots(transcript))
@@ -525,7 +530,8 @@ def _render_ballot_lists(games: list[tuple[GameTranscript, AnalysisResult]]) -> 
         "",
         "票を比べる基準は、その日の最後の手番のメモの吊り先です。ハードな失敗になるのは、"
         "その名前を自分の公開発言で言っていて、発言後にどちらの吊り先にも関わる新しい"
-        "公開情報がなく、理由が後の発言者の論を挙げていない変更だけです。",
+        "公開情報がなく、理由が後の発言者の論を挙げておらず、進行役のグレラン宣言で"
+        "グレー外からグレーへ移したのでもない変更だけです。",
         "",
         "比較できた票／全票（その日の手番がない票と、メモの吊り先が空の票は比較できません）:",
         "",
@@ -540,6 +546,7 @@ def _render_ballot_lists(games: list[tuple[GameTranscript, AnalysisResult]]) -> 
             f"{no_basis} | {unspoken} |"
         )
 
+    unexplained_rows: list[str] = []
     unspoken_rows: list[str] = []
     justified_rows: list[str] = []
     designated_rows: list[str] = []
@@ -567,7 +574,13 @@ def _render_ballot_lists(games: list[tuple[GameTranscript, AnalysisResult]]) -> 
                     f"| {_seed(transcript)} | {day} | {voter} → {target} | "
                     f"{_quote(verdict.designation_line)} | {tally} | {_quote(verdict.reason)} |"
                 )
-            if verdict.kind is VoteChangeKind.MEMO_TARGET_UNSPOKEN:
+            if verdict.kind is VoteChangeKind.UNEXPLAINED:
+                last_line = verdict.own_lines[-1] if verdict.own_lines else ""
+                unexplained_rows.append(
+                    f"| {_seed(transcript)} | {day} | {voter} | {basis} → {target} | "
+                    f"{_quote(last_line)} | {_quote(verdict.reason)} |"
+                )
+            elif verdict.kind is VoteChangeKind.MEMO_TARGET_UNSPOKEN:
                 last_line = verdict.own_lines[-1] if verdict.own_lines else ""
                 unspoken_rows.append(
                     f"| {_seed(transcript)} | {day} | {voter} | {basis} → {target} | "
@@ -590,6 +603,27 @@ def _render_ballot_lists(games: list[tuple[GameTranscript, AnalysisResult]]) -> 
                 f"- seed {_seed(transcript)} {day_number}日目: {'、'.join(items)}"
             )
 
+    # The failures first, under their own heading, quoted like the rest: a
+    # count alone asked the reader to trust the reading the lists below let
+    # them check (run 14 counted seven and quoted none).
+    failed = [
+        "",
+        UNEXPLAINED_LIST_HEADING,
+        "",
+        "その日の自分の発言でメモの吊り先の名前を出し、発言後に関わる公開情報も、"
+        "理由が挙げる後の発言者の論も、グレー外からグレーへ移す進行役のグレラン宣言も"
+        "ないまま、別の相手に入れた票です（`unexplained_vote_change_count`）。",
+        "",
+    ]
+    if unexplained_rows:
+        failed += [
+            "| seed | 日 | 投票者 | メモの吊り先 → 票 | その日の自分の最後の発言 | 票の理由 |",
+            "|---|---|---|---|---|---|",
+            *unexplained_rows,
+        ]
+    else:
+        failed.append("(ありません)")
+    out = [*failed[1:], "", *out]
     out += [
         "",
         "#### 卓で言っていないメモの吊り先からの変更（`memo_target_unspoken`）",

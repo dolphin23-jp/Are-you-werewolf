@@ -39,6 +39,11 @@ class VoteChangeKind(StrEnum):
     # public stance against the vote, and the table saw no stance to leave;
     # the report lists these with quotes instead of failing them.
     MEMO_TARGET_UNSPOKEN = "memo_target_unspoken"
+    # After the seat's last word, a closing line of the day declared a
+    # grey-random day, and the ballot left a seat outside the grey for one in
+    # it. The policy the table heard says where the votes go; run 14 failed
+    # six ballots that followed it from a seer claimant to a grey seat.
+    GREY_RANDOM_POLICY = "grey_random_policy"
 
 
 # Changes with a cause the table could see. `no_basis` compared nothing, and
@@ -100,6 +105,38 @@ def mention_spans(text: str, names: Mapping[str, str]) -> list[tuple[int, int, s
 def named_seat_ids(text: str, names: Mapping[str, str]) -> tuple[str, ...]:
     """The seats `text` names, each once, in the order first named."""
     return tuple(dict.fromkeys(seat for _start, _end, seat in mention_spans(text, names)))
+
+
+# A line that declares a grey-random day: 「今日はグレランで」, 「グレランに
+# します」, 「グレランのままで」, 「灰ラン。」. Only a declaration counts --
+# 「グレランではなく」, 「グレランでもいいけど」, 「グレランにしない」 do not.
+_GREY_RANDOM_DECLARED = re.compile(
+    r"(?:グレー?|灰)ラン(?:ダム)?"
+    r"(?:で(?![はも])|に(?:す|決|し(?!な|ませ))|と(?:す|し)|のまま|[。！!]|$)"
+)
+
+# A designation said in the same line: 「仮指定はダイキ」, 「ツムギさんを指定」.
+# 「指定なし」, 「指定はしない」, 「指定せず」 are not one -- they are how a
+# grey-random day is often announced.
+_DESIGNATION_SAID = re.compile(r"指定(?!(?:は|を|も)?(?:なし|無し|しな|しま?せ|せず))")
+
+
+def declares_grey_random(text: str) -> bool:
+    """Whether a line declares a grey-random day: グレラン said as the plan, with no 指定.
+
+    The scheduler reads a closing line with it (no final designation after a
+    declaration) and the ballot audit reads the day's policy with it, so the
+    two cannot disagree about the day.
+
+    「グレラン」 with a designation in the same breath is a designation: run
+    13's seed 3 closed two days on 「今日はグレランで、仮指定はダイキ…」. A
+    name alone does not make one. Run 14 read 「今日はグレランで、シオンさんの
+    答えを聞いてから投票に入ろう」 -- the summariser's own lean named -- as a
+    designation, and the final-designation turn that followed turned three
+    grey-random days into 「シオンさんに入れるよ、グレランで」, which the
+    table voted as a 本指定.
+    """
+    return bool(_GREY_RANDOM_DECLARED.search(text)) and not _DESIGNATION_SAID.search(text)
 
 
 _SENTENCE_ENDS = frozenset("。！？!?")
@@ -251,6 +288,12 @@ class BallotFacts:
     runoff: bool = False
     candidates: Sequence[str] = ()
     alive_ids: frozenset[str] = frozenset()
+    # The day's closing lines (summary, designations) -- the policy the vote
+    # prompt quotes as 【進行役の方針】.
+    closing_message_ids: Sequence[str] = ()
+    # The grey at the vote: alive, no claim, no seer claimant's verdict.
+    # None when it is not known; the grey-random cause is then never found.
+    grey_ids: frozenset[str] | None = None
 
     def lines_after_voter(self) -> Sequence[SpokenLine]:
         """The day's lines after the voter's last one: what it heard since it spoke."""
@@ -274,8 +317,10 @@ def classify_vote_change(facts: BallotFacts) -> tuple[VoteChangeKind, str]:
     Each cause is something the table could see happen after the seat last
     spoke: a runoff that left the candidate off the ballot, the candidate's
     death, a correction, another seat arguing about the old or the new target
-    whom the reason names, or a new ability result about either target or by
-    either of them. Only a change none of them covers is unexplained. The
+    whom the reason names, a new ability result about either target or by
+    either of them, or a closing line declaring a grey-random day when the
+    ballot left a seat outside the grey for one in it. Only a change none of
+    them covers is unexplained. The
     reason the seat wrote is kept either way, but it is not a cause on its
     own -- the vote prompt asks every ballot for one.
 
@@ -336,6 +381,19 @@ def classify_vote_change(facts: BallotFacts) -> tuple[VoteChangeKind, str]:
     if news:
         cited = "、".join(dict.fromkeys(news))
         return VoteChangeKind.NEW_PUBLIC_EVIDENCE, f"発言後に能力結果が公開({cited})"
+    closing = set(facts.closing_message_ids)
+    declared = [
+        line.message_id
+        for line in later
+        if line.message_id in closing and declares_grey_random(line.content)
+    ]
+    grey = facts.grey_ids
+    if declared and grey is not None and basis not in grey and target in grey:
+        return (
+            VoteChangeKind.GREY_RANDOM_POLICY,
+            f"発言後に進行役がグレランを宣言({'、'.join(declared)})。"
+            f"{facts.names.get(basis, basis)}はグレー外、票はグレー: {facts.reason}",
+        )
     return VoteChangeKind.UNEXPLAINED, facts.reason
 
 
@@ -501,8 +559,56 @@ class _Record:
         self.death_day: dict[str, int] = {}
         for death in state.get("death_records", []) or []:
             self.death_day.setdefault(str(death.get("player_id")), int(death.get("day", 0)))
+        self.closing = self._closing_message_ids()
+        self.claims: list[tuple[int, str]] = [
+            (int(claim.get("day", -1)), str(claim.get("player_id")))
+            for claim in state.get("co_declarations", []) or []
+        ]
+        self.seer_verdicts: list[tuple[int, str]] = [
+            (int(event.get("day", -1)), str(event.get("target_id")))
+            for event in state.get("speech_events", []) or []
+            if event.get("event_type") == "ability_result"
+            and event.get("role") == "seer"
+            and event.get("target_id")
+            and float(event.get("confidence", 1.0)) >= _BINDING_CONFIDENCE
+        ]
         self.votes: list[dict[str, Any]] = list(state.get("vote_records", []) or [])
         self.reasons = self._vote_reasons()
+
+    def _closing_message_ids(self) -> dict[int, tuple[str, ...]]:
+        """Each day's closing lines (summary, designations), as message ids.
+
+        Utterances carry their stage and messages their id; a closing line is
+        the public message of the same day, author and text.
+        """
+        by_text: dict[tuple[int, str, str], list[str]] = {}
+        for day, lines in self.lines.items():
+            for line in lines:
+                by_text.setdefault((day, line.author_id, line.content), []).append(
+                    line.message_id
+                )
+        # The last line of each closing stage, as the live vote prompt keeps
+        # them (`ContextBuilder.direction_lines`).
+        closing: dict[int, dict[str, str]] = {}
+        for utterance in self.t.utterances:
+            if utterance.kind != "discussion" or utterance.stage not in _CLOSING_STAGES:
+                continue
+            ids = by_text.get((utterance.day, utterance.player_id, utterance.text))
+            if ids:
+                closing.setdefault(utterance.day, {})[str(utterance.stage)] = ids.pop(0)
+        return {day: tuple(by_stage.values()) for day, by_stage in closing.items()}
+
+    def grey(self, day: int) -> frozenset[str] | None:
+        """The grey at a day's vote: alive, no claim by then, no seer verdict by then."""
+        if not self.replayable:
+            return None
+        claimed = {seat for when, seat in self.claims if when <= day}
+        judged = {seat for when, seat in self.seer_verdicts if when <= day}
+        return frozenset(
+            seat
+            for seat in self.names
+            if self.death_day.get(seat, day) >= day and seat not in claimed | judged
+        )
 
     def _vote_reasons(self) -> dict[tuple[str, int, int], str]:
         """Each ballot's reason by (seat, day, round), rounds read off the vote records."""
@@ -652,6 +758,8 @@ class _Record:
             alive_ids=frozenset(
                 seat for seat in self.names if self.death_day.get(seat, day) >= day
             ),
+            closing_message_ids=self.closing.get(day, ()),
+            grey_ids=self.grey(day),
         )
 
 
