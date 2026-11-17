@@ -24,6 +24,7 @@ from app.ai.schemas import (
     DiscussionOutput,
     MorningIntentOutput,
     NightActionOutput,
+    PublicResultClaim,
     SummaryOutput,
     VoteOutput,
     WolfChatOutput,
@@ -41,12 +42,18 @@ AI_IDS = [f"p{i}" for i in range(1, 17)]
 
 
 class _PlanAndBallot:
-    """Names `plan` as its candidate in every turn and votes for `vote`."""
+    """Names `plan` as its candidate in every turn and votes for `vote`.
+
+    `line` is what the turn says aloud, and `claim` -- (role, target, black) --
+    a CO and one seer verdict the turn publishes with it.
+    """
 
     def __init__(self, plan: str, vote: str | None = None, reason: str = "気が変わった。") -> None:
         self.plan = plan
         self.vote = vote or plan
         self.reason = reason
+        self.line = "灰の発言を比べたい。"
+        self.claim: tuple[str, str, bool] | None = None
 
     async def generate_structured(
         self, *, system: str, messages: list[Message], response_schema: type[SchemaT], **kwargs
@@ -55,8 +62,14 @@ class _PlanAndBallot:
         if response_schema is MorningIntentOutput:
             return MorningIntentOutput()
         if response_schema in (DiscussionOutput, ChatDiscussionOutput):
-            output = DiscussionOutput(public_message="灰の発言を比べたい。")
+            output = DiscussionOutput(public_message=self.line)
             output.reasoning_memo.execution_target = self.plan
+            if self.claim is not None:
+                role, target, black = self.claim
+                output.public_claim_role = role
+                output.public_results = [
+                    PublicResultClaim(result_type="seer", target_id=target, is_werewolf=black)
+                ]
             if response_schema is ChatDiscussionOutput:
                 return ChatDiscussionOutput.from_discussion_output(output)
             return output
@@ -490,9 +503,12 @@ def test_the_first_games_ballots_reclassify_with_no_unexplained_change():
     assert sum(by_kind.values()) == 47
     # アオイ moved off レン to ミオ after マコト's later point: persuasion, not noise.
     assert kinds[(2, ids["アオイ"], VoteChangeKind.PUBLIC_ARGUMENT)] == 1
-    # The two other changes keep the label the live game gave them.
-    assert kinds[(3, ids["ミオ"], VoteChangeKind.NEW_PUBLIC_EVIDENCE)] == 1
-    assert kinds[(4, ids["ツムギ"], VoteChangeKind.NEW_PUBLIC_EVIDENCE)] == 1
+    # The two other changes were filed as new evidence live. Each reason names
+    # a seat that argued about the old or the new target after the voter's
+    # last line (ミオ: ツムギ's m50/m51; ツムギ: m61-m63), and an argument the
+    # reason cites outranks a verdict published beside it.
+    assert kinds[(3, ids["ミオ"], VoteChangeKind.PUBLIC_ARGUMENT)] == 1
+    assert kinds[(4, ids["ツムギ"], VoteChangeKind.PUBLIC_ARGUMENT)] == 1
     assert by_kind[VoteChangeKind.NONE] == 44
 
 
@@ -573,6 +589,9 @@ def test_on_the_first_games_boards_no_move_with_a_vague_reason_counts_as_persuas
 
     assert sum(kinds.values()) == 257
     assert kinds[VoteChangeKind.PUBLIC_ARGUMENT] == 0
-    # A result published after the seat spoke still explains a move.
-    assert kinds[VoteChangeKind.NEW_PUBLIC_EVIDENCE] == 57
-    assert kinds[VoteChangeKind.UNEXPLAINED] == 200
+    # A result published after the seat spoke still explains a move -- but only
+    # one about the old or the new target, or by one of them. Any new verdict
+    # used to explain every move of the day: 57 of these, 43 of them on
+    # verdicts that touched neither seat or were the voter's own.
+    assert kinds[VoteChangeKind.NEW_PUBLIC_EVIDENCE] == 14
+    assert kinds[VoteChangeKind.UNEXPLAINED] == 243

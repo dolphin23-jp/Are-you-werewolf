@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import re
 import statistics
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from enum import StrEnum
 
@@ -30,6 +32,175 @@ class VoteChangeKind(StrEnum):
 
 
 JUSTIFIED_CHANGES = frozenset(VoteChangeKind) - {VoteChangeKind.NONE, VoteChangeKind.UNEXPLAINED}
+
+
+# -- seat names, matched whole --
+#
+# The rule `app.ai.context._mention_spans` reads seat names by, restated over a
+# plain name table so a transcript can be read without a live game state:
+# a label is not read inside a longer word of its own script (レン is not in
+# チャレンジ, Player1 is not in Player11), and a label inside a longer seat's
+# label at the same place is that longer seat (サク inside サクラ).
+# `tests/eval/test_ballot_names.py` holds the two to the same answers.
+
+_KATAKANA = "ァ-ヺヽ-ヿ"
+_LONG_VOWEL = "ー"
+_KATAKANA_OR_LONG_RE = re.compile(f"[{_KATAKANA}{_LONG_VOWEL}]")
+
+
+def _label_pattern(label: str) -> re.Pattern[str]:
+    lead = r"(?<![0-9A-Za-z])"
+    if _KATAKANA_OR_LONG_RE.fullmatch(label[0]):
+        lead += rf"(?<![{_KATAKANA}])(?<![{_KATAKANA}]{_LONG_VOWEL})"
+    last = label[-1]
+    if last.isdigit():
+        trail = r"(?![0-9])"
+    elif last.isascii() and last.isalpha():
+        trail = r"(?![A-Za-z])"
+    elif _KATAKANA_OR_LONG_RE.fullmatch(last):
+        trail = rf"(?!{_LONG_VOWEL}*[{_KATAKANA}])"
+    else:
+        trail = ""
+    return re.compile(f"{lead}{re.escape(label)}{trail}")
+
+
+def mention_spans(text: str, names: Mapping[str, str]) -> list[tuple[int, int, str]]:
+    """Every seat `text` names, as (start, end, player_id), in order. By id or by name."""
+    found: list[tuple[int, int, str]] = []
+    for player_id, name in names.items():
+        for label in {player_id, name} - {""}:
+            found.extend(
+                (m.start(), m.end(), player_id) for m in _label_pattern(label).finditer(text)
+            )
+    found.sort(key=lambda span: (span[0], span[0] - span[1]))
+    kept: list[tuple[int, int, str]] = []
+    for span in found:
+        if not any(start <= span[0] and span[1] <= end for start, end, _ in kept):
+            kept.append(span)
+    return kept
+
+
+def named_seat_ids(text: str, names: Mapping[str, str]) -> tuple[str, ...]:
+    """The seats `text` names, each once, in the order first named."""
+    return tuple(dict.fromkeys(seat for _start, _end, seat in mention_spans(text, names)))
+
+
+# -- one ballot, classified --
+
+
+@dataclass(frozen=True)
+class SpokenLine:
+    """One public line of the day, in the order the table saw it."""
+
+    message_id: str
+    author_id: str
+    content: str
+
+
+@dataclass(frozen=True)
+class PublishedResult:
+    """An ability result (or its correction) stated in public, and where."""
+
+    claimant_id: str
+    target_id: str
+    source_message_id: str
+
+
+@dataclass(frozen=True)
+class BallotFacts:
+    """Everything a ballot's change of target is judged on, as plain data.
+
+    The live coordinator fills it from the game state and the offline audit
+    from a transcript's final state, so a committed game is re-classified by
+    the very function that classified it live.
+    """
+
+    voter_id: str
+    # The candidate the ballot is compared against: the seat's memo target
+    # from its last turn of the day with notes. None when it had no such turn.
+    basis: str | None
+    vote_target: str | None
+    reason: str
+    names: Mapping[str, str]
+    # The day's public lines, in order, the voter's own included.
+    day_lines: Sequence[SpokenLine] = ()
+    # The day's ability results and corrections, with the line each was said in.
+    results: Sequence[PublishedResult] = ()
+    # Lines a fact correction was heard from.
+    correction_message_ids: Sequence[str] = ()
+    runoff: bool = False
+    candidates: Sequence[str] = ()
+    alive_ids: frozenset[str] = frozenset()
+
+    def lines_after_voter(self) -> Sequence[SpokenLine]:
+        """The day's lines after the voter's last one: what it heard since it spoke."""
+        last_own = max(
+            (index for index, line in enumerate(self.day_lines) if line.author_id == self.voter_id),
+            default=-1,
+        )
+        return self.day_lines[last_own + 1 :]
+
+
+def classify_vote_change(facts: BallotFacts) -> tuple[VoteChangeKind, str]:
+    """Why the ballot left the seat's candidate, if it did. See `VoteChangeKind`.
+
+    Each cause is something the table could see happen after the seat last
+    spoke: a runoff that left the candidate off the ballot, the candidate's
+    death, a correction, another seat arguing about the old or the new target
+    whom the reason names, or a new ability result about either target or by
+    either of them. Only a change none of them covers is unexplained. The
+    reason the seat wrote is kept either way, but it is not a cause on its
+    own -- the vote prompt asks every ballot for one.
+
+    A later message is an argument only when the reason names its author:
+    the day's summary and designation name the candidate after almost
+    everyone has spoken, so counting any mention made nearly every change
+    "persuaded". An argument the reason cites outranks a result published
+    beside it -- the seat said what moved it.
+
+    A result counts only when it is new to the seat and touches the change.
+    The seat's own results are not news to it, and one verdict about a third
+    seat by a third claimant says nothing about leaving the old target for
+    the new one; counting any new result, as the audit used to, filed seed 1's
+    ダイキ as moved by his own result and by アオイ's on ソウタ.
+    """
+    basis, target, voter = facts.basis, facts.vote_target, facts.voter_id
+    if basis is None or target == basis:
+        return VoteChangeKind.NONE, ""
+    if facts.runoff and basis not in facts.candidates:
+        return VoteChangeKind.RUNOFF_RESTRICTION, "決選投票の対象制限"
+    if basis not in facts.alive_ids:
+        return VoteChangeKind.TARGET_BECAME_INVALID, "発言後に対象が無効化"
+    later = facts.lines_after_voter()
+    later_ids = {line.message_id for line in later}
+    if later_ids & set(facts.correction_message_ids):
+        return VoteChangeKind.CORRECTION_ACCEPTED, "発言後に事実訂正を受理"
+    wanted = {basis, target}
+    cited_authors = set(named_seat_ids(facts.reason, facts.names))
+    arguments = [
+        line.message_id
+        for line in later
+        if line.author_id != voter
+        and line.author_id in cited_authors
+        and (set(named_seat_ids(line.content, facts.names)) - {line.author_id}) & wanted
+    ]
+    if arguments:
+        cited = "、".join(arguments)
+        return (
+            VoteChangeKind.PUBLIC_ARGUMENT,
+            f"発言後の公開発言({cited})を受けて変更: {facts.reason}",
+        )
+    news = [
+        result.source_message_id
+        for result in facts.results
+        if result.source_message_id in later_ids
+        and result.claimant_id != voter
+        and {result.claimant_id, result.target_id} & wanted
+    ]
+    if news:
+        cited = "、".join(dict.fromkeys(news))
+        return VoteChangeKind.NEW_PUBLIC_EVIDENCE, f"発言後に能力結果が公開({cited})"
+    return VoteChangeKind.UNEXPLAINED, facts.reason
 
 
 @dataclass(frozen=True)
