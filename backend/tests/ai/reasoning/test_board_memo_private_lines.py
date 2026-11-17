@@ -66,3 +66,43 @@ def test_the_fox_is_never_told_who_is_not_the_fox():
         private = s1.private_part(s1.memo(s1.board(day, at), s1.SOTA))
         assert "妖狐でもない" not in private, (day, at)
         assert "妖狐ではない" not in private, (day, at)
+
+
+# -- 8. the wolves: a published colour they know is false --
+
+_FALSE_WHITE = "アオイの『カイト=白』は事実と違う（カイトは人狼）"
+_TRUTHFUL = (
+    "  - 真の占い師が色を偽らないなら、アオイは真の占い師ではない。"
+    "潜伏の占い師もいないなら、真の占い師はケント"
+)
+
+
+def test_every_wolf_is_told_that_aoi_whited_a_wolf():
+    """2-B4: m34 アオイ published カイト white. All three wolves knew it was
+    false; their memo had no way to say so, and the existing supposition
+    `HonestResults(アオイ)` made the whole board impossible instead."""
+    state = s1.board(2, "m34")
+
+    for wolf in (s1.HARUTO, s1.DAIKI):
+        lines = s1.private_part(s1.memo(state, wolf)).splitlines()
+        assert f"- {_FALSE_WHITE}" in lines, s1.name(wolf)
+        assert _TRUTHFUL in lines, s1.name(wolf)
+
+
+def test_the_false_colour_is_a_fact_and_the_true_seer_a_supposition():
+    lines = s1.private_part(s1.memo(s1.board(2, "m34"), s1.HARUTO)).splitlines()
+
+    fact = lines.index(f"- {_FALSE_WHITE}")
+    head = lines.index("- あなたの視点で、仮定つきで言えること（仮定が外れれば成り立たない）:")
+    assert fact < head < lines.index(_TRUTHFUL)
+    certain = next((line for line in lines if "論理的に確定" in line), "")
+    assert "ケント" not in certain
+
+
+def test_no_other_seat_learns_what_the_wolves_know_about_aoi():
+    memos = _memos(2, "m34")
+
+    for wolf in s1.WOLVES:
+        memos.pop(wolf)
+    for text in ("事実と違う", "色を偽らない", "真の占い師はケント"):
+        assert _others_see(memos, "", text) == [], text

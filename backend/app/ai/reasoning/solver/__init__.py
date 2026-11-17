@@ -20,6 +20,7 @@ from app.ai.reasoning.solver.assumptions import (
     HonestResults,
     NoLatentClaim,
     NoVillageBluff,
+    TruthfulIfGenuine,
 )
 from app.ai.reasoning.solver.backend import (
     Certainty,
@@ -78,6 +79,7 @@ __all__ = [
     "RuleModule",
     "SolverCache",
     "SolverStats",
+    "TruthfulIfGenuine",
     "Unsatisfiable",
     "WorldModel",
     "Z3ConstraintBackend",

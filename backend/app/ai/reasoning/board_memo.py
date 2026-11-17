@@ -51,7 +51,9 @@ from app.ai.reasoning.solver.assumptions import (
     NON_VILLAGE_ROLES,
     GenuineClaim,
     HonestResults,
+    NoLatentClaim,
     NoVillageBluff,
+    TruthfulIfGenuine,
 )
 from app.ai.reasoning.solver.backend import AnyOf, Hypothesis, RoleIs, has_role
 from app.ai.reasoning.solver.queries import RoleSolver
@@ -1210,11 +1212,57 @@ def _private_lines(
         )
     )
     if seat_solver is not None:
+        false_colours = _false_colours(player_id, ledger, observations, allies, seat_solver)
+        lines.extend(f"- {text}" for _verdict, text in false_colours)
         lines.extend(_seat_endgame_lines(ledger, seat_solver, own_role, public_solver))
         lines.extend(
-            _seat_supposition_lines(player_id, own_role, ledger, observations, allies, seat_solver)
+            _seat_supposition_lines(
+                player_id,
+                own_role,
+                ledger,
+                observations,
+                allies,
+                seat_solver,
+                false_colours=[verdict for verdict, _text in false_colours],
+            )
         )
     return lines
+
+
+def _false_colours(
+    player_id: str,
+    ledger: PublicFactLedger,
+    observations: ObservationSet,
+    allies: Iterable[str],
+    seat_solver: RoleSolver,
+) -> list[tuple[PublicVerdict, str]]:
+    """Published colours this seat knows to be false, said as fact.
+
+    The wolves knew m34's 「カイト=白」 was false the moment アオイ said it; the
+    memo had no way to say so (2-B4). Verdicts by the seat or a known ally are
+    left out: the wolves wrote their own fakes.
+    """
+    skip = {player_id, *allies}
+    found: list[tuple[PublicVerdict, str]] = []
+    for verdict in sorted(observations.verdicts, key=lambda v: (v.day, v.source_night)):
+        if verdict.claimant_id in skip:
+            continue
+        target = ledger.name_of(verdict.target_id)
+        wolf = has_role(verdict.target_id, RoleName.WEREWOLF)
+        if verdict.is_werewolf and not seat_solver.is_possible(wolf):
+            truth = f"{target}は人狼ではない"
+        elif not verdict.is_werewolf and seat_solver.is_forced(wolf):
+            truth = f"{target}は人狼"
+        else:
+            continue
+        colour = "黒" if verdict.is_werewolf else "白"
+        found.append(
+            (
+                verdict,
+                f"{ledger.name_of(verdict.claimant_id)}の『{target}={colour}』は事実と違う（{truth}）",
+            )
+        )
+    return found
 
 
 def _seat_supposition_lines(
@@ -1224,17 +1272,78 @@ def _seat_supposition_lines(
     observations: ObservationSet,
     allies: Iterable[str],
     seat_solver: RoleSolver,
+    *,
+    false_colours: list[PublicVerdict],
 ) -> list[str]:
     """What this seat may conclude under a named supposition, kept apart from
     what it knows. Each row opens with its supposition: the design contract's
     rule that a conditional conclusion states what it rests on."""
-    rows = _no_village_bluff_rows(player_id, ledger, observations, allies, seat_solver)
+    rows = _truthful_holder_rows(
+        player_id, own_role, ledger, observations, allies, seat_solver, false_colours
+    )
+    rows += _no_village_bluff_rows(player_id, ledger, observations, allies, seat_solver)
     if not rows:
         return []
     return ["- あなたの視点で、仮定つきで言えること（仮定が外れれば成り立たない）:", *rows]
 
 
 _NON_VILLAGE_LABELS = {RoleName.WEREWOLF: "人狼", RoleName.MADMAN: "狂人", RoleName.FOX: "妖狐"}
+
+_RESULT_ROLES = ((SEER_RESULT, RoleName.SEER), (MEDIUM_RESULT, RoleName.MEDIUM))
+
+
+def _truthful_holder_rows(
+    player_id: str,
+    own_role: RoleName,
+    ledger: PublicFactLedger,
+    observations: ObservationSet,
+    allies: Iterable[str],
+    seat_solver: RoleSolver,
+    false_colours: list[PublicVerdict],
+) -> list[str]:
+    """Who cannot be the real seer (or medium), if the real one tells true
+    colours -- and who must be, if nobody holds the card in silence.
+
+    Two suppositions, each named (2-B4): a real seer may lie about a colour,
+    and a real seer may never claim. Asked only once the seat holds a colour
+    it knows is false; a seat holding the card itself already knows.
+    """
+    rows: list[str] = []
+    skip = {player_id, *allies}
+    for result_type, role in _RESULT_ROLES:
+        if own_role is role or not any(v.result_type == result_type for v in false_colours):
+            continue
+        claimants = _ability_claimants(ledger, observations, result_type, role)
+        possible = [
+            pid for pid in claimants
+            if pid not in skip and seat_solver.is_possible(has_role(pid, role))
+        ]
+        truthful = seat_solver.assuming(TruthfulIfGenuine())
+        if not truthful.is_possible(Hypothesis()):
+            continue
+        ruled_out = [pid for pid in possible if not truthful.is_possible(has_role(pid, role))]
+        if not ruled_out:
+            continue
+        label = ROLE_DEFINITIONS[role].label_ja
+        row = f"  - 真の{label}が色を偽らないなら、{_names(ledger, ruled_out)}は真の{label}ではない"
+        no_latent = truthful.assuming(NoLatentClaim(role))
+        if no_latent.is_possible(Hypothesis()):
+            left = [pid for pid in claimants if no_latent.is_possible(has_role(pid, role))]
+            if len(left) == 1:
+                row += f"。潜伏の{label}もいないなら、真の{label}は{ledger.name_of(left[0])}"
+        rows.append(row)
+    return rows
+
+
+def _ability_claimants(
+    ledger: PublicFactLedger, observations: ObservationSet, result_type: str, role: RoleName
+) -> list[str]:
+    if role is RoleName.SEER:
+        return _seer_claimants(ledger)
+    wanted = set(observations.claimants_of(role)) | {
+        v.claimant_id for v in observations.verdicts if v.result_type == result_type
+    }
+    return _seat_ordered_ids(ledger, wanted)
 
 
 def _no_village_bluff_rows(

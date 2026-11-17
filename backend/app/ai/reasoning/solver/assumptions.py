@@ -21,6 +21,11 @@ Five separate suppositions, because collapsing them loses real distinctions:
 * `NoVillageBluff()`        -- no village-side seat claims a role it does not
   hold, so a false claim (seer, medium, hunter, freemason) comes from a wolf,
   the madman or the fox. A table's habit, not a rule: a hunter may claim seer.
+* `TruthfulIfGenuine()`     -- whoever really holds the seer or medium card
+  publishes the colours it showed. Unlike `HonestResults(p)` it says nothing
+  of a claimant who is not the holder, so a seat that knows a published colour
+  is false can still suppose it: that claimant is then not the holder, where
+  `HonestResults` would make the whole board impossible.
 """
 
 from __future__ import annotations
@@ -30,6 +35,7 @@ from dataclasses import dataclass
 
 from app.ai.reasoning.observations import ObservationSet
 from app.ai.reasoning.solver.backend import (
+    AnyOf,
     LabelledConstraint,
     RoleIs,
     RoleIsNot,
@@ -99,6 +105,13 @@ class NoVillageBluff:
         return "no_village_bluff"
 
 
+@dataclass(frozen=True)
+class TruthfulIfGenuine:
+    @property
+    def key(self) -> str:
+        return "truthful_if_genuine"
+
+
 Assumption = (
     GenuineClaim
     | HonestResults
@@ -106,6 +119,7 @@ Assumption = (
     | NoLatentClaim
     | AccurateTimeline
     | NoVillageBluff
+    | TruthfulIfGenuine
 )
 
 # The roles outside the village team: whoever bluffs a role, under
@@ -142,7 +156,40 @@ def _expand_one(
             return _accurate_timeline(assumption, observations)
         case NoVillageBluff():
             return _no_village_bluff(assumption, observations)
+        case TruthfulIfGenuine():
+            return _truthful_if_genuine(assumption, observations)
     raise TypeError(f"unknown assumption {assumption!r}")
+
+
+def _truthful_if_genuine(
+    assumption: TruthfulIfGenuine, observations: ObservationSet
+) -> list[LabelledConstraint]:
+    """For every published verdict: its author is not the holder of that
+    ability, or the colour is true."""
+    constraints: list[LabelledConstraint] = []
+    for index, verdict in enumerate(observations.verdicts):
+        role = RoleName.MEDIUM if verdict.result_type == "medium" else RoleName.SEER
+        colour = "黒" if verdict.is_werewolf else "白"
+        true_colour = (
+            RoleIs(player_id=verdict.target_id, role=RoleName.WEREWOLF)
+            if verdict.is_werewolf
+            else RoleIsNot(player_id=verdict.target_id, role=RoleName.WEREWOLF)
+        )
+        label = ROLE_DEFINITIONS[role].label_ja
+        constraints.append(
+            LabelledConstraint(
+                constraint_id=f"{assumption.key}:{index}",
+                constraint=AnyOf(
+                    (RoleIsNot(player_id=verdict.claimant_id, role=role), true_colour)
+                ),
+                explanation=(
+                    f"真の{label}は色を偽らないと仮定しているため、{verdict.claimant_id}が真の{label}なら"
+                    f"「{verdict.target_id}={colour}」は正しい判定です。"
+                ),
+                module_id=MODULE_ID,
+            )
+        )
+    return constraints
 
 
 def _no_village_bluff(
@@ -344,6 +391,7 @@ __all__ = [
     "HonestResults",
     "NoLatentClaim",
     "NoVillageBluff",
+    "TruthfulIfGenuine",
     "expand",
     "no_latent_constraints",
     "signature",

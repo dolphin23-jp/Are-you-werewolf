@@ -20,6 +20,7 @@ from app.ai.reasoning.solver import (
     Hypothesis,
     NoLatentClaim,
     NoVillageBluff,
+    TruthfulIfGenuine,
     build_solver,
     has_role,
     not_role,
@@ -417,3 +418,27 @@ def test_supposing_no_village_bluff_leaves_a_false_claimant_wolf_madman_or_fox()
     assert supposed.is_possible(has_role("p9", RoleName.HUNTER)) is True
     # The unconditional view is untouched.
     assert seer.is_possible(has_role("p7", RoleName.HUNTER)) is True
+
+
+# -- "the real holder tells true colours": unlike HonestResults, it survives
+#    a colour the seat knows is false --
+
+
+def test_a_wolf_supposing_a_truthful_seer_rules_out_the_claimant_who_whited_a_wolf():
+    state = boards.deal({"p1": RoleName.WEREWOLF, "p2": RoleName.WEREWOLF, "p4": RoleName.SEER})
+    boards.claim(state, "p4", RoleName.SEER)
+    boards.claim(state, "p7", RoleName.SEER)
+    boards.verdict(state, "p7", "seer", "p1", False, day=1)  # a white on a wolf
+    wolf = build_solver(boards.observe(state), PlayerPrivatePerspective("p2"))
+
+    # Supposing p7's results honest contradicts what the wolf knows outright.
+    assert wolf.assuming(HonestResults("p7")).is_possible(Hypothesis()) is False
+    truthful = wolf.assuming(TruthfulIfGenuine())
+    assert truthful.is_possible(Hypothesis()) is True
+    assert truthful.is_possible(has_role("p7", RoleName.SEER)) is False
+    assert truthful.is_possible(has_role("p4", RoleName.SEER)) is True
+    # Without the supposition p7 may still be the seer -- a seer can lie.
+    assert wolf.is_possible(has_role("p7", RoleName.SEER)) is True
+    # And with no latent seer either, only p4 is left.
+    alone = truthful.assuming(NoLatentClaim(RoleName.SEER))
+    assert alone.is_forced(has_role("p4", RoleName.SEER)) is True
