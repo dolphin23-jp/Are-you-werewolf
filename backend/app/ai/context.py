@@ -1280,11 +1280,15 @@ class ContextBuilder:
         direction = self._direction_layer(state)
         if direction:
             layers.append(direction)
+        waiting = "、".join(
+            "自分" if pid == player_id else self._label(state, pid)
+            for pid in self._seats_without_a_turn(state)
+        )
         layers += [
             stated,
             "【投票について】\n- 投票先は全員に公開され、記録に残る\n"
             "- AI席の手番は進行が割り振る。今日まだ手番が回っていない席: "
-            f"{self._labels(state, self._seats_without_a_turn(state))}（人間の席は含めない）",
+            f"{waiting or 'なし'}（人間の席は含めない）",
             f"{header}{candidates or 'なし'}",
             render_roster(ledger, player_id),
             CHAT_VOTE_OUTPUT_INSTRUCTION,

@@ -81,6 +81,19 @@ def test_a_human_seat_is_never_listed_as_waiting_for_a_turn():
     assert waiting.endswith("（人間の席は含めない）")
 
 
+def test_a_voter_without_a_turn_finds_itself_as_jibun():
+    controller, state, _runtime, coordinator, provider, speaker, _coded, _rogue = _v3_setup()
+    state.phase = Phase.VOTING
+
+    asyncio.run(coordinator._cast_vote(controller, state, speaker))
+
+    _schema, _system, user = next(p for p in provider.prompts if p[0] is VoteOutput)
+    listed = _line(user, "- AI席の手番は進行が割り振る。").split(": ", 1)[1]
+    seats = listed.split("（", 1)[0].split("、")
+    assert "自分" in seats
+    assert state.players[speaker].name not in seats
+
+
 def test_each_candidate_carries_its_public_facts():
     candidates = _line(captured_prompts()["d4-vote-kaito"].user, "【投票候補】")
 
