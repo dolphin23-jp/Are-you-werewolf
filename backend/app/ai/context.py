@@ -69,6 +69,12 @@ _MAX_KEY_POINTS_SHOWN = 12
 _DIGEST_ITEMS = 3
 _DIGEST_QUOTE_CHARS = 70
 
+# The team channel a role reads, for the next day's carry-over.
+_TEAM_CHANNELS: dict[RoleName, ChatChannel] = {
+    RoleName.WEREWOLF: ChatChannel.WOLF,
+    RoleName.FREEMASON: ChatChannel.FREEMASON,
+}
+
 # Each faction's win, for its v3 role card. Checked after every execution and
 # every night by `VictoryChecker`; the madman and the fox count as non-wolves.
 _WIN_LINES: dict[Team, str] = {
@@ -770,6 +776,31 @@ class ContextBuilder:
             state, ChatChannel.PUBLIC, heading="【今日の公開議論のログ】"
         )
 
+    def _layer_last_night_team_chat(self, state: GameState, player_id: str) -> str:
+        """v3: the team chat of the night before, for the seats that wrote it.
+
+        The night's plan never reached the next day: wolves planned "tonight
+        ケント, then アカリ" and argued the next day without it (review 3-N1),
+        and the freemasons' chat was read by nobody (2-N1). Information only,
+        with the one line that the team's words are not the table's. Night N
+        chat carries day N, the day before the discussion that follows it.
+        """
+        role = state.players[player_id].role
+        channel = _TEAM_CHANNELS.get(role)
+        if channel is None:
+            return ""
+        lines = [
+            self._format_chat_line(state, message)
+            for message in state.chat_log
+            if message.channel is channel and message.day == state.day - 1
+        ]
+        if not lines:
+            return ""
+        heading = "人狼" if channel is ChatChannel.WOLF else "共有"
+        return (
+            f"【前夜の{heading}チャット】内輪の内容は卓でそのまま言わない。\n" + "\n".join(lines)
+        )
+
     def _layer_private_history(self, state: GameState, channel: ChatChannel) -> str:
         messages = [m for m in state.chat_log if m.channel == channel]
         if not messages:
@@ -1090,6 +1121,7 @@ class ContextBuilder:
             self._layer_pending_questions(state, player_id),
             self._layer_since_last_turn(state, player_id),
             self._layer_d_summaries(),
+            *filter(None, [self._layer_last_night_team_chat(state, player_id)]),
             self._layer_previous_memo(state, player_id),
             self._layer_e_current_log(state, ChatChannel.PUBLIC),
             f"【いまの場面】{self._stage_label(stage)}。{stage_instruction}"
@@ -1241,6 +1273,7 @@ class ContextBuilder:
                 board_memo=board_memo,
             ),
             self._layer_d_summaries(),
+            *filter(None, [self._layer_last_night_team_chat(state, player_id)]),
             self._layer_previous_memo(state, player_id),
             self._layer_e_current_log(state, ChatChannel.PUBLIC),
         ]
@@ -1429,10 +1462,20 @@ class ContextBuilder:
             self._layer_private_history(state, channel),
         ]
         if self._chat:
-            user_layers.append(
-                "【指示】内輪チャットの1通。仲間と、今夜の行動と明日の方針を人間のチャットのように"
-                "短く相談する。"
-            )
+            if channel is ChatChannel.FREEMASON:
+                # The freemasons have no night action; their chat is where the
+                # next day is set up, and the two of them are its only readers
+                # (owner decision on review 2-N1, 1-B5).
+                user_layers.append(
+                    "【指示】共有チャットの1通。相方と明日の進行を決める: "
+                    "方針（グレランか指定か）、候補、占いCO者の扱い、どちらがまとめ役か。"
+                    "狩人はこのチャットを読めない（読めるのは共有の2人だけ）。"
+                )
+            else:
+                user_layers.append(
+                    "【指示】内輪チャットの1通。仲間と、今夜の行動と明日の方針を"
+                    "人間のチャットのように短く相談する。"
+                )
             user_layers.append(CHAT_PRIVATE_CHAT_INSTRUCTION)
         else:
             user_layers.append(instruction)
