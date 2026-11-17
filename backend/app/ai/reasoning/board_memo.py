@@ -77,6 +77,10 @@ MEMO_HEADING = "【盤面メモ】"
 PRIVATE_HEADING = "【あなただけが知っていること】"
 # How a seat's memo names the seat itself, past the header (review 2-C1).
 SELF = "自分"
+# On every header of conclusions only this seat can draw (review 1-C1: the fox
+# argued in public from its own curse reasoning). Not on the seat's card or
+# results, which a seer or medium is there to publish.
+_KEEP_UNSAID = "卓ではこの結論を知らないものとして話し、匂わせない"
 
 
 class _SeatLedger(PublicFactLedger):
@@ -397,23 +401,30 @@ def _co_count_lines(ledger: PublicFactLedger, by_role: dict[RoleName, list[str]]
 
 
 def _freemason_note(state: GameState, ledger: PublicFactLedger, claimants: list[str]) -> str:
-    confirmed = [claim for claim in state.freemason_partner_claims if claim.confirmed]
+    partner_claims = state.freemason_partner_claims
+    named = set(claimants) | {
+        claim.partner_id for claim in partner_claims if claim.claimant_id in claimants
+    }
+    # Both freemason seats have a name on the table: the "is a day-1 black the
+    # freemason trap" question is closed (1-C5). Three names is a contest.
+    both_out = "。共有は2人とも名前が出ている" if len(named) == 2 else ""
+    confirmed = [claim for claim in partner_claims if claim.confirmed]
     if confirmed:
         pair = confirmed[0]
         return (
             f"（{ledger.name_of(pair.claimant_id)}と{ledger.name_of(pair.partner_id)}が"
-            "互いに相方と確認済み）"
+            f"互いに相方と確認済み{both_out}）"
         )
-    named = [claim for claim in state.freemason_partner_claims if not claim.confirmed]
-    if named:
-        claim = named[0]
+    pending = [claim for claim in partner_claims if not claim.confirmed]
+    if pending:
+        claim = pending[0]
         return (
             f"（{ledger.name_of(claim.claimant_id)}は相方を{ledger.name_of(claim.partner_id)}と"
-            "名指ししたが本人の確認待ち）"
+            f"名指ししたが本人の確認待ち{both_out}）"
         )
     if len(claimants) == 1:
         return "（相方は未公開）"
-    return ""
+    return f"（{both_out.removeprefix('。')}）" if both_out else ""
 
 
 def _verdict_lines(ledger: PublicFactLedger, observations: ObservationSet) -> list[str]:
@@ -1229,14 +1240,24 @@ def _private_lines(
                 for night, target in sorted(nights.attacks.items())
             )
         )
+    false_colours = (
+        _false_colours(player_id, ledger, observations, allies, seat_solver)
+        if seat_solver is not None
+        else []
+    )
     lines.extend(
         _private_certainty_lines(
-            player_id, own_role, ledger, observations, allies, seat_solver, public_keys
+            player_id,
+            own_role,
+            ledger,
+            observations,
+            allies,
+            seat_solver,
+            public_keys,
+            extra=[text for _verdict, text in false_colours],
         )
     )
     if seat_solver is not None:
-        false_colours = _false_colours(player_id, ledger, observations, allies, seat_solver)
-        lines.extend(f"- {text}" for _verdict, text in false_colours)
         lines.extend(_seat_endgame_lines(ledger, seat_solver, own_role, public_solver))
         lines.extend(
             _seat_supposition_lines(
@@ -1307,7 +1328,8 @@ def _seat_supposition_lines(
     rows += _no_village_bluff_rows(player_id, ledger, observations, allies, seat_solver)
     if not rows:
         return []
-    return ["- あなたの視点で、仮定つきで言えること（仮定が外れれば成り立たない）:", *rows]
+    head = f"- あなたの視点で、仮定つきで言えること（仮定が外れれば成り立たない。{_KEEP_UNSAID}）:"
+    return [head, *rows]
 
 
 _NON_VILLAGE_LABELS = {RoleName.WEREWOLF: "人狼", RoleName.MADMAN: "狂人", RoleName.FOX: "妖狐"}
@@ -1445,6 +1467,8 @@ def _private_certainty_lines(
     allies: Iterable[str],
     seat_solver: RoleSolver | None,
     public_keys: frozenset[tuple[str, ...]],
+    *,
+    extra: Iterable[str] = (),
 ) -> list[str]:
     """Hard conclusions only this seat can draw, beyond its card and results.
 
@@ -1471,10 +1495,12 @@ def _private_certainty_lines(
         fox_view=own_role is RoleName.FOX,
     )
     texts = _fact_texts(fact for fact in facts if fact.key not in public_keys)
+    texts.extend(extra)
     if not texts:
         return []
     return [
-        "- あなたの視点で論理的に確定すること（卓には言えない根拠を含む）: " + " / ".join(texts)
+        f"- あなたの視点で論理的に確定すること（卓には言えない根拠を含む。{_KEEP_UNSAID}）: "
+        + " / ".join(texts)
     ]
 
 

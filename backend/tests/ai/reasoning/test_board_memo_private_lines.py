@@ -89,18 +89,22 @@ def test_every_wolf_is_told_that_aoi_whited_a_wolf():
 
     for wolf in (s1.HARUTO, s1.DAIKI):
         lines = s1.private_part(s1.memo(state, wolf)).splitlines()
-        assert f"- {_FALSE_WHITE}" in lines, s1.name(wolf)
+        assert _FALSE_WHITE in _certain_line(lines), s1.name(wolf)
         assert _TRUTHFUL in lines, s1.name(wolf)
+
+
+def _certain_line(lines: list[str]) -> str:
+    return next((line for line in lines if line.startswith(_CERTAIN_HEAD)), "")
 
 
 def test_the_false_colour_is_a_fact_and_the_true_seer_a_supposition():
     lines = s1.private_part(s1.memo(s1.board(2, "m34"), s1.HARUTO)).splitlines()
 
-    fact = lines.index(f"- {_FALSE_WHITE}")
-    head = lines.index("- あなたの視点で、仮定つきで言えること（仮定が外れれば成り立たない）:")
-    assert fact < head < lines.index(_TRUTHFUL)
-    certain = next((line for line in lines if "論理的に確定" in line), "")
+    certain = _certain_line(lines)
+    assert _FALSE_WHITE in certain
     assert "ケント" not in certain
+    head = lines.index(_SUPPOSED_HEAD)
+    assert lines.index(certain) < head < lines.index(_TRUTHFUL)
 
 
 def test_no_other_seat_learns_what_the_wolves_know_about_aoi():
@@ -177,5 +181,45 @@ def test_the_foxs_curse_reasoning_keeps_its_conclusion_in_the_first_person():
 def test_the_whited_wolf_reads_the_false_colour_about_itself():
     lines = s1.private_part(s1.memo(s1.board(2, "m34"), s1.KAITO)).splitlines()
 
-    assert "- アオイの『自分=白』は事実と違う（自分は人狼）" in lines
+    assert "アオイの『自分=白』は事実と違う（自分は人狼）" in _certain_line(lines)
     assert _TRUTHFUL in lines
+
+
+# -- 11. what the seat concluded stays off the table --
+
+_UNSAID = "卓ではこの結論を知らないものとして話し、匂わせない"
+_CERTAIN_HEAD = f"- あなたの視点で論理的に確定すること（卓には言えない根拠を含む。{_UNSAID}）: "
+_SUPPOSED_HEAD = f"- あなたの視点で、仮定つきで言えること（仮定が外れれば成り立たない。{_UNSAID}）:"
+
+
+def test_every_private_conclusion_header_says_to_keep_it_off_the_table():
+    """1-C1: ソウタ (the fox) argued from a conclusion only the fox could hold.
+    The header said 「卓には言えない根拠を含む」 and not that the conclusion
+    itself must not show. Every role, every header that carries one."""
+    headers = 0
+    for day, at in ((1, "m14"), (2, "m34"), (3, "m45"), (5, "m75")):
+        state = s1.board(day, at)
+        for seat in state.alive_ids():
+            for line in s1.private_part(s1.memo(state, seat)).splitlines():
+                if "論理的に確定" in line or "仮定つきで言える" in line:
+                    assert line.startswith((_CERTAIN_HEAD, _SUPPOSED_HEAD)), line
+                    headers += 1
+    assert headers > 10
+    # The seer's own results stay publishable: they are not under the header.
+    kent = s1.private_part(s1.memo(s1.board(2, "m32"), s1.KENT)).splitlines()
+    assert "- 占い結果 1日目夜: アオイ=白(人狼ではない)（公開済み）" in kent
+    assert _UNSAID not in "\n".join(line for line in kent if "占い結果" in line)
+
+
+def test_both_freemasons_named_is_a_fact_on_the_co_line():
+    """1-C5: "a day-1 black may be the freemason trap" turns on whether both
+    freemasons are already out. The CO line now says so."""
+    pending = s1.public_part(s1.memo(s1.board(1, "m2"), s1.REN))
+    assert (
+        "共有=マコト（マコトは相方をホノカと名指ししたが本人の確認待ち。共有は2人とも名前が出ている）"
+    ) in pending
+
+    confirmed = s1.public_part(s1.memo(s1.board(1, "m16"), s1.REN))
+    assert (
+        "共有=マコト、ホノカ（マコトとホノカが互いに相方と確認済み。共有は2人とも名前が出ている）"
+    ) in confirmed

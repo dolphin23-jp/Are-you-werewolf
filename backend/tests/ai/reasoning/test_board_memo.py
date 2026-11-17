@@ -137,7 +137,10 @@ def test_two_seer_claims_are_a_contest_and_two_freemason_claims_are_not():
 
     assert "占い=Player4、Player5（占いは1人なので少なくとも1人は偽）" in public
     assert "共有=Player7、Player8" in public
-    assert "共有は2人" not in public
+    # Two freemason claims are the composition, not a contest. Since the seed-1
+    # review (1-C5) the line also says both freemason names are out.
+    assert "共有は2人なので" not in public
+    assert "共有=Player7、Player8（共有は2人とも名前が出ている）" in public
     assert "少なくとも1人は偽）" in public  # only once, for the seers
     assert public.count("少なくとも") == 1
 
