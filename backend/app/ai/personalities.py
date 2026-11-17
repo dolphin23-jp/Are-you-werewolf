@@ -31,6 +31,8 @@ CHAT_STAGE_MAX_CHARS: dict[str, int] = {
     "minority_review": 60,
     "freemason_confirmation": 60,
     "human_followup": 60,
+    # From day 2, a seat with no line yet, once, before the summary.
+    "open_floor": 60,
     "immediate": 120,
     "consensus_summary": 120,
     # The close after the summary's answers: today's candidate, in a word.

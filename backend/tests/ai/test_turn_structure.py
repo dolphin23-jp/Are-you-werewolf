@@ -278,7 +278,9 @@ def test_a_black_on_a_seat_that_already_answered_it_owes_nothing():
     state = controller.state
     state.phase = Phase.DISCUSSION
     state.day = 2
-    coordinator = AICoordinator(state, ["p1", "p2", "p3", "p4"], MockProvider(seed=1), seed=1)
+    # Only the two seats that have spoken: from day 2 a seat with no line yet
+    # gets a short turn before the summary, which is not what this pins.
+    coordinator = AICoordinator(state, ["p1", "p2"], MockProvider(seed=1), seed=1)
     black = controller.chat("p1", "占いCO。p2は黒。")
     controller.public_result("p1", "seer", "p2", True, source_message_id=black)
     controller.chat("p2", "その黒は偽。対抗で占いCOする。")
@@ -366,7 +368,12 @@ def test_day_one_gives_every_silent_ai_seat_a_first_impression_before_the_close(
     assert set(first_turns.values()) <= {"immediate", "initial_view", "freemason_confirmation"}
 
 
-def test_later_days_keep_the_short_opening():
+def test_later_days_open_short_and_hear_every_silent_seat_before_the_close():
+    # This pinned that later days leave most seats silent. The owner's review
+    # of seed 1 reversed that: 37 of 83 ballots on days 2-5 came from seats
+    # with no turn that day. The opening stays short -- the duty speakers and
+    # three seats -- and every seat still silent gets one short turn before
+    # the summary (tests/ai/test_day_turn_schedule.py pins the details).
     controller = make_controller(seed=4)
     state = controller.state
     state.phase = Phase.DISCUSSION
@@ -381,8 +388,11 @@ def test_later_days_keep_the_short_opening():
         reasoning=ReasoningRuntime(state, ai_ids, seed=4),
         model_decides=True,
     )
+    turns = _spy(coordinator, provider)
 
     asyncio.run(coordinator.run_discussion_round(_session(controller)))
 
+    opening = [stage for _seat, stage in turns].index("open_floor")
+    assert opening <= 3 + sum(stage == "immediate" for _seat, stage in turns)
     spoken = {m.author_id for m in state.chat_log if m.channel is ChatChannel.PUBLIC}
-    assert len(spoken) < len(ai_ids)
+    assert spoken == set(ai_ids)

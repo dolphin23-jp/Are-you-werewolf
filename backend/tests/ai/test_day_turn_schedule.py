@@ -13,7 +13,10 @@ import asyncio
 from types import SimpleNamespace
 from typing import Any
 
+from app.ai.context import ContextBuilder, DaySummaryManager
 from app.ai.coordinator import AICoordinator
+from app.ai.deception import FakeClaimGuard, WolfDeceptionAssignment
+from app.ai.personalities import assign_personalities
 from app.ai.provider.base import Message, SchemaT
 from app.ai.reasoning.facts import PublicFactLedger
 from app.ai.reasoning.runtime import ReasoningRuntime
@@ -363,3 +366,123 @@ def test_seats_answering_a_correction_are_queued_in_a_seeded_order_not_by_seat_i
     assert all(sorted(order) == moved for order in orders)
     assert len(orders) > 1
     assert queued(3) == queued(3)
+
+
+# -- 1-A4 (3) / 2-A2: from day 2, every silent seat gets one short turn --
+
+OPEN_FLOOR = "open_floor"
+
+
+def _day_two_table(
+    table: _Table, *, observers: set[str] | None = None
+) -> tuple[GameController, AICoordinator]:
+    """Day 2 around a living human p0: sixteen AI seats, p1 leads as freemason."""
+    controller = make_controller(seed=4)
+    state = controller.state
+    state.phase = Phase.DISCUSSION
+    state.day = 2
+    controller.co("p1", "freemason")
+    ai_ids = [f"p{i}" for i in range(1, 17)]
+    coordinator = AICoordinator(
+        state,
+        ai_ids,
+        table,
+        seed=4,
+        reasoning=ReasoningRuntime(state, ai_ids, seed=4),
+        model_decides=True,
+        observer_player_ids=observers,
+        recorder=TranscriptRecorder(),
+    )
+    table.watch(coordinator)
+    return controller, coordinator
+
+
+def test_later_days_give_every_silent_seat_one_short_turn_before_the_summary():
+    """Seed 1, days 2-5: 37 of 83 ballots came from seats with no turn that day.
+
+    On a later day only the morning's openers and the seats answering or
+    answered spoke; everyone else voted without a word. Each living AI seat
+    with no line yet now gets one short turn, under a stage that asks for
+    nothing but what it wants to say.
+    """
+    table = _Table()
+    controller, coordinator = _day_two_table(table)
+    session = _session(controller)
+
+    asyncio.run(asyncio.wait_for(coordinator.run_discussion_round(session), timeout=30))
+
+    state = controller.state
+    summary = [stage for _seat, stage in table.turns].index(SUMMARY)
+    before = {seat for seat, _stage in table.turns[:summary]}
+    assert before == {f"p{i}" for i in range(1, 17)}
+    assert "p0" not in {seat for seat, _stage in table.turns}
+    swept = [seat for seat, stage in table.turns if stage == OPEN_FLOOR]
+    assert swept and len(swept) == len(set(swept))
+    # Each had no line today when its turn came: one turn each, never a second.
+    for seat in swept:
+        first = next(i for i, (s, _stage) in enumerate(table.turns) if s == seat)
+        assert table.turns[first] == (seat, OPEN_FLOOR)
+    round_state = session.discussion_round
+    assert len(round_state.outputs) <= round_state.max_total
+    assert len(_public(state, day=2)) == len(round_state.outputs)
+    utterances = coordinator._recorder.transcript.utterances  # type: ignore[union-attr]
+    assert {u.effective_length_limit for u in utterances if u.stage == OPEN_FLOOR} == {60}
+
+
+def test_the_silent_seat_turn_never_goes_to_an_observer_or_the_human():
+    table = _Table()
+    controller, coordinator = _day_two_table(table, observers={"p9"})
+
+    asyncio.run(asyncio.wait_for(coordinator.run_discussion_round(_session(controller)), 30))
+
+    seats = {seat for seat, _stage in table.turns}
+    assert "p9" not in seats and "p0" not in seats
+
+
+def test_day_one_keeps_its_roll_call_and_has_no_silent_seat_turn():
+    controller = _all_ai_morning(seed=1)
+    table = _Table()
+    coordinator = _v3(controller, table)
+
+    asyncio.run(coordinator.run_discussion_round(_session(controller)))
+
+    assert OPEN_FLOOR not in {stage for _seat, stage in table.turns}
+
+
+def _builder(state: GameState, engine: str = "v3") -> ContextBuilder:
+    wolf_ids = [p.player_id for p in state.players.values() if p.role.value == "werewolf"]
+    return ContextBuilder(
+        personalities=assign_personalities(list(state.players), seed=1),
+        day_summaries=DaySummaryManager(),
+        wolf_deception=WolfDeceptionAssignment(
+            pattern_name="all_lurk",
+            pattern_label="全潜伏",
+            fake_role_by_player={},
+            lurking_player_ids=wolf_ids,
+        ),
+        madman_fake_role=None,
+        fake_claim_guard=FakeClaimGuard(wolf_team_ids=set(wolf_ids)),
+        engine=engine,
+    )
+
+
+def _scene(state: GameState, stage: str, engine: str = "v3") -> str:
+    marker = "【いまの場面】" if engine == "v3" else "【議論段階】"
+    _system, messages = _builder(state, engine).build_discussion_context(
+        state, "p1", stage, board_memo="【盤面メモ】" if engine == "v3" else None
+    )
+    return next(line for line in messages[0].content.splitlines() if line.startswith(marker))
+
+
+def test_the_silent_seat_turn_asks_for_nothing_but_what_the_seat_wants_to_say():
+    state = make_controller(seed=4).state
+    state.day = 2
+
+    scene = _scene(state, OPEN_FLOOR)
+
+    assert scene.startswith(
+        "【いまの場面】ひとこと。今日はまだ話していない。いま言いたいことを言う。60字以内。"
+    )
+    structured = _scene(state, OPEN_FLOOR, engine="legacy")
+    assert structured.startswith("【議論段階】ひとこと。")
+    assert "いま言いたいこと" in structured

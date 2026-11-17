@@ -156,6 +156,11 @@ _FINAL_DESIGNATION_STAGE = "final_designation"
 # stage so the turn is told what it is for, whichever way it was scheduled.
 _CONFIRMATION_STAGE = "freemason_confirmation"
 
+# From day 2, the short turn each living AI seat with no line yet gets before
+# the summary. Its text asks for nothing but what the seat wants to say: the
+# turn is the opportunity, what is said in it is the seat's own.
+_OPEN_FLOOR_STAGE = "open_floor"
+
 # A wolf-chat sentence that puts a partner up for the ballot, read by
 # `_wolf_chat_ballot_plan`. A planned vote on a partner passes the release
 # gate, and the two ways of misreading the chat are not equally bad: a false
@@ -494,6 +499,8 @@ class _RoundBook:
     # The day's closing line has been given; only a partner confirmation the
     # closing line itself asked for may still follow.
     closed: bool = False
+    # The seats offered a silent-seat turn today, drawn once and walked once.
+    unheard_plan: list[str] | None = None
 
 
 def _unwrap_provider(provider: object) -> object:
@@ -1143,6 +1150,11 @@ class AICoordinator:
             round_state.major_target_sweeps += 1
             for target in owed:
                 self._round_queue_reply(state, round_state, target)
+        if state.day >= 2:
+            # Before the close, every seat that has not spoken today speaks once.
+            unheard = self._take_unheard_seat(state, round_state, book)
+            if unheard is not None:
+                return unheard, _OPEN_FLOOR_STAGE
         if (
             not round_state.minority_review_done
             and len(round_state.outputs) < round_state.max_total
@@ -1340,6 +1352,46 @@ class AICoordinator:
         random.Random(f"{self._seed}:roll-call:{state.day}").shuffle(silent)
         round_state.order.extend(silent)
         round_state.max_total += len(silent)
+
+    def _take_unheard_seat(
+        self, state: GameState, round_state: DiscussionRoundState, book: _RoundBook
+    ) -> str | None:
+        """The next living AI seat with no line today, for one short turn.
+
+        Day 1 has its roll call; later days had nothing like it, and in seed 1
+        37 of 83 ballots on days 2-5 came from seats that had no turn that
+        day. Each seat is offered once a day, in an order drawn per game and
+        day, and only if it still has no line when its turn comes -- a seat
+        that spoke meanwhile (answering a question, say) is passed over. A
+        seat whose turn fails is not offered again. So this ends after at
+        most one turn per living seat. Each turn is outside the follow-up
+        budget and counted in the round's total, so the progress counter
+        never reads past it. The human and observers are never offered one.
+        """
+        if book.unheard_plan is None:
+            plan = [pid for pid in self._ai_player_ids if self._may_schedule(state, pid)]
+            random.Random(f"{self._seed}:unheard:{state.day}").shuffle(plan)
+            book.unheard_plan = plan
+        spoken_today = {
+            message.author_id
+            for message in state.chat_log
+            if message.day == state.day and message.channel is ChatChannel.PUBLIC
+        }
+        while book.unheard_plan:
+            pid = book.unheard_plan.pop(0)
+            if (
+                not self._may_schedule(state, pid)
+                or pid in spoken_today
+                or round_state.speech_counts.get(pid, 0)
+            ):
+                continue
+            if pid in round_state.queued:
+                # One turn, not this one and a queued reply right after it.
+                round_state.queued.discard(pid)
+                round_state.reply_queue.remove(pid)
+            self._grant_extra_turn(round_state)
+            return pid
+        return None
 
     @staticmethod
     def _accusation_signature(state: GameState) -> tuple[tuple[str, ...], tuple[str, ...]]:

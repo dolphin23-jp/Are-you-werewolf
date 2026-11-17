@@ -55,6 +55,7 @@ _STAGES = (
     "minority_review:p2",
     "consensus_summary",
     "human_followup",
+    "open_floor",
 )
 
 
@@ -117,6 +118,7 @@ def test_each_stage_carries_its_own_cap():
         "minority_review:p2": 60,
         "immediate": 120,
         "consensus_summary": 120,
+        "open_floor": 60,
     }
     for stage, cap in expected.items():
         _system, messages = builder.build_discussion_context(state, "p1", stage, board_memo=MEMO)

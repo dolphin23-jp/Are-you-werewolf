@@ -805,6 +805,8 @@ class ContextBuilder:
                 "この人物が村側である反対仮説、本人の反論で妥当な点、別の処刑候補を"
                 "必ず比較してください。疑いを維持する場合も独立根拠だけを述べます。"
             )
+        elif stage == "open_floor":
+            stage_instruction = "今日はまだ発言していません。いま言いたいことを述べてください。"
         elif stage == "consensus_summary":
             stage_instruction = (
                 "第一候補だけでなく第二候補、第一候補を処刑しない最強の理由、"
@@ -935,6 +937,10 @@ class ContextBuilder:
             )
         if stage == "human_followup":
             return f"人間のプレイヤーの発言に応答する。{cap}字以内。"
+        if stage == "open_floor":
+            # The seat has had no turn today. The turn is its opportunity;
+            # nothing here suggests what to use it for.
+            return f"今日はまだ話していない。いま言いたいことを言う。{cap}字以内。"
         return (
             "今日の最初の発言。盤面を見て一番言いたいこと(内訳の見立て、吊り方針、"
             f"誰かへの質問のどれか)を一つ。{cap}字以内。"
@@ -1217,6 +1223,7 @@ class ContextBuilder:
             "consensus_summary": "議論の整理",
             "final_designation": "本指定",
             "human_followup": "人間発言への応答",
+            "open_floor": "ひとこと",
         }.get(stage, "議論")
 
 

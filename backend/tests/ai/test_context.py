@@ -523,6 +523,7 @@ def _every_v3_prompt(state, builder) -> list[str]:  # type: ignore[no-untyped-de
         "minority_review:p2",
         "consensus_summary",
         "human_followup",
+        "open_floor",
     ]
     texts: list[str] = []
     for player_id in state.players:
