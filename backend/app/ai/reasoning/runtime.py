@@ -63,6 +63,7 @@ from app.ai.reasoning.solver import (
     build_solver,
     has_role,
 )
+from app.ai.reasoning.summaries import day_results_and_claims
 from app.ai.reasoning.timeline import disclosable_result_nights
 from app.engine.roles import RoleName
 from app.engine.state import ChatChannel, GameState
@@ -1090,6 +1091,12 @@ class ReasoningRuntime:
         into the message -- and v3 seats read the disagreement from the log.
         """
         ledger = PublicFactLedger(state)
+        if not stated_targets_are_public:
+            # v3 reads the whole board in its memo every turn, so the summary
+            # does not list it again day after day: each day carries the COs
+            # made and the verdicts first published that day, dated by the
+            # night they are about, seer and medium apart (review 1-D3).
+            return day_results_and_claims(ledger, state.day)
         points: list[str] = []
         by_role: dict[RoleName, list[str]] = {}
         for claim in ledger.co_declarations():
@@ -1106,12 +1113,9 @@ class ReasoningRuntime:
             points.append(
                 f"{result.claimant_id}→{result.target_id}={colour}({result.day}日目)"
             )
-        # Under v3 a stated target is the model's structured answer, which its
-        # message need not name. Only a candidate the seat declared out loud
-        # today is public; a bare mention is no declaration, and a seat with no
-        # declaring sentence is left out rather than guessed at.
-        if not stated_targets_are_public:
-            return points
+        # Only a candidate the seat declared out loud today is public; a bare
+        # mention is no declaration, and a seat with no declaring sentence is
+        # left out rather than guessed at.
         named_today: dict[str, set[str]] = {}
         for message in state.chat_log:
             if message.day == state.day and message.channel is ChatChannel.PUBLIC:

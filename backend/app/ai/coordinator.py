@@ -2777,8 +2777,12 @@ class AICoordinator:
         # The factual half is rendered from the ledger, not asked for: who died,
         # who COed, which verdicts were published and who voted for whom are
         # already known exactly, and a model restating them can only lose them.
-        facts = render_public_fact_summary(
-            PublicFactLedger(state), state.day, names_only=self.model_decides
+        # v3 reads the board in its memo, so its past day is the day itself:
+        # execution, votes, the night before and the lines quoted as said.
+        facts = (
+            self._context.day_record(state)
+            if self.model_decides
+            else render_public_fact_summary(PublicFactLedger(state), state.day)
         )
         alive_ai = [pid for pid in self._ai_player_ids if state.players[pid].alive]
         if not alive_ai:

@@ -30,6 +30,7 @@ from app.ai.personalities import (
 from app.ai.provider.base import Message
 from app.ai.reasoning.board_memo import namify, render_roster, role_label
 from app.ai.reasoning.facts import SEER_RESULT, PublicFactLedger
+from app.ai.reasoning.summaries import render_day_record
 from app.ai.schemas import PLAN_NOTE_MEMO_FIELDS
 from app.ai.strategy import (
     StrategyAnalyzer,
@@ -61,6 +62,13 @@ _MAX_KEY_POINTS_SHOWN = 12
 # the log, which the prompt already carries in full.
 _DIGEST_ITEMS = 3
 _DIGEST_QUOTE_CHARS = 70
+
+# The turns that steer a day, and how a prompt quotes them: the summary and
+# the closing designation. A day with several of one keeps the last.
+_DIRECTION_STAGES: dict[str, str] = {
+    "consensus_summary": "進行役のまとめ",
+    "final_designation": "本指定",
+}
 
 DISCUSSION_OUTPUT_INSTRUCTION = """以下のJSON形式で回答してください:
 {"public_message": "あなたの発言(人格に合った口調)", \
@@ -196,7 +204,7 @@ class DaySummaryManager:
             if len(current) > 200:
                 self.summaries[day] = current[:200] + "…(省略)"
 
-    def render(self) -> str:
+    def render(self, *, chat: bool = False) -> str:
         days = sorted(set(self.facts) | set(self.summaries))
         if not days:
             return "(まだ過去日の要約はありません)"
@@ -204,7 +212,13 @@ class DaySummaryManager:
         for day in days:
             facts = self.facts.get(day, "")
             summary = self.summaries.get(day, "")
-            if facts:
+            if chat:
+                # v3: the facts block carries its own dated heading; the day's
+                # results and COs follow under theirs, never under 【公開事実】.
+                blocks.append(facts or f"{day}日目:")
+                if summary:
+                    blocks.append(f"【{day}日目に出た結果・CO】{summary}")
+            elif facts:
                 body = "\n".join(part for part in (facts, summary) if part)
                 blocks.append(f"{day}日目:\n{body}")
             else:
@@ -253,6 +267,9 @@ class ContextBuilder:
         self._reasoning_memos: dict[str, dict[str, Any]] = {}
         self._note_sources: dict[str, _NoteSource] = {}
         self._key_points: dict[int, list[tuple[str, str, str]]] = {}
+        # Day -> stage -> the message posted at that stage, for the stages
+        # that steer the day (`_DIRECTION_STAGES`). The last one wins.
+        self._direction_ids: dict[int, dict[str, str]] = {}
         self._knowledge = KnowledgeBase()
 
     def set_reasoning_memo(
@@ -298,6 +315,19 @@ class ContextBuilder:
             and (source.day, source.stage) == (day, stage)
         ):
             self._note_sources[player_id] = replace(source, message_id=message_id)
+        if stage in _DIRECTION_STAGES:
+            self._direction_ids.setdefault(day, {})[stage] = message_id
+
+    def direction_lines(self, day: int) -> list[tuple[str, str]]:
+        """The lines that steered `day`, as (label, message id), in stage order."""
+        posted = self._direction_ids.get(day, {})
+        return [
+            (label, posted[stage]) for stage, label in _DIRECTION_STAGES.items() if stage in posted
+        ]
+
+    def day_record(self, state: GameState) -> str:
+        """v3: the day just voted on, for the past-days layer (`render_day_record`)."""
+        return render_day_record(state, state.day, self.direction_lines(state.day))
 
     def _layer_previous_memo(self, state: GameState, player_id: str) -> str:
         memo = self._reasoning_memos.get(player_id)
@@ -663,7 +693,7 @@ class ContextBuilder:
     # -- layer [D] --
 
     def _layer_d_summaries(self) -> str:
-        return f"【過去日の要約】\n{self._day_summaries.render()}"
+        return f"【過去日の要約】\n{self._day_summaries.render(chat=self._chat)}"
 
     # -- layer [E] --
 
