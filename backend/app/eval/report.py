@@ -45,6 +45,8 @@ EVENT_LABELS: dict[str, str] = {
     "speech_discarded_after_phase_end": "議論の終了後に届いて捨てた発言",
     "discussion_stalled": "連続失敗で止まった議論",
     "designation_question_unanswered": "本指定で出た、答える番の無い質問",
+    "directed_question_target_unnamed": "本文が相手を名指していないので捨てた名指しの質問",
+    "directed_question_on_code_line": "コードが書いた行の名指しの質問(捨てた)",
 }
 
 # `release_gate.HARD_FAILURE_FIELDS`, in words. Any non-zero count fails the

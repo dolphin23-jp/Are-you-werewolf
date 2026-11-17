@@ -58,6 +58,7 @@ from app.ai.reasoning.rendering import (
 )
 from app.ai.reasoning.runtime import ReasoningRuntime, SeatReasoning
 from app.ai.schemas import (
+    DirectedQuestion,
     DiscussionOutput,
     MorningIntentOutput,
     NightActionOutput,
@@ -80,6 +81,8 @@ from app.eval.reasoning_analyzer import (
     PublishedResult,
     SpokenLine,
     classify_vote_change,
+    named_seat_ids,
+    sentence_naming,
 )
 from app.eval.transcript import (
     CorrectionAuditRecord,
@@ -1775,6 +1778,7 @@ class AICoordinator:
             or self._is_fallback(player_id, output.public_message)
             else len(output.public_message)
         )
+        model_text = output.public_message if model_text_chars else ""
         output.public_message = ensure_fact_sentences(
             output.public_message,
             drafts,
@@ -1796,6 +1800,11 @@ class AICoordinator:
             # Nothing survived to be said -- a code-written turn whose only
             # result validation rejected, say. An empty bubble is not a turn.
             return None
+        # Only questions the line puts aloud are recorded, wait for an answer
+        # or book a reply: the turn returns this list to the round.
+        output.directed_questions = self._questions_said_aloud(
+            state, output.directed_questions, model_text
+        )
         self._record(
             state,
             player_id,
@@ -1917,15 +1926,20 @@ class AICoordinator:
             base = 0.35 + len(output.public_message) * 0.012
             delay = min(3.0, base) * self._pacing_scale * self._rng.uniform(0.8, 1.2)
             await asyncio.sleep(delay)
+        names = {pid: player.name for pid, player in state.players.items()}
         for question in output.directed_questions:
-            if question.target_id not in state.players or not question.question.strip():
+            # What the target is shown is what the asker said to it: the
+            # sentence of its line that names the target, not the structured
+            # field's paraphrase (43 of 44 in seed 1 differed from the line).
+            asked = sentence_naming(model_text, question.target_id, names)
+            if question.target_id not in state.players or not asked:
                 continue
             proposed_topic = question.topic.strip()
             topic = (
                 proposed_topic
                 if proposed_topic
                 in {"execution_candidate", "fox_candidate", "claim_reason", "timeline"}
-                else self._question_topic(question.question)
+                else self._question_topic(question.question.strip() or asked)
             )
             existing = self._pending_questions.setdefault(question.target_id, [])
             if topic:
@@ -1939,7 +1953,7 @@ class AICoordinator:
                 PendingQuestion(
                     asker=player_id,
                     target=question.target_id,
-                    question=question.question.strip(),
+                    question=asked,
                     source_message_id=message_id,
                     day=state.day,
                     topic=topic,
@@ -1979,6 +1993,33 @@ class AICoordinator:
         if self.reasoning is not None:
             self.reasoning.record_public_speech(state, player_id, output.public_message, message_id)
         return output
+
+    def _questions_said_aloud(
+        self, state: GameState, questions: Sequence[DirectedQuestion], model_text: str
+    ) -> list[DirectedQuestion]:
+        """The structured questions the line itself puts to their targets.
+
+        A question in the structured field is only the model's note that it
+        asked someone. Where the text it wrote does not name that seat (whole,
+        as the vote prompt reads names), the table heard no question, and
+        booking the seat a reply or showing it "what you were asked" invents
+        one. A line code wrote -- `model_text` is then empty -- asks nothing of
+        the model's, whatever names the code put in it. Each drop is counted.
+        """
+        if not model_text:
+            for _question in questions:
+                self._record_event("directed_question_on_code_line")
+            return []
+        named = set(
+            named_seat_ids(model_text, {pid: player.name for pid, player in state.players.items()})
+        )
+        kept: list[DirectedQuestion] = []
+        for question in questions:
+            if question.target_id in named:
+                kept.append(question)
+            else:
+                self._record_event("directed_question_target_unnamed")
+        return kept
 
     def _owes_coded_line(
         self,

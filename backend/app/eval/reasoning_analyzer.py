@@ -102,6 +102,47 @@ def named_seat_ids(text: str, names: Mapping[str, str]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(seat for _start, _end, seat in mention_spans(text, names)))
 
 
+_SENTENCE_ENDS = frozenset("。！？!?")
+_QUOTE_OPENS = frozenset("「『")
+_QUOTE_CLOSES = frozenset("」』")
+
+
+def split_sentences(text: str) -> list[str]:
+    """`text` split after 。！？ and at line breaks, never inside 「」『』; a closing 。 dropped."""
+    sentences: list[str] = []
+    current: list[str] = []
+    depth = 0
+    for char in text:
+        ended = bool(current) and current[-1] in _SENTENCE_ENDS and depth == 0
+        if char == "\n" or (ended and char not in _SENTENCE_ENDS):
+            sentences.append("".join(current))
+            current = []
+            if char == "\n":
+                depth = 0
+                continue
+        if char in _QUOTE_OPENS:
+            depth += 1
+        elif char in _QUOTE_CLOSES and depth:
+            depth -= 1
+        current.append(char)
+    sentences.append("".join(current))
+    cleaned = (sentence.strip().removesuffix("。").strip() for sentence in sentences)
+    return [sentence for sentence in cleaned if sentence]
+
+
+def sentence_naming(text: str, seat: str, names: Mapping[str, str]) -> str:
+    """The sentence of `text` that puts something to `seat`: "" when none names it.
+
+    The first one naming the seat that ends as a question, else the last one
+    naming it -- a request (「理由を教えて」) usually closes the line.
+    """
+    naming = [s for s in split_sentences(text) if seat in named_seat_ids(s, names)]
+    asked = [s for s in naming if s[-1] in "？?"]
+    if asked:
+        return asked[0]
+    return naming[-1] if naming else ""
+
+
 # -- a ballot's reason that names another seat as where it goes --
 
 _HONORIFIC = r"(?:さん|くん|君|ちゃん|氏|様)?"
