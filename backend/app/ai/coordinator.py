@@ -152,6 +152,10 @@ _PRIVATE_CHAT_MAX_CHARS = 100
 # question -- one the round, closing on this turn, would never let anyone answer.
 _FINAL_DESIGNATION_STAGE = "final_designation"
 
+# A seat named as a freemason's partner, confirming (or denying) it. Its own
+# stage so the turn is told what it is for, whichever way it was scheduled.
+_CONFIRMATION_STAGE = "freemason_confirmation"
+
 # A wolf-chat sentence that puts a partner up for the ballot, read by
 # `_wolf_chat_ballot_plan`. A planned vote on a partner passes the release
 # gate, and the two ways of misreading the chat are not equally bad: a false
@@ -484,6 +488,12 @@ class _RoundBook:
     # for them: the table stops right after it so they have the floor first.
     summary_asked_human: bool = False
     designation_pending: bool = False
+    # Seats whose place in the opening order is their partner confirmation:
+    # named during the morning, they close the morning block with it.
+    confirmation_turns: set[str] = field(default_factory=set)
+    # The day's closing line has been given; only a partner confirmation the
+    # closing line itself asked for may still follow.
+    closed: bool = False
 
 
 def _unwrap_provider(provider: object) -> object:
@@ -527,7 +537,10 @@ class AICoordinator:
             for question in questions
             if question.topic
         }
-        self._forced_partner_confirmations: set[str] = set()
+        # Seats named as a freemason's partner, owed their confirmation turn, in
+        # the order they were named (never sorted: a seat id says nothing about
+        # who should speak first).
+        self._forced_partner_confirmations: list[str] = []
         self._freemason_public_plan: tuple[str, str, bool] | None = None
         self._freemason_death_announced: set[str] = set()
         freemasons = [
@@ -868,9 +881,14 @@ class AICoordinator:
                     continue
                 consecutive_failures = 0
                 round_state.outputs.append((pid, output))
-                for target_id in tuple(self._forced_partner_confirmations):
-                    self._round_queue_reply(state, round_state, target_id)
-                    self._forced_partner_confirmations.discard(target_id)
+                # A partner named during the morning closes the morning block
+                # with its confirmation; one named later takes the next turn
+                # (`_take_partner_confirmation`). Placed before the morning is
+                # closed below, so a naming by the last duty speaker still
+                # lands inside the block. These used to be moved into the
+                # reply queue right here, so the forced turn never ran and
+                # day 1's confirmation came thirteen lines late.
+                self._place_morning_confirmations(state, round_state, self._book_for(round_state))
                 round_state.speech_counts[pid] = round_state.speech_counts.get(pid, 0) + 1
                 spoken += 1
                 # Closed before the pause checks below, so a pause that lands on
@@ -901,8 +919,7 @@ class AICoordinator:
                         pid,
                         output,
                         waiting_human=human_id if can_pause else None,
-                    ):
-                        round_state.complete = True
+                    ) and self._close_round(state, round_state):
                         break
                     # A question to the human is theirs to answer before any
                     # AI answer or the designation: the floor goes to them now.
@@ -918,12 +935,12 @@ class AICoordinator:
                         # here regardless -- one designation, never a new
                         # exchange -- so the miss is counted, not looped on.
                         self._record_event("designation_question_unanswered")
-                    round_state.complete = True
-                    break
+                    if self._close_round(state, round_state):
+                        break
                 if can_pause and (waits_for_human or getattr(session, "discussion_paused", False)):
                     self._set_awaiting(round_state, True)
                     break
-                if stage == "consensus_summary":
+                if stage in ("consensus_summary", _FINAL_DESIGNATION_STAGE):
                     continue
                 for question in output.directed_questions:
                     self._round_queue_reply(state, round_state, question.target_id)
@@ -1055,22 +1072,12 @@ class AICoordinator:
         if self.reasoning is not None:
             for player_id in self.reasoning.take_reassessment_speakers():
                 self._round_queue_reply(state, round_state, player_id)
-        for target_id in sorted(self._forced_partner_confirmations):
-            self._forced_partner_confirmations.discard(target_id)
-            if target_id not in self._agents or not state.players[target_id].alive:
-                continue
-            try:
-                pending_index = round_state.order.index(target_id, round_state.cursor)
-            except ValueError:
-                pass
-            else:
-                round_state.order.pop(pending_index)
-                if pending_index < round_state.immediate_count:
-                    # A duty speaker taking its turn early. Left counted, the
-                    # morning stage would wait for one more seat than it holds.
-                    round_state.immediate_count -= 1
-            return target_id, "freemason_confirmation"
         book = self._book_for(round_state)
+        confirming = self._take_partner_confirmation(state, round_state, book)
+        if confirming is not None:
+            return confirming, _CONFIRMATION_STAGE
+        if book.closed:
+            return None, "consensus_summary"
         if round_state.summary_done:
             # The wrap-up has been given. Only what it opened is left: its
             # addressees' answers, anyone it left freshly accused, the close.
@@ -1081,6 +1088,9 @@ class AICoordinator:
             index = round_state.cursor
             pid = round_state.order[index]
             round_state.cursor += 1
+            if pid in book.confirmation_turns:
+                book.confirmation_turns.discard(pid)
+                return pid, _CONFIRMATION_STAGE
             morning = round_state.stage == "immediate" and index < round_state.immediate_count
             return pid, "immediate" if morning else "initial_view"
         self._refresh_major_targets(state, round_state, book)
@@ -1176,6 +1186,98 @@ class AICoordinator:
                 book.summary_speaker = leader
                 return leader, "consensus_summary"
         return None, "consensus_summary"
+
+    def _may_schedule(self, state: GameState, player_id: str) -> bool:
+        """A living seat this coordinator speaks for: never the human, never an observer."""
+        return (
+            player_id in self._agents
+            and player_id not in self._observer_player_ids
+            and player_id in state.players
+            and state.players[player_id].alive
+        )
+
+    @staticmethod
+    def _in_morning_block(round_state: DiscussionRoundState) -> bool:
+        """The morning's duty speakers are still speaking (or the last just spoke)."""
+        return (
+            round_state.stage == "immediate"
+            and round_state.immediate_count > 0
+            and round_state.cursor <= min(round_state.immediate_count, len(round_state.order))
+        )
+
+    def _place_morning_confirmations(
+        self, state: GameState, round_state: DiscussionRoundState, book: _RoundBook
+    ) -> None:
+        """A partner named during the morning confirms at the end of the morning block.
+
+        Day 2's results arrive together in the block, so the confirmation goes
+        after them, not between them: at the block's end, which it then
+        closes. A partner still due to speak in the block confirms on that
+        turn instead of taking a second one. Outside the morning this does
+        nothing; `_take_partner_confirmation` gives the next turn instead.
+        """
+        if not self._in_morning_block(round_state):
+            return
+        named, self._forced_partner_confirmations = self._forced_partner_confirmations, []
+        for target in named:
+            if not self._may_schedule(state, target):
+                continue
+            book.confirmation_turns.add(target)
+            if target in round_state.order[round_state.cursor : round_state.immediate_count]:
+                continue
+            try:
+                later = round_state.order.index(target, round_state.immediate_count)
+            except ValueError:
+                # A turn the day did not have: counted, so progress keeps its total.
+                self._grant_extra_turn(round_state)
+            else:
+                round_state.order.pop(later)
+            round_state.order.insert(round_state.immediate_count, target)
+            round_state.immediate_count += 1
+
+    def _take_partner_confirmation(
+        self, state: GameState, round_state: DiscussionRoundState, book: _RoundBook
+    ) -> str | None:
+        """The named partner, if one is owed its confirmation: it takes the next turn.
+
+        Whatever line named it -- an opening view, a reply, the summary, the
+        final designation -- the table hears the partner next, before the
+        summary's answers or the vote. A confirmation is one fixed sentence
+        and settles a public fact the vote should not start without, so it
+        is never deferred to the next day. A seat still waiting in the order
+        gives up that later place for it.
+        """
+        self._place_morning_confirmations(state, round_state, book)
+        while self._forced_partner_confirmations:
+            target = self._forced_partner_confirmations.pop(0)
+            if not self._may_schedule(state, target):
+                continue
+            try:
+                pending_index = round_state.order.index(target, round_state.cursor)
+            except ValueError:
+                self._grant_extra_turn(round_state)
+            else:
+                round_state.order.pop(pending_index)
+                if pending_index < round_state.immediate_count:
+                    # A duty speaker taking its turn early. Left counted, the
+                    # morning stage would wait for one more seat than it holds.
+                    round_state.immediate_count -= 1
+            return target
+        return None
+
+    def _close_round(self, state: GameState, round_state: DiscussionRoundState) -> bool:
+        """End the day after its closing line. False while a partner confirmation is owed.
+
+        The closing line (the summary or the final designation) may itself
+        name a freemason's partner; its confirmation is the one turn that can
+        still follow it, and the round closes after that.
+        """
+        book = self._book_for(round_state)
+        book.closed = True
+        if any(self._may_schedule(state, pid) for pid in self._forced_partner_confirmations):
+            return False
+        round_state.complete = True
+        return True
 
     def _book_for(self, round_state: DiscussionRoundState) -> _RoundBook:
         """The scheduler's notes on this round, started fresh for a new one."""
@@ -1579,53 +1681,69 @@ class AICoordinator:
                 pending_question=bool(self._open_questions(player_id)),
                 under_pressure=stage.startswith("rebuttal") or stage.startswith("minority_review"),
             )
-        if self.model_decides and self.reasoning is not None and decision is not None:
-            # v3: the board as a memo, plus what this turn must say. No brief --
-            # the conclusions are what the model is being asked for.
-            system, messages = self._context.build_discussion_context(
-                state,
-                player_id,
-                stage,
-                board_memo=self.reasoning.board_memo(state, player_id),
-                required_lines=self._required_lines(state, player_id, decision),
-            )
-        else:
-            system, messages = self._context.build_discussion_context(
-                state, player_id, stage
-            )
-            if decision is not None:
-                messages = [
-                    *messages[:-1],
-                    Message(role="user", content=decision.render_brief()),
-                    messages[-1],
-                ]
         freemason_opening = self._freemason_opening(state, player_id)
         freemason_must_hide = self._freemason_must_hide(state, player_id)
-        if freemason_opening is not None:
-            system += (
-                "\n\n【共有公開計画】この発言では指定された共有CO文を最初にそのまま述べてください。"
-            )
-        elif freemason_must_hide:
-            system += (
-                "\n\n【共有公開計画】あなたは潜伏側です。共有CO、相方の名前、共有者だと"
-                "推測できる表現を公開発言に絶対に含めないでください。"
-            )
+        pending_relation = self._pending_partner_relation(state, player_id)
+        # Lines code writes whole: a freemason CO (the plan's opening, the
+        # hidden partner's reveal) and a named partner's confirmation. The
+        # model's text for them was replaced word for word, so it is not asked
+        # for one -- two requests a game that bought nothing. The death report
+        # of an already-claimed leader is left on the old path: it lands on
+        # whatever turn the leader has next, which may be the summary.
+        code_writes_line = pending_relation is not None or (
+            freemason_opening is not None
+            and not any(claim.player_id == player_id for claim in state.co_declarations)
+        )
         # The turn belongs to this phase of this day. Generation can take long
         # enough for the table to move on, and the engine's `chat` checks only
         # that the speaker is alive -- so a line written for the discussion
         # would otherwise land in the middle of the vote.
         epoch = (state.phase, state.day)
-        controller.set_typing(player_id, True)  # type: ignore[attr-defined]
-        agent = self._agents[player_id]
-        try:
-            output = await agent.generate_discussion(system, messages)
-        finally:
-            controller.set_typing(player_id, False)  # type: ignore[attr-defined]
-        # The brief fallback asks for the sentence alone, so like a turn written
-        # in code it carries no notes: an empty memo and no target, by omission.
-        brief_turn = output is not None and agent.last_discussion_was_brief
-        if self._metrics is not None:
-            self._metrics.record_discussion_result(skipped=output is None)
+        brief_turn = False
+        output: DiscussionOutput | None
+        if code_writes_line:
+            output = DiscussionOutput(public_message="")
+        else:
+            if self.model_decides and self.reasoning is not None and decision is not None:
+                # v3: the board as a memo, plus what this turn must say. No brief --
+                # the conclusions are what the model is being asked for.
+                system, messages = self._context.build_discussion_context(
+                    state,
+                    player_id,
+                    stage,
+                    board_memo=self.reasoning.board_memo(state, player_id),
+                    required_lines=self._required_lines(state, player_id, decision),
+                )
+            else:
+                system, messages = self._context.build_discussion_context(
+                    state, player_id, stage
+                )
+                if decision is not None:
+                    messages = [
+                        *messages[:-1],
+                        Message(role="user", content=decision.render_brief()),
+                        messages[-1],
+                    ]
+            if freemason_opening is not None:
+                system += (
+                    "\n\n【共有公開計画】この発言では指定された共有CO文を最初にそのまま述べてください。"
+                )
+            elif freemason_must_hide:
+                system += (
+                    "\n\n【共有公開計画】あなたは潜伏側です。共有CO、相方の名前、共有者だと"
+                    "推測できる表現を公開発言に絶対に含めないでください。"
+                )
+            controller.set_typing(player_id, True)  # type: ignore[attr-defined]
+            agent = self._agents[player_id]
+            try:
+                output = await agent.generate_discussion(system, messages)
+            finally:
+                controller.set_typing(player_id, False)  # type: ignore[attr-defined]
+            # The brief fallback asks for the sentence alone, so like a turn written
+            # in code it carries no notes: an empty memo and no target, by omission.
+            brief_turn = output is not None and agent.last_discussion_was_brief
+            if self._metrics is not None:
+                self._metrics.record_discussion_result(skipped=output is None)
         owes_coded_line = decision is not None and self._owes_coded_line(
             state, player_id, decision, freemason_opening
         )
@@ -1645,7 +1763,7 @@ class AICoordinator:
             # seer whose request failed lost its result for the whole day.
             output = DiscussionOutput(public_message="")
             posted_by_code = True
-        notes_missing = posted_by_code or brief_turn
+        notes_missing = posted_by_code or brief_turn or code_writes_line
         # Set when code replaces the whole line, so its length is not the model's.
         line_replaced_by_code = False
         model_requested_target = output.reasoning_memo.execution_target
@@ -1720,7 +1838,6 @@ class AICoordinator:
                 # result the model volunteers on some later turn is speech, not
                 # an obligation, and must not be audited as one.
                 enforced_results = tuple(required)
-        pending_relation = self._pending_partner_relation(state, player_id)
         if pending_relation is not None:
             claimant_label = self._spoken_label(state, pending_relation.claimant_id)
             output.public_message = (
@@ -1728,16 +1845,33 @@ class AICoordinator:
                 f"私{self._spoken_label(state, player_id)}で間違いありません。"
             )
             output.public_claim_role = RoleName.FREEMASON.value
+            asked = [
+                question
+                for question in self._pending_questions.get(player_id, [])
+                if question.asker == pending_relation.claimant_id
+            ]
+            # The line that named this seat, not some earlier question from the
+            # same claimant.
             source_question = next(
-                (
-                    question
-                    for question in self._pending_questions.get(player_id, [])
-                    if question.asker == pending_relation.claimant_id
-                ),
-                None,
+                (q for q in reversed(asked) if q.topic == "freemason_confirmation"),
+                asked[0] if asked else None,
             )
             if source_question is not None:
                 output.reply_to = source_question.source_message_id
+        elif stage == _CONFIRMATION_STAGE and output.reply_to is None:
+            # A naming the code cannot confirm for the seat (one side is no
+            # freemason): the model answers, and its answer still points at
+            # the line that named it.
+            naming = next(
+                (
+                    question
+                    for question in reversed(self._pending_questions.get(player_id, []))
+                    if question.topic == "freemason_confirmation"
+                ),
+                None,
+            )
+            if naming is not None:
+                output.reply_to = naming.source_message_id
         if output.agrees_with and not output.key_point.strip():
             # Agreement with no new argument is a reaction, not an analysis. Cut at a
             # sentence boundary so the shortened line still reads as finished Japanese.
@@ -2257,8 +2391,8 @@ class AICoordinator:
                 topic="freemason_confirmation",
             )
         )
-        if partner_id in self._agents:
-            self._forced_partner_confirmations.add(partner_id)
+        if partner_id in self._agents and partner_id not in self._forced_partner_confirmations:
+            self._forced_partner_confirmations.append(partner_id)
 
     # -- voting (loops across runoff rounds) --
 

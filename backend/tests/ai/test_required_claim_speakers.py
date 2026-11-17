@@ -325,12 +325,16 @@ def test_the_morning_stage_cannot_outrun_the_order():
     assert AICoordinator._close_immediate_stage(round_state) is False
 
 
-def test_a_duty_speaker_confirming_early_is_taken_off_the_morning_count():
+def test_a_duty_speaker_named_mid_morning_confirms_on_its_own_morning_turn():
+    # It used to be pulled forward out of the block (and the count lowered to
+    # match). A partner named during the morning now confirms at the block's
+    # end (seed-1 review, 1-A1); one still due in the block confirms on that
+    # turn, so the count and the order stay as they were.
     controller = make_controller(seed=4)
     coordinator = AICoordinator(
         controller.state, ["p1", "p2", "p3"], MockProvider(seed=4), seed=1
     )
-    coordinator._forced_partner_confirmations.add("p2")
+    coordinator._forced_partner_confirmations.append("p2")
     round_state = DiscussionRoundState(
         day=1, order=["p1", "p2", "p3"], cursor=1, immediate_count=2, max_total=10
     )
@@ -338,8 +342,8 @@ def test_a_duty_speaker_confirming_early_is_taken_off_the_morning_count():
     speaker, stage = coordinator._next_discussion_speaker(controller.state, round_state)
 
     assert (speaker, stage) == ("p2", "freemason_confirmation")
-    assert round_state.order == ["p1", "p3"]
-    assert round_state.immediate_count == 1
+    assert round_state.order == ["p1", "p2", "p3"]
+    assert round_state.immediate_count == 2
     # p1 and p2 have both spoken: the morning is over, and p3 opens the views.
     assert AICoordinator._close_immediate_stage(round_state) is True
     assert coordinator._next_discussion_speaker(controller.state, round_state) == (
