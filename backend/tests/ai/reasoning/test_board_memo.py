@@ -274,7 +274,9 @@ def test_day_two_tables_each_claimants_nights_and_marks_what_was_never_published
         "1日目夜（死体: ソウタ、ケント）: ケント→未公開(1日目夜に死亡) / "
         "ダイキ→シオン=白[2日目公開] / アオイ→ソウタ=白[2日目公開]"
     ) in public
-    assert "アカリ(霊媒CO): 1日目処刑 ハルト=黒[2日目公開]" in public
+    # The medium section is per execution since the seed-1 review (4-B1): an
+    # execution with no published read says so instead of being left out.
+    assert "1日目処刑 ハルト=黒(アカリ・2日目公開)" in public
 
 
 def test_day_four_keeps_the_dead_and_drops_nights_a_claimant_could_not_act():

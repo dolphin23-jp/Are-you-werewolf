@@ -194,6 +194,7 @@ def render_board_memo(
             observations,
             seat_solver,
             public_keys=frozenset(fact.key for fact in public_facts),
+            public_solver=public_solver,
         )
     )
     return "\n".join(lines)
@@ -356,9 +357,11 @@ def _freemason_note(state: GameState, ledger: PublicFactLedger, claimants: list[
 
 
 def _verdict_lines(ledger: PublicFactLedger, observations: ObservationSet) -> list[str]:
-    """Seer accounts night by night, then medium results by claimant."""
-    lines = _divination_lines(ledger, observations) + _medium_lines(ledger, observations)
-    return lines or ["- 公開された判定: なし"]
+    """Seer accounts night by night, then the medium's read of each execution."""
+    lines = _divination_lines(ledger, observations)
+    if not observations.verdicts:
+        lines.append("- 公開された判定: なし")
+    return lines + _medium_lines(ledger, observations)
 
 
 def _seer_claimants(ledger: PublicFactLedger) -> list[str]:
@@ -470,25 +473,48 @@ def _divination_cell(
 
 
 def _medium_lines(ledger: PublicFactLedger, observations: ObservationSet) -> list[str]:
+    """One cell per execution: the colour each medium claimant published, or
+    that nothing was published -- and, once no medium claimant is alive, that
+    nothing will be unless somebody new claims it.
+
+    By execution rather than by claimant, because the question is "what do we
+    know of the people we hanged". The review's day-5 village kept reasoning
+    from "the medium will check it" two days after the medium was bitten; the
+    old section listed published results only, so a missing one was silent.
+    """
     results = [r for r in observations.verdicts if r.result_type == MEDIUM_RESULT]
-    if not results:
+    executions = ledger.executions()
+    if not executions and not results:
         return []
-    by_claimant: dict[str, list[str]] = defaultdict(list)
-    for result in sorted(results, key=lambda r: (r.source_night, r.day)):
-        colour = "黒" if result.is_werewolf else "白"
-        by_claimant[result.claimant_id].append(
-            f"{result.source_night}日目処刑 {ledger.name_of(result.target_id)}={colour}"
-            f"[{result.day}日目公開]"
+    by_target: dict[str, list[PublicVerdict]] = defaultdict(list)
+    for result in sorted(results, key=lambda r: (r.day, r.source_night)):
+        by_target[result.target_id].append(result)
+
+    def published(target_id: str) -> str:
+        return "、".join(
+            f"{'黒' if r.is_werewolf else '白'}({ledger.name_of(r.claimant_id)}・{r.day}日目公開)"
+            for r in by_target.pop(target_id)
         )
-    lines = ["- 霊媒結果:"]
-    for claimant_id in _seat_ordered_ids(ledger, by_claimant):
-        role = ledger.claimed_role_of(claimant_id)
-        role_label = _ROLE_LABELS.get(role, "") if role is not None else ""
-        lines.append(
-            f"  - {ledger.name_of(claimant_id)}({role_label}CO): "
-            + " / ".join(by_claimant[claimant_id])
-        )
-    return lines
+
+    cells = [
+        f"{execution.day}日目処刑 {ledger.name_of(execution.player_id)}="
+        + (published(execution.player_id) if execution.player_id in by_target else "未公開")
+        for execution in executions
+    ]
+    # A medium verdict on someone never hanged is a claim like any other.
+    cells.extend(
+        f"処刑されていない{ledger.name_of(target)}={published(target)}"
+        for target in _seat_ordered_ids(ledger, list(by_target))
+    )
+    line = "- 処刑者の霊媒結果: " + " / ".join(cells)
+    living_mediums = [
+        claim.player_id
+        for claim in ledger.co_declarations()
+        if claim.claimed_role is RoleName.MEDIUM and ledger.is_alive(claim.player_id)
+    ]
+    if executions and not living_mediums:
+        line += "。生存する霊媒COなし: 新たに霊媒COが出ない限り、処刑者の結果は公開されない"
+    return [line]
 
 
 def _vote_lines(ledger: PublicFactLedger) -> list[str]:
@@ -849,16 +875,22 @@ def _fox_clause(ledger: PublicFactLedger, end: _Endgame) -> str:
     )
 
 
-def _endgame_text(ledger: PublicFactLedger, end: _Endgame) -> str | None:
+def _endgame_text(
+    ledger: PublicFactLedger, end: _Endgame, public: _Endgame | None
+) -> str | None:
     """The village-eye summary, or None when it settles nothing worth a line.
 
     A claimant with only whites, early on, settles neither a wolf nor the
-    fox; three such lines of fox candidates would be noise.
+    fox; three such lines of fox candidates would be noise. A fox the public
+    section already buries is not buried again.
     """
     clauses = _wolf_clauses(ledger, end)
-    if not clauses and not end.fox_dead_for_sure:
+    fox_already_public = public is not None and public.fox_dead_for_sure
+    if not clauses and not (end.fox_dead_for_sure and not fox_already_public):
         return None
-    return "。".join([*clauses, _fox_clause(ledger, end)])
+    if not fox_already_public:
+        clauses.append(_fox_clause(ledger, end))
+    return "。".join(clauses)
 
 
 def _conditional_lines(ledger: PublicFactLedger, public_solver: RoleSolver | None) -> list[str]:
@@ -871,6 +903,7 @@ def _conditional_lines(ledger: PublicFactLedger, public_solver: RoleSolver | Non
     """
     if public_solver is None:
         return []
+    public = _endgame(ledger, public_solver)
     rows: list[str] = []
     for claimant in _seer_claimants(ledger):
         if not ledger.is_alive(claimant) or ledger.claimed_role_of(claimant) is not RoleName.SEER:
@@ -879,7 +912,7 @@ def _conditional_lines(ledger: PublicFactLedger, public_solver: RoleSolver | Non
             GenuineClaim(claimant, RoleName.SEER), HonestResults(claimant)
         )
         end = _endgame(ledger, supposed)
-        text = _endgame_text(ledger, end) if end is not None else None
+        text = _endgame_text(ledger, end, public) if end is not None else None
         if text is not None:
             rows.append(f"  - {ledger.name_of(claimant)}が真の占い師で結果も正しいなら: {text}")
     if not rows:
@@ -888,7 +921,10 @@ def _conditional_lines(ledger: PublicFactLedger, public_solver: RoleSolver | Non
 
 
 def _seat_endgame_lines(
-    ledger: PublicFactLedger, seat_solver: RoleSolver, own_role: RoleName
+    ledger: PublicFactLedger,
+    seat_solver: RoleSolver,
+    own_role: RoleName,
+    public_solver: RoleSolver | None,
 ) -> list[str]:
     """The same summary from the seat's own solver, with no supposition.
 
@@ -922,7 +958,8 @@ def _seat_endgame_lines(
             *_wolf_clauses(ledger, end),
         ]
         return [head + "。".join(clauses)]
-    summary = _endgame_text(ledger, end)
+    public = _endgame(ledger, public_solver) if public_solver is not None else None
+    summary = _endgame_text(ledger, end, public)
     return [head + summary] if summary is not None else []
 
 
@@ -952,6 +989,7 @@ def _private_lines(
     seat_solver: RoleSolver | None,
     *,
     public_keys: frozenset[tuple[str, ...]],
+    public_solver: RoleSolver | None = None,
 ) -> list[str]:
     perspective = PlayerPrivatePerspective(player_id)
     own_role = state.players[player_id].role
@@ -1009,7 +1047,7 @@ def _private_lines(
         )
     )
     if seat_solver is not None:
-        lines.extend(_seat_endgame_lines(ledger, seat_solver, own_role))
+        lines.extend(_seat_endgame_lines(ledger, seat_solver, own_role, public_solver))
     return lines
 
 
