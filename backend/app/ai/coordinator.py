@@ -1155,34 +1155,10 @@ class AICoordinator:
             unheard = self._take_unheard_seat(state, round_state, book)
             if unheard is not None:
                 return unheard, _OPEN_FLOOR_STAGE
-        if (
-            not round_state.minority_review_done
-            and len(round_state.outputs) < round_state.max_total
-        ):
-            latest_public_targets = {
-                speaker: target
-                for speaker, output in round_state.outputs
-                if isinstance((target := output.reasoning_memo.execution_target), str)
-                and target in state.players
-                and state.players[target].alive
-            }
-            public_pressure: Counter[str] = Counter(latest_public_targets.values())
-            round_state.minority_review_done = True
-            if public_pressure:
-                top_target, top_count = public_pressure.most_common(1)[0]
-                stated_count = sum(public_pressure.values())
-                if stated_count >= 4 and top_count / stated_count >= 0.6:
-                    reviewers = [
-                        pid
-                        for pid in self._agents
-                        if state.players[pid].alive and pid != top_target
-                    ]
-                    if reviewers:
-                        reviewer = min(
-                            reviewers,
-                            key=lambda pid: (round_state.speech_counts.get(pid, 0), pid),
-                        )
-                        return reviewer, f"minority_review:{top_target}"
+        # No seat is appointed to argue against the majority any more (the
+        # "minority review" turn): when the talk piles onto one person, the
+        # pushback should come from whoever at the table feels it, as it does
+        # between people. Every seat has had a turn by now to be that voice.
         if not round_state.summary_done and len(round_state.outputs) < round_state.max_total:
             leader = next(
                 (
@@ -1741,7 +1717,7 @@ class AICoordinator:
                 state,
                 player_id,
                 pending_question=bool(self._open_questions(player_id)),
-                under_pressure=stage.startswith("rebuttal") or stage.startswith("minority_review"),
+                under_pressure=stage.startswith("rebuttal"),
             )
         freemason_opening = self._freemason_opening(state, player_id)
         freemason_must_hide = self._freemason_must_hide(state, player_id)

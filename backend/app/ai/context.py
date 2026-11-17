@@ -797,14 +797,6 @@ class ContextBuilder:
                 "共有相方として名指しされています。真の相方なら確認共有COを最初に述べ、"
                 "相方でなければ明確に否定してください。他の論点を先に話してはいけません。"
             )
-        elif stage.startswith("minority_review:"):
-            target_id = stage.split(":", 1)[1]
-            target = player_label(state, target_id) if target_id in state.players else target_id
-            stage_instruction = (
-                f"票・疑いが{target}へ集中しています。多数派の理由を再掲せず、"
-                "この人物が村側である反対仮説、本人の反論で妥当な点、別の処刑候補を"
-                "必ず比較してください。疑いを維持する場合も独立根拠だけを述べます。"
-            )
         elif stage == "open_floor":
             stage_instruction = "今日はまだ発言していません。いま言いたいことを述べてください。"
         elif stage == "consensus_summary":
@@ -915,13 +907,6 @@ class ContextBuilder:
             return (
                 "共有の相方として名指しされた。本当の相方なら最初に確認COし、"
                 f"違うなら明確に否定する。他の話は後。{cap}字以内。"
-            )
-        if stage.startswith("minority_review:"):
-            target_id = stage.split(":", 1)[1]
-            target = self._label(state, target_id) if target_id in state.players else target_id
-            return (
-                f"票や疑いが{target}に集まっている。{target}が村側だった場合とほかの候補は"
-                f"plan_noteで比べ、発言では自分の結論を一言で。多数派の理由は繰り返さない。{cap}字以内。"
             )
         if stage == "consensus_summary":
             return (
@@ -1212,8 +1197,6 @@ class ContextBuilder:
 
     @staticmethod
     def _stage_label(stage: str) -> str:
-        if stage.startswith("minority_review:"):
-            return "多数派への反証・代替候補の比較"
         return {
             "immediate": "朝一CO・結果発表",
             "initial_view": "初回意見",

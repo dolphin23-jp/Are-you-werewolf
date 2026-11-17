@@ -10,6 +10,8 @@ handed the confirmation to the reply queue, so the forced turn never ran.
 from __future__ import annotations
 
 import asyncio
+import json
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -29,7 +31,8 @@ from app.ai.schemas import (
 from app.engine.game import GameController
 from app.engine.phases import Phase
 from app.engine.state import ChatChannel, GameState, VoteRecord
-from app.eval.transcript import TranscriptRecorder
+from app.eval.report import render_transcript
+from app.eval.transcript import GameTranscript, TranscriptRecorder
 from app.sessions.models import DiscussionRoundState
 from scripts import evaluate
 from tests.conftest import make_controller
@@ -486,3 +489,33 @@ def test_the_silent_seat_turn_asks_for_nothing_but_what_the_seat_wants_to_say():
     structured = _scene(state, OPEN_FLOOR, engine="legacy")
     assert structured.startswith("【議論段階】ひとこと。")
     assert "いま言いたいこと" in structured
+
+
+# -- 3-A3: no seat is appointed to argue against the majority --
+
+
+def test_a_table_piling_onto_one_seat_gets_no_appointed_reviewer():
+    """The owner: a balancing voice should emerge, not be assigned by code."""
+    piling = _line("p5が怪しい。", target="p5")
+    table = _Table({"initial_view": piling, OPEN_FLOOR: piling})
+    controller, coordinator = _day_two_table(table)
+
+    asyncio.run(asyncio.wait_for(coordinator.run_discussion_round(_session(controller)), 30))
+
+    stages = [stage for _seat, stage in table.turns]
+    assert stages.count("initial_view") >= 3
+    assert not [stage for stage in stages if stage.startswith("minority_review")]
+    assert SUMMARY in stages
+
+
+def test_old_records_still_print_the_removed_stage_by_name():
+    """Seed 1 (2026-11-16) carries m68 `[minority_review:p2]`; the renderer prints it as is."""
+    path = (
+        Path(__file__).resolve().parents[2]
+        / "artifacts/live-v3-claude-sonnet55-seeds1-3-2026-11-16/seed1/transcript-seed1.json"
+    )
+    transcript = GameTranscript.from_dict(json.loads(path.read_text(encoding="utf-8")))
+
+    rendered = render_transcript(transcript)
+
+    assert "[minority_review:p2]" in rendered

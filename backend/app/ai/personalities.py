@@ -28,7 +28,6 @@ CHAT_STAGE_MAX_CHARS: dict[str, int] = {
     "reaction": 30,
     "initial_view": 60,
     "rebuttal_or_reassessment": 60,
-    "minority_review": 60,
     "freemason_confirmation": 60,
     "human_followup": 60,
     # From day 2, a seat with no line yet, once, before the summary.
@@ -56,8 +55,9 @@ def discussion_length_range(verbosity: str, *, chat: bool = False) -> tuple[int,
 
 def chat_stage_max_chars(stage: str) -> int:
     """The character cap the v3 prompt names for a discussion stage. A stage
-    with a parameter (`minority_review:pN`) shares its family's cap; one the
-    table does not know gets the ordinary turn's."""
+    with a parameter (`family:pN`) shares its family's cap; one the table does
+    not know -- including `minority_review:pN`, a stage old records still
+    carry -- gets the ordinary turn's."""
     family = stage.split(":", 1)[0]
     return CHAT_STAGE_MAX_CHARS.get(family, CHAT_TURN_CHARS[1])
 
