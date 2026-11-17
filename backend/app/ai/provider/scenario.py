@@ -213,6 +213,9 @@ class ScenarioProvider:
                 )
             ]
 
+        # A question counts only where the line names its target (the
+        # coordinator drops one the table never heard), so the line asks it.
+        line = f"{line} {target}、その根拠を具体的に説明してください。"
         return DiscussionOutput(
             public_message=line,
             key_point=f"{target}への疑いを提示した",
