@@ -72,91 +72,80 @@ class Personality:
     verbosity: str = "normal"
     sample_lines: tuple[str, ...] = ()
     # The same voice in the chat register: what this player would actually type
-    # at a 17A table. Used by the v3 prompt; `sample_lines` keeps the structured
-    # register the legacy and v2 prompts were measured on.
+    # at a 17A table, tone only. Used by the v3 prompt; `sample_lines` keeps the
+    # structured register the legacy and v2 prompts were measured on.
     chat_lines: tuple[str, ...] = ()
-    # How far a sound argument has to go before it moves this player: "open",
-    # "normal" or "firm". Used by the v3 prompt only.
-    openness: str = "normal"
 
     def to_prompt_section(self, *, chat: bool = False) -> str:
-        # A cheap precaution: the chat register keeps the word 思考 out of the
-        # v3 prompt entirely, so nothing it carries can read as a request for
-        # the model's own reasoning -- Anthropic may refuse that as reasoning
-        # extraction, and its refusal fallback does not retry it. The
-        # structured register keeps the wording it was measured with.
         if chat:
-            style = CHAT_THINKING_STYLE.get(self.thinking_style, self.thinking_style)
-            style_line = f"- 考え方の癖: {style}\n"
-            # The cadence in words. Printed as "発言頻度: 1.0 / 発言量: normal"
-            # the values meant nothing to the model, and the length it did
-            # follow came from the per-verbosity character range instead.
-            cadence_line = f"- 話す量: {chat_cadence_text(self.talkativeness, self.verbosity)}"
-        else:
-            style_line = f"- 思考スタイル: {self.thinking_style}\n"
-            cadence_line = f"- 発言頻度: {self.talkativeness:.1f}\n- 発言量: {self.verbosity}"
+            return self._chat_section()
         section = (
             f"【あなたの人格】\n"
             f"- 口調: {self.tone}\n"
-            f"{style_line}"
+            f"- 思考スタイル: {self.thinking_style}\n"
             f"- 議論スタイル: {self.discussion_style}\n"
             f"- 感情傾向: {self.emotional_tendency}\n"
-            f"{cadence_line}"
+            f"- 発言頻度: {self.talkativeness:.1f}\n- 発言量: {self.verbosity}"
         )
         # Examples anchor the register far better than the abstract labels do, but a
         # preset without them must not emit a dangling empty bullet.
-        lines = self.chat_lines or self.sample_lines if chat else self.sample_lines
-        if chat:
-            openness = OPENNESS_TEXT.get(self.openness, OPENNESS_TEXT["normal"])
-            section += f"\n- 意見の聞き方: {openness}"
-        if lines and chat:
+        if self.sample_lines:
+            section += "\n- 口調の例:\n  - " + "\n  - ".join(self.sample_lines)
+        return section
+
+    def _chat_section(self) -> str:
+        """The v3 persona: how the seat sounds and how much it says, nothing else.
+
+        The owner's decision on the seed-1 review (1-C2, 1-C3, 3-B4): a persona
+        changes tone and amount only. The thinking habit ("素直に多数派へ同調し
+        がち"), the discussion style and how far an argument moves the seat were
+        judgement and procedure, and example lines that promised content came
+        back nearly verbatim (「根拠言い切ろう！」 as m46's 「根拠言い切るぞ！」).
+        The emotional tendency is said as how emotion shows in speech. No word
+        here reads as a request for the model's own reasoning.
+        """
+        voice = CHAT_EMOTION.get(self.name, self.emotional_tendency)
+        # The cadence in words. Printed as "発言頻度: 1.0 / 発言量: normal" the
+        # values meant nothing to the model.
+        section = (
+            "【あなたの人格】口調と話す量だけに表れる\n"
+            f"- 口調: {self.tone}\n"
+            f"- 感情の出し方: {voice}\n"
+            f"- 話す量: {chat_cadence_text(self.talkativeness, self.verbosity)}"
+        )
+        lines = self.chat_lines or self.sample_lines
+        if lines:
             # An example is copied whole when nothing says not to: one seat
             # opened 6 of 6 lines with its example's "経験上".
             section += "\n- 口調の例(言い回しを毎回は使わない):\n  - " + "\n  - ".join(lines)
-        elif lines:
-            section += "\n- 口調の例:\n  - " + "\n  - ".join(lines)
         return section
 
     def get_fallback_message(self) -> str:
         return self.fallback_message
 
 
-# Chat-register wording for a `thinking_style` that itself says 思考 (see
-# `to_prompt_section`). Keyed by the text, so a renamed preset keeps it.
-CHAT_THINKING_STYLE: dict[str, str] = {
-    "多数派形成を狙う戦略的思考": "多数派を作って流れを決める戦略型",
-}
-
-# Every preset is asked to weigh what it hears; this is only how far an argument
-# has to go before it moves them. Without it the table is either players who
-# fold to the first objection or players who dig in whatever is said.
-# No stock acknowledgement in here: the open text once quoted 「確かに」, and one
-# open seat opened 7 of its 14 lines with an acknowledgement word.
-OPENNESS_TEXT: dict[str, str] = {
-    "open": "人の話をよく聞く。筋の通った指摘はすぐ認めて、考えを変える",
-    "normal": "筋の通った指摘は認めて考えを変えるが、根拠の弱い指摘では動かない",
-    "firm": "一度決めた考えは簡単には変えない。結果や矛盾のような決定的な根拠が出たときだけ、"
-    "認めて変える",
-}
-
-_OPENNESS: dict[str, str] = {
-    "冷静な論客": "normal",
-    "元気なムードメーカー": "open",
-    "慎重な観察者": "normal",
-    "自信家のリーダー": "firm",
-    "疑り深い探偵": "firm",
-    "優しい世話役": "open",
-    "皮肉屋の理系": "normal",
-    "熱血な正義漢": "firm",
-    "のんびり屋": "open",
-    "策略家": "normal",
-    "新人風の初々しさ": "open",
-    "ベテランの古参": "firm",
-    "陽気なお調子者": "open",
-    "無口な実務家": "normal",
-    "情熱的な扇動家": "firm",
-    "素朴な聞き手": "open",
-    "長考する参謀": "normal",
+# The v3 persona's emotional tendency, said as how emotion shows in speech.
+# The structured register's wording carried judgement in places (義憤にかられ
+# やすい, 実は観察力がある); a persona changes tone and amount only. Keyed by
+# preset name; a preset missing here falls back to its emotional tendency.
+CHAT_EMOTION: dict[str, str] = {
+    "冷静な論客": "感情を表に出さず、淡々と話す",
+    "元気なムードメーカー": "驚きや喜びがそのまま声に出る",
+    "慎重な観察者": "控えめで、不安げな言い回しが出やすい",
+    "自信家のリーダー": "強気で、動揺を見せない",
+    "疑り深い探偵": "苛立ちが声に出やすい",
+    "優しい世話役": "相手を気づかう言葉が多い",
+    "皮肉屋の理系": "冷めた調子だが、ときどき熱が入る",
+    "熱血な正義漢": "熱くなると語気が強まる",
+    "のんびり屋": "慌てず、のんびりした調子のまま話す",
+    "策略家": "感情を見せず、含みのある言い方をする",
+    "新人風の初々しさ": "緊張していて、言葉に迷いが出る",
+    "ベテランの古参": "どっしり落ち着いて話す",
+    "陽気なお調子者": "明るく、冗談めかして話す",
+    "無口な実務家": "感情表現がほぼない",
+    "情熱的な扇動家": "感情の起伏が激しく、声が大きくなりやすい",
+    "素朴な聞き手": "驚きや納得を率直に口にする",
+    "長考する参謀": "表面上は冷静に話す",
 }
 
 PERSONALITIES: list[Personality] = [
@@ -333,94 +322,56 @@ _SAMPLE_LINES: dict[str, tuple[str, ...]] = {
     ),
 }
 
-# How the same people type at a chat table: short, reactive, in the words a
-# 17A village actually uses. `〇〇` stands for whichever player the line is
-# about -- a real name here would be copied into games it does not belong to.
-# The third line shows how the persona takes an objection. None of them opens
-# with an acknowledgement before holding its view ("その点は認める。ただ…"): that
-# shape came back as a ritual in 17 of 77 lines of the first Claude game.
+# How the same people sound at a chat table: tone only. A line here shows the
+# register -- sentence endings, calls, interjections -- and promises no content:
+# no stance, verdict or procedure, because an example is what the model copies
+# (「根拠言い切ろう！」 came back as m46's 「根拠言い切るぞ！」, 「この矛盾は放置
+# できない！」 as m15's 「放置できないよ！」). `〇〇` stands for whichever player the
+# line is about -- a real name here would be copied into games it does not
+# belong to. None opens with a stock acknowledgement (「確かに」): that shape
+# came back as a ritual in the first Claude game.
 _CHAT_LINES: dict[str, tuple[str, ...]] = {
     "冷静な論客": (
-        "〇〇の票だけ昨日の理由と噛み合ってない。そこ説明ほしい。",
-        "2-1。初手はグレランでいいと思う。",
-        "その説明なら筋は通る。〇〇は一旦下げる。",
+        "〇〇さん、その点を伺ってもいいですか。",
+        "承知しました。",
+        "なるほど、そういう見方ですね。",
     ),
     "元気なムードメーカー": (
-        "おはよー！占いCOは出揃った？",
-        "えっ今の票替え何！？理由きかせて！",
-        "あ、そっか！〇〇の言う通りかも。じゃあ〇〇はいったん外すね！",
+        "おはよー！今日もよろしく！",
+        "えっ、そうなの！？",
+        "〇〇、それってどういうこと！？",
     ),
-    "慎重な観察者": (
-        "今は様子見。〇〇の発言の変化だけ追ってる。",
-        "決め打ちはまだ早いかな。",
-        "…その指摘で見方が変わりました。〇〇さんは一旦保留にします。",
-    ),
-    "自信家のリーダー": (
-        "今日は〇〇と〇〇の2択。反論聞いてから指定出す。",
-        "異論あるなら今のうちに。",
-        "〇〇の結果は動かない。指定は変えない。",
-    ),
-    "疑り深い探偵": (
-        "その理由、昨日の票と合わないよね？",
-        "で、なんで今になって意見変えたの。",
-        "票の食い違いは？そこはまだ消えてないよね。",
-    ),
+    "慎重な観察者": ("…少しいいですか。", "えっと、〇〇さんに一つだけ。", "…わかりました。"),
+    "自信家のリーダー": ("はっきり言う。", "〇〇、答えて。", "任せて。"),
+    "疑り深い探偵": ("ふーん、そう来る？", "で、〇〇はどうなの。", "はいはい、それで？"),
     "優しい世話役": (
-        "まずは順番に意見聞きましょ。",
-        "反対意見も一回聞いてみない？",
-        "なるほど、そう言われるともっともですね。〇〇さんへの見方、変えます。",
+        "〇〇さん、ゆっくりで大丈夫だよ。",
+        "うんうん、聞かせて。",
+        "みんなお疲れさま。",
     ),
     "皮肉屋の理系": (
-        "前提が一個抜けてる。結果の整合を先に見て。",
-        "印象論はいいから材料出して。",
-        "数字が出たなら考えを変える。出てないなら変えない。",
+        "はあ、なるほどね。",
+        "で、結局どういうこと？",
+        "まあ、そういう見方もあるか。",
     ),
-    "熱血な正義漢": (
-        "曖昧なまま吊るのは嫌だ！根拠言い切ろう！",
-        "そこ怪しい！説明して！",
-        "根拠が出るまでは引かないぞ！",
-    ),
-    "のんびり屋": (
-        "まあ回答待ってからでも遅くないよ〜",
-        "うーん、今んとこ〇〇がちょっと気になるかな。",
-        "あ〜そっか、そうかも。〇〇はいったん置いとくよ〜",
-    ),
-    "策略家": (
-        "あえてこの二人の反応を見たい。",
-        "結論は伏せる。でもその質問は大事。",
-        "その線は面白い。いったん乗って、〇〇の反応を見よう。",
-    ),
+    "熱血な正義漢": ("よし、いくぞ！", "〇〇、はっきり答えてくれ！", "なんだって！？"),
+    "のんびり屋": ("ふあ〜、おはよ〜", "うーん、どうだろうね〜", "〇〇はどう思う〜？"),
+    "策略家": ("ふふ、面白いですね。", "さて、どうしましょうか。", "〇〇さんはどう見ます？"),
     "新人風の初々しさ": (
-        "えっと、投票理由を教えてもらえますか…？",
-        "まだ迷ってます。ここが気になって。",
-        "あっ、そうなんですね…納得しました。〇〇さんは外します。",
+        "えっと、すみません、いいですか…？",
+        "あっ、はい…！",
+        "〇〇さん、あの…一つ聞いても…？",
     ),
-    "ベテランの古参": (
-        "焦るな。昨日の票を順に見よう。",
-        "急いで結論出す場面じゃない。",
-        "そこは譲れん。結果が出たら考え直す。",
-    ),
+    "ベテランの古参": ("まあ落ち着け。", "ふむ、そう来たか。", "〇〇、話を聞こう。"),
     "陽気なお調子者": (
-        "おっと、その票替えは見逃せないねぇ",
-        "冗談はさておき、理由は聞きたいな。",
-        "おっと一本取られた！〇〇の指摘はもっともだ、考え直すわ。",
+        "おっと〜、そう来たか！",
+        "いやいや、参ったね！",
+        "〇〇さん、ちょっと聞いていい？",
     ),
-    "無口な実務家": ("結論。今日は〇〇。", "理由は票と回答の不一致。", "了解。〇〇に変更。"),
-    "情熱的な扇動家": (
-        "ここで意見揃えよう！",
-        "この矛盾は放置できない！",
-        "〇〇の票の説明がまだ！ここは押す！",
-    ),
-    "素朴な聞き手": (
-        "そこもう少し聞いていい？",
-        "今の説明でちょっと納得した。",
-        "ああ、そういうことか。〇〇は外す。",
-    ),
-    "長考する参謀": (
-        "二つの視点で分けて整理する。",
-        "判定と投票を合わせると、この内訳が自然。",
-        "その視点も並べて、判定と合わせてから決めます。",
-    ),
+    "無口な実務家": ("了解。", "一つだけ。", "以上。"),
+    "情熱的な扇動家": ("みんな、聞いてくれ！", "ここが勝負所だよ！", "〇〇、どうなんだ！"),
+    "素朴な聞き手": ("へえ、そうなんだ。", "そこもう少し聞いていい？", "ああ、そういうことか。"),
+    "長考する参謀": ("少し整理させてください。", "順に見ていきます。", "では、結論から言います。"),
 }
 
 # The cadence axes are part of the presets (rather than assigned per game),
@@ -485,7 +436,6 @@ PERSONALITIES = [
         # app down rather than just losing its examples.
         sample_lines=_SAMPLE_LINES.get(personality.name, ()),
         chat_lines=_CHAT_LINES.get(personality.name, ()),
-        openness=_OPENNESS.get(personality.name, "normal"),
     )
     for index, personality in enumerate(PERSONALITIES)
 ]

@@ -18,7 +18,6 @@ from app.ai.knowledge_base import KnowledgeBase
 from app.ai.personalities import (
     CHAT_STAGE_MAX_CHARS,
     CHAT_TURN_CHARS,
-    OPENNESS_TEXT,
     PERSONA_CADENCE,
     PERSONALITIES,
     Personality,
@@ -210,7 +209,6 @@ def test_doctrine_the_chat_register_reads_carries_no_checklist_to_recite():
 
 
 def test_no_persona_is_handed_a_stock_acknowledgement():
-    assert all("確かに" not in text for text in OPENNESS_TEXT.values())
     for personality in PERSONALITIES:
         assert all("確かに" not in line for line in personality.chat_lines), personality.name
         chat = personality.to_prompt_section(chat=True)

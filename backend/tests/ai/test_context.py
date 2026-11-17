@@ -679,7 +679,8 @@ def test_chat_personality_section_avoids_the_thinking_label_but_structured_keeps
     for personality in PERSONALITIES:
         chat = personality.to_prompt_section(chat=True)
         assert "思考" not in chat
-        assert "- 考え方の癖: " in chat
+        # The thinking habit is not in the v3 persona at all (tone and amount only).
+        assert "- 考え方の癖: " not in chat
         assert f"- 思考スタイル: {personality.thinking_style}" in personality.to_prompt_section()
 
 

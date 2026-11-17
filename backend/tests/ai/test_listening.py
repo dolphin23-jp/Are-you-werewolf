@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from app.ai.context import ContextBuilder, DaySummaryManager
 from app.ai.deception import FakeClaimGuard, WolfDeceptionAssignment
-from app.ai.personalities import OPENNESS_TEXT, PERSONALITIES, assign_personalities
+from app.ai.personalities import PERSONALITIES, assign_personalities
 from app.engine.roles import RoleName
 from app.engine.state import PendingQuestion
 from tests.ai.reasoning.fixtures import declare_co, publish_result
@@ -182,16 +182,10 @@ def test_the_v3_system_prompt_teaches_listening_and_the_older_prompts_are_untouc
     assert "意見の聞き方" not in legacy
 
 
-def test_every_persona_has_an_openness_and_all_three_kinds_exist():
-    kinds = {personality.openness for personality in PERSONALITIES}
-
-    assert kinds == set(OPENNESS_TEXT)
-    for kind in OPENNESS_TEXT:
-        assert sum(p.openness == kind for p in PERSONALITIES) >= 3
-
-
-def test_the_chat_persona_states_how_it_listens_and_the_structured_one_does_not():
+def test_no_persona_says_how_far_an_argument_moves_it():
+    """How a seat takes an argument is the table's rule (【聞き入れ方】), the same
+    for everyone; a persona changes tone and amount only (owner decision on the
+    seed-1 review)."""
     for personality in PERSONALITIES:
-        chat = personality.to_prompt_section(chat=True)
-        assert OPENNESS_TEXT[personality.openness] in chat
+        assert "意見の聞き方" not in personality.to_prompt_section(chat=True)
         assert "意見の聞き方" not in personality.to_prompt_section()
