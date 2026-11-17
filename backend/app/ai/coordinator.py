@@ -176,6 +176,16 @@ _PROVISIONAL_STAGE = "provisional_designation"
 _FACILITATOR_FOLLOWUP_STAGE = "facilitator_followup"
 _MAX_FACILITATOR_FOLLOWUPS = 2
 
+# A closing line that declares the day a grey-random one: 「今日はグレランで」,
+# 「グレランにします」, 「灰ラン。」. Only a declaration counts -- 「グレランでは
+# なく」, 「グレランでもいいけど」 and 「グレランにしない」 do not -- because
+# reading a mention as one would close the day with no designation. A miss
+# costs one extra designation turn instead.
+_GREY_RANDOM_DECLARED = re.compile(
+    r"(?:グレー?|灰)ラン(?:ダム)?"
+    r"(?:で(?![はも])|に(?:す|決|し(?!な|ませ))|と(?:す|し)|[。！!]|$)"
+)
+
 # The closing lines whose follow-ups the scheduler opens (answers, a defence,
 # the designation) instead of queueing ordinary replies.
 _SUMMARY_STAGES = ("consensus_summary", _PROVISIONAL_STAGE)
@@ -1574,6 +1584,11 @@ class AICoordinator:
         though the facilitator doctrine says to hear the candidate before
         the final designation. Asked and named, it still answers once. A
         living human named this way is given the floor, as when asked.
+
+        A closing line that declares a grey-random day (「今日はグレランで」)
+        names nobody on purpose: the seats it asked still answer, but no
+        candidate defends -- a plan-note lean is not a designation then --
+        and there is no final designation. The vote follows.
         """
         book = self._book_for(round_state)
         book.summary_speaker = speaker_id
@@ -1595,6 +1610,13 @@ class AICoordinator:
             and state.players[target].alive
         ):
             target = None
+        if _GREY_RANDOM_DECLARED.search(output.public_message):
+            book.defence_target = None
+            book.summary_answers = [pid for pid in named if self._may_schedule(state, pid)]
+            book.summary_asked_human = waiting_human is not None and waiting_human in named
+            self._collect_owed_replies(state, round_state, book)
+            book.designation_pending = False
+            return bool(book.summary_answers or book.owed_replies or book.summary_asked_human)
         if target is None and not named and not provisional and not book.provisional_used:
             book.provisional_used = True
             book.unheard_after_summary = True

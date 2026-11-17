@@ -886,3 +886,70 @@ def test_the_follow_up_turn_says_what_it_is_for():
     assert scene.startswith("【いまの場面】進行役の受け。")
     assert "60字以内" in scene
     assert _scene(state, FOLLOW_UP, engine="legacy").startswith("【議論段階】進行役の受け。")
+
+
+# -- 1-B2 / 1-C2: a grey-random day closes without naming anyone --
+
+
+def test_a_grey_random_summary_closes_the_day_without_a_designation():
+    """Seed 1: the summary and designation texts demanded one name even on a grey-random day."""
+    table = _Table({SUMMARY: _line("占いは吊らず、今日はグレランで。")})
+    controller, coordinator = _day_two_table(table)
+    session = _session(controller)
+
+    asyncio.run(asyncio.wait_for(coordinator.run_discussion_round(session), 30))
+
+    assert _after(table.turns) == [("p1", SUMMARY)]
+    assert session.discussion_round.complete is True
+
+
+def test_a_grey_random_summary_still_hears_whom_it_asked_and_defends_nobody():
+    summary = _asking("今日はグレランにします。p7さん、何かある？", "p7", target="p5")
+    table = _Table({SUMMARY: summary})
+    controller, coordinator = _day_two_table(table)
+
+    asyncio.run(asyncio.wait_for(coordinator.run_discussion_round(_session(controller)), 30))
+
+    # p5 is only the facilitator's own lean on a grey-random day: no defence.
+    assert _after(table.turns) == [("p1", SUMMARY), ("p7", ANSWER)]
+
+
+def test_a_grey_random_provisional_designation_closes_the_day():
+    table = _Table({PROVISIONAL: _line("それなら今日はグレランで。")})
+    controller, coordinator = _small_table(table)
+
+    asyncio.run(asyncio.wait_for(coordinator.run_discussion_round(_session(controller)), 10))
+
+    assert _after(table.turns) == [("p1", SUMMARY), ("p1", PROVISIONAL)]
+
+
+def test_a_summary_that_only_mentions_grey_random_is_not_one():
+    """Turning grey-random down, or musing about it, does not close the day."""
+    for text in (
+        "グレランではなく指定にしたい。皆さんは？",
+        "グレランでもいいけど、誰が気になる？",
+        "グレランにしないなら誰？",
+    ):
+        table = _Table({SUMMARY: _line(text), PROVISIONAL: _line("仮指定はp3。", target="p3")})
+        controller, coordinator = _small_table(table)
+
+        asyncio.run(asyncio.wait_for(coordinator.run_discussion_round(_session(controller)), 10))
+
+        assert _after(table.turns)[:2] == [("p1", SUMMARY), ("p1", PROVISIONAL)], text
+
+
+def test_the_closing_scenes_say_who_answers_next_when_the_vote_starts_and_allow_grey_random():
+    state = make_controller(seed=4).state
+    state.day = 2
+    for engine in ("v3", "legacy"):
+        summary = _scene(state, SUMMARY, engine)
+        designation = _scene(state, DESIGNATION, engine)
+        provisional = _scene(state, PROVISIONAL, engine)
+
+        for scene in (summary, designation, provisional):
+            assert "グレラン" in scene, (engine, scene)
+            assert "投票に入" in scene, (engine, scene)
+        # Who speaks between the summary and the vote.
+        assert "答え" in summary and "本指定" in summary, engine
+        assert "弁明" in provisional and "本指定" in provisional, engine
+        assert "すぐ投票に入" in designation, engine
