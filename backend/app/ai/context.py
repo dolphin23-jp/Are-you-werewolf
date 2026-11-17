@@ -63,6 +63,22 @@ _MAX_KEY_POINTS_SHOWN = 12
 _DIGEST_ITEMS = 3
 _DIGEST_QUOTE_CHARS = 70
 
+# Each faction's win, for its v3 role card. Checked after every execution and
+# every night by `VictoryChecker`; the madman and the fox count as non-wolves.
+_WIN_LINES: dict[Team, str] = {
+    Team.VILLAGE: (
+        "【勝利条件】人狼が0人になった時点で村の勝ち。ただし妖狐が生きていれば妖狐の勝ち"
+    ),
+    Team.WEREWOLF: (
+        "【勝利条件】人狼が人狼以外（狂人・妖狐も数える）と同数以上になった時点で人狼陣営の勝ち。"
+        "ただし妖狐が生きていれば妖狐の勝ち。人狼が0人になれば負け"
+    ),
+    Team.FOX: (
+        "【勝利条件】人狼が0人になった時点、または人狼が人狼以外と同数以上になった時点で、"
+        "生きていれば妖狐の勝ち（村・人狼の勝ちを奪う）"
+    ),
+}
+
 # The turns that steer a day, and how a prompt quotes them: the summary and
 # the closing designation. A day with several of one keeps the last.
 _DIRECTION_STAGES: dict[str, str] = {
@@ -509,7 +525,7 @@ class ContextBuilder:
             "- plan_noteのexecution_targetには、決めきれていなくても今日投票するつもりの相手を"
             "毎回書く。材料が何もないときだけnull\n"
             "- 発言で推した吊り先と投票先は原則そろえる。変えるときは一言理由を言う\n"
-            "- 自分の陣営の勝ちを目指す。人狼・狂人は本当の目的を発言で漏らさない。"
+            "- 自分の陣営の勝ちを目指す。人狼・狂人・妖狐は本当の目的を発言で漏らさない。"
             "妖狐は占われないこと・最後まで生き残ることを目指す\n"
             "- 「もっとも狼らしい人」と「今日吊るべき人」は別。縄数、霊結果の価値、真役職を"
             "失う損失、狐の生存はplan_noteで比べてから決める\n"
@@ -524,6 +540,12 @@ class ContextBuilder:
         lines = [
             f"【役職情報】あなたの役職は「{definition.label_ja}」です。{definition.description_ja}"
         ]
+        if self._chat:
+            # When each side wins, as `app/engine/victory.py` decides it: a
+            # rule, not advice. Without it the fox's card said only that it
+            # wins by surviving, and nobody read the last wolf's execution as
+            # the fox's win (seed-1 review 5-B2).
+            lines.append(_WIN_LINES[definition.team])
 
         if player.role == RoleName.WEREWOLF:
             allies = [
