@@ -394,6 +394,9 @@ class _Renderer:
             elif verdict is not None and verdict.ally_kind is AllyVoteKind.DESIGNATED:
                 planned += "・本指定どおりで、この票を除いても処刑は同じ（合否に数えない）"
             parts.append(f"仲間への投票: {planned}")
+        if verdict is not None and verdict.reason_names_other:
+            others = _seat_list(self.names, verdict.reason_names_other)
+            parts.append(f"理由が別の相手（{others}）への投票を述べている")
         return [f"  - 監査: {' ／ '.join(parts)}"] if parts else []
 
     def _vote_outcome(self, day: int) -> list[str]:

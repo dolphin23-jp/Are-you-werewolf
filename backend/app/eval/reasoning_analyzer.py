@@ -102,6 +102,68 @@ def named_seat_ids(text: str, names: Mapping[str, str]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(seat for _start, _end, seat in mention_spans(text, names)))
 
 
+# -- a ballot's reason that names another seat as where it goes --
+
+_HONORIFIC = r"(?:さん|くん|君|ちゃん|氏|様)?"
+# The voter's own ballot, in the forms that state or propose it: 入れる / 入れます /
+# 入れよう / 入れとく / 入れておく / 入れちゃう, 投票する / します / しよう / しとく /
+# しておく, or 一票 (に一票。 / に一票入れる).
+_OWN_BALLOT = (
+    r"(?:に|へ)\s*(?:一票(?:を)?(?:入れ(?:る|ます|よう|とく|ておく|ちゃう))?"
+    r"|入れ(?:る|ます|よう|とく|ておく|ちゃう)"
+    r"|投票(?:する|します|しよう|しとく|しておく))"
+)
+# What may follow: the end of the clause or a sentence-final particle. Not
+# って / と (a quotation), か (a question), な (入れるな), の (入れるのは違う),
+# or a noun the verb modifies (入れる人) -- each of those is about a ballot,
+# not the voter's own.
+_BALLOT_END = r"(?=$|[。．.！!、,，\s…〜~ー」』）)]|[よねわぞぜ]|けど|けれど|から)"
+# Another seat standing as the subject of the clause: 「アオイはレンに入れる」.
+_SUBJECT_AFTER = r"\s*" + _HONORIFIC + r"\s*[はがも]"
+_CONNECTIVE = re.compile(r"から|ので|けど|けれど|ため|のに")
+
+
+def seats_reason_votes_for(
+    reason: str, voter_id: str, target_id: str | None, names: Mapping[str, str]
+) -> tuple[str, ...]:
+    """Seats other than the ballot's target that the reason says the ballot goes to.
+
+    Read from the form 「Xに入れる」/「Xに投票します」/「Xに一票」 with the voter as
+    the subject: past and progressive forms (入れた, 入れてる), a quotation, a
+    question and a modified noun describe somebody's ballot, not this one, and
+    a clause whose subject is another seat is that seat's. Seed 1's ツムギ
+    voted ホノカ with 「寡黙気味のレンさんに入れるよ」. Listed for a reader, never
+    used to re-decide the ballot.
+    """
+    found: list[tuple[int, str]] = []
+    for seat, name in names.items():
+        if seat in (voter_id, target_id):
+            continue
+        for label in {seat, name} - {""}:
+            pattern = re.compile(
+                _label_pattern(label).pattern + _HONORIFIC + _OWN_BALLOT + _BALLOT_END
+            )
+            for match in pattern.finditer(reason):
+                clause = re.split(r"[。．！!？?、,，\n]", reason[: match.start()])[-1]
+                if not _another_subject(clause, names):
+                    found.append((match.start(), seat))
+    return tuple(dict.fromkeys(seat for _start, seat in sorted(found)))
+
+
+def _another_subject(clause: str, names: Mapping[str, str]) -> bool:
+    """Whether a seat is the subject of the ballot in this clause (「アオイはレンに入れる」).
+
+    Not when a connective closes the seat's own predicate first: in
+    「ハルトが怪しいからレンに入れる」 ハルト is the subject of 怪しい, and the
+    ballot is the voter's.
+    """
+    for _start, end, _seat in mention_spans(clause, names):
+        subject = re.match(_SUBJECT_AFTER, clause[end:])
+        if subject and not _CONNECTIVE.search(clause[end + subject.end() :]):
+            return True
+    return False
+
+
 # -- one ballot, classified --
 
 
@@ -283,6 +345,9 @@ class BallotVerdict:
     # The round's tally, most votes first: what a reader checks "decided
     # nothing" against.
     tally: tuple[tuple[str, int], ...] = ()
+    # Seats other than the target the reason says the ballot goes to
+    # (`seats_reason_votes_for`). Listed in the report, never judged.
+    reason_names_other: tuple[str, ...] = ()
 
     @property
     def hard_change(self) -> bool:
@@ -340,6 +405,9 @@ def audit_ballots(transcript: GameTranscript) -> tuple[BallotVerdict, ...]:
                 vote_only=audit.vote_only,
                 ally_vote=audit.ally_vote,
                 ally_vote_planned=audit.ally_vote_planned,
+                reason_names_other=seats_reason_votes_for(
+                    reason, audit.player_id, audit.vote_target, record.names
+                ),
                 **ally,
             )
         )
@@ -588,6 +656,9 @@ class ReasoningQualityReport:
     # the execution: listed in the report, not a gate failure.
     designated_wolf_ally_vote_count: int = 0
     unplanned_wolf_ally_vote_count: int = 0
+    # Ballots whose reason says they go to another seat (「Xに入れる」 for an X
+    # that is not the target). Listed with quotes; not a gate failure.
+    vote_reason_names_other_count: int = 0
     illegal_timeline_claim_count: int = 0
     duplicate_night_action_count: int = 0
     correction_messages_heard: int = 0
@@ -723,6 +794,7 @@ class ReasoningTranscriptAnalyzer:
             planned_wolf_ally_vote_count=planned_ally,
             designated_wolf_ally_vote_count=len(ally_votes) - planned_ally - unplanned_ally,
             unplanned_wolf_ally_vote_count=unplanned_ally,
+            vote_reason_names_other_count=sum(bool(v.reason_names_other) for v in ballots),
             correction_messages_heard=len(tuple(corrections)),
             corrections_confirmed=sum(record.verdict == "confirmed" for record in corrections),
             corrections_refuted=sum(record.verdict == "refuted" for record in corrections),

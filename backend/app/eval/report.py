@@ -533,6 +533,7 @@ def _render_ballot_lists(games: list[tuple[GameTranscript, AnalysisResult]]) -> 
     unspoken_rows: list[str] = []
     justified_rows: list[str] = []
     designated_rows: list[str] = []
+    mismatch_rows: list[str] = []
     no_basis_lines: list[str] = []
     for transcript, verdicts in audited:
         names = transcript.names
@@ -542,6 +543,12 @@ def _render_ballot_lists(games: list[tuple[GameTranscript, AnalysisResult]]) -> 
             basis = names.get(verdict.basis or "", verdict.basis or "—")
             target = names.get(verdict.vote_target or "", verdict.vote_target or "—")
             day = _day_label(verdict.day, verdict.round_number)
+            if verdict.reason_names_other:
+                others = "、".join(names.get(seat, seat) for seat in verdict.reason_names_other)
+                mismatch_rows.append(
+                    f"| {_seed(transcript)} | {day} | {voter} → {target} | {others} | "
+                    f"{_quote(verdict.reason)} |"
+                )
             if verdict.ally_kind is AllyVoteKind.DESIGNATED:
                 tally = "・".join(
                     f"{names.get(seat, seat)} {count}票" for seat, count in verdict.tally
@@ -603,6 +610,23 @@ def _render_ballot_lists(games: list[tuple[GameTranscript, AnalysisResult]]) -> 
             "| seed | 日 | 投票者 → 仲間 | その日の最後の指定 | 集計 | 票の理由 |",
             "|---|---|---|---|---|---|",
             *designated_rows,
+        ]
+    else:
+        out.append("(ありません)")
+    out += [
+        "",
+        "#### 理由が別の相手への投票を述べている票",
+        "",
+        "理由に「Xに入れる／Xに投票」とあり、X が票の相手でないものです（ほかの席の票を"
+        "述べた文は除いています）。票はモデルが決めたもので、理由から決め直すことは"
+        "しません。合否に数えません。",
+        "",
+    ]
+    if mismatch_rows:
+        out += [
+            "| seed | 日 | 投票者 → 票 | 理由が挙げた相手 | 票の理由 |",
+            "|---|---|---|---|---|",
+            *mismatch_rows,
         ]
     else:
         out.append("(ありません)")
