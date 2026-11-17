@@ -37,4 +37,4 @@ AI評価 run #14 の記録です（`docs/approach-reset-2026-10.md` §11.8）。
 - `prompts-seedN.jsonl.gz`: 各呼び出しのプロンプトの全文（1行1呼び出し）
 - `actions-log-seedN.txt`: Actions の実行ログ（評価ジョブの全文。実行中に表示された進行ログと時刻を含む）
 
-通読した所見は `analysis.md` にまとめています。
+通読した所見は `analysis.md` にまとめています。オーナーの seed 1 レビューの項目ごとの判定と根拠は、seed ごとに `review-check-seedN.md` にあります（点検用のエージェントが、対局時のコミットの記録・プロンプト・コードを読んで書いたもの。主要な主張は `analysis.md` を書くときに確かめ直しています）。
