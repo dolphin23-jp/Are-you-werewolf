@@ -44,6 +44,7 @@ SUMMARY = "consensus_summary"
 # reaction for any seat not under pressure; an answer to the summary is
 # always a 60-character turn now (seed-1 review, 1-A3).
 ANSWER = "summary_answer"
+PROVISIONAL = "provisional_designation"
 
 
 def _human_session(controller: Any, human_id: str = "p0") -> SimpleNamespace:
@@ -153,19 +154,24 @@ def test_a_pause_pressed_while_the_summary_generates_keeps_its_follow_ups():
     ]
 
 
-def test_a_step_on_a_summary_that_closes_the_day_closes_it():
-    """Nothing is left to wait for, so the round is over, not paused."""
+def test_a_step_on_the_line_that_closes_the_day_closes_it():
+    """Nothing is left to wait for, so the round is over, not paused.
+
+    A summary that names nobody no longer closes the day (seed-1 review): the
+    facilitator's provisional designation follows it. Here that names nobody
+    either, so it is the closing line the step lands on.
+    """
     provider = _StagedProvider()
     controller, coordinator, turns = _table(provider)
     session = _human_session(controller)
 
-    async def until_summary() -> None:
-        while SUMMARY not in [stage for _seat, stage in turns]:
+    async def until_closing_line() -> None:
+        while PROVISIONAL not in [stage for _seat, stage in turns]:
             await _press(coordinator, session, "step")
 
-    asyncio.run(until_summary())
+    asyncio.run(until_closing_line())
 
-    assert turns[-1] == ("p1", SUMMARY)
+    assert _after_summary(turns) == [("p1", SUMMARY), ("p1", PROVISIONAL)]
     assert session.discussion_round.complete is True
     assert session.discussion_round.awaiting_human is False
 
@@ -288,7 +294,9 @@ def test_a_dead_human_named_by_the_summary_is_not_waited_for():
 
     asyncio.run(asyncio.wait_for(_drive(coordinator, session, "pass"), timeout=10))
 
-    assert turns[-1] == ("p1", SUMMARY)
+    # A question to a dead seat names nobody, so the day goes on to the
+    # facilitator's provisional designation -- without waiting for anyone.
+    assert _after_summary(turns) == [("p1", SUMMARY), ("p1", PROVISIONAL)]
     assert session.discussion_round.awaiting_human is False
 
 

@@ -803,6 +803,12 @@ class ContextBuilder:
             stage_instruction = (
                 "進行役のまとめで名指しで質問されています。まずその質問に直接答えてください。"
             )
+        elif stage == "provisional_designation":
+            stage_instruction = (
+                "まとめで処刑先が示されなかったため、進行役として仮指定を出してください。"
+                "今日の処刑候補を一人挙げ、理由を1〜2文で述べます。この後その人物が弁明し、"
+                "あなたの本指定のあと投票に入ります。"
+            )
         elif stage == "consensus_summary":
             stage_instruction = (
                 "第一候補だけでなく第二候補、第一候補を処刑しない最強の理由、"
@@ -928,6 +934,12 @@ class ContextBuilder:
             return f"人間のプレイヤーの発言に応答する。{cap}字以内。"
         if stage == "summary_answer":
             return f"進行役のまとめで名指しで聞かれた。まずその問いに答える。{cap}字以内。"
+        if stage == "provisional_designation":
+            return (
+                "まとめで吊り先が出なかったので、進行役として仮指定を出す。今日の吊り先を"
+                f"一人挙げ、理由を一言。{cap}字以内。この後その人が一言弁明し、"
+                "あなたの本指定のあと投票に入る。"
+            )
         if stage == "open_floor":
             # The seat has had no turn today. The turn is its opportunity;
             # nothing here suggests what to use it for.
@@ -1214,6 +1226,7 @@ class ContextBuilder:
             "human_followup": "人間発言への応答",
             "open_floor": "ひとこと",
             "summary_answer": "まとめへの回答",
+            "provisional_designation": "仮指定",
         }.get(stage, "議論")
 
 

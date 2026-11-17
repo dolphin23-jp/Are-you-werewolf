@@ -185,13 +185,18 @@ def test_the_designation_is_told_to_decide_without_asking_again():
     assert not any("【議論段階】本指定。" in user for user in others)
 
 
-def test_a_summary_without_questions_still_closes_the_round_at_once():
+def test_a_summary_naming_nobody_goes_on_to_a_provisional_designation():
+    # This pinned that a summary with no question closed the round at once.
+    # Seed 1's day 2 closed that way on 「皆さんは気になるグレーの方はいますか…？」,
+    # a question to nobody by name, and the vote began with no candidate.
+    # Now the facilitator gives a provisional designation; it names nobody
+    # here either, so that closes the day (once a day, no designation).
     provider = _StagedProvider()
     controller, coordinator, turns = _table(provider)
 
     asyncio.run(coordinator.run_discussion_round(_session(controller)))
 
-    assert turns[-1] == ("p1", "consensus_summary")
+    assert turns[-2:] == [("p1", "consensus_summary"), ("p1", "provisional_designation")]
     assert _FINAL_DESIGNATION_STAGE not in [stage for _seat, stage in turns]
 
 

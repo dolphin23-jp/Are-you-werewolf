@@ -310,7 +310,10 @@ def test_direct_reply_queue_is_globally_bounded_and_returns_control():
 
     asyncio.run(coordinator.run_discussion_round(session))
 
-    assert provider.calls <= 5
+    # Five, plus the facilitator's one provisional designation: the summary
+    # here questions only its own speaker, which names nobody, and since the
+    # seed-1 review such a summary no longer ends the day on its own.
+    assert provider.calls <= 6
     # Questions now reach targets even before their first turn; the target can
     # therefore be queued for a focused follow-up rather than being discarded.
     authors = [message.author_id for message in controller.state.chat_log]

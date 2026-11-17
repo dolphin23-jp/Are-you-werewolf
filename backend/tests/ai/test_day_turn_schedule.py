@@ -46,16 +46,19 @@ class _Table:
 
     `script` answers a stage; `by_seat` answers one seat's turns at a stage,
     as (seat, stage) -> output, and wins over `script`. Anything else is a
-    plain line with no candidate and no question.
+    plain line with no candidate and no question. A (seat, stage) in
+    `silent` fails every request of that turn.
     """
 
     def __init__(
         self,
         script: dict[str, DiscussionOutput] | None = None,
         by_seat: dict[tuple[str, str], DiscussionOutput] | None = None,
+        silent: set[tuple[str, str]] | None = None,
     ) -> None:
         self.script = script or {}
         self.by_seat = by_seat or {}
+        self.silent = silent or set()
         self.stage = ""
         self.speaker = ""
         self.calls: list[tuple[str, str]] = []
@@ -68,6 +71,8 @@ class _Table:
         if response_schema is MorningIntentOutput:
             return MorningIntentOutput()
         self.calls.append((self.speaker, self.stage))
+        if (self.speaker, self.stage) in self.silent:
+            return None
         output = self.by_seat.get(
             (self.speaker, self.stage),
             self.script.get(self.stage, DiscussionOutput(public_message="見解を述べます。")),
@@ -557,3 +562,79 @@ def test_the_answer_turn_says_what_it_is_for_in_both_registers():
     assert scene.startswith("【いまの場面】まとめへの回答。")
     assert "60字以内" in scene
     assert structured.startswith("【議論段階】まとめへの回答。")
+
+
+# -- 1-A4 (4) / 計画不実行: a summary that names nobody does not end the day --
+
+PROVISIONAL = "provisional_designation"
+DESIGNATION = "final_designation"
+DEFENCE = "rebuttal_or_reassessment"
+
+
+def _after(turns: list[tuple[str, str]], stage: str = SUMMARY) -> list[tuple[str, str]]:
+    return turns[[s for _seat, s in turns].index(stage) :]
+
+
+def test_a_summary_naming_nobody_goes_on_to_a_provisional_designation_and_a_defence():
+    """Seed 1, day 2, m38: 「皆さんは気になるグレーの方はいますか…？」 closed the day.
+
+    The question was in the prose only -- no named seat, no candidate -- and
+    the vote began with nobody designated and nobody heard in their defence.
+    """
+    table = _Table(
+        {
+            SUMMARY: _line("占いは今日は吊らず。皆さんは気になるグレーの方はいますか…？"),
+            PROVISIONAL: _line("仮指定はp5。理由は発言が少ないこと。", target="p5"),
+            DESIGNATION: _line("本指定はp5。", target="p5"),
+        }
+    )
+    controller, coordinator = _day_two_table(table)
+    session = _session(controller)
+
+    asyncio.run(asyncio.wait_for(coordinator.run_discussion_round(session), 30))
+
+    assert _after(table.turns) == [
+        ("p1", SUMMARY),
+        ("p1", PROVISIONAL),
+        ("p5", DEFENCE),
+        ("p1", DESIGNATION),
+    ]
+    assert session.discussion_round.complete is True
+    round_state = session.discussion_round
+    assert len(round_state.outputs) <= round_state.max_total
+
+
+def test_after_a_summary_naming_nobody_any_seat_still_unheard_speaks_first():
+    """Day 1: p3's turn failed, so it had no line when the summary came."""
+    table = _Table(silent={("p3", "initial_view")})
+    controller, coordinator = _small_table(table)
+
+    asyncio.run(asyncio.wait_for(coordinator.run_discussion_round(_session(controller)), 10))
+
+    assert _after(table.turns) == [("p1", SUMMARY), ("p3", OPEN_FLOOR), ("p1", PROVISIONAL)]
+
+
+def test_a_provisional_designation_naming_nobody_closes_the_day_once():
+    """Bounded: one provisional designation a day, and nobody named means no defence."""
+    table = _Table()
+    controller, coordinator = _small_table(table)
+    session = _session(controller)
+
+    asyncio.run(asyncio.wait_for(coordinator.run_discussion_round(session), 10))
+
+    assert _after(table.turns) == [("p1", SUMMARY), ("p1", PROVISIONAL)]
+    assert session.discussion_round.complete is True
+
+
+def test_the_provisional_designation_says_who_speaks_next_and_when_the_vote_starts():
+    state = make_controller(seed=4).state
+    state.day = 2
+
+    scene = _scene(state, PROVISIONAL)
+    structured = _scene(state, PROVISIONAL, engine="legacy")
+
+    assert scene.startswith("【いまの場面】仮指定。")
+    assert "60字以内" in scene
+    assert "弁明" in scene and "投票" in scene
+    assert structured.startswith("【議論段階】仮指定。")
+    assert "弁明" in structured and "投票" in structured

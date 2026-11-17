@@ -166,6 +166,14 @@ _OPEN_FLOOR_STAGE = "open_floor"
 # answer the day is about to be decided on.
 _SUMMARY_ANSWER_STAGE = "summary_answer"
 
+# The facilitator's second try when the summary named nobody: a candidate,
+# then that seat's defence, then the final designation. Once a day.
+_PROVISIONAL_STAGE = "provisional_designation"
+
+# The closing lines whose follow-ups the scheduler opens (answers, a defence,
+# the designation) instead of queueing ordinary replies.
+_SUMMARY_STAGES = ("consensus_summary", _PROVISIONAL_STAGE)
+
 # A wolf-chat sentence that puts a partner up for the ballot, read by
 # `_wolf_chat_ballot_plan`. A planned vote on a partner passes the release
 # gate, and the two ways of misreading the chat are not equally bad: a false
@@ -498,6 +506,13 @@ class _RoundBook:
     # for them: the table stops right after it so they have the floor first.
     summary_asked_human: bool = False
     designation_pending: bool = False
+    # The seat the closing line put up for the hang, owed a defence turn.
+    defence_target: str | None = None
+    # A summary that named nobody: the unheard seats speak, then the
+    # facilitator gives a provisional designation. Once a day.
+    provisional_used: bool = False
+    unheard_after_summary: bool = False
+    provisional_pending: bool = False
     # Seats whose place in the opening order is their partner confirmation:
     # named during the morning, they close the morning block with it.
     confirmation_turns: set[str] = field(default_factory=set)
@@ -920,7 +935,7 @@ class AICoordinator:
                 # summary used to stop the loop before its follow-ups were
                 # queued, and the next segment found nothing left to say.
                 waits_for_human = False
-                if stage == "consensus_summary":
+                if stage in _SUMMARY_STAGES:
                     # A summary that asks the candidate for a last word used
                     # to close the round before the question was queued, so
                     # the answer never came (five of six days in the first
@@ -931,6 +946,7 @@ class AICoordinator:
                         pid,
                         output,
                         waiting_human=human_id if can_pause else None,
+                        provisional=stage == _PROVISIONAL_STAGE,
                     ) and self._close_round(state, round_state):
                         break
                     # A question to the human is theirs to answer before any
@@ -952,7 +968,7 @@ class AICoordinator:
                 if can_pause and (waits_for_human or getattr(session, "discussion_paused", False)):
                     self._set_awaiting(round_state, True)
                     break
-                if stage in ("consensus_summary", _FINAL_DESIGNATION_STAGE):
+                if stage in (*_SUMMARY_STAGES, _FINAL_DESIGNATION_STAGE):
                     continue
                 for question in output.directed_questions:
                     self._round_queue_reply(state, round_state, question.target_id)
@@ -1523,8 +1539,9 @@ class AICoordinator:
         output: DiscussionOutput,
         *,
         waiting_human: str | None = None,
+        provisional: bool = False,
     ) -> bool:
-        """Queue the answers a summary asked for. False when there is nothing to wait for.
+        """Queue what a closing line opened. False when there is nothing to wait for.
 
         Each AI seat the summary put a question to answers once, in the order
         asked, and the summariser then closes with a short designation. A
@@ -1534,15 +1551,49 @@ class AICoordinator:
         noted, so the round gives them the floor before the AI answers and
         the designation, and the designation follows their turn even when
         no AI seat was asked.
+
+        A summary that names neither a candidate nor anyone in its questions
+        no longer ends the day (seed 1, day 2: 「皆さんは気になるグレーの方は
+        いますか…？」 asked nobody by name, and the vote began). The seats
+        still unheard speak, then the facilitator gives a provisional
+        designation (`provisional`): its candidate defends, then the final
+        designation. Once a day -- a provisional designation that names
+        nobody either closes the day.
         """
         book = self._book_for(round_state)
         book.summary_speaker = speaker_id
-        named = dict.fromkeys(question.target_id for question in output.directed_questions)
-        book.summary_answers = [
-            target
-            for target in named
-            if target in self._agents and target != speaker_id and state.players[target].alive
-        ]
+        named = dict.fromkeys(
+            question.target_id
+            for question in output.directed_questions
+            if question.target_id in state.players
+            and question.target_id != speaker_id
+            and state.players[question.target_id].alive
+            and question.question.strip()
+        )
+        target = output.reasoning_memo.execution_target
+        if not (
+            isinstance(target, str)
+            and target != speaker_id
+            and target in state.players
+            and state.players[target].alive
+        ):
+            target = None
+        if target is None and not named and not provisional and not book.provisional_used:
+            book.provisional_used = True
+            book.unheard_after_summary = True
+            book.provisional_pending = True
+            book.summary_answers = []
+            book.summary_asked_human = False
+            self._collect_owed_replies(state, round_state, book)
+            return True
+        # A provisional designation's candidate defends before the close.
+        defence = target if provisional and target is not None else None
+        if defence is not None and not self._may_schedule(state, defence):
+            defence = None
+        book.defence_target = defence
+        answers = [book.defence_target] if book.defence_target is not None else []
+        answers += [pid for pid in named if self._may_schedule(state, pid)]
+        book.summary_answers = list(dict.fromkeys(answers))
         book.summary_asked_human = waiting_human is not None and waiting_human in named
         self._collect_owed_replies(state, round_state, book)
         book.designation_pending = bool(
@@ -1555,9 +1606,10 @@ class AICoordinator:
     ) -> tuple[str | None, str]:
         """After the summary: its addressees, anyone still owed an answer, then the close.
 
-        Bounded on purpose -- each addressee once, each accusation once, one
-        designation -- and every pick removes itself before it is returned,
-        so a seat whose generation fails cannot hold the close open.
+        Bounded on purpose -- each addressee once, each accusation once, each
+        unheard seat once, one provisional designation, one designation --
+        and every pick removes itself before it is returned, so a seat whose
+        generation fails cannot hold the close open.
         """
         self._collect_owed_replies(state, round_state, book)
         while book.summary_answers or book.owed_replies:
@@ -1566,9 +1618,20 @@ class AICoordinator:
             if pid in book.owed_replies:
                 book.owed_replies.remove(pid)
             if pid in self._agents and state.players[pid].alive:
-                pressed = pid in round_state.major_targets
+                defends = pid in round_state.major_targets or pid == book.defence_target
                 self._grant_extra_turn(round_state)
-                return pid, "rebuttal_or_reassessment" if pressed else _SUMMARY_ANSWER_STAGE
+                return pid, "rebuttal_or_reassessment" if defends else _SUMMARY_ANSWER_STAGE
+        if book.unheard_after_summary:
+            unheard = self._take_unheard_seat(state, round_state, book)
+            if unheard is not None:
+                return unheard, _OPEN_FLOOR_STAGE
+            book.unheard_after_summary = False
+        if book.provisional_pending:
+            book.provisional_pending = False
+            speaker = book.summary_speaker
+            if speaker is not None and self._may_schedule(state, speaker):
+                self._grant_extra_turn(round_state)
+                return speaker, _PROVISIONAL_STAGE
         if book.designation_pending:
             book.designation_pending = False
             speaker = book.summary_speaker

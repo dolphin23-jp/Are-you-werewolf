@@ -34,6 +34,8 @@ CHAT_STAGE_MAX_CHARS: dict[str, int] = {
     "open_floor": 60,
     # A seat the summary named, answering it: never the reaction's 30.
     "summary_answer": 60,
+    # The facilitator's candidate when the summary named nobody.
+    "provisional_designation": 60,
     "immediate": 120,
     "consensus_summary": 120,
     # The close after the summary's answers: today's candidate, in a word.
