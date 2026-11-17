@@ -79,6 +79,7 @@ def _game() -> GameTranscript:
         _u("night_action", "p1", 1, phase="night", text="狐を探す", target="p4"),
         _u("night_action", "p3", 1, phase="night", text="占いを守る", target="p1"),
         _u("wolf_chat", "p2", 1, phase="night", text="ソウタを噛む"),
+        _u("night_action", "p2", 1, phase="night", text="グレーを削る", target="p4"),
     ]
     final_state = {
         "chat_log": [
@@ -193,9 +194,12 @@ def test_nights_carry_reasons_and_results_and_mornings_their_dead() -> None:
     assert "  - 結果: 黒（人狼）" in page
     assert "  - 結果: 白（人狼ではない）" in page
     assert (
-        "  - 結果: 護衛先が襲撃され、守った" not in page
+        "護衛先が襲撃され、守った" not in page
     )  # レン guarded ハルト; the bite went elsewhere
-    assert "  - 結果: 護衛先は襲撃されなかった" in page
+    assert "  - 実際の結果（本人には知らされない）: 護衛先は襲撃されなかった" in page
+    # The hunter's and the wolves' outcomes are the god's-eye record, labelled as such;
+    # only the seer is told its result.
+    assert "  - 実際の結果（本人には知らされない）: ソウタ(p4)への襲撃は失敗" in page
     assert "- 朝の死体: レン(p3)（狩人・初日犠牲者）" in page
     assert "`m3` [人狼チャット] **サクラ（人狼／冷静）**: ソウタを噛む" in page
     assert "- 1日目夜の占い: ハルト(p1) → ソウタ(p4) = 白" in page

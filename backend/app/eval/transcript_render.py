@@ -168,7 +168,10 @@ class _Renderer:
         lines.append(
             "> 省略なしの記録です。各発言の非公開メモ（そのときの吊り先・疑い・方針）、"
             "投票の理由・決め手・反対仮説、夜行動の理由と結果、監査の判定を、"
-            "記録にあるとおりに載せています。`m12` はその発言のメッセージIDです。\n"
+            "記録にあるとおりに載せています。`m12` はその発言のメッセージIDです。"
+            "夜行動の「実際の結果」は記録から書いた神の視点で、その席に知らされた内容とは"
+            "限りません（狩人は護衛先が襲われたかを知らされず、人狼は噛みが通らなかった"
+            "ことしか分かりません）。\n"
         )
         lines += self._roster()
         lines += self._timeline()
@@ -383,7 +386,14 @@ class _Renderer:
             lines.append(f"  - 理由: {_flat(u.text)}")
         outcome = self._night_outcome(u)
         if outcome:
-            lines.append(f"  - 結果: {outcome}")
+            # A seer is told its result; a hunter is never told whether its
+            # target was attacked, and wolves learn only that a bite failed.
+            # Labelled so a reader does not take the outcome for the seat's
+            # knowledge.
+            label = (
+                "結果" if u.role == RoleName.SEER.value else "実際の結果（本人には知らされない）"
+            )
+            lines.append(f"  - {label}: {outcome}")
         return lines
 
     def _night_outcome(self, u: Utterance) -> str:
@@ -492,7 +502,10 @@ class _Renderer:
             return ["\n## 結果\n\n(対戦は未完了)"]
         winner = self.state.get("winner")
         reason = self.state.get("victory_reason", "")
-        return [f"\n## 結果\n\n勝者: {winner} / {reason}"]
+        label = {"village": "村人陣営", "werewolf": "人狼陣営", "fox": "妖狐陣営"}.get(
+            str(winner), str(winner)
+        )
+        return [f"\n## 結果\n\n勝者: {label}（{winner}） / {reason}"]
 
 
 _SECTION_TITLE = {

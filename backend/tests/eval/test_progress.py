@@ -321,7 +321,7 @@ def test_only_a_partial_transcript_says_it_is_unfinished() -> None:
     partial = render_transcript(transcript, partial=True)
 
     assert "途中経過" not in finished
-    assert "勝者: village" in finished
+    assert "勝者: 村人陣営（village）" in finished
     assert "途中経過です" in partial
     assert "勝者" not in partial
     assert "(対戦は未完了)" in partial
