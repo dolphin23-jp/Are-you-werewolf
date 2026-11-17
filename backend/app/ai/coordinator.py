@@ -2856,11 +2856,18 @@ class AICoordinator:
             alpha_id = controller.alpha_wolf_id
             if alpha_id in self._agents and state.players[alpha_id].alive:
                 await self._cast_attack(controller, state, alpha_id)
+                if state.pending_attack is None:
+                    self._attack_anyone(controller, state, alpha_id)
 
         try:
             controller.resolve_night()
         except Exception:
-            pass
+            # The engine refuses a night with a living wolf and no bite (wolves
+            # bite a non-wolf every night; the board memo's night lines rest on
+            # it). An AI alpha always has a bite by now; a human alpha has not
+            # acted yet and the orchestrator waits for it. Counted, not silent:
+            # a night that cannot resolve is a stalled game, not a quiet one.
+            self._record_event("night_not_resolved")
 
     async def _cast_divine(self, controller: object, state: GameState, seer_id: str) -> None:
         candidates = [
@@ -2934,6 +2941,22 @@ class AICoordinator:
         self._submit_audited_night_action(
             controller, state, alpha_id, "attack", output.target, candidates
         )
+
+    def _attack_anyone(self, controller: object, state: GameState, alpha_id: str) -> None:
+        """The bite the night must have when the AI alpha's own went nowhere.
+
+        `_cast_attack` offers only non-wolf seats that are not observers; it
+        submits nothing when every non-wolf is an observer, and a submission
+        can be refused. The engine then would not resolve the night, so code
+        bites the first living non-wolf -- an observer only as the last resort.
+        """
+        living = [pid for pid in state.alive_ids() if state.players[pid].role != RoleName.WEREWOLF]
+        playing = [pid for pid in living if pid not in self._observer_player_ids]
+        for target in [*playing, *[pid for pid in living if pid not in playing]]:
+            self._record_event("night_code_resolved")
+            self._submit_audited_night_action(controller, state, alpha_id, "attack", target, living)
+            if state.pending_attack is not None:
+                return
 
     def _submit_audited_night_action(
         self,
