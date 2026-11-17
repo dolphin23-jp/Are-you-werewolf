@@ -28,9 +28,12 @@ from app.engine.roles import RoleName
 class DeathRuleModule(BaseRuleModule):
     """What the whole table can conclude from the corpses alone.
 
-    Usually nothing: one night death is an attack or a curse and there is no way
-    to tell. Two exceptions, both public and exact:
+    Usually little: one night death is an attack or a curse and there is no way
+    to tell which. What is public and exact:
 
+    * A night corpse is not a wolf. The attack only reaches a non-wolf (the
+      engine refuses a wolf target since 2026-11-17) and the curse only the
+      fox.
     * Two on the same night -- there is only one attack and only one curse per
       night, so one of the two was the fox.
     * Any night death on night 0. There is no attack that night (the scripted
@@ -48,6 +51,16 @@ class DeathRuleModule(BaseRuleModule):
     ) -> None:
         for night in observations.nights_with_deaths():
             deaths = observations.deaths_on(night)
+            for death in deaths if night > 0 else ():
+                self._record(
+                    builder,
+                    f"night_death_not_wolf:{night}:{death.player_id}",
+                    RoleIsNot(player_id=death.player_id, role=RoleName.WEREWOLF),
+                    (
+                        f"{night}日目の夜に死んだ{death.player_id}は、襲撃（人狼以外しか狙えない）か"
+                        "呪殺（妖狐）で死んだので、人狼ではありません。"
+                    ),
+                )
             if night == 0:
                 for death in deaths:
                     self._record(

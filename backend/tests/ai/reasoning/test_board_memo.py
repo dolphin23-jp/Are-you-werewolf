@@ -12,6 +12,7 @@ import re
 from app.ai.reasoning.board_memo import (
     MEMO_HEADING,
     PRIVATE_HEADING,
+    SELF,
     namify,
     render_board_memo,
     render_roster,
@@ -75,10 +76,15 @@ def _memo(state, player_id: str) -> str:  # type: ignore[no-untyped-def]
 
 
 def _public_part(memo: str) -> str:
-    """Everything above the private section, minus the header naming the seat."""
+    """Everything above the private section, minus the header naming the seat.
+
+    Since the seed-1 review (2-C1) a seat's memo calls the seat itself 自分;
+    it is written back as the name from the header, so what every seat shares
+    still compares equal across seats.
+    """
     head, _, body = memo.split(PRIVATE_HEADING)[0].partition("\n")
     assert head.startswith(MEMO_HEADING)
-    return body
+    return body.replace(SELF, head.split("あなた: ", 1)[1])
 
 
 def _private_part(memo: str) -> str:
@@ -131,7 +137,10 @@ def test_two_seer_claims_are_a_contest_and_two_freemason_claims_are_not():
 
     assert "占い=Player4、Player5（占いは1人なので少なくとも1人は偽）" in public
     assert "共有=Player7、Player8" in public
-    assert "共有は2人" not in public
+    # Two freemason claims are the composition, not a contest. Since the seed-1
+    # review (1-C5) the line also says both freemason names are out.
+    assert "共有は2人なので" not in public
+    assert "共有=Player7、Player8（共有は2人とも名前が出ている）" in public
     assert "少なくとも1人は偽）" in public  # only once, for the seers
     assert public.count("少なくとも") == 1
 
@@ -162,7 +171,12 @@ def test_seer_verdicts_are_tabled_night_by_night_with_the_day_they_were_publishe
 def test_votes_are_tabled_by_target_with_counts():
     public = _public_part(_memo(_board(), "p3"))
 
-    expected = "1日目: Player1←Player3、Player4、Player7、Player8、Player9(5) / Player4←Player1(1)"
+    # Since the seed-1 review (4-B2) a target reads 「へN票」 instead of an arrow
+    # that was read backwards, and (処刑) marks the seat hanged that day.
+    expected = (
+        "1日目: Player1へ5票(処刑): Player3、Player4、Player7、Player8、Player9 / "
+        "Player4へ1票: Player1(処刑)"
+    )
     assert expected in public
 
 
@@ -274,7 +288,9 @@ def test_day_two_tables_each_claimants_nights_and_marks_what_was_never_published
         "1日目夜（死体: ソウタ、ケント）: ケント→未公開(1日目夜に死亡) / "
         "ダイキ→シオン=白[2日目公開] / アオイ→ソウタ=白[2日目公開]"
     ) in public
-    assert "アカリ(霊媒CO): 1日目処刑 ハルト=黒[2日目公開]" in public
+    # The medium section is per execution since the seed-1 review (4-B1): an
+    # execution with no published read says so instead of being left out.
+    assert "1日目処刑 ハルト=黒(アカリ・2日目公開)" in public
 
 
 def test_day_four_keeps_the_dead_and_drops_nights_a_claimant_could_not_act():

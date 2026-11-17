@@ -149,6 +149,16 @@ class GameController:
                 raise GameError("first victim not selected; call start_game() first")
             result = self._night_resolver.resolve_day_zero(self.state, self.state.first_victim_id)
         else:
+            # The wolves bite every night while any of them lives. Every seat
+            # reads an empty morning as "the bite was guarded, or it was the
+            # fox"; a night allowed to pass without a bite would make that a
+            # guess. Refused before anything resolves, so the night can still
+            # be completed.
+            if self.state.pending_attack is None and any(
+                player.alive and player.role == RoleName.WEREWOLF
+                for player in self.state.players.values()
+            ):
+                raise GameError("the werewolves must attack every night from night 1")
             result = self._night_resolver.resolve_night(self.state)
 
         for death in result.deaths:
@@ -372,6 +382,9 @@ class GameController:
                 raise GameError("only werewolves may attack")
             if player_id != self._alpha_tracker.alpha_id:
                 raise GameError("only the alpha werewolf may submit the attack")
+            # A night corpse is never a wolf: every seat reasons from it.
+            if self.state.players[target_id].role == RoleName.WEREWOLF:
+                raise GameError("the werewolves cannot attack a werewolf")
             self.state.pending_attack = (player_id, target_id)
         else:
             raise GameError(f"unknown action_type {action_type}")

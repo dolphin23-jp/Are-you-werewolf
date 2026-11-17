@@ -35,19 +35,48 @@ on night 1. So the memo now also carries, every time:
 * what the public solver settles about the dead as well as the living -- a
   role whose seats are all in the graveyard is said in so many words -- and
   which claimants the night's curse rules out as the real seer.
+
+The owner's review of run #13 seed 1 (seed1-review-causes.md, R2) found the
+memo stating the board and leaving out what follows from it. It now also says
+what code can guarantee and nothing it cannot -- facts, and conclusions under a
+named supposition, never advice:
+
+* when the game ends and who wins then, and the rope count;
+* each execution's medium read, or that none was published (and, with no
+  medium claimant alive, that none will be); each night's corpses, and that an
+  empty morning means the bite hit the guard target or the fox;
+* the grey, the CO count with its zeros, and every ballot read both ways;
+* under "if this living seer claimant is real and truthful", which wolves are
+  dead or alive, which execution ends the game, and where the fox may be --
+  in a block of its own, never among the certainties;
+* in the seat's own section: the same endgame from its own solver (or its own
+  side's way to win), a seer's "neither wolf nor fox", published colours it
+  knows are false, the hunter's empty mornings, and conclusions under
+  `NoVillageBluff` / `TruthfulIfGenuine`, each opening with its supposition --
+  under a header that tells the seat to keep them off the table.
+
+The reader is 自分 in its own memo, past the header.
 """
 
 from __future__ import annotations
 
 import re
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 
 from app.ai.reasoning.facts import MEDIUM_RESULT, SEER_RESULT, PublicFactLedger
 from app.ai.reasoning.observations import ObservationSet, PublicVerdict
 from app.ai.reasoning.perspectives import PlayerPrivatePerspective
-from app.ai.reasoning.solver.backend import AnyOf, Certainty, Hypothesis, RoleIs, has_role
+from app.ai.reasoning.solver.assumptions import (
+    NON_VILLAGE_ROLES,
+    GenuineClaim,
+    HonestResults,
+    NoLatentClaim,
+    NoVillageBluff,
+    TruthfulIfGenuine,
+)
+from app.ai.reasoning.solver.backend import AnyOf, Hypothesis, RoleIs, has_role
 from app.ai.reasoning.solver.queries import RoleSolver
 from app.ai.reasoning.solver.rules.claimed_divination import (
     ClaimedDivinationRuleModule,
@@ -60,11 +89,36 @@ from app.ai.reasoning.timeline import (
     could_publish_on_day,
     find_timeline_conflicts,
 )
+from app.engine.phases import Phase
 from app.engine.roles import ROLE_DEFINITIONS, TOTAL_PLAYERS, RoleName
 from app.engine.state import GameState, PublicDeathCause
+from app.engine.vote import DEFAULT_MAX_VOTE_ROUNDS
 
 MEMO_HEADING = "【盤面メモ】"
 PRIVATE_HEADING = "【あなただけが知っていること】"
+# How a seat's memo names the seat itself, past the header (review 2-C1).
+SELF = "自分"
+# On every header of conclusions only this seat can draw (review 1-C1: the fox
+# argued in public from its own curse reasoning). Not on the seat's card or
+# results, which a seer or medium is there to publish.
+_KEEP_UNSAID = "卓ではこの結論を知らないものとして話し、匂わせない"
+
+
+class _SeatLedger(PublicFactLedger):
+    """The ledger as one seat reads it: its own name is 自分.
+
+    The memo used to write the reader in the third person -- ソウタ's own memo
+    said 「アオイ→ソウタ=白」 -- and seats came to speak of themselves the same
+    way. Every name in the memo goes through `name_of`, so this one override
+    covers the tables, the facts and the solver's own explanations alike.
+    """
+
+    def __init__(self, state: GameState, self_id: str) -> None:
+        super().__init__(state)
+        self._self_id = self_id
+
+    def name_of(self, player_id: str) -> str:
+        return SELF if player_id == self._self_id else super().name_of(player_id)
 
 _ROLE_LABELS: dict[RoleName, str] = {
     RoleName.VILLAGER: "村人",
@@ -95,20 +149,31 @@ _COMPOSITION_ORDER = (
 assert set(_COMPOSITION_ORDER) == set(RoleName)
 
 # The rules a player reasons from, in a few lines. Every clause is what
-# `app/engine` actually does -- night_resolver (curse on every night including
+# `app/engine` actually does -- game.resolve_night / submit_night_action (from
+# night 1 the wolves bite a non-wolf every night: no wolf target, no night
+# without a bite), night_resolver (curse on every night including
 # night 0; the attack never kills the fox; one attack and one curse per night;
 # the medium reads only the day's execution; results are wolf / not wolf),
 # game.submit_night_action (night 0 is divination only; the hunter may repeat a
-# guard but not guard themselves) and roles (the first victim is never a wolf or
-# the fox). Change one only together with the engine.
+# guard but not guard themselves), roles (the first victim is never a wolf or
+# the fox), victory (who wins, counting the madman and the fox as non-wolves)
+# and game (the end is checked after an execution and after a night; a tie that
+# survives every runoff is a draw). Change one only together with the engine.
 _RULE_LINES = (
     "- ルール: 占い・霊媒の結果は人狼かどうかだけ（狂人・妖狐は白）。"
     "霊媒が知るのは処刑された人の結果だけ。"
-    "狩人は1日目夜から護衛でき、同じ人の連続護衛も可（自分は守れない）。"
+    "狩人は1日目夜から護衛でき、同じ人の連続護衛も可（狩人自身は守れない）。"
     "初日犠牲者は人狼でも妖狐でもない",
-    "- 死体のルール: 占い先が妖狐ならその夜に呪殺（0日目夜も）。妖狐は襲撃では死なない。"
-    "夜の死体は襲撃（1夜1人まで）と呪殺だけなので、1夜に2つなら片方は呪殺された妖狐。"
-    "0日目夜は襲撃がなく、初日犠牲者以外の死体は呪殺",
+    "- 死体のルール: 人狼は1日目夜から毎晩、人狼以外の生存者を必ず1人襲撃する"
+    "（襲撃なしの夜はない）。"
+    "襲撃先が護衛先か妖狐なら死体は出ない。占い先が妖狐ならその夜に呪殺（0日目夜も）。"
+    "妖狐は襲撃では死なない。夜の死体は襲撃と呪殺（どちらも1夜1人）だけなので、"
+    "1夜に2つなら片方は呪殺された妖狐。0日目夜は襲撃がなく、初日犠牲者以外の死体は呪殺",
+    "- 勝敗: 処刑のあとと夜明けに判定。人狼が0人になるか、人狼が人狼以外の生存者"
+    "（狂人・妖狐も数える）と同数以上になった時点で試合終了。"
+    "その時点で妖狐が生きていれば妖狐の勝ち。妖狐が死んでいれば、人狼0人なら村、"
+    "同数以上なら人狼陣営（狂人を含む）の勝ち。"
+    f"投票が決選を含め{DEFAULT_MAX_VOTE_ROUNDS}回続けて同数なら引き分け",
 )
 
 _PLAYER_ID_RE = re.compile(r"(?<![0-9A-Za-z])p(\d+)(?![0-9])")
@@ -164,16 +229,20 @@ def render_board_memo(
     seat_solver: RoleSolver | None = None,
 ) -> str:
     """The full memo for one seat. Pure function of the board and the seat."""
-    ledger = PublicFactLedger(state)
-    name = ledger.name_of
-    lines: list[str] = [f"{MEMO_HEADING}{state.day}日目 / あなた: {name(player_id)}"]
+    lines: list[str] = [
+        f"{MEMO_HEADING}{state.day}日目 / あなた: {PublicFactLedger(state).name_of(player_id)}"
+    ]
+    ledger = _SeatLedger(state, player_id)
     lines.extend(_rules_lines())
-    lines.extend(_roster_lines(ledger))
+    lines.extend(_roster_lines(ledger, public_solver))
     lines.extend(_claim_lines(state, ledger))
     lines.extend(_verdict_lines(ledger, observations))
+    lines.extend(_night_lines(ledger, observations))
+    lines.extend(_grey_lines(ledger, observations))
     lines.extend(_vote_lines(ledger))
     public_facts = _public_logic_facts(ledger, observations, public_solver)
     lines.extend(_logic_lines(public_facts))
+    lines.extend(_conditional_lines(ledger, public_solver))
     lines.extend(_timeline_lines(ledger, observations))
     lines.extend(
         _private_lines(
@@ -183,6 +252,7 @@ def render_board_memo(
             observations,
             seat_solver,
             public_keys=frozenset(fact.key for fact in public_facts),
+            public_solver=public_solver,
         )
     )
     return "\n".join(lines)
@@ -206,25 +276,83 @@ def _rules_lines() -> list[str]:
     return [f"- 配役({TOTAL_PLAYERS}人): {composition}", *_RULE_LINES]
 
 
-def _roster_lines(ledger: PublicFactLedger) -> list[str]:
+def _roster_lines(ledger: PublicFactLedger, public_solver: RoleSolver | None) -> list[str]:
     alive = [player for player in ledger.players() if player.alive]
     dead = [player for player in ledger.players() if not player.alive]
-    lines = [f"- 生存({len(alive)}人): " + "、".join(player.name for player in alive)]
+    name = ledger.name_of
+    lines = [f"- 生存({len(alive)}人): " + "、".join(name(player.player_id) for player in alive)]
     if dead:
         lines.append(
             "- 死亡: "
             + "、".join(
-                f"{player.name}({_death_label(player.death_cause, player.death_day)})"
+                f"{name(player.player_id)}({_death_label(player.death_cause, player.death_day)})"
                 for player in dead
             )
         )
-    wolves = ROLE_DEFINITIONS[RoleName.WEREWOLF].count
-    rope = max(0, (len(alive) - wolves) - wolves - 1)
-    lines.append(
-        f"- 人狼は最大{wolves}人（公開情報では何人死んだか確定しない）/ "
-        f"外してよい吊りの目安: {rope}回"
-    )
+    lines.append(_rope_line(ledger, public_solver, len(alive)))
     return lines
+
+
+def ropes_left(alive_count: int) -> int:
+    """Executions left if every night costs one life: (alive - 1) // 2.
+
+    16 alive on day 1 hang on 16, 14, ..., 4: seven times, and the seventh has
+    to find the last wolf or three seats become two at the next dawn.
+    """
+    return max(0, (alive_count - 1) // 2)
+
+
+def _rope_line(
+    ledger: PublicFactLedger, public_solver: RoleSolver | None, alive_count: int
+) -> str:
+    """縄: executions left, and how many of them may miss.
+
+    The inhumans the village must hang are the wolves that may still live and
+    the fox while it may live -- the fox dies to the seer as well, but nobody
+    can count on it. The old `alive - 7` formula said nine misses on day 1 of
+    a game that allows three. At night the count is for the morning after the
+    bite, since the wolves bite every night.
+    """
+    wolf_count = ROLE_DEFINITIONS[RoleName.WEREWOLF].count
+    dead_wolves: list[str] = []
+    fox_may_live = True
+    if public_solver is not None and public_solver.is_possible(Hypothesis()):
+        dead_wolves = [
+            pid
+            for pid in ledger.dead_ids()
+            if public_solver.certain_role(pid) is RoleName.WEREWOLF
+        ]
+        fox_may_live = _anyone_alive_could_be(ledger, public_solver, RoleName.FOX)
+    wolves = wolf_count - len(dead_wolves)
+    to_hang = wolves + (1 if fox_may_live else 0)
+    if dead_wolves:
+        head = f"- 生存の人狼は最大{wolves}人（{_names(ledger, dead_wolves)}は人狼で死亡確定）"
+    else:
+        head = f"- 人狼は最大{wolves}人（公開情報では何人死んだか確定しない）"
+    if ledger.phase in (Phase.NIGHT, Phase.VOTE_RESULT):
+        tomorrow = alive_count - 1
+        ropes = ropes_left(tomorrow)
+        count = f"今夜1人死ねば明日は生存{tomorrow}人で残り{ropes}回"
+    else:
+        ropes = ropes_left(alive_count)
+        count = f"生存{alive_count}人で残り{ropes}回"
+    breakdown = f"人狼{wolves}" + ("・妖狐1" if fox_may_live else "。妖狐は死亡済み")
+    return (
+        f"{head} / 縄: {count}（(生存-1)÷2、毎晩1人死ぬ場合）。"
+        f"吊るべき人外は最大{to_hang}人（{breakdown}）→ 外してよい吊りは{max(0, ropes - to_hang)}回"
+    )
+
+
+def _anyone_alive_could_be(ledger: PublicFactLedger, solver: RoleSolver, role: RoleName) -> bool:
+    alive = ledger.alive_ids()
+    if not alive:
+        return False
+    return solver.is_possible(
+        Hypothesis(
+            claims=(AnyOf(tuple(RoleIs(player_id=pid, role=role) for pid in alive)),),
+            label=f"a living {role.value}",
+        )
+    )
 
 
 def _death_label(cause: PublicDeathCause | None, day: int | None) -> str:
@@ -247,6 +375,9 @@ def _claim_lines(state: GameState, ledger: PublicFactLedger) -> list[str]:
     for role in _CLAIM_ROLE_ORDER:
         claimants = by_role.get(role)
         if not claimants:
+            if role is RoleName.MEDIUM:
+                # A latent medium is a choice the table should see it making.
+                parts.append(f"{_ROLE_LABELS[role]}=まだなし")
             continue
         rendered = "、".join(
             f"{ledger.name_of(pid)}{'' if ledger.is_alive(pid) else '(死亡)'}" for pid in claimants
@@ -264,33 +395,65 @@ def _claim_lines(state: GameState, ledger: PublicFactLedger) -> list[str]:
             continue
         rendered = "、".join(ledger.name_of(pid) for pid in claimants)
         parts.append(f"{_ROLE_LABELS.get(role, role.value)}={rendered}")
-    return ["- CO: " + " / ".join(parts)]
+    return ["- CO: " + " / ".join(parts), *_co_count_lines(ledger, by_role)]
+
+
+def _co_count_lines(ledger: PublicFactLedger, by_role: dict[RoleName, list[str]]) -> list[str]:
+    """占い・霊媒 counts, zeros included, and the "3-0" a table calls them by.
+
+    The review's day-1 table said "3-1" before any medium had claimed (1-B1):
+    a role nobody claimed was simply missing from the CO line.
+    """
+    seers = by_role.get(RoleName.SEER, [])
+    mediums = by_role.get(RoleName.MEDIUM, [])
+    if not seers and not mediums:
+        return []
+
+    def count(role: RoleName, claimants: list[str]) -> str:
+        if not claimants:
+            return f"{_ROLE_LABELS[role]}0"
+        living = sum(1 for pid in claimants if ledger.is_alive(pid))
+        return f"{_ROLE_LABELS[role]}{len(claimants)}(生存{living})"
+
+    return [
+        f"- CO数: {count(RoleName.SEER, seers)}・{count(RoleName.MEDIUM, mediums)}"
+        f" → 内訳の呼び方は{len(seers)}-{len(mediums)}"
+    ]
 
 
 def _freemason_note(state: GameState, ledger: PublicFactLedger, claimants: list[str]) -> str:
-    confirmed = [claim for claim in state.freemason_partner_claims if claim.confirmed]
+    partner_claims = state.freemason_partner_claims
+    named = set(claimants) | {
+        claim.partner_id for claim in partner_claims if claim.claimant_id in claimants
+    }
+    # Both freemason seats have a name on the table: the "is a day-1 black the
+    # freemason trap" question is closed (1-C5). Three names is a contest.
+    both_out = "。共有は2人とも名前が出ている" if len(named) == 2 else ""
+    confirmed = [claim for claim in partner_claims if claim.confirmed]
     if confirmed:
         pair = confirmed[0]
         return (
             f"（{ledger.name_of(pair.claimant_id)}と{ledger.name_of(pair.partner_id)}が"
-            "互いに相方と確認済み）"
+            f"互いに相方と確認済み{both_out}）"
         )
-    named = [claim for claim in state.freemason_partner_claims if not claim.confirmed]
-    if named:
-        claim = named[0]
+    pending = [claim for claim in partner_claims if not claim.confirmed]
+    if pending:
+        claim = pending[0]
         return (
             f"（{ledger.name_of(claim.claimant_id)}は相方を{ledger.name_of(claim.partner_id)}と"
-            "名指ししたが本人の確認待ち）"
+            f"名指ししたが本人の確認待ち{both_out}）"
         )
     if len(claimants) == 1:
         return "（相方は未公開）"
-    return ""
+    return f"（{both_out.removeprefix('。')}）" if both_out else ""
 
 
 def _verdict_lines(ledger: PublicFactLedger, observations: ObservationSet) -> list[str]:
-    """Seer accounts night by night, then medium results by claimant."""
-    lines = _divination_lines(ledger, observations) + _medium_lines(ledger, observations)
-    return lines or ["- 公開された判定: なし"]
+    """Seer accounts night by night, then the medium's read of each execution."""
+    lines = _divination_lines(ledger, observations)
+    if not observations.verdicts:
+        lines.append("- 公開された判定: なし")
+    return lines + _medium_lines(ledger, observations)
 
 
 def _seer_claimants(ledger: PublicFactLedger) -> list[str]:
@@ -402,45 +565,155 @@ def _divination_cell(
 
 
 def _medium_lines(ledger: PublicFactLedger, observations: ObservationSet) -> list[str]:
+    """One cell per execution: the colour each medium claimant published, or
+    that nothing was published -- and, once no medium claimant is alive, that
+    nothing will be unless somebody new claims it.
+
+    By execution rather than by claimant, because the question is "what do we
+    know of the people we hanged". The review's day-5 village kept reasoning
+    from "the medium will check it" two days after the medium was bitten; the
+    old section listed published results only, so a missing one was silent.
+    """
     results = [r for r in observations.verdicts if r.result_type == MEDIUM_RESULT]
-    if not results:
+    executions = ledger.executions()
+    if not executions and not results:
         return []
-    by_claimant: dict[str, list[str]] = defaultdict(list)
-    for result in sorted(results, key=lambda r: (r.source_night, r.day)):
-        colour = "黒" if result.is_werewolf else "白"
-        by_claimant[result.claimant_id].append(
-            f"{result.source_night}日目処刑 {ledger.name_of(result.target_id)}={colour}"
-            f"[{result.day}日目公開]"
+    by_target: dict[str, list[PublicVerdict]] = defaultdict(list)
+    for result in sorted(results, key=lambda r: (r.day, r.source_night)):
+        by_target[result.target_id].append(result)
+
+    def published(target_id: str) -> str:
+        return "、".join(
+            f"{'黒' if r.is_werewolf else '白'}({ledger.name_of(r.claimant_id)}・{r.day}日目公開)"
+            for r in by_target.pop(target_id)
         )
-    lines = ["- 霊媒結果:"]
-    for claimant_id in _seat_ordered_ids(ledger, by_claimant):
-        role = ledger.claimed_role_of(claimant_id)
-        role_label = _ROLE_LABELS.get(role, "") if role is not None else ""
-        lines.append(
-            f"  - {ledger.name_of(claimant_id)}({role_label}CO): "
-            + " / ".join(by_claimant[claimant_id])
+
+    cells = [
+        f"{execution.day}日目処刑 {ledger.name_of(execution.player_id)}="
+        + (published(execution.player_id) if execution.player_id in by_target else "未公開")
+        for execution in executions
+    ]
+    # A medium verdict on someone never hanged is a claim like any other.
+    cells.extend(
+        f"処刑されていない{ledger.name_of(target)}={published(target)}"
+        for target in _seat_ordered_ids(ledger, list(by_target))
+    )
+    line = "- 処刑者の霊媒結果: " + " / ".join(cells)
+    living_mediums = [
+        claim.player_id
+        for claim in ledger.co_declarations()
+        if claim.claimed_role is RoleName.MEDIUM and ledger.is_alive(claim.player_id)
+    ]
+    if executions and not living_mediums:
+        line += "。生存する霊媒COなし: 新たに霊媒COが出ない限り、処刑者の結果は公開されない"
+    return [line]
+
+
+def _night_lines(ledger: PublicFactLedger, observations: ObservationSet) -> list[str]:
+    """Every resolved night from night 1: its corpses, or none, and what none means.
+
+    The only record of an empty morning used to be a "(死体なし)" in the seer
+    table's row headers -- read by nobody in the seed-1 review, and absent
+    altogether on a night no seer claimant could act. With the engine making
+    the wolves bite a non-wolf every night, an empty morning is logic, not a
+    guess: the bite hit the guard target or the fox.
+    """
+    nights = range(1, observations.day)
+    if not nights:
+        return []
+    cells: list[str] = []
+    for night in nights:
+        corpses = [death.player_id for death in observations.deaths_on(night)]
+        found = f"死体: {_names(ledger, corpses)}" if corpses else "死体なし"
+        cells.append(f"{night}日目夜 {found}")
+    line = "- 夜の結果: " + " / ".join(cells)
+    if any(not observations.deaths_on(night) for night in nights):
+        line += "（死体なし＝襲撃が護衛で防がれたか、襲撃先が妖狐）"
+    return [line]
+
+
+def _grey_lines(ledger: PublicFactLedger, observations: ObservationSet) -> list[str]:
+    """The grey -- alive, no claim, judged by no seer claimant -- and, apart
+    from it, the unclaimed seats somebody has judged, with whose verdict.
+
+    The review's day 2 argued over "the grey" with two definitions in play and
+    no list on the board (2-B5). One definition, computed: a seat stays grey
+    until some seer claimant publishes a verdict on it, whoever that is.
+    """
+    claimed = {claim.player_id for claim in ledger.co_declarations()}
+    judged: dict[str, list[str]] = defaultdict(list)
+    for verdict in sorted(observations.verdicts, key=lambda v: (v.day, v.source_night)):
+        if verdict.result_type == SEER_RESULT:
+            colour = "黒" if verdict.is_werewolf else "白"
+            judged[verdict.target_id].append(f"{ledger.name_of(verdict.claimant_id)}の{colour}")
+    unclaimed = [pid for pid in ledger.alive_ids() if pid not in claimed]
+    if not claimed and not judged:
+        return []
+    grey = [pid for pid in unclaimed if pid not in judged]
+    line = f"- グレー(生存・CO無し・どの占いCOの判定も無し): {_names(ledger, grey) or 'なし'}"
+    seen = [pid for pid in unclaimed if pid in judged]
+    if seen:
+        line += " / 判定を受けた非CO者: " + "、".join(
+            f"{ledger.name_of(pid)}({'・'.join(judged[pid])})" for pid in seen
         )
-    return lines
+    return [line]
 
 
 def _vote_lines(ledger: PublicFactLedger) -> list[str]:
+    """Ballots read both ways: per target, then per living voter.
+
+    「ケント←ハルト、カイト、ダイキ」 was read backwards in the review (4-B2), and
+    a seat that lied about its own day-3 ballot (m61) was never caught because
+    nobody's history sat in one place. (処刑) marks the seat hanged that day,
+    as a target and as a voter.
+    """
     votes = ledger.votes()
     if not votes:
         return []
-    lines = ["- 投票履歴（吊り先←投票者）:"]
+    executed_on = {execution.day: execution.player_id for execution in ledger.executions()}
+    seat = {pid: index for index, pid in enumerate(ledger.known_player_ids())}
+    lines = ["- 投票（N日目: 投票先へ票数: 投票した人。(処刑)はその日に処刑された人）:"]
     rounds = sorted({(vote.day, vote.round) for vote in votes})
+    last_round = {day: round_number for day, round_number in rounds}
     for day, round_number in rounds:
+        hanged = executed_on.get(day)
+
+        def label(pid: str, *, hanged: str | None = hanged) -> str:
+            return ledger.name_of(pid) + ("(処刑)" if pid == hanged else "")
+
         by_target: dict[str, list[str]] = defaultdict(list)
         for vote in ledger.votes_on(day, round_number):
-            by_target[vote.target_id].append(ledger.name_of(vote.voter_id))
-        ordered = sorted(by_target.items(), key=lambda item: (-len(item[1]), item[0]))
-        rendered = " / ".join(
-            f"{ledger.name_of(target)}←{'、'.join(voters)}({len(voters)})"
-            for target, voters in ordered
-        )
-        label = f"{day}日目" + (f"決選{round_number - 1}" if round_number > 1 else "")
-        lines.append(f"  - {label}: {rendered}")
+            by_target[vote.target_id].append(vote.voter_id)
+        ordered = sorted(by_target.items(), key=lambda item: (-len(item[1]), seat[item[0]]))
+        cells = []
+        for target, voters in ordered:
+            mark = "(処刑)" if target == hanged and round_number == last_round[day] else ""
+            names = "、".join(label(pid) for pid in sorted(voters, key=seat.__getitem__))
+            cells.append(f"{ledger.name_of(target)}へ{len(voters)}票{mark}: {names}")
+        lines.append(f"  - {day}日目{_runoff_label(round_number)}: " + " / ".join(cells))
+    lines.append("- 生存者ごとの投票先:")
+    for voter in ledger.alive_ids():
+        ballots: dict[int, list[str]] = defaultdict(list)
+        for vote in sorted(votes, key=lambda v: (v.day, v.round)):
+            if vote.voter_id == voter:
+                ballots[vote.day].append(
+                    _runoff_label(vote.round) + ledger.name_of(vote.target_id)
+                )
+        if ballots:
+            lines.append(
+                f"  - {ledger.name_of(voter)}: "
+                + " / ".join(f"{day}日目" + "→".join(ballots[day]) for day in sorted(ballots))
+            )
+    if lines[-1] == "- 生存者ごとの投票先:":
+        lines.pop()
     return lines
+
+
+def _runoff_label(round_number: int) -> str:
+    """'' for the first ballot of a day, 決選 for the runoff, 決選2... after."""
+    if round_number <= 1:
+        return ""
+    return "決選" if round_number == 2 else f"決選{round_number - 1}"
 
 
 @dataclass(frozen=True)
@@ -454,6 +727,27 @@ class _Fact:
 
     key: tuple[str, ...]
     text: str
+    # Facts of the form "<seat> is not X" share a predicate, and a run of them
+    # is written once: 「リク、アオイは人狼でも妖狐でもない」.
+    predicate: str = ""
+
+
+def _fact_texts(facts: Iterable[_Fact]) -> list[str]:
+    """Each fact's text, with seats sharing a predicate merged at the first."""
+    texts: list[str] = []
+    merged: dict[str, int] = {}
+    subjects: dict[str, list[str]] = defaultdict(list)
+    for fact in facts:
+        if not fact.predicate:
+            texts.append(fact.text)
+            continue
+        if fact.predicate not in merged:
+            merged[fact.predicate] = len(texts)
+            texts.append("")
+        subjects[fact.predicate].append(fact.text)
+    for predicate, index in merged.items():
+        texts[index] = "、".join(subjects[predicate]) + predicate
+    return texts
 
 
 def _public_logic_facts(
@@ -507,7 +801,7 @@ def _public_logic_facts(
 def _logic_lines(facts: list[_Fact]) -> list[str]:
     if not facts:
         return []
-    return ["- 公開情報だけで確定すること:"] + [f"  - {fact.text}" for fact in facts]
+    return ["- 公開情報だけで確定すること:"] + [f"  - {text}" for text in _fact_texts(facts)]
 
 
 def _settled_facts(
@@ -519,6 +813,7 @@ def _settled_facts(
     wolf_view: bool,
     refute_claims: bool,
     viewer_id: str | None,
+    fox_view: bool = False,
 ) -> list[_Fact]:
     """Hard conclusions a solver reaches about claimants, roles and seats.
 
@@ -526,13 +821,20 @@ def _settled_facts(
     in the solver and in what they leave out. A board that admits no world at
     all settles nothing: read naively, "nobody can be the fox" would be true of
     every seat and printed as a fact.
+
+    A living seat that cannot be the wolf, or the fox, or either, is cleared in
+    those words. The fox is never told who is not the fox -- that is everyone
+    -- as the wolves are never told who is not a wolf; and once no living seat
+    can be the fox, the filled-role line already says so for all of them.
     """
     if not solver.is_possible(Hypothesis()):
         return []
     facts: list[_Fact] = []
     if refute_claims:
         facts.extend(_refuted_claim_facts(ledger, observations, solver, exclude, viewer_id))
-    facts.extend(_filled_role_facts(ledger, solver))
+    filled = _filled_role_facts(ledger, solver)
+    facts.extend(filled)
+    fox_settled = ("filled", RoleName.FOX.value) in {fact.key for fact in filled}
     for pid in ledger.known_player_ids():
         if pid in exclude:
             continue
@@ -541,13 +843,23 @@ def _settled_facts(
         if role is not None and not (wolf_view and role is RoleName.WEREWOLF):
             label = ledger.name_of(pid) + ("" if alive else "(死亡)")
             facts.append(_Fact(("role", pid), f"{label}は{_ROLE_LABELS[role]}で確定"))
-        elif (
-            alive
-            and role is None
-            and not wolf_view
-            and solver.assess(has_role(pid, RoleName.WEREWOLF)) is Certainty.IMPOSSIBLE
-        ):
-            facts.append(_Fact(("not_wolf", pid), f"{ledger.name_of(pid)}は人狼ではないと確定"))
+            continue
+        if not alive or role is not None:
+            continue
+        not_wolf = not wolf_view and not solver.is_possible(has_role(pid, RoleName.WEREWOLF))
+        not_fox = (
+            not fox_view
+            and not fox_settled
+            and not solver.is_possible(has_role(pid, RoleName.FOX))
+        )
+        if not_wolf or not_fox:
+            cleared = "wolf+fox" if not_wolf and not_fox else ("wolf" if not_wolf else "fox")
+            predicate = {
+                "wolf+fox": "は人狼でも妖狐でもない",
+                "wolf": "は人狼ではない",
+                "fox": "は妖狐ではない",
+            }[cleared]
+            facts.append(_Fact(("cleared", pid, cleared), ledger.name_of(pid), predicate))
     return facts
 
 
@@ -658,6 +970,232 @@ def _candidates(ledger: PublicFactLedger, player_ids: list[str]) -> str:
     return f"（{'、'.join(names)}のいずれか）"
 
 
+@dataclass(frozen=True)
+class _Endgame:
+    """What one solver settles about how the game can end.
+
+    Living wolves are bounded from both sides: the three wolves are the dead
+    ones plus the living ones, so a seat that can name the dead wolves knows
+    how many still live even before it can name them. The bounds are sound,
+    not tight -- a clause below is printed only when the bound alone makes it
+    true in every world the solver allows.
+    """
+
+    alive: tuple[str, ...]
+    dead_wolves: tuple[str, ...]
+    living_wolves: tuple[str, ...]
+    wolves_min: int
+    wolves_max: int
+    fox_alive: tuple[str, ...]
+    fox_dead: tuple[str, ...]
+
+    @property
+    def wolves_exact(self) -> bool:
+        return self.wolves_min == self.wolves_max == len(self.living_wolves)
+
+    @property
+    def fox_dead_for_sure(self) -> bool:
+        return not self.fox_alive
+
+    @property
+    def fox_alive_for_sure(self) -> bool:
+        return bool(self.fox_alive) and not self.fox_dead
+
+
+def _endgame(ledger: PublicFactLedger, solver: RoleSolver) -> _Endgame | None:
+    if not solver.is_possible(Hypothesis()):
+        return None
+    alive = ledger.alive_ids()
+    dead = ledger.dead_ids()
+    wolf, fox = RoleName.WEREWOLF, RoleName.FOX
+    maybe_dead_wolves = [pid for pid in dead if solver.is_possible(has_role(pid, wolf))]
+    maybe_living_wolves = [pid for pid in alive if solver.is_possible(has_role(pid, wolf))]
+    dead_wolves = tuple(p for p in maybe_dead_wolves if solver.is_forced(has_role(p, wolf)))
+    living_wolves = tuple(p for p in maybe_living_wolves if solver.is_forced(has_role(p, wolf)))
+    total = ROLE_DEFINITIONS[wolf].count
+    return _Endgame(
+        alive=alive,
+        dead_wolves=dead_wolves,
+        living_wolves=living_wolves,
+        wolves_min=max(len(living_wolves), total - len(maybe_dead_wolves)),
+        wolves_max=min(len(maybe_living_wolves), total - len(dead_wolves)),
+        fox_alive=tuple(pid for pid in alive if solver.is_possible(has_role(pid, fox))),
+        fox_dead=tuple(pid for pid in dead if solver.is_possible(has_role(pid, fox))),
+    )
+
+
+def _wolf_clauses(ledger: PublicFactLedger, end: _Endgame) -> list[str]:
+    """Who the wolves are and what execution ends the game, as far as settled.
+
+    "Hanging X ends it" is printed only when every world agrees: X is the one
+    living wolf left. "Hanging any non-wolf ends it" only when even the fewest
+    living wolves would then stand level with the rest.
+    """
+    clauses: list[str] = []
+    if end.dead_wolves:
+        clauses.append(f"死亡した人狼は{_names(ledger, end.dead_wolves)}")
+    count = (
+        f"{end.wolves_min}"
+        if end.wolves_min == end.wolves_max
+        else f"{end.wolves_min}〜{end.wolves_max}"
+    )
+    if end.living_wolves and end.wolves_exact:
+        clauses.append(f"生存の人狼は{_names(ledger, end.living_wolves)}だけ")
+    elif end.living_wolves:
+        clauses.append(
+            f"生存の人狼に{_names(ledger, end.living_wolves)}を含む（生存の人狼は全部で{count}人）"
+        )
+    elif end.dead_wolves and end.wolves_min == end.wolves_max:
+        clauses.append(f"生存の人狼は{count}人")
+    if end.wolves_exact and len(end.living_wolves) == 1:
+        (last,) = end.living_wolves
+        clauses.append(
+            f"{ledger.name_of(last)}を処刑すると人狼0人で試合が終わる"
+            f"（{_winner_if_wolves_gone(end)}）"
+        )
+    clauses.extend(_parity_clauses(ledger, end))
+    return clauses
+
+
+def _parity_clauses(ledger: PublicFactLedger, end: _Endgame) -> list[str]:
+    """When even the fewest living wolves would stand level with the rest.
+
+    By day the next event is an execution, then the bite; by night (and
+    between the execution and the night) the bite comes first. Each wording
+    is printed only when it holds with `wolves_min`, so in every world.
+    """
+    wolves, alive = end.wolves_min, len(end.alive)
+    if not wolves:
+        return []
+    winner = f"（{_winner_at_parity(end)}）"
+    if ledger.phase in (Phase.NIGHT, Phase.VOTE_RESULT):
+        if 2 * wolves >= alive - 1:
+            return ["今夜の襲撃が通ると人狼が同数になり試合が終わる" + winner]
+        if 2 * wolves >= alive - 2:
+            return ["今夜の襲撃が通り、次の処刑が人狼以外なら人狼が同数になり試合が終わる" + winner]
+        return []
+    if 2 * wolves >= alive - 1:
+        return ["人狼以外を処刑すると人狼が同数になり試合が終わる" + winner]
+    if 2 * wolves >= alive - 2:
+        return ["人狼以外を処刑すると、その夜の襲撃が通れば人狼が同数になり試合が終わる" + winner]
+    return []
+
+
+def _winner_if_wolves_gone(end: _Endgame) -> str:
+    if end.fox_dead_for_sure:
+        return "妖狐は死亡済みなので村の勝ち"
+    if end.fox_alive_for_sure:
+        return "妖狐が生きているので妖狐の勝ち"
+    return "妖狐が生きていれば妖狐の勝ち、死んでいれば村の勝ち"
+
+
+def _winner_at_parity(end: _Endgame) -> str:
+    if end.fox_dead_for_sure:
+        return "妖狐は死亡済みなので人狼陣営の勝ち"
+    if end.fox_alive_for_sure:
+        return "妖狐が生きているので妖狐の勝ち"
+    return "妖狐が生きていれば妖狐の勝ち、死んでいれば人狼陣営の勝ち"
+
+
+def _fox_clause(ledger: PublicFactLedger, end: _Endgame) -> str:
+    if end.fox_dead_for_sure:
+        return "妖狐は死亡済み"
+    if end.fox_alive_for_sure:
+        return "妖狐は生存"
+    return (
+        f"妖狐の死亡は未確定（生存の候補{len(end.fox_alive)}人: {_names(ledger, end.fox_alive)}"
+        f"／死亡の候補: {_names(ledger, end.fox_dead)}）"
+    )
+
+
+def _endgame_text(
+    ledger: PublicFactLedger, end: _Endgame, public: _Endgame | None
+) -> str | None:
+    """The village-eye summary, or None when it settles nothing worth a line.
+
+    A claimant with only whites, early on, settles neither a wolf nor the
+    fox; three such lines of fox candidates would be noise. A fox the public
+    section already buries is not buried again.
+    """
+    clauses = _wolf_clauses(ledger, end)
+    fox_already_public = public is not None and public.fox_dead_for_sure
+    if not clauses and not (end.fox_dead_for_sure and not fox_already_public):
+        return None
+    if not fox_already_public:
+        clauses.append(_fox_clause(ledger, end))
+    return "。".join(clauses)
+
+
+def _conditional_lines(ledger: PublicFactLedger, public_solver: RoleSolver | None) -> list[str]:
+    """What follows if one living seer claimant is real and told the truth.
+
+    Never filed under the certainties: "the game ends if カイト hangs" is true
+    only in the worlds where ケント is the seer and his blacks are real, and
+    the line says so in its first words. One claimant at a time, since two
+    seer claims cannot both hold.
+    """
+    if public_solver is None:
+        return []
+    public = _endgame(ledger, public_solver)
+    rows: list[str] = []
+    for claimant in _seer_claimants(ledger):
+        if not ledger.is_alive(claimant) or ledger.claimed_role_of(claimant) is not RoleName.SEER:
+            continue
+        supposed = public_solver.assuming(
+            GenuineClaim(claimant, RoleName.SEER), HonestResults(claimant)
+        )
+        end = _endgame(ledger, supposed)
+        text = _endgame_text(ledger, end, public) if end is not None else None
+        if text is not None:
+            rows.append(f"  - {ledger.name_of(claimant)}が真の占い師で結果も正しいなら: {text}")
+    if not rows:
+        return []
+    return ["- 仮定つきで言えること（仮定が正しい場合だけ）:", *rows]
+
+
+def _seat_endgame_lines(
+    ledger: PublicFactLedger,
+    seat_solver: RoleSolver,
+    own_role: RoleName,
+    public_solver: RoleSolver | None,
+) -> list[str]:
+    """The same summary from the seat's own solver, with no supposition.
+
+    A wolf already knows every wolf, and the fox is itself the fox: each is
+    told how its own side wins instead of a list of fox candidates.
+    """
+    end = _endgame(ledger, seat_solver)
+    if end is None:
+        return []
+    head = "- 終局（あなたの視点）: "
+    if own_role is RoleName.WEREWOLF:
+        wolves = len(end.living_wolves)
+        others = len(end.alive) - wolves
+        text = (
+            f"生存の人狼は{_names(ledger, end.living_wolves)}の{wolves}人、人狼以外は{others}人。"
+            f"人狼以外があと{others - wolves}人減ると同数で試合が終わる"
+        )
+        if end.fox_dead_for_sure:
+            # The fox's death is already a fact line; this only draws the end.
+            text += "（そのとき人狼陣営の勝ち）"
+        else:
+            text += (
+                "。その時点で妖狐が生きていれば妖狐の勝ちなので、"
+                "人狼陣営の勝ちには妖狐の死亡が要る"
+            )
+        return [head + text]
+    if own_role is RoleName.FOX:
+        clauses = [
+            "人狼が0人になるか、人狼が人狼以外と同数以上になった時点で"
+            "あなた(妖狐)が生きていれば、あなたの勝ち",
+            *_wolf_clauses(ledger, end),
+        ]
+        return [head + "。".join(clauses)]
+    public = _endgame(ledger, public_solver) if public_solver is not None else None
+    summary = _endgame_text(ledger, end, public)
+    return [head + summary] if summary is not None else []
+
+
 def _timeline_lines(ledger: PublicFactLedger, observations: ObservationSet) -> list[str]:
     conflicts = find_timeline_conflicts(observations)
     if not conflicts:
@@ -684,6 +1222,7 @@ def _private_lines(
     seat_solver: RoleSolver | None,
     *,
     public_keys: frozenset[tuple[str, ...]],
+    public_solver: RoleSolver | None = None,
 ) -> list[str]:
     perspective = PlayerPrivatePerspective(player_id)
     own_role = state.players[player_id].role
@@ -725,6 +1264,8 @@ def _private_lines(
                 for night, target in sorted(nights.guards.items())
             )
         )
+    if own_role is RoleName.HUNTER:
+        lines.extend(_quiet_guarded_nights(ledger, observations, nights.guards))
     if nights.attacks and own_role is RoleName.WEREWOLF:
         outcome_by_night = {record.day: record.succeeded for record in state.attack_records}
         lines.append(
@@ -735,12 +1276,223 @@ def _private_lines(
                 for night, target in sorted(nights.attacks.items())
             )
         )
+    false_colours = (
+        _false_colours(player_id, ledger, observations, allies, seat_solver)
+        if seat_solver is not None
+        else []
+    )
     lines.extend(
         _private_certainty_lines(
-            player_id, own_role, ledger, observations, allies, seat_solver, public_keys
+            player_id,
+            own_role,
+            ledger,
+            observations,
+            allies,
+            seat_solver,
+            public_keys,
+            extra=[text for _verdict, text in false_colours],
         )
     )
+    if seat_solver is not None:
+        lines.extend(_seat_endgame_lines(ledger, seat_solver, own_role, public_solver))
+        lines.extend(
+            _seat_supposition_lines(
+                player_id,
+                own_role,
+                ledger,
+                observations,
+                allies,
+                seat_solver,
+                false_colours=[verdict for verdict, _text in false_colours],
+            )
+        )
     return lines
+
+
+def _false_colours(
+    player_id: str,
+    ledger: PublicFactLedger,
+    observations: ObservationSet,
+    allies: Iterable[str],
+    seat_solver: RoleSolver,
+) -> list[tuple[PublicVerdict, str]]:
+    """Published colours this seat knows to be false, said as fact.
+
+    The wolves knew m34's 「カイト=白」 was false the moment アオイ said it; the
+    memo had no way to say so (2-B4). Verdicts by the seat or a known ally are
+    left out: the wolves wrote their own fakes.
+    """
+    skip = {player_id, *allies}
+    found: list[tuple[PublicVerdict, str]] = []
+    for verdict in sorted(observations.verdicts, key=lambda v: (v.day, v.source_night)):
+        if verdict.claimant_id in skip:
+            continue
+        target = ledger.name_of(verdict.target_id)
+        wolf = has_role(verdict.target_id, RoleName.WEREWOLF)
+        if verdict.is_werewolf and not seat_solver.is_possible(wolf):
+            truth = f"{target}は人狼ではない"
+        elif not verdict.is_werewolf and seat_solver.is_forced(wolf):
+            truth = f"{target}は人狼"
+        else:
+            continue
+        colour = "黒" if verdict.is_werewolf else "白"
+        found.append(
+            (
+                verdict,
+                f"{ledger.name_of(verdict.claimant_id)}の『{target}={colour}』は事実と違う（{truth}）",
+            )
+        )
+    return found
+
+
+def _seat_supposition_lines(
+    player_id: str,
+    own_role: RoleName,
+    ledger: PublicFactLedger,
+    observations: ObservationSet,
+    allies: Iterable[str],
+    seat_solver: RoleSolver,
+    *,
+    false_colours: list[PublicVerdict],
+) -> list[str]:
+    """What this seat may conclude under a named supposition, kept apart from
+    what it knows. Each row opens with its supposition: the design contract's
+    rule that a conditional conclusion states what it rests on."""
+    rows = _truthful_holder_rows(
+        player_id, own_role, ledger, observations, allies, seat_solver, false_colours
+    )
+    rows += _no_village_bluff_rows(player_id, ledger, observations, allies, seat_solver)
+    if not rows:
+        return []
+    head = f"- あなたの視点で、仮定つきで言えること（仮定が外れれば成り立たない。{_KEEP_UNSAID}）:"
+    return [head, *rows]
+
+
+_NON_VILLAGE_LABELS = {RoleName.WEREWOLF: "人狼", RoleName.MADMAN: "狂人", RoleName.FOX: "妖狐"}
+
+_RESULT_ROLES = ((SEER_RESULT, RoleName.SEER), (MEDIUM_RESULT, RoleName.MEDIUM))
+
+
+def _truthful_holder_rows(
+    player_id: str,
+    own_role: RoleName,
+    ledger: PublicFactLedger,
+    observations: ObservationSet,
+    allies: Iterable[str],
+    seat_solver: RoleSolver,
+    false_colours: list[PublicVerdict],
+) -> list[str]:
+    """Who cannot be the real seer (or medium), if the real one tells true
+    colours -- and who must be, if nobody holds the card in silence.
+
+    Two suppositions, each named (2-B4): a real seer may lie about a colour,
+    and a real seer may never claim. Asked only once the seat holds a colour
+    it knows is false; a seat holding the card itself already knows.
+    """
+    rows: list[str] = []
+    skip = {player_id, *allies}
+    for result_type, role in _RESULT_ROLES:
+        if own_role is role or not any(v.result_type == result_type for v in false_colours):
+            continue
+        claimants = _ability_claimants(ledger, observations, result_type, role)
+        possible = [
+            pid for pid in claimants
+            if pid not in skip and seat_solver.is_possible(has_role(pid, role))
+        ]
+        truthful = seat_solver.assuming(TruthfulIfGenuine())
+        if not truthful.is_possible(Hypothesis()):
+            continue
+        ruled_out = [pid for pid in possible if not truthful.is_possible(has_role(pid, role))]
+        if not ruled_out:
+            continue
+        label = ROLE_DEFINITIONS[role].label_ja
+        row = f"  - 真の{label}が色を偽らないなら、{_names(ledger, ruled_out)}は真の{label}ではない"
+        no_latent = truthful.assuming(NoLatentClaim(role))
+        if no_latent.is_possible(Hypothesis()):
+            left = [pid for pid in claimants if no_latent.is_possible(has_role(pid, role))]
+            if len(left) == 1:
+                row += f"。潜伏の{label}もいないなら、真の{label}は{ledger.name_of(left[0])}"
+        rows.append(row)
+    return rows
+
+
+def _ability_claimants(
+    ledger: PublicFactLedger, observations: ObservationSet, result_type: str, role: RoleName
+) -> list[str]:
+    if role is RoleName.SEER:
+        return _seer_claimants(ledger)
+    wanted = set(observations.claimants_of(role)) | {
+        v.claimant_id for v in observations.verdicts if v.result_type == result_type
+    }
+    return _seat_ordered_ids(ledger, wanted)
+
+
+def _no_village_bluff_rows(
+    player_id: str,
+    ledger: PublicFactLedger,
+    observations: ObservationSet,
+    allies: Iterable[str],
+    seat_solver: RoleSolver,
+) -> list[str]:
+    """The claims this seat knows are false, read as "a village seat would not
+    bluff a role".
+
+    ケント knew ダイキ and アオイ were not the seer, and that アオイ was neither
+    wolf nor fox. "So アオイ is the madman" is the table's habit, not a rule (a
+    hunter may claim seer), which is why the row names the supposition (2-B3).
+    A claim the seat cannot yet call false, or whose holder is already settled,
+    gets nothing; nor does a claimant left with all three non-village roles.
+    """
+    skip = {player_id, *allies}
+    fakes = [
+        claim.player_id
+        for claim in observations.claims
+        if claim.player_id not in skip
+        and claim.role is not RoleName.VILLAGER
+        and not seat_solver.is_possible(has_role(claim.player_id, claim.role))
+        and seat_solver.certain_role(claim.player_id) is None
+    ]
+    if not fakes:
+        return []
+    supposed = seat_solver.assuming(NoVillageBluff())
+    if not supposed.is_possible(Hypothesis()):
+        return []
+    cells: list[str] = []
+    for pid in _seat_ordered_ids(ledger, fakes):
+        roles = [role for role in NON_VILLAGE_ROLES if supposed.is_possible(has_role(pid, role))]
+        if not roles or len(roles) == len(NON_VILLAGE_ROLES):
+            continue
+        dead = "" if ledger.is_alive(pid) else "(死亡)"
+        cells.append(
+            f"{ledger.name_of(pid)}{dead}は" + "か".join(_NON_VILLAGE_LABELS[r] for r in roles)
+        )
+    if not cells:
+        return []
+    return ["  - 村側の騙りがなければ: " + "、".join(cells)]
+
+
+def _quiet_guarded_nights(
+    ledger: PublicFactLedger, observations: ObservationSet, guards: Mapping[int, str]
+) -> list[str]:
+    """The empty mornings, each with the seat the hunter covered that night.
+
+    The engine never tells the hunter whether a guard held, and this says no
+    more than the rules give: the wolves bit someone, so the bite went to the
+    covered seat or to the fox (3-B2). That the covered seat is no wolf does
+    not follow -- the fox may have been the one bitten.
+    """
+    quiet = [
+        (night, guards.get(night))
+        for night in range(1, observations.day)
+        if not observations.deaths_on(night)
+    ]
+    if not quiet:
+        return []
+    cells = "・".join(
+        f"{night}日目夜({ledger.name_of(target) if target else '護衛なし'})"
+        for night, target in quiet
+    )
+    return [f"- 死体なしの夜: {cells}。襲撃先は護衛先か妖狐（護衛の成否は知らされない）"]
 
 
 def _private_certainty_lines(
@@ -751,6 +1503,8 @@ def _private_certainty_lines(
     allies: Iterable[str],
     seat_solver: RoleSolver | None,
     public_keys: frozenset[tuple[str, ...]],
+    *,
+    extra: Iterable[str] = (),
 ) -> list[str]:
     """Hard conclusions only this seat can draw, beyond its card and results.
 
@@ -774,13 +1528,23 @@ def _private_certainty_lines(
         wolf_view=own_role is RoleName.WEREWOLF,
         refute_claims=own_role is not RoleName.SEER,
         viewer_id=player_id,
+        fox_view=own_role is RoleName.FOX,
     )
-    texts = [fact.text for fact in facts if fact.key not in public_keys]
+    texts = _fact_texts(fact for fact in facts if fact.key not in public_keys)
+    texts.extend(extra)
     if not texts:
         return []
     return [
-        "- あなたの視点で論理的に確定すること（卓には言えない根拠を含む）: " + " / ".join(texts)
+        f"- あなたの視点で論理的に確定すること（卓には言えない根拠を含む。{_KEEP_UNSAID}）: "
+        + " / ".join(texts)
     ]
 
 
-__all__ = ["MEMO_HEADING", "PRIVATE_HEADING", "namify", "render_board_memo", "render_roster"]
+__all__ = [
+    "MEMO_HEADING",
+    "PRIVATE_HEADING",
+    "SELF",
+    "namify",
+    "render_board_memo",
+    "render_roster",
+]
