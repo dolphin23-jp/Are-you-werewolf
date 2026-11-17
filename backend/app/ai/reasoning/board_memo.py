@@ -41,7 +41,7 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 
 from app.ai.reasoning.facts import MEDIUM_RESULT, SEER_RESULT, PublicFactLedger
@@ -1196,6 +1196,8 @@ def _private_lines(
                 for night, target in sorted(nights.guards.items())
             )
         )
+    if own_role is RoleName.HUNTER:
+        lines.extend(_quiet_guarded_nights(ledger, observations, nights.guards))
     if nights.attacks and own_role is RoleName.WEREWOLF:
         outcome_by_night = {record.day: record.succeeded for record in state.attack_records}
         lines.append(
@@ -1388,6 +1390,30 @@ def _no_village_bluff_rows(
     if not cells:
         return []
     return ["  - 村側の騙りがなければ: " + "、".join(cells)]
+
+
+def _quiet_guarded_nights(
+    ledger: PublicFactLedger, observations: ObservationSet, guards: Mapping[int, str]
+) -> list[str]:
+    """The empty mornings, each with the seat the hunter covered that night.
+
+    The engine never tells the hunter whether a guard held, and this says no
+    more than the rules give: the wolves bit someone, so the bite went to the
+    covered seat or to the fox (3-B2). That the covered seat is no wolf does
+    not follow -- the fox may have been the one bitten.
+    """
+    quiet = [
+        (night, guards.get(night))
+        for night in range(1, observations.day)
+        if not observations.deaths_on(night)
+    ]
+    if not quiet:
+        return []
+    cells = "・".join(
+        f"{night}日目夜({ledger.name_of(target) if target else '護衛なし'})"
+        for night, target in quiet
+    )
+    return [f"- 死体なしの夜: {cells}。襲撃先は護衛先か妖狐（護衛の成否は知らされない）"]
 
 
 def _private_certainty_lines(

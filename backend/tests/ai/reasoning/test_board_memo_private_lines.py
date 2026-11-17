@@ -9,6 +9,10 @@ section or another seat.
 
 from __future__ import annotations
 
+from app.ai.reasoning.observations import ObservationSet
+from app.ai.reasoning.perspectives import PlayerPrivatePerspective
+from app.ai.reasoning.solver import build_solver, has_role
+from app.engine.roles import RoleName
 from tests.ai.reasoning import run13_seed1_boards as s1
 
 
@@ -106,3 +110,38 @@ def test_no_other_seat_learns_what_the_wolves_know_about_aoi():
         memos.pop(wolf)
     for text in ("事実と違う", "色を偽らない", "真の占い師はケント"):
         assert _others_see(memos, "", text) == [], text
+
+
+# -- 9. the hunter: the empty mornings that were its own guard --
+
+_GUARD_READING = "襲撃先は護衛先か妖狐（護衛の成否は知らされない）"
+
+
+def test_the_hunter_is_told_which_empty_mornings_followed_its_guard():
+    """3-B2 / 5-N2: ミオ guarded ケント on every quiet night and never used it.
+    She is not told the guard held -- the engine never tells her."""
+    day_three = s1.private_part(s1.memo(s1.board(3), s1.MIO)).splitlines()
+    assert f"- 死体なしの夜: 1日目夜(ケント)・2日目夜(ケント)。{_GUARD_READING}" in day_three
+
+    day_five = s1.private_part(s1.memo(s1.board(5), s1.MIO)).splitlines()
+    assert (
+        f"- 死体なしの夜: 1日目夜(ケント)・2日目夜(ケント)・4日目夜(ケント)。{_GUARD_READING}"
+    ) in day_five
+
+
+def test_the_hunter_line_does_not_clear_the_seat_it_guarded():
+    """The bite may have gone to the fox each time, so ケント as a wolf stays
+    possible from ミオ's seat -- unnatural, not impossible."""
+    state = s1.board(5)
+    solver = build_solver(ObservationSet.from_state(state), PlayerPrivatePerspective(s1.MIO))
+    private = s1.private_part(s1.memo(state, s1.MIO))
+
+    assert solver.is_possible(has_role(s1.KENT, RoleName.WEREWOLF)) is True
+    assert "ケントは人狼" not in private
+    assert "ケント、" not in private.split("論理的に確定")[-1].split("\n")[0]
+
+
+def test_only_the_hunter_sees_its_guards():
+    memos = _memos(3, "morning")
+
+    assert _others_see(memos, s1.MIO, "死体なしの夜") == []
