@@ -38,7 +38,7 @@ from app.ai.strategy import (
     player_labels,
     render_board_analysis,
 )
-from app.engine.roles import ROLE_DEFINITIONS, RoleName
+from app.engine.roles import ROLE_DEFINITIONS, RoleName, Team
 from app.engine.speech_events import SpeechEventType
 from app.engine.state import ChatChannel, ChatMessage, GameState, PublicDeathCause
 
@@ -144,9 +144,9 @@ SUMMARY_OUTPUT_INSTRUCTION = """以下のJSON形式で回答してください:
 CHAT_DISCUSSION_OUTPUT_INSTRUCTION = """次のJSONだけを返してください（前後に説明文を付けない）。\
 plan_noteを先に書き、そのメモに沿ってpublic_messageを書く:
 {"plan_note": {"plan": "非公開の方針メモ。内訳の見立て、候補の比べ合い、今日の方針を2〜3文で", \
-"execution_target": "今いちばん吊りたい相手のplayer_id。決めきれていなくても今の\
+"execution_target": "今日投票するつもりの相手のplayer_id。決めきれていなくても今の\
 いちばんを書き、材料が何もないときだけnull", \
-"suspects": ["怪しいと思う順のplayer_id"], "trusted": ["信用しているplayer_id"], \
+"suspects": ["卓で疑いを向ける順のplayer_id"], "trusted": ["信用しているplayer_id"], \
 "trusted_seer": "真と見ている占いCO者のplayer_idまたはnull", \
 "fox_candidates": ["妖狐候補のplayer_id"], \
 "team_plan": "非公開。人狼・狂人は陣営としての狙いと次の一手を短く。それ以外は空文字"}, \
@@ -161,6 +161,15 @@ plan_noteを先に書き、そのメモに沿ってpublic_messageを書く:
 なければfalse}
 player_idは【名簿】で引いてください。public_messageの中にはplayer_idを書きません。
 public_resultsは本当に自分が持っている結果（騙りなら騙りとして出す結果）だけを入れます。"""
+
+# Wolf and madman seats only, after the contract above. execution_target and
+# suspects are the seat's position at the table for every role (the vote
+# prompt and its audit read them as that); a seat whose real read differs
+# from its position is told where the read goes. The schema is unchanged.
+CHAT_TEAM_READ_LINE = (
+    "execution_targetとsuspectsは卓での立場。"
+    "本当の見立て（真占い・狩人・狐の候補）はteam_planに書く。"
+)
 
 CHAT_VOTE_OUTPUT_INSTRUCTION = """次のJSONだけを返してください:
 {"decisive_evidence": "決め手になった一つの根拠", \
@@ -497,7 +506,7 @@ class ContextBuilder:
             "- 自分の見立てと方針はplan_noteに短く書く。候補を比べるのもplan_noteで、"
             "発言では比べた候補を並べない。発言はあなたの人格と、あなたの役職"
             "(騙っているなら騙り役)として自然な範囲で選ぶ\n"
-            "- plan_noteのexecution_targetには、決めきれていなくても今いちばん吊りたい相手を"
+            "- plan_noteのexecution_targetには、決めきれていなくても今日投票するつもりの相手を"
             "毎回書く。材料が何もないときだけnull\n"
             "- 発言で推した吊り先と投票先は原則そろえる。変えるときは一言理由を言う\n"
             "- 自分の陣営の勝ちを目指す。人狼・狂人は本当の目的を発言で漏らさない。"
@@ -1011,7 +1020,10 @@ class ContextBuilder:
         if duties:
             user_layers.append(duties)
         user_layers.append(render_roster(ledger, player_id))
-        user_layers.append(CHAT_DISCUSSION_OUTPUT_INSTRUCTION)
+        contract = CHAT_DISCUSSION_OUTPUT_INSTRUCTION
+        if state.players[player_id].team is Team.WEREWOLF:
+            contract += "\n" + CHAT_TEAM_READ_LINE
+        user_layers.append(contract)
         return self._assemble(
             [self._layer_a_system(state, player_id), self._layer_b_role(state, player_id)],
             user_layers,
