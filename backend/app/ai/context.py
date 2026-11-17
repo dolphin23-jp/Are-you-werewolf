@@ -40,7 +40,13 @@ from app.ai.strategy import (
 )
 from app.engine.roles import ROLE_DEFINITIONS, RoleName, Team
 from app.engine.speech_events import SpeechEventType
-from app.engine.state import ChatChannel, ChatMessage, GameState, PublicDeathCause
+from app.engine.state import (
+    ChatChannel,
+    ChatMessage,
+    GameState,
+    PendingQuestion,
+    PublicDeathCause,
+)
 
 # Night 0 has no attack: the scripted first victim dies (and is never listed
 # here), and the only other way to die that night is a seer divining the fox.
@@ -773,7 +779,7 @@ class ContextBuilder:
             return "【あなたへの未回答の質問】(ありません)"
         lines = [
             f"[{item.source_message_id}] {self._label(state, item.asker)} →あなた:"
-            f"「{item.question}」"
+            f"「{self._asked_in_own_words(state, item) if self._chat else item.question}」"
             for item in questions
         ]
         if self._chat:
@@ -796,6 +802,45 @@ class ContextBuilder:
             "答えるときはreply_toにその発言ID(mN)を入れてください。"
             "これらの質問はこの発言のあとで片づく扱いなので、次の発言で同じ答えを繰り返さないでください。"
         )
+
+    @staticmethod
+    def _asked_in_own_words(state: GameState, question: PendingQuestion) -> str:
+        """The question as the asker put it: the sentences of its message that
+        name the target, as said (seed-1 review 4-A2).
+
+        The recorded question is the asker's structured paraphrase; shown as
+        "what m8 said", it put words in the asker's mouth -- 43 of 44 differed
+        from the message. A sentence that is only a call (「Player1さん。」)
+        takes the sentence after it, where the question is. Two sentences at
+        most, each cut around the name. A message that is gone, or that never
+        names the target, leaves the recorded text (such questions are the
+        registering side's to drop).
+        """
+        message = next(
+            (m for m in state.chat_log if m.message_id == question.source_message_id), None
+        )
+        if message is None or message.author_id != question.asker:
+            return question.question
+        sentences = _sentences(message.content)
+        quoted: list[str] = []
+        for index, sentence in enumerate(sentences):
+            span = next(
+                (
+                    (start, end)
+                    for start, end, pid in _mention_spans(state, sentence)
+                    if pid == question.target
+                ),
+                None,
+            )
+            if span is None:
+                continue
+            rest = (sentence[: span[0]] + sentence[span[1] :]).strip()
+            if len(_CALL_RESIDUE.sub("", rest)) == 0 and index + 1 < len(sentences):
+                sentence = f"{sentence}。{sentences[index + 1]}"
+            quoted.append(_excerpt(sentence, span[0]).translate(_NESTED_QUOTES))
+            if len(quoted) == 2:
+                break
+        return "」「".join(quoted) if quoted else question.question
 
     def _layer_since_last_turn(self, state: GameState, player_id: str) -> str:
         """Where this seat stood, and what has been said or shown since it spoke.
@@ -1469,6 +1514,9 @@ _NESTED_QUOTES = str.maketrans("「」", "『』")
 _KATAKANA = "\u30a1-\u30fa\u30fd-\u30ff"
 _LONG_VOWEL = "\u30fc"
 _KATAKANA_OR_LONG_RE = re.compile(f"[{_KATAKANA}{_LONG_VOWEL}]")
+# What is left of a sentence that only calls someone: an honorific and
+# punctuation (「Player1さん」「ホノカ、」).
+_CALL_RESIDUE = re.compile(r"さん|くん|ちゃん|様|[、,。！？!?\s…ー〜]")
 
 
 def _own_sentences_naming(
