@@ -47,8 +47,13 @@ from dataclasses import dataclass
 from app.ai.reasoning.facts import MEDIUM_RESULT, SEER_RESULT, PublicFactLedger
 from app.ai.reasoning.observations import ObservationSet, PublicVerdict
 from app.ai.reasoning.perspectives import PlayerPrivatePerspective
-from app.ai.reasoning.solver.assumptions import GenuineClaim, HonestResults
-from app.ai.reasoning.solver.backend import AnyOf, Certainty, Hypothesis, RoleIs, has_role
+from app.ai.reasoning.solver.assumptions import (
+    NON_VILLAGE_ROLES,
+    GenuineClaim,
+    HonestResults,
+    NoVillageBluff,
+)
+from app.ai.reasoning.solver.backend import AnyOf, Hypothesis, RoleIs, has_role
 from app.ai.reasoning.solver.queries import RoleSolver
 from app.ai.reasoning.solver.rules.claimed_divination import (
     ClaimedDivinationRuleModule,
@@ -667,6 +672,27 @@ class _Fact:
 
     key: tuple[str, ...]
     text: str
+    # Facts of the form "<seat> is not X" share a predicate, and a run of them
+    # is written once: 「リク、アオイは人狼でも妖狐でもない」.
+    predicate: str = ""
+
+
+def _fact_texts(facts: Iterable[_Fact]) -> list[str]:
+    """Each fact's text, with seats sharing a predicate merged at the first."""
+    texts: list[str] = []
+    merged: dict[str, int] = {}
+    subjects: dict[str, list[str]] = defaultdict(list)
+    for fact in facts:
+        if not fact.predicate:
+            texts.append(fact.text)
+            continue
+        if fact.predicate not in merged:
+            merged[fact.predicate] = len(texts)
+            texts.append("")
+        subjects[fact.predicate].append(fact.text)
+    for predicate, index in merged.items():
+        texts[index] = "、".join(subjects[predicate]) + predicate
+    return texts
 
 
 def _public_logic_facts(
@@ -720,7 +746,7 @@ def _public_logic_facts(
 def _logic_lines(facts: list[_Fact]) -> list[str]:
     if not facts:
         return []
-    return ["- 公開情報だけで確定すること:"] + [f"  - {fact.text}" for fact in facts]
+    return ["- 公開情報だけで確定すること:"] + [f"  - {text}" for text in _fact_texts(facts)]
 
 
 def _settled_facts(
@@ -732,6 +758,7 @@ def _settled_facts(
     wolf_view: bool,
     refute_claims: bool,
     viewer_id: str | None,
+    fox_view: bool = False,
 ) -> list[_Fact]:
     """Hard conclusions a solver reaches about claimants, roles and seats.
 
@@ -739,13 +766,20 @@ def _settled_facts(
     in the solver and in what they leave out. A board that admits no world at
     all settles nothing: read naively, "nobody can be the fox" would be true of
     every seat and printed as a fact.
+
+    A living seat that cannot be the wolf, or the fox, or either, is cleared in
+    those words. The fox is never told who is not the fox -- that is everyone
+    -- as the wolves are never told who is not a wolf; and once no living seat
+    can be the fox, the filled-role line already says so for all of them.
     """
     if not solver.is_possible(Hypothesis()):
         return []
     facts: list[_Fact] = []
     if refute_claims:
         facts.extend(_refuted_claim_facts(ledger, observations, solver, exclude, viewer_id))
-    facts.extend(_filled_role_facts(ledger, solver))
+    filled = _filled_role_facts(ledger, solver)
+    facts.extend(filled)
+    fox_settled = ("filled", RoleName.FOX.value) in {fact.key for fact in filled}
     for pid in ledger.known_player_ids():
         if pid in exclude:
             continue
@@ -754,13 +788,23 @@ def _settled_facts(
         if role is not None and not (wolf_view and role is RoleName.WEREWOLF):
             label = ledger.name_of(pid) + ("" if alive else "(死亡)")
             facts.append(_Fact(("role", pid), f"{label}は{_ROLE_LABELS[role]}で確定"))
-        elif (
-            alive
-            and role is None
-            and not wolf_view
-            and solver.assess(has_role(pid, RoleName.WEREWOLF)) is Certainty.IMPOSSIBLE
-        ):
-            facts.append(_Fact(("not_wolf", pid), f"{ledger.name_of(pid)}は人狼ではないと確定"))
+            continue
+        if not alive or role is not None:
+            continue
+        not_wolf = not wolf_view and not solver.is_possible(has_role(pid, RoleName.WEREWOLF))
+        not_fox = (
+            not fox_view
+            and not fox_settled
+            and not solver.is_possible(has_role(pid, RoleName.FOX))
+        )
+        if not_wolf or not_fox:
+            cleared = "wolf+fox" if not_wolf and not_fox else ("wolf" if not_wolf else "fox")
+            predicate = {
+                "wolf+fox": "は人狼でも妖狐でもない",
+                "wolf": "は人狼ではない",
+                "fox": "は妖狐ではない",
+            }[cleared]
+            facts.append(_Fact(("cleared", pid, cleared), ledger.name_of(pid), predicate))
     return facts
 
 
@@ -1167,7 +1211,74 @@ def _private_lines(
     )
     if seat_solver is not None:
         lines.extend(_seat_endgame_lines(ledger, seat_solver, own_role, public_solver))
+        lines.extend(
+            _seat_supposition_lines(player_id, own_role, ledger, observations, allies, seat_solver)
+        )
     return lines
+
+
+def _seat_supposition_lines(
+    player_id: str,
+    own_role: RoleName,
+    ledger: PublicFactLedger,
+    observations: ObservationSet,
+    allies: Iterable[str],
+    seat_solver: RoleSolver,
+) -> list[str]:
+    """What this seat may conclude under a named supposition, kept apart from
+    what it knows. Each row opens with its supposition: the design contract's
+    rule that a conditional conclusion states what it rests on."""
+    rows = _no_village_bluff_rows(player_id, ledger, observations, allies, seat_solver)
+    if not rows:
+        return []
+    return ["- あなたの視点で、仮定つきで言えること（仮定が外れれば成り立たない）:", *rows]
+
+
+_NON_VILLAGE_LABELS = {RoleName.WEREWOLF: "人狼", RoleName.MADMAN: "狂人", RoleName.FOX: "妖狐"}
+
+
+def _no_village_bluff_rows(
+    player_id: str,
+    ledger: PublicFactLedger,
+    observations: ObservationSet,
+    allies: Iterable[str],
+    seat_solver: RoleSolver,
+) -> list[str]:
+    """The claims this seat knows are false, read as "a village seat would not
+    bluff a role".
+
+    ケント knew ダイキ and アオイ were not the seer, and that アオイ was neither
+    wolf nor fox. "So アオイ is the madman" is the table's habit, not a rule (a
+    hunter may claim seer), which is why the row names the supposition (2-B3).
+    A claim the seat cannot yet call false, or whose holder is already settled,
+    gets nothing; nor does a claimant left with all three non-village roles.
+    """
+    skip = {player_id, *allies}
+    fakes = [
+        claim.player_id
+        for claim in observations.claims
+        if claim.player_id not in skip
+        and claim.role is not RoleName.VILLAGER
+        and not seat_solver.is_possible(has_role(claim.player_id, claim.role))
+        and seat_solver.certain_role(claim.player_id) is None
+    ]
+    if not fakes:
+        return []
+    supposed = seat_solver.assuming(NoVillageBluff())
+    if not supposed.is_possible(Hypothesis()):
+        return []
+    cells: list[str] = []
+    for pid in _seat_ordered_ids(ledger, fakes):
+        roles = [role for role in NON_VILLAGE_ROLES if supposed.is_possible(has_role(pid, role))]
+        if not roles or len(roles) == len(NON_VILLAGE_ROLES):
+            continue
+        dead = "" if ledger.is_alive(pid) else "(死亡)"
+        cells.append(
+            f"{ledger.name_of(pid)}{dead}は" + "か".join(_NON_VILLAGE_LABELS[r] for r in roles)
+        )
+    if not cells:
+        return []
+    return ["  - 村側の騙りがなければ: " + "、".join(cells)]
 
 
 def _private_certainty_lines(
@@ -1201,8 +1312,9 @@ def _private_certainty_lines(
         wolf_view=own_role is RoleName.WEREWOLF,
         refute_claims=own_role is not RoleName.SEER,
         viewer_id=player_id,
+        fox_view=own_role is RoleName.FOX,
     )
-    texts = [fact.text for fact in facts if fact.key not in public_keys]
+    texts = _fact_texts(fact for fact in facts if fact.key not in public_keys)
     if not texts:
         return []
     return [

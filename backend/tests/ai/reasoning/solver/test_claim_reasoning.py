@@ -19,6 +19,7 @@ from app.ai.reasoning.solver import (
     HonestResults,
     Hypothesis,
     NoLatentClaim,
+    NoVillageBluff,
     build_solver,
     has_role,
     not_role,
@@ -384,3 +385,35 @@ def test_the_table_only_knows_the_first_victim_was_not_wolf_or_fox():
     # Everything else about the victim is still open from the public view.
     assert solver.is_possible(has_role("p1", RoleName.SEER)) is True
     assert solver.is_possible(has_role("p1", RoleName.FREEMASON)) is True
+
+
+# -- "no village seat bluffs": a supposition, kept out of the rules --
+
+
+def test_without_the_supposition_a_false_seer_claim_may_be_any_role_but_seer():
+    state = boards.deal({"p4": RoleName.SEER})
+    boards.claim(state, "p4", RoleName.SEER)
+    boards.claim(state, "p7", RoleName.SEER)
+    seer = build_solver(boards.observe(state), PlayerPrivatePerspective("p4"))
+
+    assert seer.is_possible(has_role("p7", RoleName.HUNTER)) is True
+    assert seer.is_possible(has_role("p7", RoleName.VILLAGER)) is True
+
+
+def test_supposing_no_village_bluff_leaves_a_false_claimant_wolf_madman_or_fox():
+    state = boards.deal({"p4": RoleName.SEER})
+    boards.claim(state, "p4", RoleName.SEER)
+    boards.claim(state, "p7", RoleName.SEER)
+    boards.claim(state, "p9", RoleName.VILLAGER)
+    seer = build_solver(boards.observe(state), PlayerPrivatePerspective("p4"))
+    supposed = seer.assuming(NoVillageBluff())
+
+    assert set(supposed.possible_roles("p7")) == {
+        RoleName.WEREWOLF,
+        RoleName.MADMAN,
+        RoleName.FOX,
+    }
+    # "Just a villager" is what a hiding hunter says: not a bluff it rules out.
+    assert supposed.is_possible(has_role("p9", RoleName.HUNTER)) is True
+    # The unconditional view is untouched.
+    assert seer.is_possible(has_role("p7", RoleName.HUNTER)) is True

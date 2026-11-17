@@ -19,6 +19,7 @@ from app.ai.reasoning.solver.assumptions import (
     GenuineClaim,
     HonestResults,
     NoLatentClaim,
+    NoVillageBluff,
 )
 from app.ai.reasoning.solver.backend import (
     Certainty,
@@ -67,6 +68,7 @@ __all__ = [
     "Hypothesis",
     "LabelledConstraint",
     "NoLatentClaim",
+    "NoVillageBluff",
     "QueryKey",
     "RoleCountIs",
     "RoleIs",

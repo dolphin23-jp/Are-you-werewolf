@@ -18,6 +18,9 @@ Five separate suppositions, because collapsing them loses real distinctions:
 * `AccurateTimeline(p)`     -- the nights p says their results came from are the
   nights they came from. Separate again: a real seer may lie about *when* while
   telling the truth about *who*, so the timing is its own supposition.
+* `NoVillageBluff()`        -- no village-side seat claims a role it does not
+  hold, so a false claim (seer, medium, hunter, freemason) comes from a wolf,
+  the madman or the fox. A table's habit, not a rule: a hunter may claim seer.
 """
 
 from __future__ import annotations
@@ -30,6 +33,7 @@ from app.ai.reasoning.solver.backend import (
     LabelledConstraint,
     RoleIs,
     RoleIsNot,
+    RoleIsOneOf,
     Unsatisfiable,
 )
 from app.ai.reasoning.timeline import disclosable_result_nights, find_timeline_conflicts
@@ -88,13 +92,25 @@ class AccurateTimeline:
         return f"timeline:{self.player_id}"
 
 
+@dataclass(frozen=True)
+class NoVillageBluff:
+    @property
+    def key(self) -> str:
+        return "no_village_bluff"
+
+
 Assumption = (
     GenuineClaim
     | HonestResults
     | CompleteResultDisclosure
     | NoLatentClaim
     | AccurateTimeline
+    | NoVillageBluff
 )
+
+# The roles outside the village team: whoever bluffs a role, under
+# `NoVillageBluff`, holds one of these.
+NON_VILLAGE_ROLES = (RoleName.WEREWOLF, RoleName.MADMAN, RoleName.FOX)
 
 
 def expand(
@@ -124,7 +140,39 @@ def _expand_one(
             return _no_latent_claim(assumption, observations)
         case AccurateTimeline():
             return _accurate_timeline(assumption, observations)
+        case NoVillageBluff():
+            return _no_village_bluff(assumption, observations)
     raise TypeError(f"unknown assumption {assumption!r}")
+
+
+def _no_village_bluff(
+    assumption: NoVillageBluff, observations: ObservationSet
+) -> list[LabelledConstraint]:
+    """Every standing claim is either true or made by a non-village seat.
+
+    A villager CO is left alone: "I'm just a villager" is what a hiding
+    hunter says, and calling that a bluff would make the supposition about
+    something else.
+    """
+    constraints: list[LabelledConstraint] = []
+    for claim in observations.claims:
+        if claim.role is RoleName.VILLAGER:
+            continue
+        label = ROLE_DEFINITIONS[claim.role].label_ja
+        constraints.append(
+            LabelledConstraint(
+                constraint_id=f"{assumption.key}:{claim.player_id}:{claim.role.value}",
+                constraint=RoleIsOneOf(
+                    player_id=claim.player_id, roles=(claim.role, *NON_VILLAGE_ROLES)
+                ),
+                explanation=(
+                    f"村側は役職を騙らないと仮定しているため、{label}COした{claim.player_id}は"
+                    f"{label}か、人狼・狂人・妖狐のどれかです。"
+                ),
+                module_id=MODULE_ID,
+            )
+        )
+    return constraints
 
 
 def _accurate_timeline(
@@ -292,8 +340,10 @@ __all__ = [
     "Assumption",
     "CompleteResultDisclosure",
     "GenuineClaim",
+    "NON_VILLAGE_ROLES",
     "HonestResults",
     "NoLatentClaim",
+    "NoVillageBluff",
     "expand",
     "no_latent_constraints",
     "signature",
