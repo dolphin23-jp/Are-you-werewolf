@@ -171,24 +171,40 @@ def role_claim_history(
     return tuple(history)
 
 
+def _standing_claims(events: Sequence[SpeechEvent]) -> dict[str, RoleClaimState]:
+    """Each player's standing transition, in the order the standing claims were made.
+
+    A restatement is not a transition of its own: the claim it repeats keeps
+    the day and the message it was first made in. Taking the restatement
+    instead dated a day-1 seer claim to day 2 the moment its holder said
+    "占いCO" again with a morning result, and the day-2 summary then listed it
+    as that day's CO (seed 1 of run 13). A switch, a retraction or a claim made
+    after a retraction is a new transition, and moves the player to where it
+    was said.
+    """
+    standing: dict[str, RoleClaimState] = {}
+    for state in role_claim_history(events):
+        if state.reaffirmed:
+            continue
+        standing.pop(state.player_id, None)
+        standing[state.player_id] = state
+    return standing
+
+
 def current_role_claim(
     events: Sequence[SpeechEvent], player_id: str
 ) -> RoleClaimState | None:
-    """The claim standing right now, or None once retracted or never made."""
-    history = role_claim_history(events, player_id)
-    if not history:
-        return None
-    latest = history[-1]
-    return latest if latest.is_active else None
+    """The claim standing right now, as first made or as switched to; None once
+    retracted or never made. A restatement stays in `role_claim_history` only."""
+    state = _standing_claims(events).get(player_id)
+    return state if state is not None and state.is_active else None
 
 
 def current_role_claims(events: Sequence[SpeechEvent]) -> tuple[RoleClaimState, ...]:
     """Active claims only, ordered by when the standing claim was made -- a
-    player who slid moves to the position of their new claim, not their old one."""
-    latest: dict[str, RoleClaimState] = {}
-    for state in role_claim_history(events):
-        latest[state.player_id] = state
-    return tuple(state for state in latest.values() if state.is_active)
+    player who slid moves to the position of their new claim, not their old one,
+    and a player who only restated a claim stays where the claim was first made."""
+    return tuple(state for state in _standing_claims(events).values() if state.is_active)
 
 
 # -- ability results --

@@ -20,6 +20,13 @@ from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
 from app.engine.roles import ROLE_DEFINITIONS, RoleName
+from app.engine.speech_events import (
+    RoleClaimState,
+    RoleClaimStatus,
+    SpeechEvent,
+    SpeechEventType,
+    role_claim_history,
+)
 from app.eval.transcript import DecisionAuditRecord, GameTranscript, Utterance
 
 _DEATH_CAUSE = {
@@ -155,6 +162,10 @@ class _Renderer:
             (plan.voter_id, plan.day, plan.round_number): plan
             for plan in transcript.wolf_ally_vote_plans
         }
+        self.claim_history = role_claim_history(_speech_events(state))
+        self.claims_by_message: dict[str, list[RoleClaimState]] = defaultdict(list)
+        for claim in self.claim_history:
+            self.claims_by_message[claim.source_message_id].append(claim)
 
     # -- the page --
 
@@ -288,7 +299,8 @@ class _Renderer:
         if u.agrees_with:
             detail.append(f"同意: {_seat_list(self.names, u.agrees_with)}")
         if u.public_claim_role:
-            detail.append(f"CO: {role_label(u.public_claim_role)}")
+            claim = self._co_label(mid, u.public_claim_role)
+            detail.append(f"{claim}: {role_label(u.public_claim_role)}")
         for result in u.public_results:
             detail.append("公開した結果: " + _result_text(result, self.names))
         if u.key_point:
@@ -306,6 +318,22 @@ class _Renderer:
             lines.append("  - 非公開メモ:")
             lines += [f"    - {line}" for line in memo]
         return lines
+
+    def _co_label(self, message_id: str | None, role: str) -> str:
+        """「CO」, or 「CO（再表明）」 when this line only said an earlier claim again.
+
+        A restatement is not a new claim: the claim stands from the day it was
+        first made (`speech_events.current_role_claim`), and the record says so
+        rather than presenting a second CO.
+        """
+        claims = [
+            claim
+            for claim in self.claims_by_message.get(message_id or "", [])
+            if claim.role is not None and claim.role.value == role
+        ]
+        if claims and all(claim.reaffirmed for claim in claims):
+            return "CO（再表明）"
+        return "CO"
 
     def _vote(self, index: int, u: Utterance, who: str) -> list[str]:
         lines = [f"- **{who}** → {seat_label(self.names, u.target)}"]
@@ -469,13 +497,7 @@ class _Renderer:
                 f"- {record['day']}日目夜の護衛: {seat_label(names, record['hunter_id'])} → "
                 f"{seat_label(names, record['target_id'])}"
             )
-        for claim in self.state.get("co_declarations", []):
-            claimed = role_label(claim.get("claimed_role"))
-            source = claim.get("source_message_id") or "-"
-            lines.append(
-                f"- {claim['day']}日目のCO: {seat_label(names, claim['player_id'])} = "
-                f"{claimed}（{source}）"
-            )
+        lines += self._claim_records()
         audits = [
             audit
             for audit in self.t.decision_audits
@@ -495,6 +517,38 @@ class _Renderer:
                 if kind:
                     parts.append(f"判定: {_CHANGE_KIND.get(kind, kind)}")
                 lines.append("- " + " ／ ".join(parts))
+        return lines
+
+    def _claim_records(self) -> list[str]:
+        """Every claim transition in the order it was spoken, restatements labelled.
+
+        Read from the speech-event log, so a claim said again keeps the day it
+        was first made. A record written without that log falls back to the
+        final CO list it carries.
+        """
+        names = self.names
+        if not self.claim_history:
+            return [
+                f"- {claim['day']}日目のCO: {seat_label(names, claim['player_id'])} = "
+                f"{role_label(claim.get('claimed_role'))}"
+                f"（{claim.get('source_message_id') or '-'}）"
+                for claim in self.state.get("co_declarations", [])
+            ]
+        lines: list[str] = []
+        for claim in self.claim_history:
+            seat = seat_label(names, claim.player_id)
+            source = claim.source_message_id or "-"
+            if claim.status is RoleClaimStatus.RETRACTED:
+                lines.append(f"- {claim.day}日目のCO撤回: {seat}（{source}）")
+                continue
+            role = role_label(claim.role.value if claim.role is not None else None)
+            if claim.reaffirmed:
+                kind = "CO（再表明）"
+            elif claim.status is RoleClaimStatus.SWITCHED and claim.previous_role is not None:
+                kind = f"CO（{role_label(claim.previous_role.value)}から乗り換え）"
+            else:
+                kind = "CO"
+            lines.append(f"- {claim.day}日目の{kind}: {seat} = {role}（{source}）")
         return lines
 
     def _result(self) -> list[str]:
@@ -535,6 +589,30 @@ def _result_text(result: Mapping[str, Any], names: Mapping[str, str]) -> str:
     night = result.get("referenced_day")
     when = f"（{night}日目夜）" if night is not None else ""
     return f"{kind} {seat_label(names, str(result.get('target_id') or ''))}={colour}{when}"
+
+
+def _speech_events(state: Mapping[str, Any]) -> list[SpeechEvent]:
+    """The final state's speech-event log, back as events; [] when it has none."""
+    events: list[SpeechEvent] = []
+    for raw in state.get("speech_events", []) or []:
+        try:
+            events.append(
+                SpeechEvent(
+                    event_id=str(raw["event_id"]),
+                    source_message_id=str(raw.get("source_message_id") or ""),
+                    actor_id=str(raw["actor_id"]),
+                    event_type=SpeechEventType(raw["event_type"]),
+                    day=int(raw["day"]),
+                    target_id=raw.get("target_id"),
+                    role=RoleName(raw["role"]) if raw.get("role") else None,
+                    result_is_werewolf=raw.get("result_is_werewolf"),
+                    referenced_day=raw.get("referenced_day"),
+                    confidence=float(raw.get("confidence", 1.0)),
+                )
+            )
+        except (KeyError, ValueError):
+            continue
+    return events
 
 
 def _match_message_ids(
