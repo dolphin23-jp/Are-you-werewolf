@@ -47,6 +47,8 @@ EVENT_LABELS: dict[str, str] = {
     "discussion_stalled": "連続失敗で止まった議論",
     "designation_question_unanswered": "本指定で出た、答える番の無い質問",
     "night_not_resolved": "夜を解決できなかった(襲撃が無いまま)",
+    "night_code_bite": "人狼の襲撃をコードが代わりに決めた夜",
+    "summary_without_speaker": "まとめ役が見つからずまとめを飛ばした日",
     "directed_question_target_unnamed": "本文が相手を名指していないので捨てた名指しの質問",
     "directed_question_on_code_line": "コードが書いた行の名指しの質問(捨てた)",
 }

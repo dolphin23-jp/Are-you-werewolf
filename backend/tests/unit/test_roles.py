@@ -54,3 +54,19 @@ def test_alpha_wolf_no_reassign_when_non_alpha_dies():
     other = next(w for w in ("w1", "w2", "w3") if w != alpha)
     tracker.on_wolf_death(other)
     assert tracker.alpha_id == alpha
+
+
+def test_a_seeded_game_reassigns_the_alpha_the_same_way_every_replay():
+    """The engine passes no rng on a wolf's death: the reassignment follows the game seed.
+
+    It drew from an unseeded `random.Random()`, so two runs of one seed could
+    hand the bite to different wolves after the alpha died.
+    """
+    wolves = [f"w{i}" for i in range(1, 9)]
+    for seed in range(20):
+        successors = set()
+        for _replay in range(5):
+            tracker = AlphaWolfTracker(wolves, seed=seed)
+            tracker.on_wolf_death(tracker.alpha_id)
+            successors.add(tracker.alpha_id)
+        assert len(successors) == 1

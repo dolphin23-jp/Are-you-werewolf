@@ -113,7 +113,8 @@ def test_a_question_already_shown_in_its_own_layer_is_not_repeated_in_the_digest
 
     assert f"[{asked}]" not in digest
     # Nothing else was said to the seat, so the digest has nothing to add.
-    assert "あなた宛て・あなたの推し先に触れた発言・新しい結果は、まだありません。" in digest
+    assert "あなた宛て・メモの吊り先に触れた発言・新しい結果は、まだありません。" in digest
+    assert "推し先" not in digest
 
 
 def test_the_digest_says_so_when_nothing_new_has_come_out():

@@ -56,7 +56,7 @@ def test_an_ai_alpha_whose_own_bite_went_nowhere_still_bites_someone() -> None:
     bites = [record for record in state.attack_records if record.day == 1]
     assert len(bites) == 1
     assert state.players[bites[0].target_id].role is not RoleName.WEREWOLF
-    assert metrics.events.get("night_code_resolved", 0) >= 1
+    assert metrics.events.get("night_code_bite") == 1
     assert "night_not_resolved" not in metrics.events
 
 

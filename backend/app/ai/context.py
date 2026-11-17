@@ -954,7 +954,10 @@ class ContextBuilder:
                 "通らなければ変えずに理由を言う。"
             )
         elif heard:
-            lines.append("- あなた宛て・あなたの推し先に触れた発言・新しい結果は、まだありません。")
+            # v3 calls the seat's lean what the note calls it, 「メモの吊り先」, as
+            # the line above does; v2's measured wording is left as it was.
+            mention = "メモの吊り先" if self._chat else "あなたの推し先"
+            lines.append(f"- あなた宛て・{mention}に触れた発言・新しい結果は、まだありません。")
         else:
             lines.append("- まだ誰も話していません。")
         return "\n".join(lines)
@@ -1469,6 +1472,44 @@ class ContextBuilder:
             board_memo=board_memo,
         )
 
+    @staticmethod
+    def _freemason_lead_note(state: GameState, player_id: str) -> str:
+        """Who leads tomorrow, as the scheduler will pick it -- not a question for the chat.
+
+        The summary and the designations fall to the first living AI seat
+        that claimed freemason (`AICoordinator._facilitator`). The chat used
+        to be asked 「どちらがまとめ役か」, and what it agreed was ignored: the
+        pair could settle on one and hear the other lead. A human partner
+        never leads, so with one the AI seat does.
+        """
+        lead = next(
+            (
+                claim.player_id
+                for claim in state.co_declarations
+                if claim.claimed_role == RoleName.FREEMASON
+                and claim.player_id in state.players
+                and state.players[claim.player_id].alive
+                and not state.players[claim.player_id].is_human
+            ),
+            None,
+        )
+        if lead is None:
+            partners = [
+                partner
+                for partner in state.players_by_role(RoleName.FREEMASON)
+                if partner.player_id != player_id and partner.alive
+            ]
+            if partners and all(partner.is_human for partner in partners):
+                lead = player_id
+        if lead == player_id:
+            return "まとめ役（進行役）はあなたが務める（決まっていることなので相談しない）。"
+        if lead is not None:
+            return (
+                f"まとめ役（進行役）は{state.players[lead].name}"
+                "（先に共有COした方。決まっていることなので相談しない）。"
+            )
+        return "まとめ役（進行役）は先に共有COした方が務める（決まっていることなので相談しない）。"
+
     def _build_private_chat_context(
         self,
         state: GameState,
@@ -1504,7 +1545,8 @@ class ContextBuilder:
                 # (owner decision on review 2-N1, 1-B5).
                 user_layers.append(
                     "【指示】共有チャットの1通。相方と明日の進行を決める: "
-                    "方針（グレランか指定か）、候補、占いCO者の扱い、どちらがまとめ役か。"
+                    "方針（グレランか指定か）、候補、占いCO者の扱い。"
+                    f"{self._freemason_lead_note(state, player_id)}"
                     "狩人はこのチャットを読めない（読めるのは共有の2人だけ）。"
                 )
             else:

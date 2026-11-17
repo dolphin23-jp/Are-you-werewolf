@@ -679,15 +679,17 @@ def test_seed1_day4_ask_defend_designate_stays_three_lines():
 
     The candidate was asked and is the candidate: one turn, not two. The
     designation names a seat that spoke after the summary, so no safety net.
+    ハルト's seat here is Player2: the lines name him by the table's name, as
+    a candidate is only one the line names (`_named_closing_target`).
     """
     summary = _asking(
-        "今日はハルトさんに投票します。最後に言いたいことはありますか…？", "p2", target="p2"
+        "今日はPlayer2さんに投票します。最後に言いたいことはありますか…？", "p2", target="p2"
     )
     table = _Table(
         {
             SUMMARY: summary,
             DEFENCE: _line("村人だと示せる決定的な根拠はない。", target="p5"),
-            DESIGNATION: _line("今日はハルトさんに投票します。", target="p2"),
+            DESIGNATION: _line("今日はPlayer2さんに投票します。", target="p2"),
         }
     )
     controller, coordinator = _day_two_table(table)

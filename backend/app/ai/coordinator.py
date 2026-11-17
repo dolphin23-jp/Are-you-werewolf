@@ -194,6 +194,11 @@ _GREY_RANDOM_DECLARED = re.compile(
     r"(?:で(?![はも])|に(?:す|決|し(?!な|ませ))|と(?:す|し)|[。！!]|$)"
 )
 
+# A designation said in the same line: 「仮指定はダイキ」, 「ツムギさんを指定」.
+# 「指定なし」, 「指定はしない」, 「指定せず」 are not one -- they are how a
+# grey-random day is often announced.
+_DESIGNATION_SAID = re.compile(r"指定(?!(?:は|を|も)?(?:なし|無し|しな|しま?せ|せず))")
+
 # The closing lines whose follow-ups the scheduler opens (answers, a defence,
 # the designation) instead of queueing ordinary replies.
 _SUMMARY_STAGES = ("consensus_summary", _PROVISIONAL_STAGE)
@@ -602,6 +607,10 @@ class AICoordinator:
         # the order they were named (never sorted: a seat id says nothing about
         # who should speak first).
         self._forced_partner_confirmations: list[str] = []
+        # The part of the last spoken line the model wrote itself (empty for a
+        # line code wrote). The closing turns read their candidate from it: a
+        # plan-note hang target the line never names is not a designation.
+        self._last_model_text = ""
         self._freemason_public_plan: tuple[str, str, bool] | None = None
         self._freemason_death_announced: set[str] = set()
         freemasons = [
@@ -1217,7 +1226,13 @@ class AICoordinator:
         # "minority review" turn): when the talk piles onto one person, the
         # pushback should come from whoever at the table feels it, as it does
         # between people. Every seat has had a turn by now to be that voice.
-        if not round_state.summary_done and len(round_state.outputs) < round_state.max_total:
+        # The summary is the day's closing line: it opens the designation, the
+        # defence and the close, so a day the replies used up still gets it --
+        # given outside the budget and counted, as an owed answer is. Gating it
+        # on the budget closed a sixth of the days with nobody named at all.
+        if not round_state.summary_done:
+            if len(round_state.outputs) >= round_state.max_total:
+                self._grant_extra_turn(round_state)
             leader = self._facilitator(state)
             if leader is None:
                 leader = next(
@@ -1232,6 +1247,7 @@ class AICoordinator:
             if leader is not None:
                 book.summary_speaker = leader
                 return leader, "consensus_summary"
+            self._record_event("summary_without_speaker")
         return None, "consensus_summary"
 
     def _may_schedule(self, state: GameState, player_id: str) -> bool:
@@ -1598,7 +1614,13 @@ class AICoordinator:
         A closing line that declares a grey-random day (「今日はグレランで」)
         names nobody on purpose: the seats it asked still answer, but no
         candidate defends -- a plan-note lean is not a designation then --
-        and there is no final designation. The vote follows.
+        and there is no final designation. The vote follows. A line that
+        says グレラン and designates in the same breath (「グレランで、仮指定
+        はダイキ」) is a designation: see `_declares_grey_random`.
+
+        The candidate is the plan note's hang target only where the line
+        itself names that seat (`_named_closing_target`): a lean the table
+        never heard used to hand an unnamed seat a defence turn.
         """
         book = self._book_for(round_state)
         book.summary_speaker = speaker_id
@@ -1612,15 +1634,10 @@ class AICoordinator:
             and state.players[question.target_id].alive
             and question.question.strip()
         )
-        target = output.reasoning_memo.execution_target
-        if not (
-            isinstance(target, str)
-            and target != speaker_id
-            and target in state.players
-            and state.players[target].alive
-        ):
-            target = None
-        if _GREY_RANDOM_DECLARED.search(output.public_message):
+        target = self._named_closing_target(
+            state, speaker_id, output.reasoning_memo.execution_target
+        )
+        if self._declares_grey_random(output.public_message, target is not None):
             book.defence_target = None
             book.summary_answers = [pid for pid in named if self._may_schedule(state, pid)]
             book.summary_asked_human = waiting_human is not None and waiting_human in named
@@ -1650,6 +1667,44 @@ class AICoordinator:
         )
         return book.designation_pending
 
+    def _named_closing_target(
+        self, state: GameState, speaker_id: str, target: object
+    ) -> str | None:
+        """The closing line's candidate: its plan note's hang target, if the line names it.
+
+        The note is the speaker's private lean; the table only hears the line.
+        A target the model's own words do not name (whole, as the vote prompt
+        reads names) -- or a line code wrote, which has no model words -- is
+        no candidate, so nobody is scheduled to defend against an accusation
+        nobody made.
+        """
+        if not (
+            isinstance(target, str)
+            and target != speaker_id
+            and target in state.players
+            and state.players[target].alive
+        ):
+            return None
+        names = {pid: player.name for pid, player in state.players.items()}
+        if target not in named_seat_ids(self._last_model_text, names):
+            return None
+        return target
+
+    @staticmethod
+    def _declares_grey_random(text: str, names_candidate: bool) -> bool:
+        """Whether a closing line declares a grey-random day and so designates nobody.
+
+        「グレラン」 alone is not enough. Run 13's seed 3 closed two days with
+        「今日はグレランで、仮指定はダイキ…」 and 「今日はグレランでツムギさんを
+        仮指定」: read as declarations, the named seat got no defence and there
+        was no final designation, though the line had just designated it. A
+        line that also says 指定 (not 「指定なし」) or names its own candidate
+        (`names_candidate`) designates; the scheduler treats it as a designation.
+        """
+        if not _GREY_RANDOM_DECLARED.search(text):
+            return False
+        return not (names_candidate or _DESIGNATION_SAID.search(text))
+
     def _open_redesignation(
         self,
         state: GameState,
@@ -1669,10 +1724,10 @@ class AICoordinator:
         book = self._book_for(round_state)
         if book.redesignation_used:
             return False
-        target = output.reasoning_memo.execution_target
-        if not (
-            isinstance(target, str) and target != speaker_id and self._may_schedule(state, target)
-        ):
+        target = self._named_closing_target(
+            state, speaker_id, output.reasoning_memo.execution_target
+        )
+        if target is None or not self._may_schedule(state, target):
             return False
         since = book.summary_position if book.summary_position is not None else 0
         if any(
@@ -2165,6 +2220,7 @@ class AICoordinator:
             else len(output.public_message)
         )
         model_text = output.public_message if model_text_chars else ""
+        self._last_model_text = model_text
         output.public_message = ensure_fact_sentences(
             output.public_message,
             drafts,
@@ -3350,11 +3406,14 @@ class AICoordinator:
         submits nothing when every non-wolf is an observer, and a submission
         can be refused. The engine then would not resolve the night, so code
         bites the first living non-wolf -- an observer only as the last resort.
+        Counted once a night as its own event, `night_code_bite`: a bite the
+        wolves never chose is not one of the ordinary code-filled actions.
         """
         living = [pid for pid in state.alive_ids() if state.players[pid].role != RoleName.WEREWOLF]
         playing = [pid for pid in living if pid not in self._observer_player_ids]
+        if living:
+            self._record_event("night_code_bite")
         for target in [*playing, *[pid for pid in living if pid not in playing]]:
-            self._record_event("night_code_resolved")
             self._submit_audited_night_action(controller, state, alpha_id, "attack", target, living)
             if state.pending_attack is not None:
                 return
