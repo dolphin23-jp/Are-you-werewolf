@@ -60,8 +60,10 @@ from app.ai.reasoning.timeline import (
     could_publish_on_day,
     find_timeline_conflicts,
 )
+from app.engine.phases import Phase
 from app.engine.roles import ROLE_DEFINITIONS, TOTAL_PLAYERS, RoleName
 from app.engine.state import GameState, PublicDeathCause
+from app.engine.vote import DEFAULT_MAX_VOTE_ROUNDS
 
 MEMO_HEADING = "【盤面メモ】"
 PRIVATE_HEADING = "【あなただけが知っていること】"
@@ -99,16 +101,23 @@ assert set(_COMPOSITION_ORDER) == set(RoleName)
 # night 0; the attack never kills the fox; one attack and one curse per night;
 # the medium reads only the day's execution; results are wolf / not wolf),
 # game.submit_night_action (night 0 is divination only; the hunter may repeat a
-# guard but not guard themselves) and roles (the first victim is never a wolf or
-# the fox). Change one only together with the engine.
+# guard but not guard themselves), roles (the first victim is never a wolf or
+# the fox), victory (who wins, counting the madman and the fox as non-wolves)
+# and game (the end is checked after an execution and after a night; a tie that
+# survives every runoff is a draw). Change one only together with the engine.
 _RULE_LINES = (
     "- ルール: 占い・霊媒の結果は人狼かどうかだけ（狂人・妖狐は白）。"
     "霊媒が知るのは処刑された人の結果だけ。"
-    "狩人は1日目夜から護衛でき、同じ人の連続護衛も可（自分は守れない）。"
+    "狩人は1日目夜から護衛でき、同じ人の連続護衛も可（狩人自身は守れない）。"
     "初日犠牲者は人狼でも妖狐でもない",
     "- 死体のルール: 占い先が妖狐ならその夜に呪殺（0日目夜も）。妖狐は襲撃では死なない。"
     "夜の死体は襲撃（1夜1人まで）と呪殺だけなので、1夜に2つなら片方は呪殺された妖狐。"
     "0日目夜は襲撃がなく、初日犠牲者以外の死体は呪殺",
+    "- 勝敗: 処刑のあとと夜明けに判定。人狼が0人になるか、人狼が人狼以外の生存者"
+    "（狂人・妖狐も数える）と同数以上になった時点で試合終了。"
+    "その時点で妖狐が生きていれば妖狐の勝ち。妖狐が死んでいれば、人狼0人なら村、"
+    "同数以上なら人狼陣営（狂人を含む）の勝ち。"
+    f"投票が決選を含め{DEFAULT_MAX_VOTE_ROUNDS}回続けて同数なら引き分け",
 )
 
 _PLAYER_ID_RE = re.compile(r"(?<![0-9A-Za-z])p(\d+)(?![0-9])")
@@ -168,7 +177,7 @@ def render_board_memo(
     name = ledger.name_of
     lines: list[str] = [f"{MEMO_HEADING}{state.day}日目 / あなた: {name(player_id)}"]
     lines.extend(_rules_lines())
-    lines.extend(_roster_lines(ledger))
+    lines.extend(_roster_lines(ledger, public_solver))
     lines.extend(_claim_lines(state, ledger))
     lines.extend(_verdict_lines(ledger, observations))
     lines.extend(_vote_lines(ledger))
@@ -206,7 +215,7 @@ def _rules_lines() -> list[str]:
     return [f"- 配役({TOTAL_PLAYERS}人): {composition}", *_RULE_LINES]
 
 
-def _roster_lines(ledger: PublicFactLedger) -> list[str]:
+def _roster_lines(ledger: PublicFactLedger, public_solver: RoleSolver | None) -> list[str]:
     alive = [player for player in ledger.players() if player.alive]
     dead = [player for player in ledger.players() if not player.alive]
     lines = [f"- 生存({len(alive)}人): " + "、".join(player.name for player in alive)]
@@ -218,13 +227,70 @@ def _roster_lines(ledger: PublicFactLedger) -> list[str]:
                 for player in dead
             )
         )
-    wolves = ROLE_DEFINITIONS[RoleName.WEREWOLF].count
-    rope = max(0, (len(alive) - wolves) - wolves - 1)
-    lines.append(
-        f"- 人狼は最大{wolves}人（公開情報では何人死んだか確定しない）/ "
-        f"外してよい吊りの目安: {rope}回"
-    )
+    lines.append(_rope_line(ledger, public_solver, len(alive)))
     return lines
+
+
+def ropes_left(alive_count: int) -> int:
+    """Executions left if every night costs one life: (alive - 1) // 2.
+
+    16 alive on day 1 hang on 16, 14, ..., 4: seven times, and the seventh has
+    to find the last wolf or three seats become two at the next dawn.
+    """
+    return max(0, (alive_count - 1) // 2)
+
+
+def _rope_line(
+    ledger: PublicFactLedger, public_solver: RoleSolver | None, alive_count: int
+) -> str:
+    """縄: executions left, and how many of them may miss.
+
+    The inhumans the village must hang are the wolves that may still live and
+    the fox while it may live -- the fox dies to the seer as well, but nobody
+    can count on it. The old `alive - 7` formula said nine misses on day 1 of
+    a game that allows three. At night the count is for the morning after the
+    bite, since the wolves bite every night.
+    """
+    wolf_count = ROLE_DEFINITIONS[RoleName.WEREWOLF].count
+    dead_wolves: list[str] = []
+    fox_may_live = True
+    if public_solver is not None and public_solver.is_possible(Hypothesis()):
+        dead_wolves = [
+            pid
+            for pid in ledger.dead_ids()
+            if public_solver.certain_role(pid) is RoleName.WEREWOLF
+        ]
+        fox_may_live = _anyone_alive_could_be(ledger, public_solver, RoleName.FOX)
+    wolves = wolf_count - len(dead_wolves)
+    to_hang = wolves + (1 if fox_may_live else 0)
+    if dead_wolves:
+        head = f"- 生存の人狼は最大{wolves}人（{_names(ledger, dead_wolves)}は人狼で死亡確定）"
+    else:
+        head = f"- 人狼は最大{wolves}人（公開情報では何人死んだか確定しない）"
+    if ledger.phase in (Phase.NIGHT, Phase.VOTE_RESULT):
+        tomorrow = alive_count - 1
+        ropes = ropes_left(tomorrow)
+        count = f"今夜1人死ねば明日は生存{tomorrow}人で残り{ropes}回"
+    else:
+        ropes = ropes_left(alive_count)
+        count = f"生存{alive_count}人で残り{ropes}回"
+    breakdown = f"人狼{wolves}" + ("・妖狐1" if fox_may_live else "。妖狐は死亡済み")
+    return (
+        f"{head} / 縄: {count}（(生存-1)÷2、毎晩1人死ぬ場合）。"
+        f"吊るべき人外は最大{to_hang}人（{breakdown}）→ 外してよい吊りは{max(0, ropes - to_hang)}回"
+    )
+
+
+def _anyone_alive_could_be(ledger: PublicFactLedger, solver: RoleSolver, role: RoleName) -> bool:
+    alive = ledger.alive_ids()
+    if not alive:
+        return False
+    return solver.is_possible(
+        Hypothesis(
+            claims=(AnyOf(tuple(RoleIs(player_id=pid, role=role) for pid in alive)),),
+            label=f"a living {role.value}",
+        )
+    )
 
 
 def _death_label(cause: PublicDeathCause | None, day: int | None) -> str:
