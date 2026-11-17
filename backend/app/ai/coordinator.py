@@ -1746,7 +1746,9 @@ class AICoordinator:
             # A turn written in code, or answered through the brief contract,
             # carries no notes. Storing its empty memo would wipe the last thing
             # the model actually thought.
-            self._context.set_reasoning_memo(player_id, output.reasoning_memo.model_dump())
+            self._context.set_reasoning_memo(
+                player_id, output.reasoning_memo.model_dump(), day=state.day, stage=stage
+            )
         # The claims this turn publishes are decided before it is spoken, so the
         # message can be made to state them. Dropping a declared verdict because
         # the prose forgot to name its target is how a result silently vanishes.
@@ -1940,7 +1942,9 @@ class AICoordinator:
                     topic=topic,
                 )
             )
-        self._context.record_key_point(state.day, message_id, player_id, output.key_point)
+        self._context.record_key_point(
+            state.day, message_id, player_id, output.key_point, stage=stage
+        )
         self._register_claim_drafts(controller, player_id, drafts, message_id)
         if self._recorder is not None and required_ids:
             published_list = [
@@ -2773,8 +2777,12 @@ class AICoordinator:
         # The factual half is rendered from the ledger, not asked for: who died,
         # who COed, which verdicts were published and who voted for whom are
         # already known exactly, and a model restating them can only lose them.
-        facts = render_public_fact_summary(
-            PublicFactLedger(state), state.day, names_only=self.model_decides
+        # v3 reads the board in its memo, so its past day is the day itself:
+        # execution, votes, the night before and the lines quoted as said.
+        facts = (
+            self._context.day_record(state)
+            if self.model_decides
+            else render_public_fact_summary(PublicFactLedger(state), state.day)
         )
         alive_ai = [pid for pid in self._ai_player_ids if state.players[pid].alive]
         if not alive_ai:

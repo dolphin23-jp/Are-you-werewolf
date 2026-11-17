@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from app.ai.context import ContextBuilder, DaySummaryManager
 from app.ai.deception import FakeClaimGuard, WolfDeceptionAssignment
-from app.ai.personalities import OPENNESS_TEXT, PERSONALITIES, assign_personalities
+from app.ai.personalities import PERSONALITIES, assign_personalities
 from app.engine.roles import RoleName
 from app.engine.state import PendingQuestion
 from tests.ai.reasoning.fixtures import declare_co, publish_result
@@ -55,7 +55,7 @@ def test_the_digest_names_what_was_said_to_the_seat_and_about_its_candidate():
 
     digest = builder._layer_since_last_turn(state, "p1")
 
-    assert "あなたが推していた吊り先: Player5" in digest
+    assert "前回のメモの吊り先: Player5［グレー］" in digest
     assert f"[{to_me}] Player2: Player1、根拠は票だけ？" in digest
     assert f"[{about_target}] Player3: Player5は白をもらってるよ" in digest
     assert "今日は静かだね" not in digest
@@ -86,7 +86,7 @@ def test_a_candidate_who_has_died_is_not_pushed_again():
 
     digest = builder._layer_since_last_turn(state, "p1")
 
-    assert "Player5(すでに死亡)" in digest
+    assert "前回のメモの吊り先: Player5［死亡］" in digest
     assert "Player5について出た発言" not in digest
 
 
@@ -133,7 +133,7 @@ def test_the_first_speaker_of_the_day_is_told_nobody_has_spoken():
 
     digest = builder._layer_since_last_turn(state, "p1")
 
-    assert "あなたが推していた吊り先: まだありません" in digest
+    assert "前回のメモの吊り先: まだありません" in digest
     assert "まだ誰も話していません" in digest
 
 
@@ -182,16 +182,10 @@ def test_the_v3_system_prompt_teaches_listening_and_the_older_prompts_are_untouc
     assert "意見の聞き方" not in legacy
 
 
-def test_every_persona_has_an_openness_and_all_three_kinds_exist():
-    kinds = {personality.openness for personality in PERSONALITIES}
-
-    assert kinds == set(OPENNESS_TEXT)
-    for kind in OPENNESS_TEXT:
-        assert sum(p.openness == kind for p in PERSONALITIES) >= 3
-
-
-def test_the_chat_persona_states_how_it_listens_and_the_structured_one_does_not():
+def test_no_persona_says_how_far_an_argument_moves_it():
+    """How a seat takes an argument is the table's rule (【聞き入れ方】), the same
+    for everyone; a persona changes tone and amount only (owner decision on the
+    seed-1 review)."""
     for personality in PERSONALITIES:
-        chat = personality.to_prompt_section(chat=True)
-        assert OPENNESS_TEXT[personality.openness] in chat
+        assert "意見の聞き方" not in personality.to_prompt_section(chat=True)
         assert "意見の聞き方" not in personality.to_prompt_section()

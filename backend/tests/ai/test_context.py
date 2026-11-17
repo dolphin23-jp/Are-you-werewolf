@@ -9,7 +9,6 @@ in place.
 
 from __future__ import annotations
 
-import json
 import re
 
 from app.ai.context import ContextBuilder, DaySummaryManager
@@ -485,7 +484,7 @@ def test_chat_vote_prompt_states_what_the_seat_said_and_uses_names():
     # The note's target, labelled as the note, and flagged: p1 never named
     # Player2 at the table today.
     assert "【今日のメモの吊り先】Player2(今日の卓ではまだこの名前を出していない)" in body
-    assert "【投票候補】Player2、Player3" in body
+    assert "【投票候補】Player2（グレー）、Player3（グレー）" in body
     assert "Player2(p2)" not in body
     assert "卓で名指しした吊り先と違う相手に入れるなら" in body
 
@@ -641,17 +640,17 @@ def test_chat_previous_memo_is_shown_under_the_wire_names():
         state, "p1", "initial_view", board_memo="【盤面メモ】"
     )
     body = messages[0].content
-    layer = body.split("【前回の方針メモ】\n", 1)[1].split("\n", 1)[0]
+    layer = body.split("【前回の方針メモ】\n", 1)[1].split("\n\n", 1)[0]
 
-    assert json.loads(layer) == {
-        "execution_target": "p2",
-        "suspects": ["p2"],
-        "trusted": [],
-        "trusted_seer": "p3",
-        "fox_candidates": [],
-        "plan": "継続方針",
-        "team_plan": "",
-    }
+    # Wire names, names for ids (with each seat's status), and no empty team note.
+    assert layer.splitlines() == [
+        "- execution_target: Player2［グレー］",
+        "- suspects: Player2［グレー］",
+        "- trusted: なし",
+        "- trusted_seer: Player3［グレー］",
+        "- fox_candidates: なし",
+        "- plan: 継続方針",
+    ]
     assert "前回の非公開思考メモ" not in body
 
 
@@ -680,7 +679,8 @@ def test_chat_personality_section_avoids_the_thinking_label_but_structured_keeps
     for personality in PERSONALITIES:
         chat = personality.to_prompt_section(chat=True)
         assert "思考" not in chat
-        assert "- 考え方の癖: " in chat
+        # The thinking habit is not in the v3 persona at all (tone and amount only).
+        assert "- 考え方の癖: " not in chat
         assert f"- 思考スタイル: {personality.thinking_style}" in personality.to_prompt_section()
 
 

@@ -189,7 +189,8 @@ async def test_request_shape_matches_the_api_contract():
     output_format = body["output_config"]["format"]
     assert output_format["type"] == "json_schema"
     assert output_format["schema"]["additionalProperties"] is False
-    assert output_format["schema"]["required"] == ["vote_target"]
+    # The deciding evidence is required and precedes the target (review R4).
+    assert output_format["schema"]["required"] == ["decisive_evidence", "vote_target"]
     assert body["output_config"]["effort"] == "medium"
     assert "fallbacks" not in body
     assert FALLBACK_BETA not in server.requests[0].headers.get("anthropic-beta", "")
