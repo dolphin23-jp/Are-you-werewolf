@@ -600,23 +600,60 @@ def _grey_lines(ledger: PublicFactLedger, observations: ObservationSet) -> list[
 
 
 def _vote_lines(ledger: PublicFactLedger) -> list[str]:
+    """Ballots read both ways: per target, then per living voter.
+
+    「ケント←ハルト、カイト、ダイキ」 was read backwards in the review (4-B2), and
+    a seat that lied about its own day-3 ballot (m61) was never caught because
+    nobody's history sat in one place. (処刑) marks the seat hanged that day,
+    as a target and as a voter.
+    """
     votes = ledger.votes()
     if not votes:
         return []
-    lines = ["- 投票履歴（吊り先←投票者）:"]
+    executed_on = {execution.day: execution.player_id for execution in ledger.executions()}
+    seat = {pid: index for index, pid in enumerate(ledger.known_player_ids())}
+    lines = ["- 投票（N日目: 投票先へ票数: 投票した人。(処刑)はその日に処刑された人）:"]
     rounds = sorted({(vote.day, vote.round) for vote in votes})
+    last_round = {day: round_number for day, round_number in rounds}
     for day, round_number in rounds:
+        hanged = executed_on.get(day)
+
+        def label(pid: str, *, hanged: str | None = hanged) -> str:
+            return ledger.name_of(pid) + ("(処刑)" if pid == hanged else "")
+
         by_target: dict[str, list[str]] = defaultdict(list)
         for vote in ledger.votes_on(day, round_number):
-            by_target[vote.target_id].append(ledger.name_of(vote.voter_id))
-        ordered = sorted(by_target.items(), key=lambda item: (-len(item[1]), item[0]))
-        rendered = " / ".join(
-            f"{ledger.name_of(target)}←{'、'.join(voters)}({len(voters)})"
-            for target, voters in ordered
-        )
-        label = f"{day}日目" + (f"決選{round_number - 1}" if round_number > 1 else "")
-        lines.append(f"  - {label}: {rendered}")
+            by_target[vote.target_id].append(vote.voter_id)
+        ordered = sorted(by_target.items(), key=lambda item: (-len(item[1]), seat[item[0]]))
+        cells = []
+        for target, voters in ordered:
+            mark = "(処刑)" if target == hanged and round_number == last_round[day] else ""
+            names = "、".join(label(pid) for pid in sorted(voters, key=seat.__getitem__))
+            cells.append(f"{ledger.name_of(target)}へ{len(voters)}票{mark}: {names}")
+        lines.append(f"  - {day}日目{_runoff_label(round_number)}: " + " / ".join(cells))
+    lines.append("- 生存者ごとの投票先:")
+    for voter in ledger.alive_ids():
+        ballots: dict[int, list[str]] = defaultdict(list)
+        for vote in sorted(votes, key=lambda v: (v.day, v.round)):
+            if vote.voter_id == voter:
+                ballots[vote.day].append(
+                    _runoff_label(vote.round) + ledger.name_of(vote.target_id)
+                )
+        if ballots:
+            lines.append(
+                f"  - {ledger.name_of(voter)}: "
+                + " / ".join(f"{day}日目" + "→".join(ballots[day]) for day in sorted(ballots))
+            )
+    if lines[-1] == "- 生存者ごとの投票先:":
+        lines.pop()
     return lines
+
+
+def _runoff_label(round_number: int) -> str:
+    """'' for the first ballot of a day, 決選 for the runoff, 決選2... after."""
+    if round_number <= 1:
+        return ""
+    return "決選" if round_number == 2 else f"決選{round_number - 1}"
 
 
 @dataclass(frozen=True)

@@ -134,3 +134,44 @@ def test_before_anybody_claims_there_is_no_count_to_give():
 
     assert "- CO: まだ誰もCOしていない" in public.splitlines()
     assert "CO数" not in public
+
+
+# -- 6. ballots, read both ways --
+
+
+def test_ballots_are_tabled_by_target_without_an_arrow_to_misread():
+    """4-B2: 「ケント←ハルト、カイト、ダイキ」 was read backwards. Each target now
+    says how many ballots it got and from whom; (処刑) marks the day's
+    execution wherever that seat appears."""
+    lines = _public(4, "m61").splitlines()
+    head = "- 投票（N日目: 投票先へ票数: 投票した人。(処刑)はその日に処刑された人）:"
+    rows = lines[lines.index(head) + 1 : lines.index(head) + 5]
+
+    assert rows == [
+        "  - 1日目: ユイへ15票(処刑): マコト、アカリ、ハルト、ソウタ、ミオ、レン、サクラ、カイト、"
+        "リク、ツムギ、ダイキ、ホノカ、シオン、アオイ、ケント / ソウタへ1票: ユイ(処刑)",
+        "  - 2日目: レンへ3票: マコト、サクラ、シオン / アオイへ3票: ソウタ、カイト、ホノカ / "
+        "ホノカへ2票: ハルト、ツムギ / シオンへ2票: ミオ、レン / "
+        "ケントへ2票: ダイキ、アオイ(処刑) / ハルトへ1票: リク / ツムギへ1票: アカリ / "
+        "ダイキへ1票: ケント",
+        "  - 2日目決選: アオイへ10票(処刑): マコト、ソウタ、ミオ、レン、カイト、リク、ツムギ、"
+        "ダイキ、ホノカ、ケント / レンへ5票: アカリ、ハルト、サクラ、シオン、アオイ(処刑)",
+        "  - 3日目: ダイキへ11票(処刑): マコト、アカリ、ソウタ、ミオ、レン、サクラ、リク、ツムギ、"
+        "ホノカ、シオン、ケント / ケントへ3票: ハルト、カイト、ダイキ(処刑)",
+    ]
+    assert "←" not in "\n".join(lines)
+
+
+def test_every_living_voter_has_their_own_ballot_history():
+    """4-B2 / 4-B3: m61 「ダイキ吊りの時はケントに入れてない」 -- his own row
+    says otherwise, in one place."""
+    lines = _public(4, "m61").splitlines()
+    head = "- 生存者ごとの投票先:"
+    rows = lines[lines.index(head) + 1 :]
+
+    assert "  - ハルト: 1日目ユイ / 2日目ホノカ→決選レン / 3日目ケント" in rows
+    assert "  - カイト: 1日目ユイ / 2日目アオイ→決選アオイ / 3日目ケント" in rows
+    voters = [row[4:].split(":")[0] for row in rows if row.startswith("  - ")]
+    # The living only, in seating order; the dead keep their rows above.
+    assert voters[:4] == ["マコト", "ハルト", "ソウタ", "ミオ"]
+    assert "ダイキ" not in voters and "アカリ" not in voters

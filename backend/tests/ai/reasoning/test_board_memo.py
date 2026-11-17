@@ -162,7 +162,12 @@ def test_seer_verdicts_are_tabled_night_by_night_with_the_day_they_were_publishe
 def test_votes_are_tabled_by_target_with_counts():
     public = _public_part(_memo(_board(), "p3"))
 
-    expected = "1日目: Player1←Player3、Player4、Player7、Player8、Player9(5) / Player4←Player1(1)"
+    # Since the seed-1 review (4-B2) a target reads 「へN票」 instead of an arrow
+    # that was read backwards, and (処刑) marks the seat hanged that day.
+    expected = (
+        "1日目: Player1へ5票(処刑): Player3、Player4、Player7、Player8、Player9 / "
+        "Player4へ1票: Player1(処刑)"
+    )
     assert expected in public
 
 
