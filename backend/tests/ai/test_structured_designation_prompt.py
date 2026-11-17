@@ -95,9 +95,14 @@ def test_every_other_structured_stage_keeps_the_shared_trailer(engine: str, stag
 
 
 def test_the_v3_designation_scene_is_unchanged():
+    # Two sentences were added after the owner's review of seed 1 (1-A2 /
+    # 1-B2): a grey-random day may close without a name, and the turn says
+    # the vote starts right after it. It is still one line with no length
+    # band and no new point.
     assert _scene("v3", DESIGNATION) == (
         "【いまの場面】本指定。まとめのあとの締め。ここまでに出た返答を踏まえ、"
-        "今日の吊り先を一言で決める。質問はしない。1文、60字以内。"
+        "今日の吊り先を一言で決める。グレランにするなら「グレランで」でよい。"
+        "質問はしない。この発言のあとすぐ投票に入る。1文、60字以内。"
         "当日のログは各行の先頭に[mN]の発言IDが付いている。"
         "誰かの発言を受けて話すならそのIDをreply_toに入れる。"
     )

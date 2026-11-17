@@ -51,9 +51,12 @@ _STAGES = (
     "reaction",
     "rebuttal_or_reassessment",
     "freemason_confirmation",
-    "minority_review:p2",
     "consensus_summary",
     "human_followup",
+    "open_floor",
+    "facilitator_followup",
+    "provisional_designation",
+    "summary_answer",
 )
 
 
@@ -113,9 +116,12 @@ def test_each_stage_carries_its_own_cap():
         "reaction": 30,
         "initial_view": 60,
         "rebuttal_or_reassessment": 60,
-        "minority_review:p2": 60,
         "immediate": 120,
         "consensus_summary": 120,
+        "open_floor": 60,
+        "facilitator_followup": 60,
+        "provisional_designation": 60,
+        "summary_answer": 60,
     }
     for stage, cap in expected.items():
         _system, messages = builder.build_discussion_context(state, "p1", stage, board_memo=MEMO)

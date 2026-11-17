@@ -1043,24 +1043,39 @@ class ContextBuilder:
                 "共有相方として名指しされています。真の相方なら確認共有COを最初に述べ、"
                 "相方でなければ明確に否定してください。他の論点を先に話してはいけません。"
             )
-        elif stage.startswith("minority_review:"):
-            target_id = stage.split(":", 1)[1]
-            target = player_label(state, target_id) if target_id in state.players else target_id
+        elif stage == "open_floor":
+            stage_instruction = "今日はまだ発言していません。いま言いたいことを述べてください。"
+        elif stage == "summary_answer":
             stage_instruction = (
-                f"票・疑いが{target}へ集中しています。多数派の理由を再掲せず、"
-                "この人物が村側である反対仮説、本人の反論で妥当な点、別の処刑候補を"
-                "必ず比較してください。疑いを維持する場合も独立根拠だけを述べます。"
+                "進行役のまとめで名指しで質問されています。まずその質問に直接答えてください。"
+            )
+        elif stage == "facilitator_followup":
+            stage_instruction = (
+                "名指しで質問した相手から回答がありました。それを受けて、進行役として"
+                "一言述べてください。"
+            )
+        elif stage == "provisional_designation":
+            stage_instruction = (
+                "まとめで処刑先が示されなかったため、進行役として仮指定を出してください。"
+                "今日の処刑候補を一人挙げ、理由を1〜2文で述べます。この後その人物が弁明し、"
+                "あなたの本指定のあと投票に入ります。グレランにするなら「今日はグレラン」と"
+                "述べてもかまいません。そのときはこの発言のあとすぐ投票に入ります。"
             )
         elif stage == "consensus_summary":
             stage_instruction = (
                 "第一候補だけでなく第二候補、第一候補を処刑しない最強の理由、"
                 "本人の反論後にも残った独立根拠、少数意見を整理してください。"
+                "グレランで進めるなら処刑候補を挙げず「今日はグレラン」と述べてもかまいません。"
+                "この後、処刑候補に挙げた人物と名指しで質問した相手が一言ずつ答え、"
+                "あなたの本指定のあと投票に入ります。グレランなら本指定はなく、"
+                "回答が済めば投票に入ります。"
             )
         elif stage == "final_designation":
             stage_instruction = (
                 "まとめのあとの締めです。ここまでに出た返答を踏まえ、今日の処刑先を一人だけ"
-                "1〜2文で短く指定してください。新しい質問・新しい論点は出さず、"
-                "directed_questionsは空にします。"
+                "1〜2文で短く指定してください。グレランにするなら「グレランで」と述べても"
+                "かまいません。新しい質問・新しい論点は出さず、directed_questionsは空にします。"
+                "この発言のあとすぐ投票に入ります。"
             )
         reply_note = (
             "当日のログは各行の先頭に[mN]の発言IDが付いています。"
@@ -1164,27 +1179,43 @@ class ContextBuilder:
                 "共有の相方として名指しされた。本当の相方なら最初に確認COし、"
                 f"違うなら明確に否定する。他の話は後。{cap}字以内。"
             )
-        if stage.startswith("minority_review:"):
-            target_id = stage.split(":", 1)[1]
-            target = self._label(state, target_id) if target_id in state.players else target_id
-            return (
-                f"票や疑いが{target}に集まっている。{target}が村側だった場合とほかの候補は"
-                f"plan_noteで比べ、発言では自分の結論を一言で。多数派の理由は繰り返さない。{cap}字以内。"
-            )
         if stage == "consensus_summary":
+            # Says plainly what follows it, so a plan to hear someone first is
+            # one the day can carry out.
             return (
                 f"投票前のまとめ。今日の吊り先と理由を一行で。{cap}字以内。"
                 "候補の比べ合いはplan_noteに書き、発言では並べない。"
-                "候補本人にまだ反論を聞いていなければ、一つだけ聞いてよい。"
+                "グレランにするなら誰も挙げずに「今日はグレラン」でよい。"
+                "この後、吊り先に挙げた人と名指しで聞いた人が一言ずつ答え、"
+                "あなたの本指定で投票に入る。グレランなら本指定はなく、答えが済めば投票に入る。"
             )
         if stage == "final_designation":
             # The round closes on this turn: a question here could not be answered.
             return (
                 "まとめのあとの締め。ここまでに出た返答を踏まえ、今日の吊り先を一言で決める。"
-                f"質問はしない。1文、{cap}字以内。"
+                "グレランにするなら「グレランで」でよい。"
+                f"質問はしない。この発言のあとすぐ投票に入る。1文、{cap}字以内。"
             )
         if stage == "human_followup":
             return f"人間のプレイヤーの発言に応答する。{cap}字以内。"
+        if stage == "summary_answer":
+            return f"進行役のまとめで名指しで聞かれた。まずその問いに答える。{cap}字以内。"
+        if stage == "facilitator_followup":
+            return (
+                "名指しで聞いた問いに答えが返ってきた。それを受けて進行役として一言。"
+                f"{cap}字以内。"
+            )
+        if stage == "provisional_designation":
+            return (
+                "まとめで吊り先が出なかったので、進行役として仮指定を出す。今日の吊り先を"
+                f"一人挙げ、理由を一言。{cap}字以内。この後その人が一言弁明し、"
+                "あなたの本指定のあと投票に入る。グレランにするなら「今日はグレラン」でよく、"
+                "そのときはこの発言のあとすぐ投票に入る。"
+            )
+        if stage == "open_floor":
+            # The seat has had no turn today. The turn is its opportunity;
+            # nothing here suggests what to use it for.
+            return f"今日はまだ話していない。いま言いたいことを言う。{cap}字以内。"
         return (
             "今日の最初の発言。盤面を見て一番言いたいこと(内訳の見立て、吊り方針、"
             f"誰かへの質問のどれか)を一つ。{cap}字以内。"
@@ -1531,8 +1562,6 @@ class ContextBuilder:
 
     @staticmethod
     def _stage_label(stage: str) -> str:
-        if stage.startswith("minority_review:"):
-            return "多数派への反証・代替候補の比較"
         return {
             "immediate": "朝一CO・結果発表",
             "initial_view": "初回意見",
@@ -1542,6 +1571,10 @@ class ContextBuilder:
             "consensus_summary": "議論の整理",
             "final_designation": "本指定",
             "human_followup": "人間発言への応答",
+            "open_floor": "ひとこと",
+            "summary_answer": "まとめへの回答",
+            "provisional_designation": "仮指定",
+            "facilitator_followup": "進行役の受け",
         }.get(stage, "議論")
 
 

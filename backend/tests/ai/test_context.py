@@ -383,18 +383,10 @@ def test_reaction_stage_still_asks_for_an_anchored_target():
     assert "reply_to" in prompt and "quote" in prompt
 
 
-def test_minority_review_requires_countercase_and_alternative():
-    controller = make_controller(seed=4)
-    builder = _builder(controller.state)
-
-    _, messages = builder.build_discussion_context(
-        controller.state, "p2", "minority_review:p0"
-    )
-    prompt = "\n".join(message.content for message in messages)
-
-    assert "Player0(p0)へ集中" in prompt
-    assert "反対仮説" in prompt
-    assert "別の処刑候補" in prompt
+# (The minority-review stage and its text were removed after the owner's
+# review of seed 1: a voice against the majority should emerge from the
+# table, not be appointed. tests/ai/test_day_turn_schedule.py pins that no
+# such turn is scheduled.)
 
 
 # -- v3: the chat register --
@@ -519,9 +511,12 @@ def _every_v3_prompt(state, builder) -> list[str]:  # type: ignore[no-untyped-de
         "reaction",
         "rebuttal_or_reassessment",
         "freemason_confirmation",
-        "minority_review:p2",
         "consensus_summary",
         "human_followup",
+        "open_floor",
+        "facilitator_followup",
+        "provisional_designation",
+        "summary_answer",
     ]
     texts: list[str] = []
     for player_id in state.players:

@@ -15,7 +15,6 @@ from app.ai.reasoning.belief import EvidenceRecord, vote_fact_id
 from app.ai.reasoning.facts import PublicFactLedger
 from app.ai.reasoning.runtime import (
     MAX_OPENING_SPEAKERS,
-    MIN_OPENING_SPEAKERS,
     ReasoningRuntime,
 )
 from app.ai.reasoning.summaries import day_results_and_claims
@@ -102,8 +101,11 @@ def test_only_a_handful_of_seats_open_the_day():
 
     speakers = runtime.select_opening_speakers(state)
 
-    assert MIN_OPENING_SPEAKERS <= len(speakers) <= MAX_OPENING_SPEAKERS
+    # Three seats without a CO, beside the duty speakers the coordinator adds
+    # (seed-1 review: the old three-to-five counted the duty seats in).
+    assert len(speakers) == MAX_OPENING_SPEAKERS == 3
     assert len(set(speakers)) == len(speakers)
+    assert "p4" not in speakers  # the seer CO is not a gray seat
 
 
 def test_speech_value_prefers_the_seats_with_something_to_say():

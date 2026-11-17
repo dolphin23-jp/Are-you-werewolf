@@ -118,10 +118,12 @@ def test_a_summary_question_is_answered_before_a_short_designation_closes_the_da
     asyncio.run(coordinator.run_discussion_round(_session(controller)))
 
     summary = [stage for _seat, stage in turns].index("consensus_summary")
-    # p2 is nobody's candidate here, so its answer is a short reply.
+    # p2 is nobody's candidate here. Its answer used to be the 30-character
+    # reaction; an answer to the summary is always a 60-character turn now
+    # (seed-1 review, 1-A3).
     assert turns[summary:] == [
         ("p1", "consensus_summary"),
-        ("p2", "reaction"),
+        ("p2", "summary_answer"),
         ("p1", _FINAL_DESIGNATION_STAGE),
     ]
     assert controller.state.chat_log[-1].author_id == "p1"
@@ -185,13 +187,18 @@ def test_the_designation_is_told_to_decide_without_asking_again():
     assert not any("【議論段階】本指定。" in user for user in others)
 
 
-def test_a_summary_without_questions_still_closes_the_round_at_once():
+def test_a_summary_naming_nobody_goes_on_to_a_provisional_designation():
+    # This pinned that a summary with no question closed the round at once.
+    # Seed 1's day 2 closed that way on 「皆さんは気になるグレーの方はいますか…？」,
+    # a question to nobody by name, and the vote began with no candidate.
+    # Now the facilitator gives a provisional designation; it names nobody
+    # here either, so that closes the day (once a day, no designation).
     provider = _StagedProvider()
     controller, coordinator, turns = _table(provider)
 
     asyncio.run(coordinator.run_discussion_round(_session(controller)))
 
-    assert turns[-1] == ("p1", "consensus_summary")
+    assert turns[-2:] == [("p1", "consensus_summary"), ("p1", "provisional_designation")]
     assert _FINAL_DESIGNATION_STAGE not in [stage for _seat, stage in turns]
 
 
@@ -204,7 +211,7 @@ def test_the_close_terminates_when_the_answering_seat_cannot_speak():
     asyncio.run(asyncio.wait_for(coordinator.run_discussion_round(session), timeout=10))
 
     summary = [stage for _seat, stage in turns].index("consensus_summary")
-    assert turns[summary + 1 :] == [("p2", "reaction"), ("p1", _FINAL_DESIGNATION_STAGE)]
+    assert turns[summary + 1 :] == [("p2", "summary_answer"), ("p1", _FINAL_DESIGNATION_STAGE)]
     assert session.discussion_round.complete is True
 
 
@@ -280,7 +287,9 @@ def test_a_black_on_a_seat_that_already_answered_it_owes_nothing():
     state = controller.state
     state.phase = Phase.DISCUSSION
     state.day = 2
-    coordinator = AICoordinator(state, ["p1", "p2", "p3", "p4"], MockProvider(seed=1), seed=1)
+    # Only the two seats that have spoken: from day 2 a seat with no line yet
+    # gets a short turn before the summary, which is not what this pins.
+    coordinator = AICoordinator(state, ["p1", "p2"], MockProvider(seed=1), seed=1)
     black = controller.chat("p1", "占いCO。p2は黒。")
     controller.public_result("p1", "seer", "p2", True, source_message_id=black)
     controller.chat("p2", "その黒は偽。対抗で占いCOする。")
@@ -368,7 +377,12 @@ def test_day_one_gives_every_silent_ai_seat_a_first_impression_before_the_close(
     assert set(first_turns.values()) <= {"immediate", "initial_view", "freemason_confirmation"}
 
 
-def test_later_days_keep_the_short_opening():
+def test_later_days_open_short_and_hear_every_silent_seat_before_the_close():
+    # This pinned that later days leave most seats silent. The owner's review
+    # of seed 1 reversed that: 37 of 83 ballots on days 2-5 came from seats
+    # with no turn that day. The opening stays short -- the duty speakers and
+    # three seats -- and every seat still silent gets one short turn before
+    # the summary (tests/ai/test_day_turn_schedule.py pins the details).
     controller = make_controller(seed=4)
     state = controller.state
     state.phase = Phase.DISCUSSION
@@ -383,8 +397,11 @@ def test_later_days_keep_the_short_opening():
         reasoning=ReasoningRuntime(state, ai_ids, seed=4),
         model_decides=True,
     )
+    turns = _spy(coordinator, provider)
 
     asyncio.run(coordinator.run_discussion_round(_session(controller)))
 
+    opening = [stage for _seat, stage in turns].index("open_floor")
+    assert opening <= 3 + sum(stage == "immediate" for _seat, stage in turns)
     spoken = {m.author_id for m in state.chat_log if m.channel is ChatChannel.PUBLIC}
-    assert len(spoken) < len(ai_ids)
+    assert spoken == set(ai_ids)
