@@ -27,7 +27,7 @@ from app.engine.speech_events import (
     SpeechEventType,
     role_claim_history,
 )
-from app.eval.reasoning_analyzer import audit_ballots
+from app.eval.reasoning_analyzer import AllyVoteKind, audit_ballots
 from app.eval.transcript import DecisionAuditRecord, GameTranscript, Utterance
 
 _DEATH_CAUSE = {
@@ -391,6 +391,8 @@ class _Renderer:
             planned = "計画あり" if audit.ally_vote_planned else "計画なし"
             if plan is not None:
                 planned += f"（{plan.basis}: {_flat(plan.story_reason)}）"
+            elif verdict is not None and verdict.ally_kind is AllyVoteKind.DESIGNATED:
+                planned += "・本指定どおりで、この票を除いても処刑は同じ（合否に数えない）"
             parts.append(f"仲間への投票: {planned}")
         return [f"  - 監査: {' ／ '.join(parts)}"] if parts else []
 

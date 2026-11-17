@@ -12,7 +12,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any, Literal
 
 from app.eval.analyzers import AnalysisResult
-from app.eval.reasoning_analyzer import VoteChangeKind, audit_ballots
+from app.eval.reasoning_analyzer import AllyVoteKind, VoteChangeKind, audit_ballots
 from app.eval.release_gate import HARD_FAILURE_FIELDS
 from app.eval.transcript import GameTranscript
 
@@ -61,7 +61,9 @@ HARD_FAILURE_LABELS: dict[str, str] = {
     "unexplained_vote_change_count": (
         "卓で名指しした吊り先から、新しい関連の公開情報も引いた論もなく変えた投票"
     ),
-    "unplanned_wolf_ally_vote_count": "計画のない人狼の仲間投票",
+    "unplanned_wolf_ally_vote_count": (
+        "計画のない人狼の仲間投票（指定に従わない、指定がない、または処刑を決めた票）"
+    ),
     "duplicate_night_action_count": "同じ夜の行動の重複",
 }
 
@@ -530,6 +532,7 @@ def _render_ballot_lists(games: list[tuple[GameTranscript, AnalysisResult]]) -> 
 
     unspoken_rows: list[str] = []
     justified_rows: list[str] = []
+    designated_rows: list[str] = []
     no_basis_lines: list[str] = []
     for transcript, verdicts in audited:
         names = transcript.names
@@ -539,6 +542,14 @@ def _render_ballot_lists(games: list[tuple[GameTranscript, AnalysisResult]]) -> 
             basis = names.get(verdict.basis or "", verdict.basis or "—")
             target = names.get(verdict.vote_target or "", verdict.vote_target or "—")
             day = _day_label(verdict.day, verdict.round_number)
+            if verdict.ally_kind is AllyVoteKind.DESIGNATED:
+                tally = "・".join(
+                    f"{names.get(seat, seat)} {count}票" for seat, count in verdict.tally
+                )
+                designated_rows.append(
+                    f"| {_seed(transcript)} | {day} | {voter} → {target} | "
+                    f"{_quote(verdict.designation_line)} | {tally} | {_quote(verdict.reason)} |"
+                )
             if verdict.kind is VoteChangeKind.MEMO_TARGET_UNSPOKEN:
                 last_line = verdict.own_lines[-1] if verdict.own_lines else ""
                 unspoken_rows.append(
@@ -575,6 +586,23 @@ def _render_ballot_lists(games: list[tuple[GameTranscript, AnalysisResult]]) -> 
             "| seed | 日 | 投票者 | メモの吊り先 → 票 | その日の自分の最後の発言 | 票の理由 |",
             "|---|---|---|---|---|---|",
             *unspoken_rows,
+        ]
+    else:
+        out.append("(ありません)")
+    out += [
+        "",
+        "#### 本指定に従った、結果を変えない仲間への投票",
+        "",
+        "人狼が計画なしに仲間へ入れた票のうち、その日の最後の指定どおりで、この票を除いて"
+        "数え直しても処刑される人が変わらないものです。合否に数えません"
+        "（指定と違う票、指定のない日の票、処刑を決めた票はハードな失敗のままです）。",
+        "",
+    ]
+    if designated_rows:
+        out += [
+            "| seed | 日 | 投票者 → 仲間 | その日の最後の指定 | 集計 | 票の理由 |",
+            "|---|---|---|---|---|---|",
+            *designated_rows,
         ]
     else:
         out.append("(ありません)")

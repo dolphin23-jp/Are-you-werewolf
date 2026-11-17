@@ -239,6 +239,20 @@ def classify_vote_change(facts: BallotFacts) -> tuple[VoteChangeKind, str]:
 # -- every ballot of a transcript --
 
 
+class AllyVoteKind(StrEnum):
+    """A werewolf's ballot on its own partner, by what stood behind it."""
+
+    # A wolf-chat plan or a public mark on the partner (`WolfAllyVotePlan`).
+    PLANNED = "planned"
+    # No plan, but it followed the day's final designation and decided
+    # nothing: the round recounted without it executes the same seat. Not a
+    # hard failure (owner, 2026-11-17); listed with the designation it followed.
+    DESIGNATED = "designated"
+    # Anything else -- no designation, another seat designated, or the vote
+    # that tipped the execution. A hard failure.
+    UNPLANNED = "unplanned"
+
+
 @dataclass(frozen=True)
 class BallotVerdict:
     """One audited ballot, judged from the transcript it was recorded in."""
@@ -259,6 +273,16 @@ class BallotVerdict:
     vote_only: bool = False
     ally_vote: bool = False
     ally_vote_planned: bool = False
+    # For a ballot on a partner: what stood behind it, the day's final
+    # designation (its target and its line), and whether the ballot decided
+    # the execution. None where the record cannot tell.
+    ally_kind: AllyVoteKind | None = None
+    designated_target: str | None = None
+    designation_line: str = ""
+    ally_decisive: bool | None = None
+    # The round's tally, most votes first: what a reader checks "decided
+    # nothing" against.
+    tally: tuple[tuple[str, int], ...] = ()
 
     @property
     def hard_change(self) -> bool:
@@ -267,7 +291,7 @@ class BallotVerdict:
 
     @property
     def hard_ally_vote(self) -> bool:
-        return self.ally_vote and not self.ally_vote_planned
+        return self.ally_kind is AllyVoteKind.UNPLANNED
 
 
 def audit_ballots(transcript: GameTranscript) -> tuple[BallotVerdict, ...]:
@@ -298,6 +322,9 @@ def audit_ballots(transcript: GameTranscript) -> tuple[BallotVerdict, ...]:
             kind, why = _change_kind(audit), audit.target_change_reason
             basis = audit.decision_target
             own_lines = record.own_lines_from_utterances(audit.player_id, audit.day)
+        ally: dict[str, Any] = {}
+        if audit.ally_vote:
+            ally = record.ally_vote(audit, round_number)
         verdicts.append(
             BallotVerdict(
                 player_id=audit.player_id,
@@ -313,12 +340,16 @@ def audit_ballots(transcript: GameTranscript) -> tuple[BallotVerdict, ...]:
                 vote_only=audit.vote_only,
                 ally_vote=audit.ally_vote,
                 ally_vote_planned=audit.ally_vote_planned,
+                **ally,
             )
         )
     return tuple(verdicts)
 
 
 _NEW_RESULT_EVENT_TYPES = frozenset({"ability_result", "result_correction"})
+# The turns that close a day's discussion (`coordinator._FINAL_DESIGNATION_STAGE`
+# and the summary before it).
+_CLOSING_STAGES = frozenset({"final_designation", "consensus_summary"})
 _BINDING_CONFIDENCE = 0.8  # `speech_events.CLAIM_CONFIDENCE_THRESHOLD`
 
 
@@ -429,6 +460,56 @@ class _Record:
             if u.kind == "discussion" and u.player_id == seat and u.day == day
         )
 
+    def designation(self, day: int) -> tuple[str | None, str]:
+        """The day's final designation: its target and its line.
+
+        The last line of the closing turns -- the designation, or the summary
+        when nothing was left to wait for and the round closed on its
+        仮指定. Its target is the speaker's memo target, when the line says the
+        name; a line that does not name it designated nobody the table heard.
+        """
+        closing = [
+            u
+            for u in self.t.utterances
+            if u.kind == "discussion" and u.day == day and u.stage in _CLOSING_STAGES
+        ]
+        if not closing:
+            return None, ""
+        last = closing[-1]
+        target = (last.reasoning_memo or {}).get("execution_target")
+        if isinstance(target, str) and target in named_seat_ids(last.text, self.names):
+            return target, last.text
+        return None, last.text
+
+    def ally_vote(self, audit: DecisionAuditRecord, round_number: int) -> dict[str, Any]:
+        """`BallotVerdict`'s ally fields for a ballot on the voter's partner."""
+        if audit.ally_vote_planned:
+            return {"ally_kind": AllyVoteKind.PLANNED}
+        if not self.replayable:
+            return {"ally_kind": AllyVoteKind.UNPLANNED}
+        designated, line = self.designation(audit.day)
+        counts = self.tally(audit.day, round_number)
+        cast = any(
+            vote.get("day") == audit.day
+            and int(vote.get("round", 1)) == round_number
+            and vote.get("voter_id") == audit.player_id
+            for vote in self.votes
+        )
+        # A ballot the records do not hold cannot be shown to have decided nothing.
+        decisive = not cast or _top(counts) != _top(
+            self.tally(audit.day, round_number, without=audit.player_id)
+        )
+        follows = designated is not None and designated == audit.vote_target
+        return {
+            "ally_kind": (
+                AllyVoteKind.DESIGNATED if follows and not decisive else AllyVoteKind.UNPLANNED
+            ),
+            "designated_target": designated,
+            "designation_line": line,
+            "ally_decisive": decisive,
+            "tally": tuple(sorted(counts.items(), key=lambda item: (-item[1], item[0]))),
+        }
+
     def tally(self, day: int, round_number: int, *, without: str | None = None) -> dict[str, int]:
         counts: dict[str, int] = {}
         for vote in self.votes:
@@ -503,6 +584,9 @@ class ReasoningQualityReport:
     memo_target_unspoken_count: int = 0
     wolf_ally_vote_count: int = 0
     planned_wolf_ally_vote_count: int = 0
+    # Unplanned, but following the day's final designation without deciding
+    # the execution: listed in the report, not a gate failure.
+    designated_wolf_ally_vote_count: int = 0
     unplanned_wolf_ally_vote_count: int = 0
     illegal_timeline_claim_count: int = 0
     duplicate_night_action_count: int = 0
@@ -553,11 +637,15 @@ class ReasoningTranscriptAnalyzer:
         }
         change_kinds = [kind for (_seat, _day, _target, kind) in changes]
         no_basis = sum(verdict.kind is VoteChangeKind.NO_BASIS for verdict in ballots)
-        ally_votes: dict[tuple[str, int, str | None], bool] = {}
+        # A ballot on a partner, once per (seat, day, partner): hard if any of
+        # its rounds was, planned only if every round was.
+        ally_votes: dict[tuple[str, int, str | None], set[AllyVoteKind]] = {}
         for verdict in ballots:
-            if verdict.ally_vote:
+            if verdict.ally_vote and verdict.ally_kind is not None:
                 ballot = (verdict.player_id, verdict.day, verdict.vote_target)
-                ally_votes[ballot] = ally_votes.get(ballot, True) and not verdict.hard_ally_vote
+                ally_votes.setdefault(ballot, set()).add(verdict.ally_kind)
+        unplanned_ally = sum(AllyVoteKind.UNPLANNED in kinds for kinds in ally_votes.values())
+        planned_ally = sum(kinds == {AllyVoteKind.PLANNED} for kinds in ally_votes.values())
         deltas = [
             abs(delta)
             for correction in corrections
@@ -632,8 +720,9 @@ class ReasoningTranscriptAnalyzer:
             compared_vote_count=len(ballots) - no_basis,
             memo_target_unspoken_count=change_kinds.count(VoteChangeKind.MEMO_TARGET_UNSPOKEN),
             wolf_ally_vote_count=len(ally_votes),
-            planned_wolf_ally_vote_count=sum(ally_votes.values()),
-            unplanned_wolf_ally_vote_count=sum(not planned for planned in ally_votes.values()),
+            planned_wolf_ally_vote_count=planned_ally,
+            designated_wolf_ally_vote_count=len(ally_votes) - planned_ally - unplanned_ally,
+            unplanned_wolf_ally_vote_count=unplanned_ally,
             correction_messages_heard=len(tuple(corrections)),
             corrections_confirmed=sum(record.verdict == "confirmed" for record in corrections),
             corrections_refuted=sum(record.verdict == "refuted" for record in corrections),
