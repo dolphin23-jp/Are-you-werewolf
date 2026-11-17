@@ -64,6 +64,14 @@ def _game() -> GameTranscript:
         ),
         _u("discussion", "p2", 1, text="偽の黒だ", stage="rebuttal_or_reassessment", reply_to="m1"),
         _u(
+            "discussion",
+            "p3",
+            1,
+            text="ソウタが怪しい。",
+            stage="reaction",
+            reasoning_memo={"execution_target": "p4"},
+        ),
+        _u(
             "vote",
             "p1",
             1,
@@ -94,6 +102,13 @@ def _game() -> GameTranscript:
                 "message_id": "m2",
                 "author_id": "p2",
                 "content": "偽の黒だ",
+                "channel": "public",
+                "day": 1,
+            },
+            {
+                "message_id": "m5",
+                "author_id": "p3",
+                "content": "ソウタが怪しい。",
                 "channel": "public",
                 "day": 1,
             },
@@ -182,7 +197,9 @@ def test_votes_carry_their_evidence_and_audit_and_the_day_its_tally() -> None:
     assert "  - 反対仮説: 占いが偽なら村人" in page
     assert "  - 次点: ソウタ(p4)" in page
     assert "比較の基準（メモの吊り先）: ソウタ(p4)" in page
-    assert "判定: 理由のない変更（理由が無い）" in page
+    # Judged from the record as the analyzer judges it: レン said ソウタ and
+    # voted サクラ with nothing new after his line, so the reason is his own.
+    assert "判定: 理由のない変更（結果を信じる）" in page
     assert "- 集計（1回目）: サクラ(p2) 2票 / ハルト(p1) 1票" in page
     assert "- 処刑: サクラ(p2)（人狼）" in page
 

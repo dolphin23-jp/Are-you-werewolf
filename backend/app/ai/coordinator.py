@@ -51,7 +51,6 @@ from app.ai.reasoning.claims import (
     register_claim_drafts,
 )
 from app.ai.reasoning.dialogue import DiscussionDecision
-from app.ai.reasoning.facts import mentions_player
 from app.ai.reasoning.observations import ObservationSet
 from app.ai.reasoning.rendering import (
     displayed_execution_target,
@@ -59,6 +58,7 @@ from app.ai.reasoning.rendering import (
 )
 from app.ai.reasoning.runtime import ReasoningRuntime, SeatReasoning
 from app.ai.schemas import (
+    DirectedQuestion,
     DiscussionOutput,
     MorningIntentOutput,
     NightActionOutput,
@@ -75,6 +75,14 @@ from app.engine.state import (
     FreemasonPartnerClaim,
     GameState,
     PendingQuestion,
+)
+from app.eval.reasoning_analyzer import (
+    BallotFacts,
+    PublishedResult,
+    SpokenLine,
+    classify_vote_change,
+    named_seat_ids,
+    sentence_naming,
 )
 from app.eval.transcript import (
     CorrectionAuditRecord,
@@ -1772,6 +1780,7 @@ class AICoordinator:
             or self._is_fallback(player_id, output.public_message)
             else len(output.public_message)
         )
+        model_text = output.public_message if model_text_chars else ""
         output.public_message = ensure_fact_sentences(
             output.public_message,
             drafts,
@@ -1793,6 +1802,11 @@ class AICoordinator:
             # Nothing survived to be said -- a code-written turn whose only
             # result validation rejected, say. An empty bubble is not a turn.
             return None
+        # Only questions the line puts aloud are recorded, wait for an answer
+        # or book a reply: the turn returns this list to the round.
+        output.directed_questions = self._questions_said_aloud(
+            state, output.directed_questions, model_text
+        )
         self._record(
             state,
             player_id,
@@ -1914,15 +1928,20 @@ class AICoordinator:
             base = 0.35 + len(output.public_message) * 0.012
             delay = min(3.0, base) * self._pacing_scale * self._rng.uniform(0.8, 1.2)
             await asyncio.sleep(delay)
+        names = {pid: player.name for pid, player in state.players.items()}
         for question in output.directed_questions:
-            if question.target_id not in state.players or not question.question.strip():
+            # What the target is shown is what the asker said to it: the
+            # sentence of its line that names the target, not the structured
+            # field's paraphrase (43 of 44 in seed 1 differed from the line).
+            asked = sentence_naming(model_text, question.target_id, names)
+            if question.target_id not in state.players or not asked:
                 continue
             proposed_topic = question.topic.strip()
             topic = (
                 proposed_topic
                 if proposed_topic
                 in {"execution_candidate", "fox_candidate", "claim_reason", "timeline"}
-                else self._question_topic(question.question)
+                else self._question_topic(question.question.strip() or asked)
             )
             existing = self._pending_questions.setdefault(question.target_id, [])
             if topic:
@@ -1936,7 +1955,7 @@ class AICoordinator:
                 PendingQuestion(
                     asker=player_id,
                     target=question.target_id,
-                    question=question.question.strip(),
+                    question=asked,
                     source_message_id=message_id,
                     day=state.day,
                     topic=topic,
@@ -1946,6 +1965,13 @@ class AICoordinator:
             state.day, message_id, player_id, output.key_point, stage=stage
         )
         self._register_claim_drafts(controller, player_id, drafts, message_id)
+        if self._recorder is not None and decision is not None and self.reasoning is not None:
+            # What the seat had seen when it spoke includes what it said: the
+            # turn's audit is recorded before its own CO and results are
+            # registered, so the snapshot is retaken now.
+            self._recorder.update_latest_decision(
+                player_id, state.day, public_result_ids_at_decision=self._public_result_ids(state)
+            )
         if self._recorder is not None and required_ids:
             published_list = [
                 f"{result.result_type}:{result.referenced_day}:{result.target_id}"
@@ -1971,6 +1997,33 @@ class AICoordinator:
         if self.reasoning is not None:
             self.reasoning.record_public_speech(state, player_id, output.public_message, message_id)
         return output
+
+    def _questions_said_aloud(
+        self, state: GameState, questions: Sequence[DirectedQuestion], model_text: str
+    ) -> list[DirectedQuestion]:
+        """The structured questions the line itself puts to their targets.
+
+        A question in the structured field is only the model's note that it
+        asked someone. Where the text it wrote does not name that seat (whole,
+        as the vote prompt reads names), the table heard no question, and
+        booking the seat a reply or showing it "what you were asked" invents
+        one. A line code wrote -- `model_text` is then empty -- asks nothing of
+        the model's, whatever names the code put in it. Each drop is counted.
+        """
+        if not model_text:
+            for _question in questions:
+                self._record_event("directed_question_on_code_line")
+            return []
+        named = set(
+            named_seat_ids(model_text, {pid: player.name for pid, player in state.players.items()})
+        )
+        kept: list[DirectedQuestion] = []
+        for question in questions:
+            if question.target_id in named:
+                kept.append(question)
+            else:
+                self._record_event("directed_question_target_unnamed")
+        return kept
 
     def _owes_coded_line(
         self,
@@ -2428,6 +2481,10 @@ class AICoordinator:
             )
         )
 
+    # A result that can be news at the vote: a verdict stated, or a stated one
+    # corrected. A retraction takes a verdict away and tells nobody anything new.
+    _NEW_RESULT_EVENTS = (SpeechEventType.ABILITY_RESULT, SpeechEventType.RESULT_CORRECTION)
+
     def _classify_vote_change(
         self,
         state: GameState,
@@ -2440,86 +2497,46 @@ class AICoordinator:
     ) -> tuple[str, str]:
         """Why the ballot left the seat's stated candidate, if it did.
 
-        Each kind below is something the table could see happen after the seat
-        last spoke: a runoff that left the candidate off the ballot, the
-        candidate's death, a correction, a new ability result, or another seat
-        arguing about the old or the new target. Only a change none of them
-        covers is unexplained. The reason the seat wrote is kept either way,
-        but it is not a cause on its own -- the vote prompt asks every ballot
-        for one, so having a reason cannot be what separates the two.
-
-        A later message is the cause only when the reason names its author.
-        Merely naming a target is no argument: the day's summary and
-        designation name the candidate after almost everyone has spoken, and
-        agreeing with the old plan or greeting the new target names one too,
-        so counting any mention made nearly every change "persuaded". The vote
-        prompt asks a seat that leaves its candidate to say whose remark moved
-        it, by name.
+        The judgement is `reasoning_analyzer.classify_vote_change`, the same
+        function the offline audit runs on a committed transcript; this only
+        hands it the day as the table saw it. What the seat heard is read by
+        position in the day's log -- the lines after its own last one -- not
+        by comparing a snapshot of the published results: the snapshot was
+        taken before the turn's own results were registered, so a seer's own
+        verdicts read as news to it at the vote.
         """
-        if stated_target is None or actual_target == stated_target:
-            return "none", ""
-        if state.phase is Phase.RUNOFF and stated_target not in candidates:
-            return "runoff_restriction", "決選投票の対象制限"
-        if stated_target not in state.alive_ids():
-            return "target_became_invalid", "発言後に対象が無効化"
+        corrections: tuple[str, ...] = ()
         recorder = self._recorder
-        audited = (
-            recorder.latest_decision(player_id, state.day)
-            if recorder is not None and hasattr(recorder, "latest_decision")
-            else None
-        )
-        if recorder is not None and audited is not None:
-            current_corrections = {
-                item.correction_id for item in recorder.transcript.correction_audits
-            }
-            if current_corrections - set(audited.correction_ids_at_decision):
-                return "correction_accepted", "発言後に事実訂正を受理"
-            if set(self._public_result_ids(state)) - set(audited.public_result_ids_at_decision):
-                return "new_public_evidence", "発言後に能力結果が公開"
-        # Matched whole, as the ledger matches names: Player1 is not Player11.
-        arguments = tuple(
-            message_id
-            for message_id, author_id in self._later_public_arguments(
-                state, player_id, (stated_target, actual_target)
+        if recorder is not None and hasattr(recorder, "transcript"):
+            corrections = tuple(
+                item.source_message_id for item in recorder.transcript.correction_audits
             )
-            if author_id in state.players
-            and mentions_player(reason, author_id, state.players[author_id].name)
+        facts = BallotFacts(
+            voter_id=player_id,
+            basis=stated_target,
+            vote_target=actual_target,
+            reason=reason,
+            names={pid: player.name for pid, player in state.players.items()},
+            day_lines=tuple(
+                SpokenLine(message.message_id, message.author_id, message.content)
+                for message in state.chat_log
+                if message.day == state.day and message.channel is ChatChannel.PUBLIC
+            ),
+            results=tuple(
+                PublishedResult(event.actor_id, event.target_id, event.source_message_id)
+                for event in state.speech_events
+                if event.event_type in self._NEW_RESULT_EVENTS
+                and event.is_binding
+                and event.day == state.day
+                and event.target_id is not None
+            ),
+            correction_message_ids=corrections,
+            runoff=state.phase is Phase.RUNOFF,
+            candidates=tuple(candidates),
+            alive_ids=frozenset(state.alive_ids()),
         )
-        if arguments:
-            cited = "、".join(arguments)
-            return "public_argument", f"発言後の公開発言({cited})を受けて変更: {reason}"
-        return "unexplained", reason
-
-    @staticmethod
-    def _later_public_arguments(
-        state: GameState, player_id: str, target_ids: Sequence[str | None]
-    ) -> tuple[tuple[str, str], ...]:
-        """Other seats' public messages today, after this seat's last one, naming a target.
-
-        Returned as (message id, author) pairs. After its own last word,
-        because the seat named its candidate having already heard everything
-        before it -- an argument it had heard and answered by keeping the
-        candidate cannot be what changed its mind. A message that names only
-        its own author is a defence, not an argument about that seat.
-        """
-        wanted = {target for target in target_ids if target}
-        today = [
-            message
-            for message in state.chat_log
-            if message.day == state.day and message.channel is ChatChannel.PUBLIC
-        ]
-        last_own = max(
-            (index for index, message in enumerate(today) if message.author_id == player_id),
-            default=-1,
-        )
-        ledger = PublicFactLedger(state)
-        return tuple(
-            (message.message_id, message.author_id)
-            for message in today[last_own + 1 :]
-            if message.author_id != player_id
-            and (set(ledger.mentioned_player_ids(message.content)) - {message.author_id})
-            & wanted
-        )
+        kind, why = classify_vote_change(facts)
+        return kind.value, why
 
     def _ensure_ballot_audit(
         self, state: GameState, player_id: str, candidates: Sequence[str]

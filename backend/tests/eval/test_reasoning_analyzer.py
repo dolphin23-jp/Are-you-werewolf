@@ -207,11 +207,11 @@ def test_analyzer_counts_wolf_ally_votes_planned_vs_unplanned():
     transcript = GameTranscript(
         decision_audits=[
             DecisionAuditRecord(
-                game_id="g", day=2, phase="voting", player_id="p1",
+                game_id="g", day=2, phase="voting", player_id="p1", vote_target="p3",
                 ally_vote=True, ally_vote_planned=True,
             ),
             DecisionAuditRecord(
-                game_id="g", day=2, phase="voting", player_id="p2",
+                game_id="g", day=2, phase="voting", player_id="p2", vote_target="p3",
                 ally_vote=True, ally_vote_planned=False,
             ),
         ]

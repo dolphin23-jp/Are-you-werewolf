@@ -66,7 +66,12 @@ def state_at_vote(day: int) -> GameState:
     the vote); that night's private chat, deaths and night actions are not.
     Night `n` events carry day `n`, so the previous nights are `< day`.
     """
-    final = load_transcript()["final_state"]
+    return replay_at_vote(load_transcript(), day, session_id="first-claude-game")
+
+
+def replay_at_vote(data: dict[str, Any], day: int, *, session_id: str) -> GameState:
+    """`state_at_vote` for any committed transcript, given as its parsed JSON."""
+    final = data["final_state"]
     players = {
         raw["player_id"]: PlayerState(
             player_id=raw["player_id"],
@@ -76,7 +81,7 @@ def state_at_vote(day: int) -> GameState:
         )
         for raw in final["players"]
     }
-    state = GameState(session_id="first-claude-game", players=players, phase=Phase.VOTING)
+    state = GameState(session_id=session_id, players=players, phase=Phase.VOTING)
     for record in final["death_records"]:
         if record["day"] >= day:
             continue

@@ -20,6 +20,14 @@ from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
 from app.engine.roles import ROLE_DEFINITIONS, RoleName
+from app.engine.speech_events import (
+    RoleClaimState,
+    RoleClaimStatus,
+    SpeechEvent,
+    SpeechEventType,
+    role_claim_history,
+)
+from app.eval.reasoning_analyzer import AllyVoteKind, audit_ballots
 from app.eval.transcript import DecisionAuditRecord, GameTranscript, Utterance
 
 _DEATH_CAUSE = {
@@ -30,7 +38,15 @@ _DEATH_CAUSE = {
     "night_death": "夜の死亡",
 }
 
-_TEAM = {"village": "村人陣営", "werewolf": "人狼陣営", "fox": "妖狐陣営"}
+# The factions as the table says them. The one table every display of a
+# faction or a winner reads: the record, the report's per-game table and the
+# live log of `scripts/evaluate.py`.
+TEAM_LABELS: dict[str, str] = {"village": "村人陣営", "werewolf": "人狼陣営", "fox": "妖狐陣営"}
+
+
+def team_label(team: object) -> str:
+    """A faction id as the table says it: `fox` -> 妖狐陣営. Anything else as it is."""
+    return TEAM_LABELS.get(str(team), str(team))
 
 _NIGHT_ACTION = {
     RoleName.SEER.value: "占い",
@@ -48,6 +64,9 @@ _CHANGE_KIND = {
     "strategic_team_decision": "陣営の方針",
     "public_argument": "公開の論による変更",
     "unexplained": "理由のない変更",
+    # Compared with nothing: no turn that day, or a memo that named nobody.
+    "no_basis": "比較できない",
+    "memo_target_unspoken": "卓で言っていないメモの吊り先からの変更（合否に数えない）",
 }
 
 # A discussion utterance's private note, field by field, in reading order.
@@ -151,10 +170,18 @@ class _Renderer:
         self.message_ids = _match_message_ids(transcript.utterances, state.get("chat_log", []))
         self.vote_rounds = _assign_vote_rounds(transcript.utterances, state.get("vote_records", []))
         self.ballot_audits = _ballot_audits(transcript.decision_audits)
+        self.verdicts = {
+            (verdict.player_id, verdict.day, verdict.vote_round): verdict
+            for verdict in audit_ballots(transcript)
+        }
         self.plans = {
             (plan.voter_id, plan.day, plan.round_number): plan
             for plan in transcript.wolf_ally_vote_plans
         }
+        self.claim_history = role_claim_history(_speech_events(state))
+        self.claims_by_message: dict[str, list[RoleClaimState]] = defaultdict(list)
+        for claim in self.claim_history:
+            self.claims_by_message[claim.source_message_id].append(claim)
 
     # -- the page --
 
@@ -191,7 +218,7 @@ class _Renderer:
         for pid, name in self.names.items():
             fake = fake_roles.get(pid)
             label = f"偽{role_label(fake)}" if fake else ("潜伏" if pid in lurkers else "-")
-            team = _TEAM.get(self.t.teams.get(pid, ""), self.t.teams.get(pid, "-"))
+            team = team_label(self.t.teams.get(pid, "-"))
             lines.append(
                 f"| {name} (`{pid}`) | {role_label(self.t.roles.get(pid))} | {team} | "
                 f"{self.t.personalities.get(pid, '-')} | {label} |"
@@ -288,7 +315,8 @@ class _Renderer:
         if u.agrees_with:
             detail.append(f"同意: {_seat_list(self.names, u.agrees_with)}")
         if u.public_claim_role:
-            detail.append(f"CO: {role_label(u.public_claim_role)}")
+            claim = self._co_label(mid, u.public_claim_role)
+            detail.append(f"{claim}: {role_label(u.public_claim_role)}")
         for result in u.public_results:
             detail.append("公開した結果: " + _result_text(result, self.names))
         if u.key_point:
@@ -306,6 +334,22 @@ class _Renderer:
             lines.append("  - 非公開メモ:")
             lines += [f"    - {line}" for line in memo]
         return lines
+
+    def _co_label(self, message_id: str | None, role: str) -> str:
+        """「CO」, or 「CO（再表明）」 when this line only said an earlier claim again.
+
+        A restatement is not a new claim: the claim stands from the day it was
+        first made (`speech_events.current_role_claim`), and the record says so
+        rather than presenting a second CO.
+        """
+        claims = [
+            claim
+            for claim in self.claims_by_message.get(message_id or "", [])
+            if claim.role is not None and claim.role.value == role
+        ]
+        if claims and all(claim.reaffirmed for claim in claims):
+            return "CO（再表明）"
+        return "CO"
 
     def _vote(self, index: int, u: Utterance, who: str) -> list[str]:
         lines = [f"- **{who}** → {seat_label(self.names, u.target)}"]
@@ -326,27 +370,41 @@ class _Renderer:
         return lines
 
     def _audit_lines(self, audit: DecisionAuditRecord, round_number: int | None) -> list[str]:
+        """The ballot's audit as the analyzer judges it now (`audit_ballots`).
+
+        Not the classification recorded live: a record written before the
+        audit's rules were fixed would otherwise keep printing a ballot with
+        nothing to compare against as 「変更なし」.
+        """
         parts: list[str] = []
-        if audit.decision_target:
-            basis = seat_label(self.names, audit.decision_target)
+        verdict = self.verdicts.get((audit.player_id, audit.day, audit.vote_round))
+        basis_id = verdict.basis if verdict is not None else audit.decision_target
+        if basis_id:
+            basis = seat_label(self.names, basis_id)
             parts.append(f"比較の基準（メモの吊り先）: {basis}")
         if audit.model_target_was_overridden:
             parts.append(
                 f"モデルが書いた吊り先 {seat_label(self.names, audit.model_requested_target)} "
                 "をコードが差し替え"
             )
-        kind = audit.target_change_classification
+        kind = verdict.kind.value if verdict is not None else audit.target_change_classification
+        why = verdict.why if verdict is not None else audit.target_change_reason
         if kind:
             text = _CHANGE_KIND.get(kind, kind)
-            if audit.target_change_reason:
-                text += f"（{audit.target_change_reason}）"
+            if why:
+                text += f"（{why}）"
             parts.append(f"判定: {text}")
         if audit.ally_vote:
             plan = self.plans.get((audit.player_id, audit.day, round_number or 1))
             planned = "計画あり" if audit.ally_vote_planned else "計画なし"
             if plan is not None:
                 planned += f"（{plan.basis}: {_flat(plan.story_reason)}）"
+            elif verdict is not None and verdict.ally_kind is AllyVoteKind.DESIGNATED:
+                planned += "・本指定どおりで、この票を除いても処刑は同じ（合否に数えない）"
             parts.append(f"仲間への投票: {planned}")
+        if verdict is not None and verdict.reason_names_other:
+            others = _seat_list(self.names, verdict.reason_names_other)
+            parts.append(f"理由が別の相手（{others}）への投票を述べている")
         return [f"  - 監査: {' ／ '.join(parts)}"] if parts else []
 
     def _vote_outcome(self, day: int) -> list[str]:
@@ -469,13 +527,7 @@ class _Renderer:
                 f"- {record['day']}日目夜の護衛: {seat_label(names, record['hunter_id'])} → "
                 f"{seat_label(names, record['target_id'])}"
             )
-        for claim in self.state.get("co_declarations", []):
-            claimed = role_label(claim.get("claimed_role"))
-            source = claim.get("source_message_id") or "-"
-            lines.append(
-                f"- {claim['day']}日目のCO: {seat_label(names, claim['player_id'])} = "
-                f"{claimed}（{source}）"
-            )
+        lines += self._claim_records()
         audits = [
             audit
             for audit in self.t.decision_audits
@@ -497,15 +549,44 @@ class _Renderer:
                 lines.append("- " + " ／ ".join(parts))
         return lines
 
+    def _claim_records(self) -> list[str]:
+        """Every claim transition in the order it was spoken, restatements labelled.
+
+        Read from the speech-event log, so a claim said again keeps the day it
+        was first made. A record written without that log falls back to the
+        final CO list it carries.
+        """
+        names = self.names
+        if not self.claim_history:
+            return [
+                f"- {claim['day']}日目のCO: {seat_label(names, claim['player_id'])} = "
+                f"{role_label(claim.get('claimed_role'))}"
+                f"（{claim.get('source_message_id') or '-'}）"
+                for claim in self.state.get("co_declarations", [])
+            ]
+        lines: list[str] = []
+        for claim in self.claim_history:
+            seat = seat_label(names, claim.player_id)
+            source = claim.source_message_id or "-"
+            if claim.status is RoleClaimStatus.RETRACTED:
+                lines.append(f"- {claim.day}日目のCO撤回: {seat}（{source}）")
+                continue
+            role = role_label(claim.role.value if claim.role is not None else None)
+            if claim.reaffirmed:
+                kind = "CO（再表明）"
+            elif claim.status is RoleClaimStatus.SWITCHED and claim.previous_role is not None:
+                kind = f"CO（{role_label(claim.previous_role.value)}から乗り換え）"
+            else:
+                kind = "CO"
+            lines.append(f"- {claim.day}日目の{kind}: {seat} = {role}（{source}）")
+        return lines
+
     def _result(self) -> list[str]:
         if self.partial:
             return ["\n## 結果\n\n(対戦は未完了)"]
         winner = self.state.get("winner")
         reason = self.state.get("victory_reason", "")
-        label = {"village": "村人陣営", "werewolf": "人狼陣営", "fox": "妖狐陣営"}.get(
-            str(winner), str(winner)
-        )
-        return [f"\n## 結果\n\n勝者: {label}（{winner}） / {reason}"]
+        return [f"\n## 結果\n\n勝者: {team_label(winner)}（{winner}） / {reason}"]
 
 
 _SECTION_TITLE = {
@@ -535,6 +616,30 @@ def _result_text(result: Mapping[str, Any], names: Mapping[str, str]) -> str:
     night = result.get("referenced_day")
     when = f"（{night}日目夜）" if night is not None else ""
     return f"{kind} {seat_label(names, str(result.get('target_id') or ''))}={colour}{when}"
+
+
+def _speech_events(state: Mapping[str, Any]) -> list[SpeechEvent]:
+    """The final state's speech-event log, back as events; [] when it has none."""
+    events: list[SpeechEvent] = []
+    for raw in state.get("speech_events", []) or []:
+        try:
+            events.append(
+                SpeechEvent(
+                    event_id=str(raw["event_id"]),
+                    source_message_id=str(raw.get("source_message_id") or ""),
+                    actor_id=str(raw["actor_id"]),
+                    event_type=SpeechEventType(raw["event_type"]),
+                    day=int(raw["day"]),
+                    target_id=raw.get("target_id"),
+                    role=RoleName(raw["role"]) if raw.get("role") else None,
+                    result_is_werewolf=raw.get("result_is_werewolf"),
+                    referenced_day=raw.get("referenced_day"),
+                    confidence=float(raw.get("confidence", 1.0)),
+                )
+            )
+        except (KeyError, ValueError):
+            continue
+    return events
 
 
 def _match_message_ids(

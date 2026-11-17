@@ -89,6 +89,7 @@ from app.eval.report import (  # noqa: E402
     render_report,
 )
 from app.eval.transcript import GameTranscript, TranscriptRecorder  # noqa: E402
+from app.eval.transcript_render import team_label  # noqa: E402
 
 HUMAN_ID = "p0"
 MAX_LOOPS = 200
@@ -530,6 +531,11 @@ def _budget_line(budget: EvaluationBudget | None) -> str:
     return f" 費用 {spent_text} / 上限 ${budget.max_estimated_cost:.2f}"
 
 
+def winner_line(winner: object) -> str:
+    """The live log's line for a finished game, the faction named as the record names it."""
+    return f"    勝者: {team_label(winner) if winner else '(未決着)'}"
+
+
 def _print_line(line: str) -> None:
     # Flushed on purpose: stdout is a pipe under Actions, so Python would hold
     # these back in a block buffer and the live log would stay empty.
@@ -567,7 +573,7 @@ async def main(argv: Sequence[str] | None = None) -> int:
             run.call_log, list(run.metrics.records), run.transcript.names, args.out, seed
         )
         winner = run.transcript.final_state.get("winner")
-        print(f"    winner={winner}{_budget_line(budget)}", flush=True)
+        print(f"{winner_line(winner)}{_budget_line(budget)}", flush=True)
         if run.budget_stop is not None:
             budget_stop = run.budget_stop
             print(f"==> {BUDGET_STOP_BANNER}: {budget_stop}", flush=True)

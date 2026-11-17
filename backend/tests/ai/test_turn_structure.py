@@ -86,8 +86,10 @@ def _session(controller: Any) -> SimpleNamespace:
 
 
 def _summary_asking(*targets: str) -> DiscussionOutput:
+    # The line names whom it asks: a structured question the line does not
+    # put aloud books no answer (`AICoordinator._questions_said_aloud`).
     return DiscussionOutput(
-        public_message="整理します。仮指定です。最後に反論はありますか？",
+        public_message=f"整理します。仮指定です。{'、'.join(targets)}、最後に反論はありますか？",
         directed_questions=[
             DirectedQuestion(target_id=target, question="最後に反論はありますか？")
             for target in targets
