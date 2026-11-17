@@ -24,8 +24,8 @@ from app.ai.metrics import MetricsCollector
 from app.engine.phases import Phase
 from app.eval.report import render_transcript
 from app.eval.transcript import GameTranscript, TranscriptRecorder, Utterance
+from app.eval.transcript_render import render_memo
 
-TEXT_LIMIT = 90
 HEARTBEAT_SECONDS = 120.0
 
 _PHASE_LABEL = {
@@ -46,27 +46,56 @@ def clock_text(seconds: float) -> str:
     return f"{hours}:{minutes:02d}:{secs:02d}" if hours else f"{minutes:02d}:{secs:02d}"
 
 
-def _shorten(text: str, limit: int = TEXT_LIMIT) -> str:
-    flat = " ".join(text.split())
-    return flat if len(flat) <= limit else flat[: limit - 1] + "…"
+def _flat(text: str) -> str:
+    """One line, nothing cut: line breaks become ' / '."""
+    return " / ".join(part.strip() for part in text.splitlines() if part.strip()) or text
 
 
 def format_utterance(utterance: Utterance, names: Mapping[str, str]) -> str | None:
-    """One log line for something worth watching; None for internal records."""
+    """What the live log prints for one recorded utterance, in full.
+
+    The first line is what the table saw; any further lines (indented) are
+    what only the log shows -- a seat's private note, a vote's evidence. The
+    log used to cut each line at 90 characters and print votes and night
+    actions without their reasons, so the run page could not be read on its
+    own. Nothing is shortened now; the transcript has the same words.
+    """
     day = f"{utterance.day}日目"
     who = utterance.player_name
     target = names.get(utterance.target or "", utterance.target or "?")
     if utterance.kind == "discussion":
         flag = " [フォールバック]" if utterance.used_fallback else ""
-        return f"{day} {who}{flag}: {_shorten(utterance.text)}"
+        stage = f"[{utterance.stage}] " if utterance.stage else ""
+        lines = [f"{day} {stage}{who}{flag}: {_flat(utterance.text)}"]
+        memo = render_memo(utterance.reasoning_memo, names)
+        if memo:
+            lines.append("    メモ: " + " ／ ".join(memo))
+        return "\n".join(lines)
     if utterance.kind == "vote":
-        return f"{day} 投票 {who} → {target}"
+        head = f"{day} 投票 {who} → {target}"
+        lines = [f"{head}: {_flat(utterance.text)}" if utterance.text else head]
+        detail = []
+        if utterance.decision_evidence:
+            detail.append(f"決め手: {_flat(utterance.decision_evidence)}")
+        if utterance.countercase:
+            detail.append(f"反対仮説: {_flat(utterance.countercase)}")
+        if utterance.alternative_target:
+            alternative = names.get(utterance.alternative_target, utterance.alternative_target)
+            detail.append(f"次点: {alternative}")
+        if detail:
+            lines.append("    " + " ／ ".join(detail))
+        return "\n".join(lines)
+    if utterance.kind == "vote_change":
+        return f"{day} 投票の記録 {who}: {_flat(utterance.text)}"
     if utterance.kind == "night_action":
-        return f"{day} 夜行動 {who}({utterance.role}) → {target}"
+        head = f"{day} 夜行動 {who}({utterance.role}) → {target}"
+        return f"{head}: {_flat(utterance.text)}" if utterance.text else head
     if utterance.kind == "wolf_chat":
-        return f"{day} [人狼] {who}: {_shorten(utterance.text)}"
+        return f"{day} [人狼] {who}: {_flat(utterance.text)}"
     if utterance.kind == "freemason_chat":
-        return f"{day} [共有] {who}: {_shorten(utterance.text)}"
+        return f"{day} [共有] {who}: {_flat(utterance.text)}"
+    if utterance.kind == "summary":
+        return f"{day} 要約: {_flat(utterance.text)}"
     return None
 
 
@@ -115,8 +144,12 @@ class LiveTranscriptRecorder(TranscriptRecorder):
 
     def log(self, line: str) -> None:
         # A closed stdout must not end a game that is hours into its run.
+        stamp = f"[{clock_text(self._clock() - self._started_at)}]"
+        first, *rest = line.split("\n")
         with contextlib.suppress(OSError):
-            self._emit(f"[{clock_text(self._clock() - self._started_at)}] {line}")
+            self._emit(f"{stamp} {first}")
+            for more in rest:
+                self._emit(f"{' ' * len(stamp)} {more}")
 
     def record(self, utterance: Utterance) -> None:
         super().record(utterance)
@@ -140,8 +173,13 @@ class RunProgress:
         seed: int,
         out_dir: Path | None = None,
         heartbeat_seconds: float = HEARTBEAT_SECONDS,
+        on_save: Callable[[], None] | None = None,
     ) -> None:
+        """`on_save` writes anything else worth keeping with each partial
+        snapshot (the evaluation's call log); a failure in it is logged, not
+        raised."""
         self._recorder = recorder
+        self._on_save = on_save
         self._metrics = metrics
         self._seed = seed
         self._out_dir = out_dir
@@ -176,6 +214,8 @@ class RunProgress:
             write_transcript_files(
                 self._recorder.transcript, self._out_dir, self._seed, partial=True
             )
+            if self._on_save is not None:
+                self._on_save()
         except Exception as exc:  # observing must never end the run it observes
             self._recorder.log(f"(途中経過の保存に失敗しました: {type(exc).__name__}: {exc})")
 

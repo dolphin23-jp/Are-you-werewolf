@@ -24,6 +24,7 @@ from __future__ import annotations
 import re
 from collections.abc import Sequence
 
+from app.ai.call_context import calling_as
 from app.ai.context import BRIEF_DISCUSSION_OUTPUT_INSTRUCTION
 from app.ai.personalities import Personality, discussion_length_range
 from app.ai.provider.base import LLMProvider, Message, SchemaT
@@ -91,6 +92,7 @@ class AIPlayerAgent:
         *,
         chat_contract: bool = False,
         metrics: object | None = None,
+        seat_id: str | None = None,
     ) -> None:
         """`chat_contract` selects the v3 wire schema for discussion
         (`ChatDiscussionOutput`): the full `DiscussionOutput` is too complex for
@@ -101,6 +103,8 @@ class AIPlayerAgent:
         game's `MetricsCollector`); anything else, or None, records nothing."""
         self._provider = provider
         self._personality = personality
+        # Labels this seat's calls in the metrics records (`app.ai.call_context`).
+        self._seat_id = seat_id
         # Kept as a source-compatible argument for existing integrations. HTTP
         # retries belong to the provider; an agent submits each contract once.
         self._max_retries = max_retries
@@ -246,12 +250,13 @@ class AIPlayerAgent:
         set the budget: swallowed here, an exhausted budget would keep the game
         going on canned turns and the run would never learn it had stopped."""
         try:
-            return await self._provider.generate_structured(
-                system=system,
-                messages=messages,
-                response_schema=schema,
-                max_tokens=max_tokens,
-            )
+            with calling_as(seat_id=self._seat_id):
+                return await self._provider.generate_structured(
+                    system=system,
+                    messages=messages,
+                    response_schema=schema,
+                    max_tokens=max_tokens,
+                )
         except BudgetExceeded:
             raise
         except Exception:

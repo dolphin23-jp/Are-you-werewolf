@@ -591,6 +591,7 @@ class AICoordinator:
                 self._personalities[pid],
                 chat_contract=self.model_decides,
                 metrics=self._metrics,
+                seat_id=pid,
             )
             for pid in self._ai_player_ids
         }

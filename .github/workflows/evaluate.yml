@@ -226,19 +226,61 @@ jobs:
             echo "シード $SEED のレポートが生成されませんでした(接続確認で失敗した、対戦の途中で止めた、または時間切れ)。上のログを確認してください。途中まで進んでいれば、対戦記録が下と Artifacts の eval-out-seed$SEED に残っています。" >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      - name: 対戦記録も表示(先頭のみ)
+      # The whole record, not its head: every line, private note, vote reason
+      # and night result, then every model call. GitHub caps one step's
+      # summary at 1 MiB, so each gets its own step; a file that fits is shown
+      # whole, and one that does not says where it was cut.
+      - name: 対戦記録を表示(全文)
         if: always()
         working-directory: backend
+        env:
+          SEED: ${{ matrix.seed }}
+          KIND: transcript
+          TITLE: 対戦記録
         run: |
-          transcript=$(ls eval-out/transcript-seed*.md 2>/dev/null | head -1)
-          if [ -n "$transcript" ]; then
+          limit=1000000
+          file=$(ls eval-out/${KIND}-seed*.md 2>/dev/null | head -1)
+          if [ -n "$file" ]; then
+            size=$(wc -c < "$file")
             {
               echo ""
-              echo "<details><summary>対戦記録(クリックで展開)</summary>"
+              echo "<details><summary>${TITLE}(クリックで展開)</summary>"
               echo ""
-              # Keep well under the 1MB step-summary limit; the full log is
-              # in the downloadable artifact.
-              head -c 400000 "$transcript"
+              if [ "$size" -le "$limit" ]; then
+                cat "$file"
+              else
+                head -c "$limit" "$file"
+                echo ""
+                echo "**(ここで切れています。$(basename "$file") は ${size} バイトで、画面に出せる上限の約1MBを超えました。全文は Artifacts の eval-out-seed${SEED} にあります)**"
+              fi
+              echo ""
+              echo "</details>"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: 呼び出しの記録を表示(全呼び出し)
+        if: always()
+        working-directory: backend
+        env:
+          SEED: ${{ matrix.seed }}
+          KIND: calls
+          TITLE: 呼び出しの記録
+        run: |
+          limit=1000000
+          file=$(ls eval-out/${KIND}-seed*.md 2>/dev/null | head -1)
+          if [ -n "$file" ]; then
+            size=$(wc -c < "$file")
+            {
+              echo ""
+              echo "<details><summary>${TITLE}(クリックで展開)</summary>"
+              echo ""
+              if [ "$size" -le "$limit" ]; then
+                cat "$file"
+              else
+                head -c "$limit" "$file"
+                echo ""
+                echo "**(ここで切れています。$(basename "$file") は ${size} バイトで、画面に出せる上限の約1MBを超えました。全文は Artifacts の eval-out-seed${SEED} にあります)**"
+              fi
               echo ""
               echo "</details>"
             } >> "$GITHUB_STEP_SUMMARY"

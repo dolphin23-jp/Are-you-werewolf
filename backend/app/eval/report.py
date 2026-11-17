@@ -660,73 +660,12 @@ def render_transcript(transcript: GameTranscript, *, partial: bool = False) -> s
     """Readable per-game log, with each speaker's hidden role and persona
     shown inline so Japanese quality and persona drift can be eyeballed.
 
+    Written in full -- private notes, vote reasons, night results, audits --
+    by `app.eval.transcript_render`; nothing is shortened.
+
     `partial` marks a snapshot taken while the game is still being played, so a
     run that was cancelled or timed out leaves a file that says what it is
     instead of announcing a winner of None."""
-    lines = [f"# 対戦記録 (seed={transcript.seed})\n"]
-    if partial:
-        lines.append(
-            "> **途中経過です。** 対戦はまだ終わっていません。"
-            "実行が止まった場合は、ここまでが残った分です。\n"
-        )
-    lines.append("## 配役\n")
-    lines.append("| プレイヤー | 役職 | 人格 | 騙り役 |")
-    lines.append("|---|---|---|---|")
-    fake_roles = transcript.deception.get("fake_role_by_player", {})
-    lurkers = set(transcript.deception.get("lurking_player_ids", []))
-    for pid, name in transcript.names.items():
-        deception = fake_roles.get(pid)
-        label = f"偽{deception}" if deception else ("潜伏" if pid in lurkers else "-")
-        lines.append(
-            f"| {name} (`{pid}`) | {transcript.roles.get(pid, '?')} | "
-            f"{transcript.personalities.get(pid, '-')} | {label} |"
-        )
+    from app.eval.transcript_render import render_transcript_full
 
-    lines.append(f"\n人狼陣営の方針: {transcript.deception.get('wolf_pattern_label', '-')}\n")
-
-    current_day = None
-    for u in transcript.utterances:
-        if u.day != current_day:
-            current_day = u.day
-            lines.append(f"\n## {u.day}日目\n")
-        speaker = f"{u.player_name}({u.role}/{u.personality})"
-        if u.kind == "discussion":
-            flag = " [フォールバック]" if u.used_fallback else ""
-            lines.append(f"- **{speaker}**{flag}: {u.text}")
-        elif u.kind == "vote":
-            lines.append(f"- _{speaker} → 投票: {u.target}_ ({u.text})")
-        elif u.kind == "night_action":
-            lines.append(f"- _{speaker} → 夜行動: {u.target}_ ({u.text})")
-        elif u.kind in ("wolf_chat", "freemason_chat"):
-            lines.append(f"- `[{u.kind}]` {speaker}: {u.text}")
-        elif u.kind == "summary":
-            lines.append(f"- _要約_: {u.text}")
-
-    lines.append("\n## システム記録\n")
-    names = transcript.names
-    for death in transcript.final_state.get("death_records", []):
-        pid = death["player_id"]
-        lines.append(
-            f"- {death['day']}日目: {names.get(pid, pid)}({pid})が"
-            f"{death['cause']}で死亡"
-        )
-    guards = {
-        (record["day"], record["target_id"])
-        for record in transcript.final_state.get("guard_records", [])
-    }
-    for attack in transcript.final_state.get("attack_records", []):
-        target = attack["target_id"]
-        guarded = (attack["day"], target) in guards
-        outcome = "護衛され失敗" if guarded else ("成功" if attack["succeeded"] else "失敗")
-        lines.append(
-            f"- {attack['day']}日目夜: {names.get(attack['wolf_id'], attack['wolf_id'])}が"
-            f"{names.get(target, target)}({target})を襲撃 → {outcome}"
-        )
-
-    if partial:
-        lines.append("\n## 結果\n\n(対戦は未完了)")
-        return "\n".join(lines) + "\n"
-    winner = transcript.final_state.get("winner")
-    reason = transcript.final_state.get("victory_reason", "")
-    lines.append(f"\n## 結果\n\n勝者: {winner} / {reason}")
-    return "\n".join(lines) + "\n"
+    return render_transcript_full(transcript, partial=partial)

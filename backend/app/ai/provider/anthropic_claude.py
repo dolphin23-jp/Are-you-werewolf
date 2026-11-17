@@ -142,7 +142,10 @@ _GRAMMAR_REJECTION_HINTS = ("schema", "complex", "output_config", "format", "jso
 # for a reservation; the real count replaces it once the response arrives.
 _ESTIMATED_TOKENS_PER_CHAR = 1.2
 
-_ERROR_TEXT_LIMIT = 200
+# An error message is kept whole up to this length. It used to be cut at 200
+# characters, which dropped the part of an API validation error that names the
+# field at fault; past this it is an echoed request body, not a diagnosis.
+_ERROR_TEXT_LIMIT = 2000
 
 
 # --- process-wide concurrency limiter -------------------------------------

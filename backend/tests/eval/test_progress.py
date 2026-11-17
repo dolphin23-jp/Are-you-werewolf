@@ -68,15 +68,30 @@ def test_clock_switches_to_hours_after_an_hour() -> None:
     assert clock_text(3725) == "1:02:05"
 
 
-def test_a_discussion_line_is_one_short_line() -> None:
+def test_a_discussion_line_is_printed_whole_on_one_line() -> None:
+    """The live log used to cut every line at 90 characters; it prints all of it now."""
     text = "最初の行\n二行目 " + "あ" * 200
     line = format_utterance(_utterance(text=text), NAMES)
 
-    assert line is not None
-    assert "\n" not in line
-    assert line.startswith("1日目 ハルト: 最初の行 二行目")
-    assert line.endswith("…")
-    assert len(line.split(": ", 1)[1]) <= 90
+    assert line == "1日目 ハルト: 最初の行 / 二行目 " + "あ" * 200
+
+
+def test_a_discussion_line_carries_its_stage_and_private_note() -> None:
+    memo = {
+        "overall_thought": "サクラを吊りたい",
+        "execution_target": "p2",
+        "suspects": ["p2"],
+        "trusted": [],
+        "fox_candidates": [],
+    }
+    line = format_utterance(
+        _utterance(text="サクラが怪しい", stage="reaction", reasoning_memo=memo), NAMES
+    )
+
+    assert line == (
+        "1日目 [reaction] ハルト: サクラが怪しい\n"
+        "    メモ: 方針: サクラを吊りたい ／ 吊り先: サクラ(p2) ／ 疑い: サクラ(p2)"
+    )
 
 
 def test_a_fallback_line_is_flagged_so_a_failing_model_shows_up_live() -> None:
@@ -93,6 +108,27 @@ def test_votes_and_night_actions_name_the_target_not_its_id() -> None:
     assert night == "1日目 夜行動 ハルト(seer) → サクラ"
 
 
+def test_votes_and_night_actions_print_their_reasons_in_full() -> None:
+    vote = format_utterance(
+        _utterance(
+            "vote",
+            target="p2",
+            text="サクラに入れる",
+            decision_evidence="m3の矛盾",
+            countercase="村人でも説明がつく",
+            alternative_target="p1",
+        ),
+        NAMES,
+    )
+    night = format_utterance(_utterance("night_action", target="p2", text="灰を狭める"), NAMES)
+
+    assert vote == (
+        "1日目 投票 ハルト → サクラ: サクラに入れる\n"
+        "    決め手: m3の矛盾 ／ 反対仮説: 村人でも説明がつく ／ 次点: ハルト"
+    )
+    assert night == "1日目 夜行動 ハルト(seer) → サクラ: 灰を狭める"
+
+
 def test_an_unknown_target_falls_back_to_its_id_and_a_missing_one_to_a_question_mark() -> None:
     assert format_utterance(_utterance("vote", target="p9"), NAMES) == "1日目 投票 ハルト → p9"
     assert format_utterance(_utterance("vote", target=None), NAMES) == "1日目 投票 ハルト → ?"
@@ -106,9 +142,21 @@ def test_private_chat_is_labelled_by_channel() -> None:
     assert mason == "1日目 [共有] ハルト: 様子を見よう"
 
 
-def test_internal_records_print_nothing() -> None:
-    assert format_utterance(_utterance("summary", text="要約"), NAMES) is None
-    assert format_utterance(_utterance("vote_change", text="変更"), NAMES) is None
+def test_summaries_and_vote_notes_are_printed_too() -> None:
+    assert format_utterance(_utterance("summary", text="要約"), NAMES) == "1日目 要約: 要約"
+    assert (
+        format_utterance(_utterance("vote_change", text="変更"), NAMES)
+        == "1日目 投票の記録 ハルト: 変更"
+    )
+
+
+def test_a_continuation_line_is_indented_under_the_clock() -> None:
+    printed: list[str] = []
+    recorder = LiveTranscriptRecorder(printed.append, clock=_Clock())
+
+    recorder.log("一行目\n二行目")
+
+    assert printed == ["[00:00] 一行目", "        二行目"]
 
 
 def test_call_health_reports_failures_and_truncation() -> None:
@@ -141,6 +189,7 @@ def test_the_recorder_prints_as_it_records_and_still_keeps_the_transcript() -> N
     assert lines == [
         "[00:05] 1日目 ハルト: こんにちは",
         "[1:02:05] 1日目 投票 ハルト → サクラ",
+        "[1:02:05] 1日目 要約: 内部",
     ]
     assert [u.kind for u in recorder.transcript.utterances] == ["discussion", "vote", "summary"]
 

@@ -705,7 +705,8 @@ effort を足した。コードがモデルの代わりに埋めた箇所は、�
 ### 11.6 記録の扱い（常設のルール）
 
 - 基準線と A/B の各試合は、`report.md`・`summary.json`・対戦記録（`transcript-seedN.md`・
-  `.json`）を `backend/artifacts/` にコミットする。コミット SHA・モデル・effort・シードを
+  `.json`）を `backend/artifacts/` にコミットする。2026-11-17 からは、呼び出しの記録
+  （`calls-seedN.md`・`.jsonl`）とプロンプトの全文（`prompts-seedN.jsonl.gz`）も残す。コミット SHA・モデル・effort・シードを
   添える。Actions の成果物は保持期間で消える（run #11 の時点では14日で、対戦記録はこれで失われた。
   評価ワークフローは90日に延ばしたが、公開リポジトリの上限も90日なので、コミットが唯一の保存手段）。
 - luna の run #11 は**文脈としてだけ**使う（`backend/artifacts/live-v3-luna-run11/`）。
