@@ -23,6 +23,7 @@ from app.engine.state import DeathCause, DeathRecord, GameState, PlayerState
 from app.engine.victory import VictoryChecker
 from app.engine.vote import DEFAULT_MAX_VOTE_ROUNDS
 from tests.ai.reasoning import run13_seed1_boards as s1
+from tests.ai.reasoning.solver import boards
 
 _END_RULE = (
     "- 勝敗: 処刑のあとと夜明けに判定。人狼が0人になるか、人狼が人狼以外の生存者"
@@ -275,3 +276,36 @@ def test_a_villager_with_nothing_settled_gets_no_endgame_line():
     private = s1.private_part(s1.memo(s1.board(4, "m57"), s1.REN))
 
     assert "終局" not in private
+
+
+def _two_wolves_left(*, phase: Phase) -> GameState:
+    """Five alive: the claimant p4, wolves p1 and p2 (both blacked by p4), p5, p6.
+    p3, the third wolf, was hanged and blacked too."""
+    state = boards.deal(
+        {"p1": RoleName.WEREWOLF, "p2": RoleName.WEREWOLF, "p3": RoleName.WEREWOLF,
+         "p4": RoleName.SEER, "p7": RoleName.FOX},
+        day=4,
+    )
+    boards.kill_first_victim(state, "p16")
+    boards.claim(state, "p4", RoleName.SEER, day=1)
+    for night, target in enumerate(("p3", "p1", "p2")):
+        boards.divine(state, "p4", target, night=night)
+        boards.verdict(state, "p4", "seer", target, True, day=night + 1)
+    for pid in ("p0", "p3", "p7", "p8", "p9", "p10", "p11"):
+        boards.execute(state, pid, day=1)
+    for pid in ("p12", "p13", "p14", "p15"):
+        boards.die_by_attack(state, pid, night=1)
+    state.phase = phase
+    return state
+
+
+def test_parity_is_said_for_the_next_execution_by_day_and_for_the_bite_by_night():
+    """With two wolves among five, hanging a non-wolf brings them level. At
+    night the bite comes first, so the line has to say that instead."""
+    assert len(_two_wolves_left(phase=Phase.DISCUSSION).alive_ids()) == 5
+    by_day = s1.public_part(s1.memo(_two_wolves_left(phase=Phase.DISCUSSION), "p5"))
+    assert "人狼以外を処刑すると人狼が同数になり試合が終わる" in by_day
+
+    by_night = s1.public_part(s1.memo(_two_wolves_left(phase=Phase.NIGHT), "p5"))
+    assert "今夜の襲撃が通ると人狼が同数になり試合が終わる" in by_night
+    assert "人狼以外を処刑すると" not in by_night

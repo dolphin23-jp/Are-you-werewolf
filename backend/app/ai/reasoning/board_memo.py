@@ -35,6 +35,27 @@ on night 1. So the memo now also carries, every time:
 * what the public solver settles about the dead as well as the living -- a
   role whose seats are all in the graveyard is said in so many words -- and
   which claimants the night's curse rules out as the real seer.
+
+The owner's review of run #13 seed 1 (seed1-review-causes.md, R2) found the
+memo stating the board and leaving out what follows from it. It now also says
+what code can guarantee and nothing it cannot -- facts, and conclusions under a
+named supposition, never advice:
+
+* when the game ends and who wins then, and the rope count;
+* each execution's medium read, or that none was published (and, with no
+  medium claimant alive, that none will be); each night's corpses, and that an
+  empty morning means the bite hit the guard target or the fox;
+* the grey, the CO count with its zeros, and every ballot read both ways;
+* under "if this living seer claimant is real and truthful", which wolves are
+  dead or alive, which execution ends the game, and where the fox may be --
+  in a block of its own, never among the certainties;
+* in the seat's own section: the same endgame from its own solver (or its own
+  side's way to win), a seer's "neither wolf nor fox", published colours it
+  knows are false, the hunter's empty mornings, and conclusions under
+  `NoVillageBluff` / `TruthfulIfGenuine`, each opening with its supposition --
+  under a header that tells the seat to keep them off the table.
+
+The reader is 自分 in its own memo, past the header.
 """
 
 from __future__ import annotations
@@ -1032,17 +1053,32 @@ def _wolf_clauses(ledger: PublicFactLedger, end: _Endgame) -> list[str]:
             f"{ledger.name_of(last)}を処刑すると人狼0人で試合が終わる"
             f"（{_winner_if_wolves_gone(end)}）"
         )
-    if end.wolves_min and 2 * end.wolves_min >= len(end.alive) - 1:
-        clauses.append(
-            "人狼以外を処刑すると人狼が同数になり試合が終わる"
-            f"（{_winner_at_parity(end)}）"
-        )
-    elif end.wolves_min and 2 * end.wolves_min >= len(end.alive) - 2:
-        clauses.append(
-            "人狼以外を処刑すると、その夜の襲撃が通れば人狼が同数になり試合が終わる"
-            f"（{_winner_at_parity(end)}）"
-        )
+    clauses.extend(_parity_clauses(ledger, end))
     return clauses
+
+
+def _parity_clauses(ledger: PublicFactLedger, end: _Endgame) -> list[str]:
+    """When even the fewest living wolves would stand level with the rest.
+
+    By day the next event is an execution, then the bite; by night (and
+    between the execution and the night) the bite comes first. Each wording
+    is printed only when it holds with `wolves_min`, so in every world.
+    """
+    wolves, alive = end.wolves_min, len(end.alive)
+    if not wolves:
+        return []
+    winner = f"（{_winner_at_parity(end)}）"
+    if ledger.phase in (Phase.NIGHT, Phase.VOTE_RESULT):
+        if 2 * wolves >= alive - 1:
+            return ["今夜の襲撃が通ると人狼が同数になり試合が終わる" + winner]
+        if 2 * wolves >= alive - 2:
+            return ["今夜の襲撃が通り、次の処刑が人狼以外なら人狼が同数になり試合が終わる" + winner]
+        return []
+    if 2 * wolves >= alive - 1:
+        return ["人狼以外を処刑すると人狼が同数になり試合が終わる" + winner]
+    if 2 * wolves >= alive - 2:
+        return ["人狼以外を処刑すると、その夜の襲撃が通れば人狼が同数になり試合が終わる" + winner]
+    return []
 
 
 def _winner_if_wolves_gone(end: _Endgame) -> str:
