@@ -12,6 +12,9 @@ from __future__ import annotations
 
 import itertools
 
+from app.ai.reasoning.observations import ObservationSet
+from app.ai.reasoning.perspectives import PlayerPrivatePerspective
+from app.ai.reasoning.solver import build_solver
 from app.ai.strategy import StrategyAnalyzer
 from app.engine.game import GameController, PlayerSpec
 from app.engine.phases import Phase
@@ -159,3 +162,116 @@ def test_the_legacy_rope_count_uses_the_same_formula():
     assert analyzer._rope_count(3, 11) == 1
     assert analyzer._rope_count(3, 11, fox_may_be_alive=False) == 2
     assert analyzer._rope_count(3, 6) == 0
+
+
+# -- 2. what ends the game, under each seer claim and from each seat --
+
+_KENT_IF = "ケントが真の占い師で結果も正しいなら: "
+_FOX_OPEN = (
+    "妖狐の死亡は未確定（生存の候補8人: マコト、ソウタ、ミオ、レン、サクラ、ツムギ、ホノカ、シオン"
+    "／死亡の候補: ユイ）"
+)
+
+
+def _conditional_lines(public: str) -> list[str]:
+    head = "- 仮定つきで言えること（仮定が正しい場合だけ）:"
+    lines = public.splitlines()
+    if head not in lines:
+        return []
+    out: list[str] = []
+    for line in lines[lines.index(head) + 1 :]:
+        if not line.startswith("  - "):
+            break
+        out.append(line[4:])
+    return out
+
+
+def test_kents_seat_on_day_five_is_told_that_hanging_kaito_ends_the_game():
+    """5-B1: ケント knew all three wolves after m75, and that a fox might live."""
+    private = s1.private_part(s1.memo(s1.board(5, "m75"), s1.KENT))
+
+    line = _line(private, "- 終局（あなたの視点）: ")
+    assert (
+        "死亡した人狼はハルト、ダイキ。生存の人狼はカイトだけ。"
+        "カイトを処刑すると人狼0人で試合が終わる"
+        "（妖狐が生きていれば妖狐の勝ち、死んでいれば村の勝ち）。" + _FOX_OPEN
+    ) in line
+
+
+def test_the_public_section_says_the_same_under_kents_claim_and_names_the_assumption():
+    public = s1.public_part(s1.memo(s1.board(5, "m75"), s1.REN))
+
+    (line,) = _conditional_lines(public)
+    assert line.startswith(_KENT_IF)
+    assert "カイトを処刑すると人狼0人で試合が終わる" in line
+    assert _FOX_OPEN in line
+    # A supposition, not a fact: it is never filed with the certainties.
+    settled = public.split("- 公開情報だけで確定すること:")[1].split("\n- ")[0]
+    assert "試合が終わる" not in settled
+
+
+def test_on_day_four_kents_claim_names_a_living_wolf_but_no_end_yet():
+    public = s1.public_part(s1.memo(s1.board(4, "m57"), s1.REN))
+
+    (line,) = _conditional_lines(public)
+    assert line.startswith(
+        _KENT_IF + "死亡した人狼はダイキ。生存の人狼にハルトを含む（生存の人狼は全部で1〜2人）"
+    )
+    assert "試合が終わる" not in line
+
+
+def test_a_seer_claim_that_settles_nothing_gets_no_line():
+    """Day 2: three claimants, whites only. Nothing follows about wolves or the
+    fox from any one of them, so there is nothing to say yet."""
+    public = s1.public_part(s1.memo(s1.board(2, "m34"), s1.REN))
+
+    assert _conditional_lines(public) == []
+
+
+def test_the_endgame_line_agrees_with_the_victory_checker():
+    """Hang カイト in any world consistent with ケント's view: the checker ends
+    the game. Hang anyone else: it does not."""
+    state = s1.board(5, "m75")
+    solver = build_solver(ObservationSet.from_state(state), PlayerPrivatePerspective(s1.KENT))
+    worlds = [state]
+    for model in solver.representative_models([], limit=8):
+        world = s1.board(5, "m75")
+        for pid, role in model.roles:
+            world.players[pid].role = role
+        worlds.append(world)
+    assert len(worlds) > 2
+    for world in worlds:
+        fox_alive = any(p.alive and p.role is RoleName.FOX for p in world.players.values())
+        for hanged in world.alive_ids():
+            world.players[hanged].alive = False
+            result = VictoryChecker().check(world)
+            world.players[hanged].alive = True
+            if hanged == s1.KAITO:
+                assert result is not None
+                assert result.winner is (Team.FOX if fox_alive else Team.VILLAGE)
+            else:
+                assert result is None, hanged
+
+
+def test_wolves_and_the_fox_are_told_their_own_way_to_win():
+    state = s1.board(4, "m57")
+
+    wolf = _line(s1.private_part(s1.memo(state, s1.KAITO)), "- 終局（あなたの視点）: ")
+    assert wolf.startswith(
+        "- 終局（あなたの視点）: 生存の人狼はハルト、カイトの2人、人狼以外は10人。"
+    )
+    assert "人狼以外があと8人減ると同数で試合が終わる" in wolf
+    assert "人狼陣営の勝ちには妖狐の死亡が要る" in wolf
+    assert "候補" not in wolf
+
+    fox = _line(s1.private_part(s1.memo(state, s1.SOTA)), "- 終局（あなたの視点）: ")
+    assert (
+        "人狼が0人になるか、人狼が人狼以外と同数以上になった時点であなた(妖狐)が生きていれば、あなたの勝ち"
+    ) in fox
+    assert "候補" not in fox
+
+
+def test_a_villager_with_nothing_settled_gets_no_endgame_line():
+    private = s1.private_part(s1.memo(s1.board(4, "m57"), s1.REN))
+
+    assert "終局" not in private

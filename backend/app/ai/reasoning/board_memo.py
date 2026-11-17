@@ -47,6 +47,7 @@ from dataclasses import dataclass
 from app.ai.reasoning.facts import MEDIUM_RESULT, SEER_RESULT, PublicFactLedger
 from app.ai.reasoning.observations import ObservationSet, PublicVerdict
 from app.ai.reasoning.perspectives import PlayerPrivatePerspective
+from app.ai.reasoning.solver.assumptions import GenuineClaim, HonestResults
 from app.ai.reasoning.solver.backend import AnyOf, Certainty, Hypothesis, RoleIs, has_role
 from app.ai.reasoning.solver.queries import RoleSolver
 from app.ai.reasoning.solver.rules.claimed_divination import (
@@ -183,6 +184,7 @@ def render_board_memo(
     lines.extend(_vote_lines(ledger))
     public_facts = _public_logic_facts(ledger, observations, public_solver)
     lines.extend(_logic_lines(public_facts))
+    lines.extend(_conditional_lines(ledger, public_solver))
     lines.extend(_timeline_lines(ledger, observations))
     lines.extend(
         _private_lines(
@@ -724,6 +726,206 @@ def _candidates(ledger: PublicFactLedger, player_ids: list[str]) -> str:
     return f"（{'、'.join(names)}のいずれか）"
 
 
+@dataclass(frozen=True)
+class _Endgame:
+    """What one solver settles about how the game can end.
+
+    Living wolves are bounded from both sides: the three wolves are the dead
+    ones plus the living ones, so a seat that can name the dead wolves knows
+    how many still live even before it can name them. The bounds are sound,
+    not tight -- a clause below is printed only when the bound alone makes it
+    true in every world the solver allows.
+    """
+
+    alive: tuple[str, ...]
+    dead_wolves: tuple[str, ...]
+    living_wolves: tuple[str, ...]
+    wolves_min: int
+    wolves_max: int
+    fox_alive: tuple[str, ...]
+    fox_dead: tuple[str, ...]
+
+    @property
+    def wolves_exact(self) -> bool:
+        return self.wolves_min == self.wolves_max == len(self.living_wolves)
+
+    @property
+    def fox_dead_for_sure(self) -> bool:
+        return not self.fox_alive
+
+    @property
+    def fox_alive_for_sure(self) -> bool:
+        return bool(self.fox_alive) and not self.fox_dead
+
+
+def _endgame(ledger: PublicFactLedger, solver: RoleSolver) -> _Endgame | None:
+    if not solver.is_possible(Hypothesis()):
+        return None
+    alive = ledger.alive_ids()
+    dead = ledger.dead_ids()
+    wolf, fox = RoleName.WEREWOLF, RoleName.FOX
+    maybe_dead_wolves = [pid for pid in dead if solver.is_possible(has_role(pid, wolf))]
+    maybe_living_wolves = [pid for pid in alive if solver.is_possible(has_role(pid, wolf))]
+    dead_wolves = tuple(p for p in maybe_dead_wolves if solver.is_forced(has_role(p, wolf)))
+    living_wolves = tuple(p for p in maybe_living_wolves if solver.is_forced(has_role(p, wolf)))
+    total = ROLE_DEFINITIONS[wolf].count
+    return _Endgame(
+        alive=alive,
+        dead_wolves=dead_wolves,
+        living_wolves=living_wolves,
+        wolves_min=max(len(living_wolves), total - len(maybe_dead_wolves)),
+        wolves_max=min(len(maybe_living_wolves), total - len(dead_wolves)),
+        fox_alive=tuple(pid for pid in alive if solver.is_possible(has_role(pid, fox))),
+        fox_dead=tuple(pid for pid in dead if solver.is_possible(has_role(pid, fox))),
+    )
+
+
+def _wolf_clauses(ledger: PublicFactLedger, end: _Endgame) -> list[str]:
+    """Who the wolves are and what execution ends the game, as far as settled.
+
+    "Hanging X ends it" is printed only when every world agrees: X is the one
+    living wolf left. "Hanging any non-wolf ends it" only when even the fewest
+    living wolves would then stand level with the rest.
+    """
+    clauses: list[str] = []
+    if end.dead_wolves:
+        clauses.append(f"死亡した人狼は{_names(ledger, end.dead_wolves)}")
+    count = (
+        f"{end.wolves_min}"
+        if end.wolves_min == end.wolves_max
+        else f"{end.wolves_min}〜{end.wolves_max}"
+    )
+    if end.living_wolves and end.wolves_exact:
+        clauses.append(f"生存の人狼は{_names(ledger, end.living_wolves)}だけ")
+    elif end.living_wolves:
+        clauses.append(
+            f"生存の人狼に{_names(ledger, end.living_wolves)}を含む（生存の人狼は全部で{count}人）"
+        )
+    elif end.dead_wolves and end.wolves_min == end.wolves_max:
+        clauses.append(f"生存の人狼は{count}人")
+    if end.wolves_exact and len(end.living_wolves) == 1:
+        (last,) = end.living_wolves
+        clauses.append(
+            f"{ledger.name_of(last)}を処刑すると人狼0人で試合が終わる"
+            f"（{_winner_if_wolves_gone(end)}）"
+        )
+    if end.wolves_min and 2 * end.wolves_min >= len(end.alive) - 1:
+        clauses.append(
+            "人狼以外を処刑すると人狼が同数になり試合が終わる"
+            f"（{_winner_at_parity(end)}）"
+        )
+    elif end.wolves_min and 2 * end.wolves_min >= len(end.alive) - 2:
+        clauses.append(
+            "人狼以外を処刑すると、その夜の襲撃が通れば人狼が同数になり試合が終わる"
+            f"（{_winner_at_parity(end)}）"
+        )
+    return clauses
+
+
+def _winner_if_wolves_gone(end: _Endgame) -> str:
+    if end.fox_dead_for_sure:
+        return "妖狐は死亡済みなので村の勝ち"
+    if end.fox_alive_for_sure:
+        return "妖狐が生きているので妖狐の勝ち"
+    return "妖狐が生きていれば妖狐の勝ち、死んでいれば村の勝ち"
+
+
+def _winner_at_parity(end: _Endgame) -> str:
+    if end.fox_dead_for_sure:
+        return "妖狐は死亡済みなので人狼陣営の勝ち"
+    if end.fox_alive_for_sure:
+        return "妖狐が生きているので妖狐の勝ち"
+    return "妖狐が生きていれば妖狐の勝ち、死んでいれば人狼陣営の勝ち"
+
+
+def _fox_clause(ledger: PublicFactLedger, end: _Endgame) -> str:
+    if end.fox_dead_for_sure:
+        return "妖狐は死亡済み"
+    if end.fox_alive_for_sure:
+        return "妖狐は生存"
+    return (
+        f"妖狐の死亡は未確定（生存の候補{len(end.fox_alive)}人: {_names(ledger, end.fox_alive)}"
+        f"／死亡の候補: {_names(ledger, end.fox_dead)}）"
+    )
+
+
+def _endgame_text(ledger: PublicFactLedger, end: _Endgame) -> str | None:
+    """The village-eye summary, or None when it settles nothing worth a line.
+
+    A claimant with only whites, early on, settles neither a wolf nor the
+    fox; three such lines of fox candidates would be noise.
+    """
+    clauses = _wolf_clauses(ledger, end)
+    if not clauses and not end.fox_dead_for_sure:
+        return None
+    return "。".join([*clauses, _fox_clause(ledger, end)])
+
+
+def _conditional_lines(ledger: PublicFactLedger, public_solver: RoleSolver | None) -> list[str]:
+    """What follows if one living seer claimant is real and told the truth.
+
+    Never filed under the certainties: "the game ends if カイト hangs" is true
+    only in the worlds where ケント is the seer and his blacks are real, and
+    the line says so in its first words. One claimant at a time, since two
+    seer claims cannot both hold.
+    """
+    if public_solver is None:
+        return []
+    rows: list[str] = []
+    for claimant in _seer_claimants(ledger):
+        if not ledger.is_alive(claimant) or ledger.claimed_role_of(claimant) is not RoleName.SEER:
+            continue
+        supposed = public_solver.assuming(
+            GenuineClaim(claimant, RoleName.SEER), HonestResults(claimant)
+        )
+        end = _endgame(ledger, supposed)
+        text = _endgame_text(ledger, end) if end is not None else None
+        if text is not None:
+            rows.append(f"  - {ledger.name_of(claimant)}が真の占い師で結果も正しいなら: {text}")
+    if not rows:
+        return []
+    return ["- 仮定つきで言えること（仮定が正しい場合だけ）:", *rows]
+
+
+def _seat_endgame_lines(
+    ledger: PublicFactLedger, seat_solver: RoleSolver, own_role: RoleName
+) -> list[str]:
+    """The same summary from the seat's own solver, with no supposition.
+
+    A wolf already knows every wolf, and the fox is itself the fox: each is
+    told how its own side wins instead of a list of fox candidates.
+    """
+    end = _endgame(ledger, seat_solver)
+    if end is None:
+        return []
+    head = "- 終局（あなたの視点）: "
+    if own_role is RoleName.WEREWOLF:
+        wolves = len(end.living_wolves)
+        others = len(end.alive) - wolves
+        text = (
+            f"生存の人狼は{_names(ledger, end.living_wolves)}の{wolves}人、人狼以外は{others}人。"
+            f"人狼以外があと{others - wolves}人減ると同数で試合が終わる"
+        )
+        if end.fox_dead_for_sure:
+            # The fox's death is already a fact line; this only draws the end.
+            text += "（そのとき人狼陣営の勝ち）"
+        else:
+            text += (
+                "。その時点で妖狐が生きていれば妖狐の勝ちなので、"
+                "人狼陣営の勝ちには妖狐の死亡が要る"
+            )
+        return [head + text]
+    if own_role is RoleName.FOX:
+        clauses = [
+            "人狼が0人になるか、人狼が人狼以外と同数以上になった時点で"
+            "あなた(妖狐)が生きていれば、あなたの勝ち",
+            *_wolf_clauses(ledger, end),
+        ]
+        return [head + "。".join(clauses)]
+    summary = _endgame_text(ledger, end)
+    return [head + summary] if summary is not None else []
+
+
 def _timeline_lines(ledger: PublicFactLedger, observations: ObservationSet) -> list[str]:
     conflicts = find_timeline_conflicts(observations)
     if not conflicts:
@@ -806,6 +1008,8 @@ def _private_lines(
             player_id, own_role, ledger, observations, allies, seat_solver, public_keys
         )
     )
+    if seat_solver is not None:
+        lines.extend(_seat_endgame_lines(ledger, seat_solver, own_role))
     return lines
 
 
