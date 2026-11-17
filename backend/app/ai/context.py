@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Iterable, Sequence
+from dataclasses import dataclass, replace
 from typing import Any
 
 from app.ai.deception import FakeClaimGuard, WolfDeceptionAssignment
@@ -27,8 +28,8 @@ from app.ai.personalities import (
     discussion_length_range,
 )
 from app.ai.provider.base import Message
-from app.ai.reasoning.board_memo import render_roster
-from app.ai.reasoning.facts import PublicFactLedger
+from app.ai.reasoning.board_memo import namify, render_roster, role_label
+from app.ai.reasoning.facts import SEER_RESULT, PublicFactLedger
 from app.ai.schemas import PLAN_NOTE_MEMO_FIELDS
 from app.ai.strategy import (
     StrategyAnalyzer,
@@ -38,7 +39,7 @@ from app.ai.strategy import (
 )
 from app.engine.roles import ROLE_DEFINITIONS, RoleName
 from app.engine.speech_events import SpeechEventType
-from app.engine.state import ChatChannel, ChatMessage, GameState
+from app.engine.state import ChatChannel, ChatMessage, GameState, PublicDeathCause
 
 # Night 0 has no attack: the scripted first victim dies (and is never listed
 # here), and the only other way to die that night is a seer divining the fox.
@@ -216,6 +217,16 @@ class DaySummaryManager:
         )
 
 
+@dataclass(frozen=True)
+class _NoteSource:
+    """Where a seat's plan note was written: the day, the turn's stage and, once
+    the line is posted, its message id."""
+
+    day: int
+    stage: str
+    message_id: str | None = None
+
+
 class ContextBuilder:
     def __init__(
         self,
@@ -240,11 +251,26 @@ class ContextBuilder:
         self._fake_claim_guard = fake_claim_guard
         self._observer_player_ids = observer_player_ids or set()
         self._reasoning_memos: dict[str, dict[str, Any]] = {}
+        self._note_sources: dict[str, _NoteSource] = {}
         self._key_points: dict[int, list[tuple[str, str, str]]] = {}
         self._knowledge = KnowledgeBase()
 
-    def set_reasoning_memo(self, player_id: str, memo: dict[str, Any]) -> None:
+    def set_reasoning_memo(
+        self,
+        player_id: str,
+        memo: dict[str, Any],
+        *,
+        day: int | None = None,
+        stage: str | None = None,
+    ) -> None:
+        """Store the seat's latest note. `day` and `stage` say which turn wrote
+        it; the message id follows when that turn's line is posted (see
+        `record_key_point`). Without them the note is shown undated."""
         self._reasoning_memos[player_id] = memo
+        if day is None or stage is None:
+            self._note_sources.pop(player_id, None)
+        else:
+            self._note_sources[player_id] = _NoteSource(day=day, stage=stage)
 
     def get_reasoning_memo(self, player_id: str) -> dict[str, Any] | None:
         """The player's last persisted memo. Free-text fields in it are opinion,
@@ -252,30 +278,92 @@ class ContextBuilder:
         return self._reasoning_memos.get(player_id)
 
     def record_key_point(
-        self, day: int, message_id: str, player_id: str, key_point: str
+        self,
+        day: int,
+        message_id: str,
+        player_id: str,
+        key_point: str,
+        *,
+        stage: str | None = None,
     ) -> None:
+        """Note a posted turn: its key point and, given the turn's `stage`, the
+        message that carried the plan note the same turn wrote."""
         normalized = key_point.strip()
         if normalized:
             self._key_points.setdefault(day, []).append((message_id, player_id, normalized))
+        source = self._note_sources.get(player_id)
+        if (
+            source is not None
+            and source.message_id is None
+            and (source.day, source.stage) == (day, stage)
+        ):
+            self._note_sources[player_id] = replace(source, message_id=message_id)
 
-    def _layer_previous_memo(self, player_id: str) -> str:
+    def _layer_previous_memo(self, state: GameState, player_id: str) -> str:
         memo = self._reasoning_memos.get(player_id)
         if self._chat:
-            # Shown back under the wire names the model wrote it with, so the
-            # v3 prompt never asks for (or echoes) a "thought" field. The stored
-            # memo keeps ReasoningMemo's names, because code reads those; fields
-            # the wire form does not carry (role_hypotheses) are left out.
-            if memo is None:
-                return "【前回の方針メモ】(まだありません)"
-            note = {
-                note_field: memo[memo_field]
-                for note_field, memo_field in PLAN_NOTE_MEMO_FIELDS.items()
-                if memo_field in memo
-            }
-            return "【前回の方針メモ】\n" + json.dumps(note, ensure_ascii=False)
+            return self._chat_previous_note(state, player_id, memo)
         if memo is None:
             return "【前回の非公開思考メモ】(まだありません)"
         return "【前回の非公開思考メモ】\n" + json.dumps(memo, ensure_ascii=False)
+
+    def _chat_previous_note(
+        self, state: GameState, player_id: str, memo: dict[str, Any] | None
+    ) -> str:
+        """The seat's last plan note, dated, its names read as they stand now.
+
+        A note is rewritten only on a discussion turn, so a seat without one
+        votes from whatever it wrote last -- days ago, perhaps, about a seat
+        confirmed or dead since. Echoed as ids with no date, that note read as
+        today's (seed-1 review 2-A4). Shown under the wire names the model
+        wrote it with, so the v3 prompt never asks for (or echoes) a "thought"
+        field; fields the wire form does not carry (role_hypotheses) are left
+        out, and so is an empty free-text field.
+        """
+        if memo is None:
+            return "【前回の方針メモ】(まだありません)"
+        source = self._note_sources.get(player_id)
+        heading = "【前回の方針メモ】"
+        if source is not None:
+            heading = f"【前回の方針メモ（{self._note_source_text(source)}で書いたもの）】"
+            if source.day < state.day:
+                heading += "それ以降の出来事は【盤面メモ】にある。"
+        lines = [heading]
+        for note_field, memo_field in PLAN_NOTE_MEMO_FIELDS.items():
+            if memo_field not in memo:
+                continue
+            value = memo[memo_field]
+            if isinstance(value, list):
+                rendered = (
+                    "、".join(self._noted_seat(state, player_id, item) for item in value)
+                    or "なし"
+                )
+            elif note_field in ("execution_target", "trusted_seer"):
+                rendered = self._noted_seat(state, player_id, value) if value else "なし"
+            else:
+                text = str(value or "").strip()
+                if not text:
+                    continue
+                rendered = namify(text, PublicFactLedger(state))
+            lines.append(f"- {note_field}: {rendered}")
+        return "\n".join(lines)
+
+    def _note_source_text(self, source: _NoteSource, *, with_stage: bool = True) -> str:
+        where = f"{source.day}日目"
+        if source.message_id:
+            where += f" {source.message_id}"
+        if with_stage:
+            where += f"・{self._stage_label(source.stage)}"
+        return where
+
+    @staticmethod
+    def _noted_seat(state: GameState, self_id: str, player_id: object) -> str:
+        """A seat named in a note: its name and its public status now."""
+        if not isinstance(player_id, str) or player_id not in state.players:
+            return str(player_id)
+        if player_id == self_id:
+            return "自分"
+        return f"{state.players[player_id].name}［{public_status(state, player_id)}］"
 
     def _label(self, state: GameState, player_id: str) -> str:
         """How a player is written in the prompt: `名前(pN)` normally, the name
@@ -692,7 +780,16 @@ class ContextBuilder:
             stood = target.name
         else:
             stood = f"{target.name}(すでに死亡)"
-        lines = ["【前回の発言のあとに出たこと】", f"- あなたが推していた吊り先: {stood}"]
+        if self._chat:
+            # The note's value, not something said at the table, and as old as
+            # the note: dated, the name read as it stands now (review 2-A4).
+            source = self._note_sources.get(player_id)
+            when = f"（{self._note_source_text(source, with_stage=False)}）" if source else ""
+            if target is not None:
+                stood = self._noted_seat(state, player_id, target.player_id)
+            lines = ["【前回の発言のあとに出たこと】", f"- 前回のメモの吊り先{when}: {stood}"]
+        else:
+            lines = ["【前回の発言のあとに出たこと】", f"- あなたが推していた吊り先: {stood}"]
         if addressed:
             lines.append("- あなた宛ての発言:")
             lines.extend(self._digest_line(state, m) for m in addressed[-_DIGEST_ITEMS:])
@@ -846,7 +943,7 @@ class ContextBuilder:
                 self._layer_pending_questions(state, player_id),
                 self._layer_existing_key_points(state),
                 self._layer_d_summaries(),
-                self._layer_previous_memo(player_id),
+                self._layer_previous_memo(state, player_id),
                 self._layer_e_current_log(state, ChatChannel.PUBLIC),
                 stage_text,
                 DISCUSSION_OUTPUT_INSTRUCTION,
@@ -875,7 +972,7 @@ class ContextBuilder:
             self._layer_pending_questions(state, player_id),
             self._layer_since_last_turn(state, player_id),
             self._layer_d_summaries(),
-            self._layer_previous_memo(player_id),
+            self._layer_previous_memo(state, player_id),
             self._layer_e_current_log(state, ChatChannel.PUBLIC),
             f"【いまの場面】{self._stage_label(stage)}。{stage_instruction}"
             "当日のログは各行の先頭に[mN]の発言IDが付いている。誰かの発言を受けて話すなら"
@@ -948,7 +1045,7 @@ class ContextBuilder:
             [
                 self._layer_c_state(state, player_id, self._role_specific_guides(state, player_id)),
                 self._layer_d_summaries(),
-                self._layer_previous_memo(player_id),
+                self._layer_previous_memo(state, player_id),
                 MORNING_INTENT_OUTPUT_INSTRUCTION,
             ],
         )
@@ -984,7 +1081,7 @@ class ContextBuilder:
                 # a plain villager.
                 self._layer_c_state(state, player_id, self._role_specific_guides(state, player_id)),
                 self._layer_d_summaries(),
-                self._layer_previous_memo(player_id),
+                self._layer_previous_memo(state, player_id),
                 self._layer_e_current_log(state, ChatChannel.PUBLIC),
                 f"{header}{candidates}",
                 VOTE_OUTPUT_INSTRUCTION,
@@ -1018,7 +1115,7 @@ class ContextBuilder:
                     board_memo=board_memo,
                 ),
                 self._layer_d_summaries(),
-                self._layer_previous_memo(player_id),
+                self._layer_previous_memo(state, player_id),
                 self._layer_e_current_log(state, ChatChannel.PUBLIC),
                 stated,
                 f"{header}{self._labels(state, candidate_ids)}",
@@ -1089,7 +1186,7 @@ class ContextBuilder:
         if self._chat:
             user_layers.append(self._layer_todays_public_discussion(state))
         user_layers += [
-            self._layer_previous_memo(player_id),
+            self._layer_previous_memo(state, player_id),
             f"【夜行動: {action_label}({action_type})】候補: {candidates}{extra}",
         ]
         if self._chat:
@@ -1147,7 +1244,7 @@ class ContextBuilder:
                 self._layer_todays_public_discussion(state),
             ]
         user_layers += [
-            self._layer_previous_memo(player_id),
+            self._layer_previous_memo(state, player_id),
             self._layer_private_history(state, channel),
         ]
         if self._chat:
@@ -1380,3 +1477,45 @@ def _label_pattern(label: str) -> re.Pattern[str]:
     else:
         trail = ""
     return re.compile(f"{lead}{re.escape(label)}{trail}")
+
+
+# -- a seat's public status, as notes and ballots name it --
+
+
+def public_status(state: GameState, player_id: str) -> str:
+    """What the table knows about a seat now, in a few words.
+
+    A dead seat by how and when it died; a living one by its standing CO and
+    the seer verdicts published on it, or グレー (無CO・未判定) when it has
+    neither. A freemason pair is 相互確認済み only once the named partner has
+    confirmed. Public facts only, so it reads the same for every seat.
+    """
+    ledger = PublicFactLedger(state)
+    player = ledger.player(player_id)
+    if player is None:
+        return ""
+    if not player.alive:
+        if player.death_cause is PublicDeathCause.FIRST_VICTIM:
+            return "初日犠牲者"
+        if player.death_day is None:
+            return "死亡"
+        if player.death_cause is PublicDeathCause.EXECUTED:
+            return f"{player.death_day}日目処刑"
+        return f"{player.death_day}日目夜死亡"
+    parts: list[str] = []
+    claimed = ledger.claimed_role_of(player_id)
+    if claimed is RoleName.FREEMASON:
+        confirmed = any(
+            claim.confirmed and player_id in (claim.claimant_id, claim.partner_id)
+            for claim in state.freemason_partner_claims
+        )
+        parts.append("共有・相互確認済み" if confirmed else "共有CO")
+    elif claimed is not None:
+        parts.append(f"{role_label(claimed)}CO")
+    verdicts = dict.fromkeys(
+        f"{ledger.name_of(result.claimant_id)}の{'黒' if result.is_werewolf else '白'}"
+        for result in ledger.public_results()
+        if result.target_id == player_id and result.result_type == SEER_RESULT
+    )
+    parts.extend(verdicts)
+    return "・".join(parts) or "グレー"

@@ -55,7 +55,7 @@ def test_the_digest_names_what_was_said_to_the_seat_and_about_its_candidate():
 
     digest = builder._layer_since_last_turn(state, "p1")
 
-    assert "あなたが推していた吊り先: Player5" in digest
+    assert "前回のメモの吊り先: Player5［グレー］" in digest
     assert f"[{to_me}] Player2: Player1、根拠は票だけ？" in digest
     assert f"[{about_target}] Player3: Player5は白をもらってるよ" in digest
     assert "今日は静かだね" not in digest
@@ -86,7 +86,7 @@ def test_a_candidate_who_has_died_is_not_pushed_again():
 
     digest = builder._layer_since_last_turn(state, "p1")
 
-    assert "Player5(すでに死亡)" in digest
+    assert "前回のメモの吊り先: Player5［死亡］" in digest
     assert "Player5について出た発言" not in digest
 
 
@@ -133,7 +133,7 @@ def test_the_first_speaker_of_the_day_is_told_nobody_has_spoken():
 
     digest = builder._layer_since_last_turn(state, "p1")
 
-    assert "あなたが推していた吊り先: まだありません" in digest
+    assert "前回のメモの吊り先: まだありません" in digest
     assert "まだ誰も話していません" in digest
 
 
