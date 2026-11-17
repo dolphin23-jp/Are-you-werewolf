@@ -570,6 +570,18 @@ class ContextBuilder:
             else:
                 lines.append("あなたは潜伏担当です。無理にCOせず村人として振る舞ってください。")
 
+        if (
+            self._chat
+            and player.role == RoleName.MEDIUM
+            and not any(
+                declaration.player_id == player_id and declaration.claimed_role == RoleName.MEDIUM
+                for declaration in state.co_declarations
+            )
+        ):
+            # A fact and a nudge; staying latent remains the seat's call
+            # (owner decision on review 1-B3).
+            lines.append("あなたはまだ霊媒COしていない。17Aでは1日目COが普通")
+
         if player.role == RoleName.MADMAN and self._madman_fake_role is not None:
             fake_label = ROLE_DEFINITIONS[self._madman_fake_role].label_ja
             lines.append(f"あなたの戦略: 「{fake_label}」を騙ってください。")
