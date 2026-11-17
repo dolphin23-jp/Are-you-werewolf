@@ -88,3 +88,49 @@ def test_the_rule_line_says_the_wolves_bite_a_non_wolf_every_night():
     assert "人狼は1日目夜から毎晩、人狼以外の生存者を必ず1人襲撃する（襲撃なしの夜はない）" in rule
     assert "襲撃（1夜1人まで）" not in rule
 
+
+# -- 5. the grey, and the CO count with its zeros --
+
+
+def test_the_grey_is_listed_apart_from_the_seats_a_claimant_has_judged():
+    """2-B5: on day 2 the table argued over "the grey" with two definitions
+    and no list. After m37 every seer claimant had published two nights."""
+    line = _line(_public(2, "m37"), "- グレー")
+
+    assert line == (
+        "- グレー(生存・CO無し・どの占いCOの判定も無し): ハルト、レン、サクラ、ツムギ / "
+        "判定を受けた非CO者: ソウタ(アオイの白)、ミオ(ダイキの白)、カイト(アオイの白)、"
+        "リク(ケントの白)、シオン(ダイキの白)"
+    )
+
+
+def test_a_seat_judged_twice_shows_both_verdicts():
+    line = _line(_public(5, "m75"), "- グレー")
+
+    assert "カイト(アオイの白・ケントの黒)" in line
+
+
+def test_the_co_count_says_the_zero_and_the_name_of_the_split():
+    """1-B1: m4 called it 3-1 with no medium out; the memo never said 霊媒0."""
+    expected = {
+        "m2": "- CO数: 占い1(生存1)・霊媒0 → 内訳の呼び方は1-0",
+        "m3": "- CO数: 占い2(生存2)・霊媒0 → 内訳の呼び方は2-0",
+        "m4": "- CO数: 占い3(生存3)・霊媒0 → 内訳の呼び方は3-0",
+    }
+    for message, line in expected.items():
+        public = _public(1, message)
+        assert line in public.splitlines(), message
+        assert "霊媒=まだなし" in _line(public, "- CO: ")
+
+    after_akari = _public(2, "m31")
+    assert "- CO数: 占い3(生存3)・霊媒1(生存1) → 内訳の呼び方は3-1" in after_akari.splitlines()
+    assert "霊媒=まだなし" not in after_akari
+    late = _public(5)
+    assert "- CO数: 占い3(生存1)・霊媒1(生存0) → 内訳の呼び方は3-1" in late.splitlines()
+
+
+def test_before_anybody_claims_there_is_no_count_to_give():
+    public = _public(1)
+
+    assert "- CO: まだ誰もCOしていない" in public.splitlines()
+    assert "CO数" not in public

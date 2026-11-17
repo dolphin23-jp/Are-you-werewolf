@@ -186,6 +186,7 @@ def render_board_memo(
     lines.extend(_claim_lines(state, ledger))
     lines.extend(_verdict_lines(ledger, observations))
     lines.extend(_night_lines(ledger, observations))
+    lines.extend(_grey_lines(ledger, observations))
     lines.extend(_vote_lines(ledger))
     public_facts = _public_logic_facts(ledger, observations, public_solver)
     lines.extend(_logic_lines(public_facts))
@@ -321,6 +322,9 @@ def _claim_lines(state: GameState, ledger: PublicFactLedger) -> list[str]:
     for role in _CLAIM_ROLE_ORDER:
         claimants = by_role.get(role)
         if not claimants:
+            if role is RoleName.MEDIUM:
+                # A latent medium is a choice the table should see it making.
+                parts.append(f"{_ROLE_LABELS[role]}=まだなし")
             continue
         rendered = "、".join(
             f"{ledger.name_of(pid)}{'' if ledger.is_alive(pid) else '(死亡)'}" for pid in claimants
@@ -338,7 +342,30 @@ def _claim_lines(state: GameState, ledger: PublicFactLedger) -> list[str]:
             continue
         rendered = "、".join(ledger.name_of(pid) for pid in claimants)
         parts.append(f"{_ROLE_LABELS.get(role, role.value)}={rendered}")
-    return ["- CO: " + " / ".join(parts)]
+    return ["- CO: " + " / ".join(parts), *_co_count_lines(ledger, by_role)]
+
+
+def _co_count_lines(ledger: PublicFactLedger, by_role: dict[RoleName, list[str]]) -> list[str]:
+    """占い・霊媒 counts, zeros included, and the "3-0" a table calls them by.
+
+    The review's day-1 table said "3-1" before any medium had claimed (1-B1):
+    a role nobody claimed was simply missing from the CO line.
+    """
+    seers = by_role.get(RoleName.SEER, [])
+    mediums = by_role.get(RoleName.MEDIUM, [])
+    if not seers and not mediums:
+        return []
+
+    def count(role: RoleName, claimants: list[str]) -> str:
+        if not claimants:
+            return f"{_ROLE_LABELS[role]}0"
+        living = sum(1 for pid in claimants if ledger.is_alive(pid))
+        return f"{_ROLE_LABELS[role]}{len(claimants)}(生存{living})"
+
+    return [
+        f"- CO数: {count(RoleName.SEER, seers)}・{count(RoleName.MEDIUM, mediums)}"
+        f" → 内訳の呼び方は{len(seers)}-{len(mediums)}"
+    ]
 
 
 def _freemason_note(state: GameState, ledger: PublicFactLedger, claimants: list[str]) -> str:
@@ -542,6 +569,33 @@ def _night_lines(ledger: PublicFactLedger, observations: ObservationSet) -> list
     line = "- 夜の結果: " + " / ".join(cells)
     if any(not observations.deaths_on(night) for night in nights):
         line += "（死体なし＝襲撃が護衛で防がれたか、襲撃先が妖狐）"
+    return [line]
+
+
+def _grey_lines(ledger: PublicFactLedger, observations: ObservationSet) -> list[str]:
+    """The grey -- alive, no claim, judged by no seer claimant -- and, apart
+    from it, the unclaimed seats somebody has judged, with whose verdict.
+
+    The review's day 2 argued over "the grey" with two definitions in play and
+    no list on the board (2-B5). One definition, computed: a seat stays grey
+    until some seer claimant publishes a verdict on it, whoever that is.
+    """
+    claimed = {claim.player_id for claim in ledger.co_declarations()}
+    judged: dict[str, list[str]] = defaultdict(list)
+    for verdict in sorted(observations.verdicts, key=lambda v: (v.day, v.source_night)):
+        if verdict.result_type == SEER_RESULT:
+            colour = "黒" if verdict.is_werewolf else "白"
+            judged[verdict.target_id].append(f"{ledger.name_of(verdict.claimant_id)}の{colour}")
+    unclaimed = [pid for pid in ledger.alive_ids() if pid not in claimed]
+    if not claimed and not judged:
+        return []
+    grey = [pid for pid in unclaimed if pid not in judged]
+    line = f"- グレー(生存・CO無し・どの占いCOの判定も無し): {_names(ledger, grey) or 'なし'}"
+    seen = [pid for pid in unclaimed if pid in judged]
+    if seen:
+        line += " / 判定を受けた非CO者: " + "、".join(
+            f"{ledger.name_of(pid)}({'・'.join(judged[pid])})" for pid in seen
+        )
     return [line]
 
 
