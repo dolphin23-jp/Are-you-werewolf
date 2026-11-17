@@ -352,6 +352,13 @@ def _run_to_the_next_morning(controller: GameController, spare: set[str]) -> Non
         controller.vote(voter, target if voter != target else "p0")
     controller.resolve_votes()
     controller.start_night()
+    # The wolves bite every night (an engine rule since 2026-11-17).
+    bitten = next(
+        pid
+        for pid in state.alive_ids()
+        if state.players[pid].role is not RoleName.WEREWOLF and pid != "p0"
+    )
+    controller.submit_night_action(controller.alpha_wolf_id, "attack", bitten)
     controller.resolve_night()
     controller.start_discussion()
 

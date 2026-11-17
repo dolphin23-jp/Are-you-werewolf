@@ -18,6 +18,11 @@ be the curse, which is why the public death cause still reads as an ordinary
 night death and the deduction is left to the table.
 
 Regular night (Day N >= 1):
+  0. The wolves must have chosen a non-wolf to attack: while any wolf lives,
+     every regular night has exactly one attack (GameController refuses both
+     a wolf target and resolving without an attack). So a morning without a
+     corpse means the attack hit the guard target or the fox, and a night
+     corpse is never a wolf -- facts every seat reasons from.
   1. Medium result: if a player was executed at the end of Day N, every
      living Medium learns whether that player was a werewolf.
   2. Seer divination resolves; if the target is the Fox, a curse-kill is
@@ -80,6 +85,7 @@ class NightResolver:
         return NightResult(deaths=deaths, divine_result=divine_result)
 
     def resolve_night(self, state: GameState) -> NightResult:
+        _require_a_legal_attack(state)
         medium_results = self._distribute_medium_results(state)
         divine_result = self._resolve_divine(state)
         guard_target = self._resolve_guard(state)
@@ -181,6 +187,22 @@ class NightResolver:
         record = DeathRecord(player_id=target_id, cause=DeathCause.ATTACKED, day=state.day)
         state.death_records.append(record)
         return record
+
+
+def _require_a_legal_attack(state: GameState) -> None:
+    """Step 0, checked before anything on the night resolves.
+
+    `GameController` refuses both cases with a GameError first; this is the
+    resolver's own guard, so a caller that writes `pending_attack` by hand
+    cannot resolve half a night and then fail.
+    """
+    if state.pending_attack is None:
+        if any(p.alive and p.role == RoleName.WEREWOLF for p in state.players.values()):
+            raise ValueError("the werewolves must attack every night from night 1")
+        return
+    _wolf_id, target_id = state.pending_attack
+    if state.players[target_id].role == RoleName.WEREWOLF:
+        raise ValueError("the werewolves cannot attack a werewolf")
 
 
 def _in_seat_order(state: GameState, deaths: list[DeathRecord]) -> None:

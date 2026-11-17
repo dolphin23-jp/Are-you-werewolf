@@ -86,6 +86,21 @@ def test_two_deaths_in_one_night_put_the_fox_among_them():
     assert solver.is_possible(has_role("p12", RoleName.FOX)) is False
 
 
+def test_a_night_corpse_is_never_a_wolf():
+    """The engine refuses a bite on a wolf (2026-11-17), and the curse only
+    reaches the fox, so a corpse found at dawn is not a wolf -- to everyone."""
+    state = _wolf_board()
+    boards.die_by_attack(state, "p9", night=1)
+    solver = _public(state)
+
+    assert solver.is_possible(has_role("p9", RoleName.WEREWOLF)) is False
+    assert solver.is_possible(has_role("p9", RoleName.FOX)) is True
+    # The first victim is ruled out by its own rule; an execution is not a night.
+    boards.execute(state, "p10", day=2)
+    state.day = 3
+    assert _public(state).is_possible(has_role("p10", RoleName.WEREWOLF)) is True
+
+
 def test_a_quiet_night_proves_neither_a_guard_nor_a_fox_bite():
     state = _wolf_board()
     boards.attack(state, "p1", "p6", night=1, succeeded=False)
@@ -328,9 +343,11 @@ def test_no_night_action_leaks_through_the_public_projection():
         module.add_hard_constraints(builder, CommonPublicPerspective(), observations)
         public_constraints.extend(builder.constraints)
 
-    # A single night death and no viewpoint knowledge: the public modules have
-    # nothing to say, and in particular say nothing about p9 or p13.
-    assert public_constraints == []
+    # A single night death and no viewpoint knowledge: the public modules say
+    # only what the corpse itself says -- p13 is not a wolf, since the engine
+    # refuses a bite on a wolf (2026-11-17) -- and nothing about who was
+    # divined, guarded or bitten: not p12, not p9, not p13's cause of death.
+    assert [item.constraint_id for item in public_constraints] == ["night_death_not_wolf:1:p13"]
 
 
 def test_the_debug_view_sees_every_night_action():

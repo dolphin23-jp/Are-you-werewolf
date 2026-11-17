@@ -98,7 +98,9 @@ _COMPOSITION_ORDER = (
 assert set(_COMPOSITION_ORDER) == set(RoleName)
 
 # The rules a player reasons from, in a few lines. Every clause is what
-# `app/engine` actually does -- night_resolver (curse on every night including
+# `app/engine` actually does -- game.resolve_night / submit_night_action (from
+# night 1 the wolves bite a non-wolf every night: no wolf target, no night
+# without a bite), night_resolver (curse on every night including
 # night 0; the attack never kills the fox; one attack and one curse per night;
 # the medium reads only the day's execution; results are wolf / not wolf),
 # game.submit_night_action (night 0 is divination only; the hunter may repeat a
@@ -111,9 +113,11 @@ _RULE_LINES = (
     "霊媒が知るのは処刑された人の結果だけ。"
     "狩人は1日目夜から護衛でき、同じ人の連続護衛も可（狩人自身は守れない）。"
     "初日犠牲者は人狼でも妖狐でもない",
-    "- 死体のルール: 占い先が妖狐ならその夜に呪殺（0日目夜も）。妖狐は襲撃では死なない。"
-    "夜の死体は襲撃（1夜1人まで）と呪殺だけなので、1夜に2つなら片方は呪殺された妖狐。"
-    "0日目夜は襲撃がなく、初日犠牲者以外の死体は呪殺",
+    "- 死体のルール: 人狼は1日目夜から毎晩、人狼以外の生存者を必ず1人襲撃する"
+    "（襲撃なしの夜はない）。"
+    "襲撃先が護衛先か妖狐なら死体は出ない。占い先が妖狐ならその夜に呪殺（0日目夜も）。"
+    "妖狐は襲撃では死なない。夜の死体は襲撃と呪殺（どちらも1夜1人）だけなので、"
+    "1夜に2つなら片方は呪殺された妖狐。0日目夜は襲撃がなく、初日犠牲者以外の死体は呪殺",
     "- 勝敗: 処刑のあとと夜明けに判定。人狼が0人になるか、人狼が人狼以外の生存者"
     "（狂人・妖狐も数える）と同数以上になった時点で試合終了。"
     "その時点で妖狐が生きていれば妖狐の勝ち。妖狐が死んでいれば、人狼0人なら村、"
@@ -181,6 +185,7 @@ def render_board_memo(
     lines.extend(_roster_lines(ledger, public_solver))
     lines.extend(_claim_lines(state, ledger))
     lines.extend(_verdict_lines(ledger, observations))
+    lines.extend(_night_lines(ledger, observations))
     lines.extend(_vote_lines(ledger))
     public_facts = _public_logic_facts(ledger, observations, public_solver)
     lines.extend(_logic_lines(public_facts))
@@ -514,6 +519,29 @@ def _medium_lines(ledger: PublicFactLedger, observations: ObservationSet) -> lis
     ]
     if executions and not living_mediums:
         line += "。生存する霊媒COなし: 新たに霊媒COが出ない限り、処刑者の結果は公開されない"
+    return [line]
+
+
+def _night_lines(ledger: PublicFactLedger, observations: ObservationSet) -> list[str]:
+    """Every resolved night from night 1: its corpses, or none, and what none means.
+
+    The only record of an empty morning used to be a "(死体なし)" in the seer
+    table's row headers -- read by nobody in the seed-1 review, and absent
+    altogether on a night no seer claimant could act. With the engine making
+    the wolves bite a non-wolf every night, an empty morning is logic, not a
+    guess: the bite hit the guard target or the fox.
+    """
+    nights = range(1, observations.day)
+    if not nights:
+        return []
+    cells: list[str] = []
+    for night in nights:
+        corpses = [death.player_id for death in observations.deaths_on(night)]
+        found = f"死体: {_names(ledger, corpses)}" if corpses else "死体なし"
+        cells.append(f"{night}日目夜 {found}")
+    line = "- 夜の結果: " + " / ".join(cells)
+    if any(not observations.deaths_on(night) for night in nights):
+        line += "（死体なし＝襲撃が護衛で防がれたか、襲撃先が妖狐）"
     return [line]
 
 
