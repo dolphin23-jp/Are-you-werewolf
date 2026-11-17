@@ -259,17 +259,38 @@ class MorningIntentOutput(BaseModel):
     priority_reason: str = ""
 
 
+def _evidence_before_ballot(schema: dict[str, Any]) -> None:
+    """The vote as sent: what decided it is required and written first, then
+    the target. With the target the only required property, and first, the
+    ballot was fixed before any reason existed, and a reason written after it
+    could argue against it (seed-1 review R4, 2-A3). Parsing keeps the default,
+    as for the plan note (see `_plan_note_before_message`)."""
+    _omit_description(schema)
+    schema["required"] = ["decisive_evidence", "vote_target"]
+
+
+def _reason_before_target(schema: dict[str, Any]) -> None:
+    """A night action as sent: the reason first, then the target it leads to."""
+    _omit_description(schema)
+    schema["required"] = ["reason", "target"]
+
+
 class VoteOutput(BaseModel):
+    model_config = ConfigDict(json_schema_extra=_evidence_before_ballot)
+
+    # Declaration order is the order on the wire; see `_evidence_before_ballot`.
+    decisive_evidence: str = ""
     vote_target: str
     reason: str = ""
-    decisive_evidence: str = ""
     countercase: str = ""
     alternative_target: str | None = None
 
 
 class NightActionOutput(BaseModel):
-    target: str
+    model_config = ConfigDict(json_schema_extra=_reason_before_target)
+
     reason: str = ""
+    target: str
 
 
 class WolfChatOutput(BaseModel):

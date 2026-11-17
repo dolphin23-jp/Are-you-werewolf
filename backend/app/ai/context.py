@@ -113,8 +113,8 @@ MORNING_INTENT_OUTPUT_INSTRUCTION = """公開発言前の非公開判断です�
 占霊結果を見てから出たい共有などはafter_results。意図的潜伏はholdを選んでください。"""
 
 VOTE_OUTPUT_INSTRUCTION = """以下のJSON形式で回答してください:
-{"vote_target": "投票する相手のplayer_id", "reason": "簡潔な理由", \
-"decisive_evidence": "人数や口調ではない、投票を決めた最も強い独立根拠", \
+{"decisive_evidence": "人数や口調ではない、投票を決めた最も強い独立根拠", \
+"vote_target": "投票する相手のplayer_id", "reason": "簡潔な理由", \
 "countercase": "その相手が村側・真役職でも説明できる最も強い反対仮説", \
 "alternative_target": "次点候補のplayer_idまたはnull"}
 多数派、共有指定、他者への同意だけを投票理由にしてはいけません。現在の最多候補を
@@ -123,7 +123,7 @@ VOTE_OUTPUT_INSTRUCTION = """以下のJSON形式で回答してください:
 できません。処刑で得る霊結果だけでなく、真役職だった場合に失う結果も比較します。"""
 
 NIGHT_ACTION_OUTPUT_INSTRUCTION = """以下のJSON形式で回答してください:
-{"target": "対象プレイヤーのplayer_id", "reason": "簡潔な理由"}"""
+{"reason": "簡潔な理由", "target": "対象プレイヤーのplayer_id"}"""
 
 WOLF_CHAT_OUTPUT_INSTRUCTION = """以下のJSON形式で回答してください:
 {"message": "内輪チャットでの発言(100文字以内)"}"""
@@ -163,8 +163,8 @@ player_idは【名簿】で引いてください。public_messageの中にはpla
 public_resultsは本当に自分が持っている結果（騙りなら騙りとして出す結果）だけを入れます。"""
 
 CHAT_VOTE_OUTPUT_INSTRUCTION = """次のJSONだけを返してください:
-{"vote_target": "投票する相手のplayer_id", "reason": "一言の理由（チャットで言う調子）", \
-"decisive_evidence": "決め手になった一つの根拠", \
+{"decisive_evidence": "決め手になった一つの根拠", \
+"vote_target": "投票する相手のplayer_id", "reason": "一言の理由（チャットで言う調子）", \
 "countercase": "その相手が村側でも説明がつく最も強い見方", \
 "alternative_target": "次点のplayer_idまたはnull"}
 卓で名指しした吊り先と違う相手に入れるなら、reasonに理由を書く。\
