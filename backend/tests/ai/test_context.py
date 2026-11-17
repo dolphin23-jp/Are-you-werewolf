@@ -484,7 +484,7 @@ def test_chat_vote_prompt_states_what_the_seat_said_and_uses_names():
     # The note's target, labelled as the note, and flagged: p1 never named
     # Player2 at the table today.
     assert "【今日のメモの吊り先】Player2(今日の卓ではまだこの名前を出していない)" in body
-    assert "【投票候補】Player2、Player3" in body
+    assert "【投票候補】Player2（グレー）、Player3（グレー）" in body
     assert "Player2(p2)" not in body
     assert "卓で名指しした吊り先と違う相手に入れるなら" in body
 
