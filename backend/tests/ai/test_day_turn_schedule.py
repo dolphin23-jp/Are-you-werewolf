@@ -779,3 +779,45 @@ def test_a_summary_naming_the_living_human_as_candidate_gives_them_the_floor_fir
     assert segments[at][0][-1] == ("p1", SUMMARY) and segments[at][1] is True
     assert segments[at + 1] == ([("p1", DESIGNATION)], False)
     assert session.discussion_round.complete is True
+
+
+# -- the human's step and pause keep what a turn opened --
+
+
+def _drive(coordinator: AICoordinator, session: SimpleNamespace, mode: str) -> None:
+    """Press pass (or step, one turn a press) until the round closes, as the API does."""
+
+    async def run() -> None:
+        for _ in range(80):
+            round_state = getattr(session, "discussion_round", None)
+            if round_state is not None and round_state.complete:
+                return
+            if mode == "step":
+                session.discussion_paused = False
+                session.discussion_pause_requested = False
+                session.discussion_step_budget = 1
+            coordinator.resume_after_human(session)
+            await coordinator.advance_discussion(session)
+        raise AssertionError("the round never closed")
+
+    asyncio.run(run())
+
+
+def test_a_step_keeps_the_answer_a_question_was_owed():
+    """Replies to a turn's questions were queued after the pause check.
+
+    A step pauses after every turn, so in step mode no question ever got its
+    answer turn that day: the human stepping through the table heard a
+    different (shorter) discussion than one passing through it.
+    """
+    schedules = {}
+    for mode in ("pass", "step"):
+        table = _Table(by_seat={("p2", "initial_view"): _asking("p3さん、なぜ？", "p3")})
+        _controller, coordinator, session = _human_table(table)
+
+        _drive(coordinator, session, mode)
+
+        schedules[mode] = table.turns
+    assert schedules["step"] == schedules["pass"]
+    asked = schedules["pass"].index(("p2", "initial_view"))
+    assert "p3" in [seat for seat, _stage in schedules["pass"][asked + 1 :]]

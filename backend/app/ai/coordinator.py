@@ -972,18 +972,14 @@ class AICoordinator:
                         state, round_state, pid, output
                     ) and self._close_round(state, round_state):
                         break
+                else:
+                    # Settled before the pause check too: a step pauses after
+                    # every turn, so queued here after it, no question asked
+                    # in step mode ever got its answer turn that day.
+                    self._queue_turn_replies(state, round_state, pid, output)
                 if can_pause and (waits_for_human or getattr(session, "discussion_paused", False)):
                     self._set_awaiting(round_state, True)
                     break
-                if stage in (*_SUMMARY_STAGES, _FINAL_DESIGNATION_STAGE):
-                    continue
-                for question in output.directed_questions:
-                    self._round_queue_reply(state, round_state, question.target_id)
-                if output.needs_another_statement and self._rng.random() < min(
-                    0.95, self._personalities[pid].talkativeness / 1.5
-                ):
-                    self._round_queue_reply(state, round_state, pid)
-
                 # The first segment contains only morning-immediate speakers.
                 if finished_immediate and can_pause:
                     self._set_awaiting(round_state, True)
@@ -1694,6 +1690,21 @@ class AICoordinator:
                 self._grant_extra_turn(round_state)
                 return speaker, _FINAL_DESIGNATION_STAGE
         return None, "consensus_summary"
+
+    def _queue_turn_replies(
+        self,
+        state: GameState,
+        round_state: DiscussionRoundState,
+        speaker_id: str,
+        output: DiscussionOutput,
+    ) -> None:
+        """What an ordinary turn opens: an answer from each seat it asked, its own next word."""
+        for question in output.directed_questions:
+            self._round_queue_reply(state, round_state, question.target_id)
+        if output.needs_another_statement and self._rng.random() < min(
+            0.95, self._personalities[speaker_id].talkativeness / 1.5
+        ):
+            self._round_queue_reply(state, round_state, speaker_id)
 
     def _round_queue_reply(
         self, state: GameState, round_state: DiscussionRoundState, target_id: str
