@@ -1,0 +1,390 @@
+{
+  "provider": "anthropic",
+  "model": "claude-sonnet-5-5",
+  "reasoning_engine": "v3",
+  "commit": "5adb376291214fba6173d4f33275d0979dfa0758",
+  "games": 1,
+  "games_played": 1,
+  "stopped_by_budget": false,
+  "budget_stop": null,
+  "budget_stop_phase": null,
+  "budget": {
+    "max_requests": 10000000,
+    "used_requests": 217,
+    "max_estimated_cost": 9.0,
+    "input_price_per_million": null,
+    "output_price_per_million": null,
+    "prompt_tokens": 0,
+    "completion_tokens": 0,
+    "estimated_cost": 4.568449999999999,
+    "pricing_supplied": true,
+    "spent_cost": 4.568449999999999,
+    "reserved_cost": 7.216449660063518e-16,
+    "settled_attempts": 217
+  },
+  "metrics": {
+    "total_calls": 217,
+    "http_requests": 217,
+    "success_rate": 1.0,
+    "parse_path_counts": {
+      "strict_schema": 217,
+      "json_object": 0,
+      "permissive": 0,
+      "failed": 0
+    },
+    "strict_schema_rate": 1.0,
+    "strict_schema_failures": 0,
+    "json_object_successes": 0,
+    "complete_failures": 0,
+    "retry_calls": 0,
+    "finish_reason_counts": {
+      "end_turn": 217
+    },
+    "truncated_calls": 0,
+    "truncated_failure_rate": 0.0,
+    "reasoning_tokens": 0,
+    "reasoning_token_share": 0.0,
+    "latency_seconds": {
+      "mean": 3.745,
+      "p50": 3.628,
+      "p95": 6.36,
+      "max": 7.627
+    },
+    "by_schema": {
+      "ChatDiscussionOutput": {
+        "calls": 119,
+        "success_rate": 1.0,
+        "mean_latency_seconds": 3.71,
+        "effort": "low"
+      },
+      "NightActionOutput": {
+        "calls": 13,
+        "success_rate": 1.0,
+        "mean_latency_seconds": 2.481,
+        "effort": "medium"
+      },
+      "VoteOutput": {
+        "calls": 66,
+        "success_rate": 1.0,
+        "mean_latency_seconds": 4.507,
+        "effort": "medium"
+      },
+      "WolfChatOutput": {
+        "calls": 19,
+        "success_rate": 1.0,
+        "mean_latency_seconds": 2.182,
+        "effort": "low"
+      }
+    },
+    "errors": [],
+    "discussion_generation_attempts": 119,
+    "discussion_skips": 0,
+    "discussion_skip_rate": 0.0,
+    "total_game_wall_time": 559.295205246,
+    "time_per_game_day": 93.21586754100001,
+    "time_per_public_utterance": 4.622274423520661,
+    "time_waiting_for_llm": 812.6343108230002,
+    "time_spent_in_solver": 18.95480740099967,
+    "solver_query_count": 89641,
+    "solver_cache_hit_rate": 0.6435894289443447,
+    "events": {},
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 0,
+    "cache_read_share": 0.0,
+    "refusals": {},
+    "served_model_counts": {
+      "claude-sonnet-5-5": 217
+    },
+    "fallback_served_calls": 0,
+    "tokens": {
+      "prompt": 2011510,
+      "completion": 54543,
+      "total": 2066053
+    },
+    "estimated_cost": 4.56845,
+    "pricing_supplied": true,
+    "pricing_source": "table"
+  },
+  "per_game": [
+    {
+      "seed": 3,
+      "winner": "werewolf",
+      "finished": true,
+      "wall_time_seconds": 559.295,
+      "public_utterances": 121,
+      "days": 6,
+      "metrics": {
+        "total_calls": 217,
+        "http_requests": 217,
+        "success_rate": 1.0,
+        "parse_path_counts": {
+          "strict_schema": 217,
+          "json_object": 0,
+          "permissive": 0,
+          "failed": 0
+        },
+        "strict_schema_rate": 1.0,
+        "strict_schema_failures": 0,
+        "json_object_successes": 0,
+        "complete_failures": 0,
+        "retry_calls": 0,
+        "finish_reason_counts": {
+          "end_turn": 217
+        },
+        "truncated_calls": 0,
+        "truncated_failure_rate": 0.0,
+        "reasoning_tokens": 0,
+        "reasoning_token_share": 0.0,
+        "latency_seconds": {
+          "mean": 3.745,
+          "p50": 3.628,
+          "p95": 6.36,
+          "max": 7.627
+        },
+        "by_schema": {
+          "ChatDiscussionOutput": {
+            "calls": 119,
+            "success_rate": 1.0,
+            "mean_latency_seconds": 3.71,
+            "effort": "low"
+          },
+          "NightActionOutput": {
+            "calls": 13,
+            "success_rate": 1.0,
+            "mean_latency_seconds": 2.481,
+            "effort": "medium"
+          },
+          "VoteOutput": {
+            "calls": 66,
+            "success_rate": 1.0,
+            "mean_latency_seconds": 4.507,
+            "effort": "medium"
+          },
+          "WolfChatOutput": {
+            "calls": 19,
+            "success_rate": 1.0,
+            "mean_latency_seconds": 2.182,
+            "effort": "low"
+          }
+        },
+        "errors": [],
+        "discussion_generation_attempts": 119,
+        "discussion_skips": 0,
+        "discussion_skip_rate": 0.0,
+        "total_game_wall_time": 559.295205246,
+        "time_per_game_day": 93.21586754100001,
+        "time_per_public_utterance": 4.622274423520661,
+        "time_waiting_for_llm": 812.6343108230002,
+        "time_spent_in_solver": 18.95480740099967,
+        "solver_query_count": 89641,
+        "solver_cache_hit_rate": 0.6435894289443447,
+        "events": {},
+        "cache_creation_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_read_share": 0.0,
+        "refusals": {},
+        "served_model_counts": {
+          "claude-sonnet-5-5": 217
+        },
+        "fallback_served_calls": 0,
+        "tokens": {
+          "prompt": 2011510,
+          "completion": 54543,
+          "total": 2066053
+        },
+        "estimated_cost": 4.56845,
+        "pricing_supplied": true,
+        "pricing_source": "table"
+      },
+      "hard_failures": {
+        "private_evidence_exposed_count": 0,
+        "team_private_evidence_exposed_count": 0,
+        "dead_target_selection_count": 0,
+        "public_fact_flip_count": 0,
+        "missing_required_result_count": 0,
+        "duplicate_required_result_count": 0,
+        "displayed_target_mismatch_count": 0,
+        "stale_evidence_publicly_emitted_count": 0,
+        "unexplained_vote_change_count": 1,
+        "unplanned_wolf_ally_vote_count": 0,
+        "duplicate_night_action_count": 0
+      },
+      "reasoning_quality": {
+        "decision_count": 121,
+        "vote_count": 66,
+        "dead_target_selection_count": 0,
+        "invalid_action_target_count": 0,
+        "public_fact_flip_count": 0,
+        "vote_history_fabrication_count": 0,
+        "private_evidence_exposed_count": 0,
+        "team_private_evidence_exposed_count": 0,
+        "displayed_target_mismatch_count": 0,
+        "missing_required_result_count": 0,
+        "duplicate_required_result_count": 0,
+        "stale_evidence_used_in_brief_count": 0,
+        "stale_evidence_cited_publicly_count": 0,
+        "stale_evidence_attempt_count": 0,
+        "stale_evidence_blocked_count": 0,
+        "stale_evidence_publicly_emitted_count": 0,
+        "justified_vote_change_count": 7,
+        "unexplained_vote_change_count": 1,
+        "no_basis_vote_count": 8,
+        "compared_vote_count": 58,
+        "memo_target_unspoken_count": 3,
+        "wolf_ally_vote_count": 0,
+        "planned_wolf_ally_vote_count": 0,
+        "designated_wolf_ally_vote_count": 0,
+        "unplanned_wolf_ally_vote_count": 0,
+        "vote_reason_names_other_count": 0,
+        "illegal_timeline_claim_count": 0,
+        "duplicate_night_action_count": 0,
+        "correction_messages_heard": 0,
+        "corrections_confirmed": 0,
+        "corrections_refuted": 0,
+        "corrections_unverifiable": 0,
+        "confirmed_corrections_with_effect": 0,
+        "seat_evidence_retractions": 0,
+        "affected_seat_count": 0,
+        "mean_belief_delta_per_affected_seat": 0.0,
+        "median_belief_delta_per_affected_seat": 0.0,
+        "vote_change_rate": 0.12121212121212122,
+        "unexplained_vote_change_rate": 0.015151515151515152
+      },
+      "validation": {
+        "dead_target_selections": 0,
+        "public_fact_flips": 0,
+        "vote_history_misreads": 0,
+        "vote_plan_mismatches": 11
+      },
+      "budget_stop": null
+    }
+  ],
+  "judge": {
+    "summary": null,
+    "per_player": {},
+    "metrics": null
+  },
+  "findings": [
+    {
+      "seed": 3,
+      "winner": "werewolf",
+      "counts": {
+        "vote_contradicts_stated_intent": 11,
+        "assigned_faker_never_claimed": 1
+      },
+      "stats": {
+        "wolf_plan_execution": {
+          "p6": {
+            "assigned": "fake_seer",
+            "executed": true
+          },
+          "p5": {
+            "assigned": "fake_seer",
+            "executed": false
+          },
+          "p11": {
+            "assigned": "lurker",
+            "executed": true
+          },
+          "p0": {
+            "assigned": "lurker",
+            "executed": true
+          }
+        },
+        "wolf_pattern": "偽占い1+潜伏2",
+        "stance": {
+          "follow_up_turns": 105,
+          "observable_follow_ups": 68,
+          "forced_changes": 23,
+          "voluntary_changes": 11,
+          "voluntary_changes_same_day": 4,
+          "voluntary_changes_replying": 10,
+          "voluntary_changes_acknowledged": 4,
+          "acknowledged_without_change": 7,
+          "acknowledged_without_change_with_reason": 0,
+          "acknowledged_without_change_no_reason": 7,
+          "target_unstated_follow_ups": 14,
+          "target_unstated_acknowledged": 2,
+          "target_adopted_acknowledged": 2
+        },
+        "speech": {
+          "utterances": 140,
+          "length_lines": 138,
+          "mean_length": 51.3,
+          "median_length": 51,
+          "max_length": 78,
+          "over_length_limit": 24,
+          "fallback_lines": 0,
+          "fallback_rate": 0.0,
+          "verbatim_repeat_players": 0,
+          "length_variance": 91.5,
+          "speech_count_gini": 0.2753,
+          "reply_rate": 0.9174,
+          "unanswered_question_rate": 0.3519,
+          "unanswered_never_served_rate": 0.0185,
+          "unanswered_served_without_reply_link_rate": 0.3333,
+          "cross_player_topic_overlap_rate": 0.0003,
+          "cross_player_mean_jaccard": 0.0406,
+          "adjacent_pairs": 111,
+          "adjacent_mean_jaccard": 0.0905,
+          "adjacent_overlap_rate": 0.027,
+          "adjacent_overlap_examples": [
+            {
+              "day": 1,
+              "first": "p1",
+              "second": "p2",
+              "jaccard": 0.3281,
+              "first_text": "はっきり言う。占い2人の真偽は今日は決められない。まずグレーの発言を見て、薄い人から絞る。",
+              "second_text": "アカリに同意。占いの真偽は今は決められないし、霊媒もまだ出てない。まずグレーの発言を見るのが先でしょ。"
+            },
+            {
+              "day": 2,
+              "first": "p15",
+              "second": "p14",
+              "jaccard": 0.3235,
+              "first_text": "ユイ、カイトの夜の動きって死んだ人のをどう見るの。それより今日はグレーの中身を見たいんだけど。",
+              "second_text": "アオイさんに同意。ユイさん、カイトさんの夜の動きは死んだ人だと確かめようがないよ。今日はグレーの中身を見たいな。"
+            },
+            {
+              "day": 3,
+              "first": "p1",
+              "second": "p7",
+              "jaccard": 0.25,
+              "first_text": "ハルトの指摘で見直した。ユイは理由が毎回動いている。今日はリクよりユイを見る。",
+              "second_text": "おっと〜、ハルトさんの指摘で見直したよ。ユイさんは理由が毎回動いて、弱いと認めた後も疑いを散らした。今日の吊り先はユイさんで仮指定、反論を聞くよ。"
+            }
+          ],
+          "utterances_by_stage": {
+            "immediate": 9,
+            "initial_view": 28,
+            "reaction": 9,
+            "rebuttal_or_reassessment": 36,
+            "consensus_summary": 6,
+            "summary_answer": 2,
+            "open_floor": 22,
+            "final_designation": 5,
+            "facilitator_followup": 4
+          },
+          "template_phrase_rate": 0.0083,
+          "prompt_template_phrase_rate": 0.0,
+          "code_fact_sentence_lines": 1,
+          "code_fact_sentence_rate": 0.0083,
+          "id_mention_rate": 0.0,
+          "public_messages_per_day": 20.2,
+          "public_mean_length": 50.6
+        }
+      }
+    }
+  ],
+  "settings": {
+    "anthropic_effort_by_kind": {
+      "discussion": "low",
+      "vote": "medium",
+      "night": "medium",
+      "chat": "low",
+      "default": "medium"
+    },
+    "anthropic_fallbacks": "default",
+    "anthropic_max_tokens": 12000
+  }
+}
