@@ -90,6 +90,7 @@ MOMENTS: tuple[Moment, ...] = (
     Moment("d2-vote-haruto", 2, "vote", "p2", 0),
     Moment("d2-vote-makoto", 2, "vote", "p0", 0),
     Moment("d2-vote-kento", 2, "vote", "p16", 0),
+    Moment("d2-runoff-makoto", 2, "vote", "p0", 1),
     Moment("n2-attack-kaito", 2, "night_action", "p8", 0),
     Moment("d4-m61-haruto-initial", 4, "discussion", "p2", 0),
     Moment("d4-vote-kaito", 4, "vote", "p8", 0),

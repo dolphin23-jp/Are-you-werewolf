@@ -1129,30 +1129,90 @@ class ContextBuilder:
     ) -> tuple[str, list[Message]]:
         ledger = PublicFactLedger(state)
         header = (
-            f"【決選投票({state.vote_round}回目)】前回の投票が同数だったため、"
+            f"【決選投票({state.vote_round}回目)】{self._runoff_reason(state)}、"
             "候補は同数だったプレイヤーに限られる。次の中から選ぶ: "
             if state.runoff_candidates
             else "【投票候補】"
         )
         stated = self._memo_target_line(state, player_id, stated_target)
+        # Facts only, each checkable against the board: who will see the
+        # ballot, who has not had a turn today, what the day was steered by,
+        # and what the table knows of each candidate. How to weigh them is
+        # the seat's (review 2-B6, 2-A2, 3-B1, 4-B6).
+        candidates = "、".join(
+            f"{self._label(state, pid)}（{public_status(state, pid)}）" for pid in candidate_ids
+        )
+        layers = [
+            self._layer_c_state(
+                state,
+                player_id,
+                self._role_specific_guides(state, player_id),
+                board_memo=board_memo,
+            ),
+            self._layer_d_summaries(),
+            self._layer_previous_memo(state, player_id),
+            self._layer_e_current_log(state, ChatChannel.PUBLIC),
+        ]
+        direction = self._direction_layer(state)
+        if direction:
+            layers.append(direction)
+        layers += [
+            stated,
+            "【投票について】\n- 投票先は全員に公開され、記録に残る\n"
+            "- AI席の手番は進行が割り振る。今日まだ手番が回っていない席: "
+            f"{self._labels(state, self._seats_without_a_turn(state))}（人間の席は含めない）",
+            f"{header}{candidates or 'なし'}",
+            render_roster(ledger, player_id),
+            CHAT_VOTE_OUTPUT_INSTRUCTION,
+        ]
         return self._assemble(
             [self._layer_a_system(state, player_id), self._layer_b_role(state, player_id)],
-            [
-                self._layer_c_state(
-                    state,
-                    player_id,
-                    self._role_specific_guides(state, player_id),
-                    board_memo=board_memo,
-                ),
-                self._layer_d_summaries(),
-                self._layer_previous_memo(state, player_id),
-                self._layer_e_current_log(state, ChatChannel.PUBLIC),
-                stated,
-                f"{header}{self._labels(state, candidate_ids)}",
-                render_roster(ledger, player_id),
-                CHAT_VOTE_OUTPUT_INSTRUCTION,
-            ],
+            layers,
         )
+
+    def _direction_layer(self, state: GameState) -> str:
+        """Today's summary and designation, quoted as said; empty if neither."""
+        posted = {message.message_id: message for message in state.chat_log}
+        lines = [
+            f"- {label}（{self._label(state, message.author_id)} {message_id}）:"
+            f"「{' '.join(message.content.split()).translate(_NESTED_QUOTES)}」"
+            for label, message_id in self.direction_lines(state.day)
+            if (message := posted.get(message_id)) is not None
+        ]
+        return "【進行役の方針】\n" + "\n".join(lines) if lines else ""
+
+    def _seats_without_a_turn(self, state: GameState) -> list[str]:
+        """Living AI seats that have not posted in public today, in seat order.
+
+        Human seats speak when they choose, so "no turn yet" says nothing
+        about them; observers never speak and are named in their own layer.
+        """
+        spoke = {
+            message.author_id
+            for message in state.chat_log
+            if message.channel is ChatChannel.PUBLIC and message.day == state.day
+        }
+        return [
+            pid
+            for pid in state.alive_ids()
+            if pid not in spoke
+            and not state.players[pid].is_human
+            and pid not in self._observer_player_ids
+        ]
+
+    @staticmethod
+    def _runoff_reason(state: GameState) -> str:
+        """Why the ballot is narrowed: who tied in the previous round, and on how many."""
+        previous = state.vote_round - 1
+        counts: dict[str, int] = {}
+        for vote in state.vote_records:
+            if vote.day == state.day and vote.round == previous:
+                counts[vote.target_id] = counts.get(vote.target_id, 0) + 1
+        tied = [pid for pid in state.runoff_candidates if pid in counts]
+        if len(tied) < 2 or len({counts[pid] for pid in tied}) != 1:
+            return "前回の投票が同数だったため"
+        names = "と".join(state.players[pid].name for pid in tied)
+        return f"前回の投票で{names}が各{counts[tied[0]]}票の同数だったため"
 
     def _memo_target_line(
         self, state: GameState, player_id: str, target_id: str | None
