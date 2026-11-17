@@ -12,6 +12,7 @@ import re
 from app.ai.reasoning.board_memo import (
     MEMO_HEADING,
     PRIVATE_HEADING,
+    SELF,
     namify,
     render_board_memo,
     render_roster,
@@ -75,10 +76,15 @@ def _memo(state, player_id: str) -> str:  # type: ignore[no-untyped-def]
 
 
 def _public_part(memo: str) -> str:
-    """Everything above the private section, minus the header naming the seat."""
+    """Everything above the private section, minus the header naming the seat.
+
+    Since the seed-1 review (2-C1) a seat's memo calls the seat itself 自分;
+    it is written back as the name from the header, so what every seat shares
+    still compares equal across seats.
+    """
     head, _, body = memo.split(PRIVATE_HEADING)[0].partition("\n")
     assert head.startswith(MEMO_HEADING)
-    return body
+    return body.replace(SELF, head.split("あなた: ", 1)[1])
 
 
 def _private_part(memo: str) -> str:

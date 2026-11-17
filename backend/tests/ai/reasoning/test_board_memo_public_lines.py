@@ -13,7 +13,7 @@ from tests.ai.reasoning.solver import boards
 
 
 def _public(day: int, at: str = "morning", seat: str = s1.REN) -> str:
-    return s1.public_part(s1.memo(s1.board(day, at), seat))
+    return s1.shared_part(s1.memo(s1.board(day, at), seat), seat)
 
 
 def _line(public: str, prefix: str) -> str:

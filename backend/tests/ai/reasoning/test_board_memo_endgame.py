@@ -41,7 +41,7 @@ def _line(public: str, prefix: str) -> str:
 
 
 def test_the_memo_states_when_the_game_ends_and_who_wins():
-    public = s1.public_part(s1.memo(s1.board(1), s1.REN))
+    public = s1.shared_part(s1.memo(s1.board(1), s1.REN), s1.REN)
 
     assert _END_RULE in public.splitlines()
 
@@ -137,19 +137,19 @@ def test_the_game_is_decided_at_dawn():
 
 def test_the_rope_count_is_half_the_living_less_the_inhumans_still_to_hang():
     """17A: 16 alive on day 1 is 7 executions for 3 wolves and the fox -- 3 spare."""
-    day_one = s1.public_part(s1.memo(s1.board(1), s1.REN))
+    day_one = s1.shared_part(s1.memo(s1.board(1), s1.REN), s1.REN)
     assert (
         "縄: 生存16人で残り7回（(生存-1)÷2、毎晩1人死ぬ場合）。"
         "吊るべき人外は最大4人（人狼3・妖狐1）→ 外してよい吊りは3回"
     ) in day_one
 
-    day_five = s1.public_part(s1.memo(s1.board(5), s1.REN))
+    day_five = s1.shared_part(s1.memo(s1.board(5), s1.REN), s1.REN)
     assert "縄: 生存11人で残り5回" in day_five
     assert "外してよい吊りは1回" in day_five
 
 
 def test_at_night_the_rope_count_is_for_the_morning_after_a_death():
-    night_four = s1.public_part(s1.memo(s1.board(4, "night"), s1.REN))
+    night_four = s1.shared_part(s1.memo(s1.board(4, "night"), s1.REN), s1.REN)
 
     assert "縄: 今夜1人死ねば明日は生存10人で残り4回" in night_four
     assert "外してよい吊りは0回" in night_four
@@ -199,7 +199,7 @@ def test_kents_seat_on_day_five_is_told_that_hanging_kaito_ends_the_game():
 
 
 def test_the_public_section_says_the_same_under_kents_claim_and_names_the_assumption():
-    public = s1.public_part(s1.memo(s1.board(5, "m75"), s1.REN))
+    public = s1.shared_part(s1.memo(s1.board(5, "m75"), s1.REN), s1.REN)
 
     (line,) = _conditional_lines(public)
     assert line.startswith(_KENT_IF)
@@ -211,7 +211,7 @@ def test_the_public_section_says_the_same_under_kents_claim_and_names_the_assump
 
 
 def test_on_day_four_kents_claim_names_a_living_wolf_but_no_end_yet():
-    public = s1.public_part(s1.memo(s1.board(4, "m57"), s1.REN))
+    public = s1.shared_part(s1.memo(s1.board(4, "m57"), s1.REN), s1.REN)
 
     (line,) = _conditional_lines(public)
     assert line.startswith(
@@ -223,7 +223,7 @@ def test_on_day_four_kents_claim_names_a_living_wolf_but_no_end_yet():
 def test_a_seer_claim_that_settles_nothing_gets_no_line():
     """Day 2: three claimants, whites only. Nothing follows about wolves or the
     fox from any one of them, so there is nothing to say yet."""
-    public = s1.public_part(s1.memo(s1.board(2, "m34"), s1.REN))
+    public = s1.shared_part(s1.memo(s1.board(2, "m34"), s1.REN), s1.REN)
 
     assert _conditional_lines(public) == []
 
@@ -258,7 +258,7 @@ def test_wolves_and_the_fox_are_told_their_own_way_to_win():
 
     wolf = _line(s1.private_part(s1.memo(state, s1.KAITO)), "- 終局（あなたの視点）: ")
     assert wolf.startswith(
-        "- 終局（あなたの視点）: 生存の人狼はハルト、カイトの2人、人狼以外は10人。"
+        "- 終局（あなたの視点）: 生存の人狼はハルト、自分の2人、人狼以外は10人。"
     )
     assert "人狼以外があと8人減ると同数で試合が終わる" in wolf
     assert "人狼陣営の勝ちには妖狐の死亡が要る" in wolf

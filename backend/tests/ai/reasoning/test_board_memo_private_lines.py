@@ -145,3 +145,37 @@ def test_only_the_hunter_sees_its_guards():
     memos = _memos(3, "morning")
 
     assert _others_see(memos, s1.MIO, "死体なしの夜") == []
+
+
+# -- 10. the reader is 自分 in its own memo --
+
+
+def test_a_seat_reads_itself_as_jibun_everywhere_but_the_header():
+    """2-C1: the memo wrote the reader in the third person (「アオイ→ソウタ=白」
+    in ソウタ's own memo), and seats spoke of themselves the same way."""
+    text = s1.memo(s1.board(2, "m32"), s1.SOTA)
+
+    assert text.splitlines()[0] == "【盤面メモ】2日目 / あなた: ソウタ"
+    assert "アオイ→自分=白[1日目公開]" in text
+    assert "自分へ1票: ユイ(処刑)" in text
+    assert "ソウタ" not in text.partition("\n")[2]
+    # Everyone else still reads ソウタ by name.
+    assert "アオイ→ソウタ=白[1日目公開]" in s1.memo(s1.board(2, "m32"), s1.REN)
+
+
+def test_the_foxs_curse_reasoning_keeps_its_conclusion_in_the_first_person():
+    """The owner's §7 good behaviour: ソウタ (the fox, alive after アオイ's
+    night-0 white on him) knew アオイ could not be the real seer."""
+    private = s1.private_part(s1.memo(s1.board(1, "m14"), s1.SOTA))
+
+    assert (
+        "アオイは真の占い師ではありえない（アオイが真の占い師なら、公開どおり0日目夜に自分を"
+        "占っています。自分はその夜に死んでいないので、その場合自分は妖狐ではありません。）"
+    ) in private
+
+
+def test_the_whited_wolf_reads_the_false_colour_about_itself():
+    lines = s1.private_part(s1.memo(s1.board(2, "m34"), s1.KAITO)).splitlines()
+
+    assert "- アオイの『自分=白』は事実と違う（自分は人狼）" in lines
+    assert _TRUTHFUL in lines

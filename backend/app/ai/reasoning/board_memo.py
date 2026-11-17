@@ -75,6 +75,25 @@ from app.engine.vote import DEFAULT_MAX_VOTE_ROUNDS
 
 MEMO_HEADING = "【盤面メモ】"
 PRIVATE_HEADING = "【あなただけが知っていること】"
+# How a seat's memo names the seat itself, past the header (review 2-C1).
+SELF = "自分"
+
+
+class _SeatLedger(PublicFactLedger):
+    """The ledger as one seat reads it: its own name is 自分.
+
+    The memo used to write the reader in the third person -- ソウタ's own memo
+    said 「アオイ→ソウタ=白」 -- and seats came to speak of themselves the same
+    way. Every name in the memo goes through `name_of`, so this one override
+    covers the tables, the facts and the solver's own explanations alike.
+    """
+
+    def __init__(self, state: GameState, self_id: str) -> None:
+        super().__init__(state)
+        self._self_id = self_id
+
+    def name_of(self, player_id: str) -> str:
+        return SELF if player_id == self._self_id else super().name_of(player_id)
 
 _ROLE_LABELS: dict[RoleName, str] = {
     RoleName.VILLAGER: "村人",
@@ -185,9 +204,10 @@ def render_board_memo(
     seat_solver: RoleSolver | None = None,
 ) -> str:
     """The full memo for one seat. Pure function of the board and the seat."""
-    ledger = PublicFactLedger(state)
-    name = ledger.name_of
-    lines: list[str] = [f"{MEMO_HEADING}{state.day}日目 / あなた: {name(player_id)}"]
+    lines: list[str] = [
+        f"{MEMO_HEADING}{state.day}日目 / あなた: {PublicFactLedger(state).name_of(player_id)}"
+    ]
+    ledger = _SeatLedger(state, player_id)
     lines.extend(_rules_lines())
     lines.extend(_roster_lines(ledger, public_solver))
     lines.extend(_claim_lines(state, ledger))
@@ -234,12 +254,13 @@ def _rules_lines() -> list[str]:
 def _roster_lines(ledger: PublicFactLedger, public_solver: RoleSolver | None) -> list[str]:
     alive = [player for player in ledger.players() if player.alive]
     dead = [player for player in ledger.players() if not player.alive]
-    lines = [f"- 生存({len(alive)}人): " + "、".join(player.name for player in alive)]
+    name = ledger.name_of
+    lines = [f"- 生存({len(alive)}人): " + "、".join(name(player.player_id) for player in alive)]
     if dead:
         lines.append(
             "- 死亡: "
             + "、".join(
-                f"{player.name}({_death_label(player.death_cause, player.death_day)})"
+                f"{name(player.player_id)}({_death_label(player.death_cause, player.death_day)})"
                 for player in dead
             )
         )
@@ -1457,4 +1478,11 @@ def _private_certainty_lines(
     ]
 
 
-__all__ = ["MEMO_HEADING", "PRIVATE_HEADING", "namify", "render_board_memo", "render_roster"]
+__all__ = [
+    "MEMO_HEADING",
+    "PRIVATE_HEADING",
+    "SELF",
+    "namify",
+    "render_board_memo",
+    "render_roster",
+]

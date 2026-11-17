@@ -31,7 +31,7 @@ from functools import cache
 from pathlib import Path
 from typing import Any
 
-from app.ai.reasoning.board_memo import PRIVATE_HEADING, render_board_memo
+from app.ai.reasoning.board_memo import PRIVATE_HEADING, SELF, render_board_memo
 from app.ai.reasoning.observations import ObservationSet
 from app.ai.reasoning.perspectives import CommonPublicPerspective, PlayerPrivatePerspective
 from app.ai.reasoning.solver import build_solver
@@ -190,6 +190,13 @@ def public_part(text: str) -> str:
 
 def private_part(text: str) -> str:
     return text.split(PRIVATE_HEADING)[1]
+
+
+def shared_part(text: str, seat: str) -> str:
+    """The public part with the seat's 自分 written back as its name: what
+    every seat's memo has in common (the memo names the reader 自分, 2-C1)."""
+    assert text.partition("\n")[0].endswith(f"あなた: {name(seat)}")
+    return public_part(text).replace(SELF, name(seat))
 
 
 def name(seat: str) -> str:
