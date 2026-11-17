@@ -458,7 +458,7 @@ def audit_ballots(transcript: GameTranscript) -> tuple[BallotVerdict, ...]:
 _NEW_RESULT_EVENT_TYPES = frozenset({"ability_result", "result_correction"})
 # The turns that close a day's discussion (`coordinator._FINAL_DESIGNATION_STAGE`
 # and the summary before it).
-_CLOSING_STAGES = frozenset({"final_designation", "consensus_summary"})
+_CLOSING_STAGES = frozenset({"final_designation", "provisional_designation", "consensus_summary"})
 _BINDING_CONFIDENCE = 0.8  # `speech_events.CLAIM_CONFIDENCE_THRESHOLD`
 
 

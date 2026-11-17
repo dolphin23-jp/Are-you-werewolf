@@ -95,6 +95,7 @@ _WIN_LINES: dict[Team, str] = {
 # the closing designation. A day with several of one keeps the last.
 _DIRECTION_STAGES: dict[str, str] = {
     "consensus_summary": "進行役のまとめ",
+    "provisional_designation": "仮指定",
     "final_designation": "本指定",
 }
 
@@ -1217,8 +1218,8 @@ class ContextBuilder:
             # nothing here suggests what to use it for.
             return f"今日はまだ話していない。いま言いたいことを言う。{cap}字以内。"
         return (
-            "今日の最初の発言。盤面を見て一番言いたいこと(内訳の見立て、吊り方針、"
-            f"誰かへの質問のどれか)を一つ。{cap}字以内。"
+            "今日の最初の発言。盤面を見て一番言いたいこと(役職COがあるならそれ、内訳の見立て、"
+            f"吊り方針、誰かへの質問のどれか)を一つ。{cap}字以内。"
         )
 
     def build_morning_intent_context(

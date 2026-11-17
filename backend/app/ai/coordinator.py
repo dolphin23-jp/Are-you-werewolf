@@ -2317,15 +2317,15 @@ class AICoordinator:
             # What the target is shown is what the asker said to it: the
             # sentence of its line that names the target, not the structured
             # field's paraphrase (43 of 44 in seed 1 differed from the line).
-            asked = sentence_naming(model_text, question.target_id, names)
-            if question.target_id not in state.players or not asked:
+            said_aloud = sentence_naming(model_text, question.target_id, names)
+            if question.target_id not in state.players or not said_aloud:
                 continue
             proposed_topic = question.topic.strip()
             topic = (
                 proposed_topic
                 if proposed_topic
                 in {"execution_candidate", "fox_candidate", "claim_reason", "timeline"}
-                else self._question_topic(question.question.strip() or asked)
+                else self._question_topic(question.question.strip() or said_aloud)
             )
             existing = self._pending_questions.setdefault(question.target_id, [])
             if topic:
@@ -2339,7 +2339,7 @@ class AICoordinator:
                 PendingQuestion(
                     asker=player_id,
                     target=question.target_id,
-                    question=asked,
+                    question=said_aloud,
                     source_message_id=message_id,
                     day=state.day,
                     topic=topic,
