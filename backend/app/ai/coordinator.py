@@ -161,6 +161,11 @@ _CONFIRMATION_STAGE = "freemason_confirmation"
 # turn is the opportunity, what is said in it is the seat's own.
 _OPEN_FLOOR_STAGE = "open_floor"
 
+# A seat the closing summary put a question to, answering it. It used to be
+# the 30-character reaction for any seat not under pressure, too short for an
+# answer the day is about to be decided on.
+_SUMMARY_ANSWER_STAGE = "summary_answer"
+
 # A wolf-chat sentence that puts a partner up for the ballot, read by
 # `_wolf_chat_ballot_plan`. A planned vote on a partner passes the release
 # gate, and the two ways of misreading the chat are not equally bad: a false
@@ -1563,7 +1568,7 @@ class AICoordinator:
             if pid in self._agents and state.players[pid].alive:
                 pressed = pid in round_state.major_targets
                 self._grant_extra_turn(round_state)
-                return pid, "rebuttal_or_reassessment" if pressed else "reaction"
+                return pid, "rebuttal_or_reassessment" if pressed else _SUMMARY_ANSWER_STAGE
         if book.designation_pending:
             book.designation_pending = False
             speaker = book.summary_speaker

@@ -116,10 +116,12 @@ def test_a_summary_question_is_answered_before_a_short_designation_closes_the_da
     asyncio.run(coordinator.run_discussion_round(_session(controller)))
 
     summary = [stage for _seat, stage in turns].index("consensus_summary")
-    # p2 is nobody's candidate here, so its answer is a short reply.
+    # p2 is nobody's candidate here. Its answer used to be the 30-character
+    # reaction; an answer to the summary is always a 60-character turn now
+    # (seed-1 review, 1-A3).
     assert turns[summary:] == [
         ("p1", "consensus_summary"),
-        ("p2", "reaction"),
+        ("p2", "summary_answer"),
         ("p1", _FINAL_DESIGNATION_STAGE),
     ]
     assert controller.state.chat_log[-1].author_id == "p1"
@@ -202,7 +204,7 @@ def test_the_close_terminates_when_the_answering_seat_cannot_speak():
     asyncio.run(asyncio.wait_for(coordinator.run_discussion_round(session), timeout=10))
 
     summary = [stage for _seat, stage in turns].index("consensus_summary")
-    assert turns[summary + 1 :] == [("p2", "reaction"), ("p1", _FINAL_DESIGNATION_STAGE)]
+    assert turns[summary + 1 :] == [("p2", "summary_answer"), ("p1", _FINAL_DESIGNATION_STAGE)]
     assert session.discussion_round.complete is True
 
 

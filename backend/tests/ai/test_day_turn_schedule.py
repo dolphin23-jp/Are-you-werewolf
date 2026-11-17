@@ -519,3 +519,41 @@ def test_old_records_still_print_the_removed_stage_by_name():
     rendered = render_transcript(transcript)
 
     assert "[minority_review:p2]" in rendered
+
+
+# -- 1-A3: an answer to the summary is a 60-character turn --
+
+ANSWER = "summary_answer"
+
+
+def _asking(text: str, *targets: str, target: str | None = None) -> DiscussionOutput:
+    output = _line(text, target=target)
+    output.directed_questions = [
+        DirectedQuestion(target_id=seat, question="どう思う？") for seat in targets
+    ]
+    return output
+
+
+def test_a_seat_the_summary_names_answers_in_sixty_characters_not_thirty():
+    """Seed 1: seats named by the summary answered in the 30-character reaction slot."""
+    table = _Table({SUMMARY: _asking("p5とp7はどう思う？", "p5", "p7")})
+    controller, coordinator = _day_two_table(table)
+
+    asyncio.run(asyncio.wait_for(coordinator.run_discussion_round(_session(controller)), 30))
+
+    at = [stage for _seat, stage in table.turns].index(SUMMARY)
+    assert table.turns[at + 1 : at + 3] == [("p5", ANSWER), ("p7", ANSWER)]
+    utterances = coordinator._recorder.transcript.utterances  # type: ignore[union-attr]
+    assert {u.effective_length_limit for u in utterances if u.stage == ANSWER} == {60}
+
+
+def test_the_answer_turn_says_what_it_is_for_in_both_registers():
+    state = make_controller(seed=4).state
+    state.day = 2
+
+    scene = _scene(state, ANSWER)
+    structured = _scene(state, ANSWER, engine="legacy")
+
+    assert scene.startswith("【いまの場面】まとめへの回答。")
+    assert "60字以内" in scene
+    assert structured.startswith("【議論段階】まとめへの回答。")

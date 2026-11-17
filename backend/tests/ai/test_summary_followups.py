@@ -40,6 +40,10 @@ from tests.ai.test_turn_structure import _spy, _StagedProvider, _summary_asking
 from tests.conftest import make_controller
 
 SUMMARY = "consensus_summary"
+# The turn a seat the summary named answers in. It was the 30-character
+# reaction for any seat not under pressure; an answer to the summary is
+# always a 60-character turn now (seed-1 review, 1-A3).
+ANSWER = "summary_answer"
 
 
 def _human_session(controller: Any, human_id: str = "p0") -> SimpleNamespace:
@@ -109,7 +113,7 @@ def test_a_step_that_lands_on_the_summary_keeps_its_answer_and_designation():
         == tails["pass"]
         == [
             ("p1", SUMMARY),
-            ("p2", "reaction"),
+            ("p2", ANSWER),
             ("p1", _FINAL_DESIGNATION_STAGE),
         ]
     )
@@ -144,7 +148,7 @@ def test_a_pause_pressed_while_the_summary_generates_keeps_its_follow_ups():
 
     assert _after_summary(turns) == [
         ("p1", SUMMARY),
-        ("p2", "reaction"),
+        ("p2", ANSWER),
         ("p1", _FINAL_DESIGNATION_STAGE),
     ]
 
@@ -220,7 +224,7 @@ def test_a_summary_that_asks_the_human_stops_for_them_before_any_answer_or_desig
     assert awaiting is True and complete is False
     # Once the human has had the floor, the AI addressee answers and the close follows.
     assert segments[with_summary + 1] == (
-        [("p2", "reaction"), ("p1", _FINAL_DESIGNATION_STAGE)],
+        [("p2", ANSWER), ("p1", _FINAL_DESIGNATION_STAGE)],
         False,
         True,
     )
@@ -240,7 +244,7 @@ def test_the_human_answering_the_summary_is_followed_by_the_ai_answers_and_the_c
 
     assert _after_summary(turns) == [
         ("p1", SUMMARY),
-        ("p2", "reaction"),
+        ("p2", ANSWER),
         ("p1", _FINAL_DESIGNATION_STAGE),
     ]
     assert controller.state.chat_log[-1].author_id == "p1"
@@ -269,7 +273,7 @@ def test_a_round_that_may_not_wait_never_stops_for_the_human_it_asked():
 
     assert _after_summary(turns) == [
         ("p1", SUMMARY),
-        ("p2", "reaction"),
+        ("p2", ANSWER),
         ("p1", _FINAL_DESIGNATION_STAGE),
     ]
     assert "p0" not in [seat for seat, _stage in turns]
@@ -305,8 +309,8 @@ def test_answers_and_the_close_after_a_summary_at_the_budget_are_counted_in_the_
     round_state = session.discussion_round
     assert _after_summary(turns) == [
         ("p1", SUMMARY),
-        ("p2", "reaction"),
-        ("p3", "reaction"),
+        ("p2", ANSWER),
+        ("p3", ANSWER),
         ("p1", _FINAL_DESIGNATION_STAGE),
     ]
     assert len(round_state.outputs) == 7
@@ -514,7 +518,7 @@ def test_a_designation_that_asks_anyway_still_closes_the_round_and_is_counted():
 
     assert _after_summary(turns) == [
         ("p1", SUMMARY),
-        ("p2", "reaction"),
+        ("p2", ANSWER),
         ("p1", _FINAL_DESIGNATION_STAGE),
     ]
     assert session.discussion_round.complete is True
