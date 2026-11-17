@@ -1069,7 +1069,9 @@ class AICoordinator:
         Everyone forms an opinion -- the belief engine updates all of them -- but
         a morning where sixteen AIs each state a view is a wall of text nobody
         reads. Duty speakers (a held result, a planned CO, a direct question)
-        are never dropped; the rest speak when they are answered or challenged.
+        are never dropped, and up to three seats without a CO open beside
+        them; the rest speak when answered or challenged, in day 1's roll
+        call, or in the short turn every silent seat gets from day 2 on.
         """
         assert self.reasoning is not None
         self.reasoning.refresh(state)
@@ -1329,7 +1331,7 @@ class AICoordinator:
     ) -> None:
         """Day 1: every AI seat that has had no turn yet gets one first-impression turn.
 
-        The opening is three to five seats plus the duty speakers, and the
+        The opening is the duty speakers plus up to three seats, and the
         rest were to speak when answered or challenged. On day 1 nobody has a
         result or a reputation to be challenged on, so seven gray seats in the
         first Claude game never spoke at all -- and the day's votes went to

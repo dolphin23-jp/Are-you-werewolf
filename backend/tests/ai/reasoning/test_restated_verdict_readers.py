@@ -210,15 +210,33 @@ def _round(state: GameState) -> DiscussionRoundState:
     )
 
 
+def _until_the_summary(
+    state: GameState, coordinator: AICoordinator, round_state: DiscussionRoundState
+) -> tuple[list[tuple[str, str]], str]:
+    """The turns handed out before the summary, each counted as spoken."""
+    turns: list[tuple[str, str]] = []
+    for _ in range(10):
+        speaker, stage = coordinator._next_discussion_speaker(state, round_state)
+        if speaker is None or stage == "consensus_summary":
+            return turns, stage
+        turns.append((speaker, stage))
+        round_state.speech_counts[speaker] = round_state.speech_counts.get(speaker, 0) + 1
+    raise AssertionError("the summary never came")
+
+
 def test_a_black_only_restated_today_owes_its_target_no_second_reply():
     state, coordinator = _day_three_table(restated_night=None)
     round_state = _round(state)
 
-    speaker, stage = coordinator._next_discussion_speaker(state, round_state)
+    turns, stage = _until_the_summary(state, coordinator, round_state)
 
-    assert (speaker, stage) != ("p2", "rebuttal_or_reassessment")
+    # From day 2 every seat silent today gets one short turn before the
+    # summary (seed-1 review), p2 among them -- but no rebuttal is owed to it,
+    # and nothing beyond those turns was added to the total.
+    assert ("p2", "rebuttal_or_reassessment") not in turns
+    assert {turn_stage for _seat, turn_stage in turns} <= {"open_floor"}
     assert stage == "consensus_summary"
-    assert round_state.max_total == 10
+    assert round_state.max_total == 10 + len(turns)
 
 
 def test_a_black_restated_with_a_new_night_is_a_new_black_and_owes_a_reply():
@@ -254,7 +272,7 @@ def test_a_black_restated_for_the_same_night_owes_its_target_no_second_reply():
     state, coordinator = _day_three_table(restated_night=1)
     round_state = _round(state)
 
-    speaker, stage = coordinator._next_discussion_speaker(state, round_state)
+    turns, _stage = _until_the_summary(state, coordinator, round_state)
 
-    assert (speaker, stage) != ("p2", "rebuttal_or_reassessment")
-    assert round_state.max_total == 10
+    assert ("p2", "rebuttal_or_reassessment") not in turns
+    assert round_state.max_total == 10 + len(turns)
