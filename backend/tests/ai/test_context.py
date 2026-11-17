@@ -515,6 +515,7 @@ def _every_v3_prompt(state, builder) -> list[str]:  # type: ignore[no-untyped-de
         "consensus_summary",
         "human_followup",
         "open_floor",
+        "facilitator_followup",
         "provisional_designation",
         "summary_answer",
     ]

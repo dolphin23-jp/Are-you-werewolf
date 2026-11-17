@@ -170,6 +170,12 @@ _SUMMARY_ANSWER_STAGE = "summary_answer"
 # then that seat's defence, then the final designation. Once a day.
 _PROVISIONAL_STAGE = "provisional_designation"
 
+# The facilitator's turn after the seats it asked by name have answered:
+# the floor back to act on the answer. At most `_MAX_FACILITATOR_FOLLOWUPS`
+# a day.
+_FACILITATOR_FOLLOWUP_STAGE = "facilitator_followup"
+_MAX_FACILITATOR_FOLLOWUPS = 2
+
 # The closing lines whose follow-ups the scheduler opens (answers, a defence,
 # the designation) instead of queueing ordinary replies.
 _SUMMARY_STAGES = ("consensus_summary", _PROVISIONAL_STAGE)
@@ -513,6 +519,11 @@ class _RoundBook:
     provisional_used: bool = False
     unheard_after_summary: bool = False
     provisional_pending: bool = False
+    # The seats the facilitator's latest line asked by name, still to answer;
+    # the follow-ups it has had today; whether one is queued now.
+    facilitator_waiting: set[str] = field(default_factory=set)
+    facilitator_followups: int = 0
+    facilitator_due: bool = False
     # Where the summary's line sits in the chat log: who has spoken since.
     summary_position: int | None = None
     # The final designation named a seat unheard since the summary, which was
@@ -1146,6 +1157,9 @@ class AICoordinator:
             while round_state.reply_queue and len(round_state.outputs) < round_state.max_total:
                 pid = round_state.reply_queue.pop(0)
                 round_state.queued.discard(pid)
+                if book.facilitator_due and pid == self._facilitator(state):
+                    book.facilitator_due = False
+                    return pid, _FACILITATOR_FOLLOWUP_STAGE
                 limit = max(1, round(2.5 * self._personalities[pid].talkativeness))
                 if pid in round_state.major_targets:
                     limit = max(limit, 4)
@@ -1184,16 +1198,7 @@ class AICoordinator:
         # pushback should come from whoever at the table feels it, as it does
         # between people. Every seat has had a turn by now to be that voice.
         if not round_state.summary_done and len(round_state.outputs) < round_state.max_total:
-            leader = next(
-                (
-                    claim.player_id
-                    for claim in state.co_declarations
-                    if claim.claimed_role == RoleName.FREEMASON
-                    and claim.player_id in self._agents
-                    and state.players[claim.player_id].alive
-                ),
-                None,
-            )
+            leader = self._facilitator(state)
             if leader is None:
                 leader = next(
                     (
@@ -1698,13 +1703,62 @@ class AICoordinator:
         speaker_id: str,
         output: DiscussionOutput,
     ) -> None:
-        """What an ordinary turn opens: an answer from each seat it asked, its own next word."""
+        """What an ordinary turn opens: an answer from each seat it asked, its own next word.
+
+        And the facilitator's next word: once every seat its latest line asked
+        by name has spoken, it is queued at the head of the replies to act on
+        the answers (seed 1, m48 and m52: asked, answered, and no turn left
+        to do anything with it). At most twice a day, before the summary.
+        """
         for question in output.directed_questions:
             self._round_queue_reply(state, round_state, question.target_id)
         if output.needs_another_statement and self._rng.random() < min(
             0.95, self._personalities[speaker_id].talkativeness / 1.5
         ):
             self._round_queue_reply(state, round_state, speaker_id)
+        facilitator = self._facilitator(state)
+        if facilitator is None or round_state.summary_done:
+            return
+        book = self._book_for(round_state)
+        if speaker_id == facilitator:
+            book.facilitator_waiting = {
+                question.target_id
+                for question in output.directed_questions
+                if question.target_id != speaker_id
+                and question.question.strip()
+                and self._may_schedule(state, question.target_id)
+            }
+            return
+        if speaker_id not in book.facilitator_waiting:
+            return
+        book.facilitator_waiting.discard(speaker_id)
+        if book.facilitator_waiting or book.facilitator_followups >= _MAX_FACILITATOR_FOLLOWUPS:
+            return
+        book.facilitator_followups += 1
+        book.facilitator_due = True
+        if facilitator in round_state.queued:
+            round_state.reply_queue.remove(facilitator)
+        else:
+            round_state.queued.add(facilitator)
+            self._grant_extra_turn(round_state)
+        round_state.reply_queue.insert(0, facilitator)
+
+    def _facilitator(self, state: GameState) -> str | None:
+        """The living AI seat that leads the day: the first standing freemason CO.
+
+        The same seat the summary falls to. A seat leading only because it
+        was the last to be ready to vote is no facilitator.
+        """
+        return next(
+            (
+                claim.player_id
+                for claim in state.co_declarations
+                if claim.claimed_role == RoleName.FREEMASON
+                and claim.player_id in self._agents
+                and state.players[claim.player_id].alive
+            ),
+            None,
+        )
 
     def _round_queue_reply(
         self, state: GameState, round_state: DiscussionRoundState, target_id: str

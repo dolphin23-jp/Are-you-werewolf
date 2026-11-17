@@ -55,6 +55,7 @@ _STAGES = (
     "consensus_summary",
     "human_followup",
     "open_floor",
+    "facilitator_followup",
     "provisional_designation",
     "summary_answer",
 )
@@ -119,6 +120,7 @@ def test_each_stage_carries_its_own_cap():
         "immediate": 120,
         "consensus_summary": 120,
         "open_floor": 60,
+        "facilitator_followup": 60,
         "provisional_designation": 60,
         "summary_answer": 60,
     }

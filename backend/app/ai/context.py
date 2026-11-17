@@ -803,6 +803,11 @@ class ContextBuilder:
             stage_instruction = (
                 "進行役のまとめで名指しで質問されています。まずその質問に直接答えてください。"
             )
+        elif stage == "facilitator_followup":
+            stage_instruction = (
+                "名指しで質問した相手から回答がありました。それを受けて、進行役として"
+                "一言述べてください。"
+            )
         elif stage == "provisional_designation":
             stage_instruction = (
                 "まとめで処刑先が示されなかったため、進行役として仮指定を出してください。"
@@ -934,6 +939,11 @@ class ContextBuilder:
             return f"人間のプレイヤーの発言に応答する。{cap}字以内。"
         if stage == "summary_answer":
             return f"進行役のまとめで名指しで聞かれた。まずその問いに答える。{cap}字以内。"
+        if stage == "facilitator_followup":
+            return (
+                "名指しで聞いた問いに答えが返ってきた。それを受けて進行役として一言。"
+                f"{cap}字以内。"
+            )
         if stage == "provisional_designation":
             return (
                 "まとめで吊り先が出なかったので、進行役として仮指定を出す。今日の吊り先を"
@@ -1227,6 +1237,7 @@ class ContextBuilder:
             "open_floor": "ひとこと",
             "summary_answer": "まとめへの回答",
             "provisional_designation": "仮指定",
+            "facilitator_followup": "進行役の受け",
         }.get(stage, "議論")
 
 

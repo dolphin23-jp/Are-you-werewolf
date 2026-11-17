@@ -821,3 +821,68 @@ def test_a_step_keeps_the_answer_a_question_was_owed():
     assert schedules["step"] == schedules["pass"]
     asked = schedules["pass"].index(("p2", "initial_view"))
     assert "p3" in [seat for seat, _stage in schedules["pass"][asked + 1 :]]
+
+
+# -- 計画不実行: the facilitator who asked hears the answer and acts on it --
+
+FOLLOW_UP = "facilitator_followup"
+
+
+def test_the_facilitator_gets_the_floor_back_once_its_question_is_answered():
+    """Seed 1, m48 and m52: the facilitator asked, was answered, and had no next turn.
+
+    m23's 「反論を聞いてから本指定」 could not be carried out for the same
+    reason: nothing gave the floor back to the seat that asked.
+    """
+    table = _Table(by_seat={("p1", OPEN_FLOOR): _asking("p5さん、昨日の票の理由は？", "p5")})
+    controller, coordinator = _day_two_table(table)
+
+    asyncio.run(asyncio.wait_for(coordinator.run_discussion_round(_session(controller)), 30))
+
+    asked = table.turns.index(("p1", OPEN_FLOOR))
+    assert table.turns[asked + 1][0] == "p5"
+    assert table.turns[asked + 2] == ("p1", FOLLOW_UP)
+    assert [stage for _seat, stage in table.turns].count(FOLLOW_UP) == 1
+    utterances = coordinator._recorder.transcript.utterances  # type: ignore[union-attr]
+    assert {u.effective_length_limit for u in utterances if u.stage == FOLLOW_UP} == {60}
+
+
+def test_the_facilitator_follow_up_comes_at_most_twice_a_day():
+    table = _Table(
+        by_seat={("p1", OPEN_FLOOR): _asking("p5さん、理由は？", "p5")},
+        queued={
+            FOLLOW_UP: [
+                _asking("了解。p6さんはどう？", "p6"),
+                _asking("了解。p7さんは？", "p7"),
+                _asking("了解。p8さんは？", "p8"),
+            ]
+        },
+    )
+    controller, coordinator = _day_two_table(table)
+    session = _session(controller)
+
+    asyncio.run(asyncio.wait_for(coordinator.run_discussion_round(session), 30))
+
+    assert [stage for _seat, stage in table.turns].count(FOLLOW_UP) == 2
+    round_state = session.discussion_round
+    assert len(round_state.outputs) <= round_state.max_total
+
+
+def test_a_seat_that_does_not_lead_gets_no_follow_up():
+    table = _Table(by_seat={("p4", OPEN_FLOOR): _asking("p5さん、理由は？", "p5")})
+    controller, coordinator = _day_two_table(table)
+
+    asyncio.run(asyncio.wait_for(coordinator.run_discussion_round(_session(controller)), 30))
+
+    assert FOLLOW_UP not in {stage for _seat, stage in table.turns}
+
+
+def test_the_follow_up_turn_says_what_it_is_for():
+    state = make_controller(seed=4).state
+    state.day = 2
+
+    scene = _scene(state, FOLLOW_UP)
+
+    assert scene.startswith("【いまの場面】進行役の受け。")
+    assert "60字以内" in scene
+    assert _scene(state, FOLLOW_UP, engine="legacy").startswith("【議論段階】進行役の受け。")
