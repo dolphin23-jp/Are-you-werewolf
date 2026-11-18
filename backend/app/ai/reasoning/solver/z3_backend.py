@@ -25,6 +25,7 @@ from app.ai.reasoning.solver.backend import (
     ContradictionResult,
     Hypothesis,
     LabelledConstraint,
+    RoleCountAmong,
     RoleCountIs,
     RoleIs,
     RoleIsNot,
@@ -258,6 +259,15 @@ class Z3ConstraintBackend:
                 return z3.PbEq(
                     [(self._var(pid) == index, 1) for pid in self._player_ids], count
                 )
+            case RoleCountAmong(player_ids=pids, role=role, at_least=low, at_most=high):
+                if not pids:
+                    return z3.BoolVal(low <= 0)
+                index = _ROLE_INDEX[role]
+                terms = [(self._var(pid) == index, 1) for pid in pids]
+                bounds = [z3.PbGe(terms, low)] if low > 0 else []
+                if high is not None:
+                    bounds.append(z3.PbLe(terms, high))
+                return z3.And(*bounds) if bounds else z3.BoolVal(True)
         raise TypeError(f"unencodable constraint {constraint!r}")
 
     def _var(self, player_id: str) -> z3.ArithRef:

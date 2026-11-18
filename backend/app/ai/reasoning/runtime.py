@@ -57,6 +57,7 @@ from app.ai.reasoning.perspectives import (
     PlayerPrivatePerspective,
 )
 from app.ai.reasoning.rendering import declared_candidates
+from app.ai.reasoning.skill import DerivationClock, Skill, assign_skills
 from app.ai.reasoning.solver import (
     AccurateTimeline,
     RoleSolver,
@@ -163,6 +164,11 @@ class ReasoningRuntime:
         self._reported_solver_hits = 0
         self._reported_solver_seconds = 0.0
         self._traits = assign_traits(list(ai_player_ids), seed=seed)
+        # How soon each seat notices a derived conclusion on the board memo --
+        # separate from the persona, dealt from the seed (`skill.py`). The
+        # clock remembers when each conclusion first became derivable.
+        self.skills: dict[str, Skill] = assign_skills(list(ai_player_ids), seed=seed)
+        self.derivation_clock = DerivationClock()
         self.seats: dict[str, SeatReasoning] = {}
         for player_id in ai_player_ids:
             perspective = PlayerPrivatePerspective(player_id)
@@ -880,7 +886,8 @@ class ReasoningRuntime:
         private knowledge; the final section is the seat's own card, results and
         allies, read through its perspective. The seat's private solver adds
         only hard conclusions. Nothing here is a conclusion about whom to
-        suspect -- that is what the model is being asked for.
+        suspect -- that is what the model is being asked for. Derived public
+        conclusions reach the seat when its skill allows (`skill.py`).
         """
         self.refresh(state)
         seat = self.seats[player_id]
@@ -893,6 +900,8 @@ class ReasoningRuntime:
             observations=self.observations,
             public_solver=public_solver,
             seat_solver=seat.solver,
+            skill=self.skills.get(player_id, Skill.EXPERT),
+            clock=self.derivation_clock,
         )
 
     def record_stated_target(self, player_id: str, target: str | None, day: int) -> None:
