@@ -25,7 +25,9 @@ from app.ai.reasoning.solver.rules import (
     GuardRuleModule,
 )
 from app.engine.roles import RoleName
+from app.engine.state import GameState
 from tests.ai.reasoning.solver import boards
+from tests.conftest import make_controller
 
 
 def _solver(state, perspective):  # type: ignore[no-untyped-def]
@@ -82,6 +84,21 @@ def test_two_deaths_in_one_night_put_the_fox_among_them():
     ) is True
     # But the fox cannot be anybody else.
     assert solver.is_possible(has_role("p12", RoleName.FOX)) is False
+
+
+def test_a_night_corpse_is_never_a_wolf():
+    """The engine refuses a bite on a wolf (2026-11-17), and the curse only
+    reaches the fox, so a corpse found at dawn is not a wolf -- to everyone."""
+    state = _wolf_board()
+    boards.die_by_attack(state, "p9", night=1)
+    solver = _public(state)
+
+    assert solver.is_possible(has_role("p9", RoleName.WEREWOLF)) is False
+    assert solver.is_possible(has_role("p9", RoleName.FOX)) is True
+    # The first victim is ruled out by its own rule; an execution is not a night.
+    boards.execute(state, "p10", day=2)
+    state.day = 3
+    assert _public(state).is_possible(has_role("p10", RoleName.WEREWOLF)) is True
 
 
 def test_a_quiet_night_proves_neither_a_guard_nor_a_fox_bite():
@@ -326,9 +343,11 @@ def test_no_night_action_leaks_through_the_public_projection():
         module.add_hard_constraints(builder, CommonPublicPerspective(), observations)
         public_constraints.extend(builder.constraints)
 
-    # A single night death and no viewpoint knowledge: the public modules have
-    # nothing to say, and in particular say nothing about p9 or p13.
-    assert public_constraints == []
+    # A single night death and no viewpoint knowledge: the public modules say
+    # only what the corpse itself says -- p13 is not a wolf, since the engine
+    # refuses a bite on a wolf (2026-11-17) -- and nothing about who was
+    # divined, guarded or bitten: not p12, not p9, not p13's cause of death.
+    assert [item.constraint_id for item in public_constraints] == ["night_death_not_wolf:1:p13"]
 
 
 def test_the_debug_view_sees_every_night_action():
@@ -366,3 +385,72 @@ def test_night_events_change_the_board_version():
     # Cached answers from before the corpse must not be reused after it.
     assert before != after
     assert len(json.dumps({"before": before, "after": after})) > 0
+
+
+# -- night 0: the curse lands there too --
+#
+# The engine now curses a fox divined on night 0 (it used to skip it), which is
+# what `FoxCurseRuleModule` had always assumed. Driven through the real engine,
+# so the solver is checked against what the engine does rather than against a
+# hand-built board that could agree with either.
+
+
+def _night_zero_on_the_fox() -> tuple[GameState, str, str]:
+    controller = make_controller(seed=5)
+    controller.start_game()
+    state = controller.state
+    seer = next(pid for pid, p in state.players.items() if p.role is RoleName.SEER)
+    fox = next(pid for pid, p in state.players.items() if p.role is RoleName.FOX)
+    controller.submit_night_action(seer, "divine", fox)
+    controller.resolve_night()
+    controller.start_discussion()
+    return state, seer, fox
+
+
+def _truth(observations: ObservationSet) -> Hypothesis:
+    return Hypothesis(
+        claims=tuple(
+            RoleIs(player_id=pid, role=role)
+            for pid, role in sorted(observations.true_roles.items())
+        ),
+        label="true world",
+    )
+
+
+def test_a_real_seer_who_divines_the_fox_on_night_zero_keeps_the_true_world():
+    state, seer, fox = _night_zero_on_the_fox()
+    observations = ObservationSet.from_state(state)
+    truth = _truth(observations)
+
+    assert state.players[fox].alive is False
+    seer_solver = build_solver(observations, PlayerPrivatePerspective(seer))
+    assert seer_solver.is_possible(truth) is True
+    assert seer_solver.certain_role(fox) is RoleName.FOX
+    for seat in observations.player_ids:
+        assert build_solver(observations, PlayerPrivatePerspective(seat)).is_possible(truth), seat
+    assert build_solver(observations, TrueWorldPerspective()).is_possible(truth) is True
+    assert build_solver(observations, CommonPublicPerspective()).is_possible(truth) is True
+
+
+def test_a_night_zero_corpse_besides_the_first_victim_is_publicly_the_fox():
+    state, _seer, fox = _night_zero_on_the_fox()
+    public = build_solver(ObservationSet.from_state(state), CommonPublicPerspective())
+
+    # No attack on night 0, so the only way to die besides the scripted victim
+    # is the curse: the table can name the fox outright.
+    assert public.certain_role(fox) is RoleName.FOX
+
+
+def test_the_first_victim_alone_proves_nothing_about_the_fox():
+    controller = make_controller(seed=5)
+    controller.start_game()
+    controller.resolve_night()
+    controller.start_discussion()
+    public = build_solver(ObservationSet.from_state(controller.state), CommonPublicPerspective())
+
+    assert not any(cid.startswith("night_zero_death") for cid in public.stats.constraint_ids)
+    fox = next(
+        pid for pid, p in controller.state.players.items() if p.role is RoleName.FOX
+    )
+    assert public.certain_role(fox) is None
+

@@ -7,10 +7,17 @@ counts are the offline guard: a field added to a contract shows up here first.
 
 from __future__ import annotations
 
+import re
+
 import pytest
 from anthropic import transform_schema
 from pydantic import BaseModel
 
+from app.ai.context import (
+    CHAT_VOTE_OUTPUT_INSTRUCTION,
+    NIGHT_ACTION_OUTPUT_INSTRUCTION,
+    VOTE_OUTPUT_INSTRUCTION,
+)
 from app.ai.schema_limits import (
     MAX_OPTIONAL_PARAMETERS,
     MAX_UNION_PARAMETERS,
@@ -66,7 +73,55 @@ def test_the_full_discussion_contract_is_over_the_limit_which_is_why_v3_uses_the
 
 
 def test_the_wire_form_has_headroom_under_both_limits():
-    assert count_schema_parameters(transform_schema(ChatDiscussionOutput)) == (18, 6)
+    assert count_schema_parameters(transform_schema(ChatDiscussionOutput)) == (17, 6)
+
+
+def test_the_plan_note_is_written_before_the_message():
+    """Structured outputs emit required properties first, in schema order. The
+    note is required on the wire so the comparison precedes the line; inside
+    it, the comparison (`plan`) precedes the pick."""
+    sent = transform_schema(ChatDiscussionOutput)
+
+    assert sent["required"] == ["plan_note", "public_message"]
+    assert list(sent["properties"])[:2] == ["plan_note", "public_message"]
+    assert list(sent["$defs"]["PlanNote"]["properties"])[:2] == ["plan", "execution_target"]
+    # Parsing stays lenient: the json_object path is not grammar-enforced.
+    assert ChatDiscussionOutput.model_validate({"public_message": "x"}).plan_note.plan == ""
+
+
+def _keys_in_order(instruction: str) -> list[str]:
+    return re.findall(r'"([a-z_]+)":', instruction.split("\n", 1)[1])
+
+
+VOTE_ORDER = ["decisive_evidence", "vote_target", "reason", "countercase", "alternative_target"]
+
+
+def test_the_vote_names_what_decided_it_before_the_target():
+    """Seed-1 review R4: with `vote_target` the only required property, and
+    first, the ballot was fixed before any reason was written; one seat's
+    reason then argued against its own ballot (2-A3). The deciding evidence is
+    now required and comes first, the target second."""
+    sent = transform_schema(VoteOutput)
+
+    assert sent["required"] == ["decisive_evidence", "vote_target"]
+    assert list(sent["properties"]) == VOTE_ORDER
+    # Parsing stays lenient: the json_object path is not grammar-enforced.
+    parsed = VoteOutput.model_validate({"vote_target": "p1"})
+    assert (parsed.vote_target, parsed.decisive_evidence) == ("p1", "")
+
+
+def test_a_night_action_gives_its_reason_before_its_target():
+    sent = transform_schema(NightActionOutput)
+
+    assert sent["required"] == ["reason", "target"]
+    assert list(sent["properties"]) == ["reason", "target"]
+    assert NightActionOutput.model_validate({"target": "p1"}).reason == ""
+
+
+def test_the_instructions_show_the_keys_in_the_order_they_are_sent():
+    assert _keys_in_order(CHAT_VOTE_OUTPUT_INSTRUCTION) == VOTE_ORDER
+    assert _keys_in_order(VOTE_OUTPUT_INSTRUCTION) == VOTE_ORDER
+    assert _keys_in_order(NIGHT_ACTION_OUTPUT_INSTRUCTION) == ["reason", "target"]
 
 
 def test_the_limits_are_the_documented_ones():

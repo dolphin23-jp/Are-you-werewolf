@@ -47,7 +47,7 @@ import subprocess
 import sys
 from collections import Counter
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from time import perf_counter
 from types import SimpleNamespace
@@ -73,6 +73,7 @@ from app.config import Settings, settings_for_provider  # noqa: E402
 from app.engine.game import GameController, PlayerSpec  # noqa: E402
 from app.engine.phases import Phase  # noqa: E402
 from app.eval.analyzers import AnalysisResult, analyze  # noqa: E402
+from app.eval.call_log import CallLogEntry, CallLogProvider, write_call_log  # noqa: E402
 from app.eval.judge import judge_transcript  # noqa: E402
 from app.eval.progress import (  # noqa: E402
     HEARTBEAT_SECONDS,
@@ -88,6 +89,7 @@ from app.eval.report import (  # noqa: E402
     render_report,
 )
 from app.eval.transcript import GameTranscript, TranscriptRecorder  # noqa: E402
+from app.eval.transcript_render import team_label  # noqa: E402
 
 HUMAN_ID = "p0"
 MAX_LOOPS = 200
@@ -148,6 +150,8 @@ class GameRun:
     wall_time_seconds: float
     validation: dict[str, int]
     budget_stop: str | None = None
+    # Every model call of the game, with its prompt and answer (`app.eval.call_log`).
+    call_log: list[CallLogEntry] = field(default_factory=list)
 
 
 def model_label(provider: object | None, settings: Settings) -> str:
@@ -219,9 +223,15 @@ async def play_game(
     tasks_before = asyncio.all_tasks()
     started = perf_counter()
     inner = build_llm_provider(settings, seed=seed, metrics=metrics)
-    provider: LLMProvider = BudgetedProvider(inner, budget) if budget is not None else inner
+    budgeted: LLMProvider = BudgetedProvider(inner, budget) if budget is not None else inner
     specs = _make_specs()
+    names = {spec.player_id: spec.name for spec in specs}
     controller = GameController(session_id=f"eval-{seed}", player_specs=specs, seed=seed)
+    # Outermost, so a call the budget refused is logged too. It only observes.
+    call_log = CallLogProvider(
+        budgeted, context=lambda: (controller.state.day, controller.state.phase.value)
+    )
+    provider: LLMProvider = call_log
     ai_ids = [s.player_id for s in specs]
     live = LiveTranscriptRecorder(emit) if emit is not None else None
     recorder = live if live is not None else TranscriptRecorder()
@@ -251,8 +261,19 @@ async def play_game(
         coordinator=coordinator,
         discussion_lock=asyncio.Lock(),
     )
+    def save_call_log() -> None:
+        if out_dir is not None:
+            write_call_log(call_log.entries, list(metrics.records), names, out_dir, seed)
+
     progress = (
-        RunProgress(live, metrics, seed=seed, out_dir=out_dir, heartbeat_seconds=heartbeat_seconds)
+        RunProgress(
+            live,
+            metrics,
+            seed=seed,
+            out_dir=out_dir,
+            heartbeat_seconds=heartbeat_seconds,
+            on_save=save_call_log,
+        )
         if live is not None
         else None
     )
@@ -312,6 +333,7 @@ async def play_game(
         wall_time_seconds=elapsed,
         validation=_validation_counts(coordinator),
         budget_stop=budget_stop,
+        call_log=list(call_log.entries),
     )
 
 
@@ -509,6 +531,11 @@ def _budget_line(budget: EvaluationBudget | None) -> str:
     return f" 費用 {spent_text} / 上限 ${budget.max_estimated_cost:.2f}"
 
 
+def winner_line(winner: object) -> str:
+    """The live log's line for a finished game, the faction named as the record names it."""
+    return f"    勝者: {team_label(winner) if winner else '(未決着)'}"
+
+
 def _print_line(line: str) -> None:
     # Flushed on purpose: stdout is a pipe under Actions, so Python would hold
     # these back in a block buffer and the live log would stay empty.
@@ -542,8 +569,11 @@ async def main(argv: Sequence[str] | None = None) -> int:
         )
         runs.append(run)
         write_transcript_files(run.transcript, args.out, seed, partial=not run.finished)
+        write_call_log(
+            run.call_log, list(run.metrics.records), run.transcript.names, args.out, seed
+        )
         winner = run.transcript.final_state.get("winner")
-        print(f"    winner={winner}{_budget_line(budget)}", flush=True)
+        print(f"{winner_line(winner)}{_budget_line(budget)}", flush=True)
         if run.budget_stop is not None:
             budget_stop = run.budget_stop
             print(f"==> {BUDGET_STOP_BANNER}: {budget_stop}", flush=True)

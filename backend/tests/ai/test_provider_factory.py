@@ -5,7 +5,7 @@ from app.ai.provider.factory import LLMProviderConfigError, build_llm_provider
 from app.ai.provider.luna_openai import LunaOpenAIProvider
 from app.ai.provider.mock import MockProvider
 from app.ai.schemas import DiscussionOutput, VoteOutput
-from app.config import Settings
+from app.config import DEFAULT_ANTHROPIC_MODEL, Settings
 
 
 def test_mock_provider_selected_by_default():
@@ -122,7 +122,7 @@ def test_anthropic_provider_builds_from_settings():
     )
     provider = build_llm_provider(settings)
     assert isinstance(provider, AnthropicClaudeProvider)
-    assert provider.model == "claude-opus-5-5"
+    assert provider.model == DEFAULT_ANTHROPIC_MODEL
     assert provider.fallbacks_enabled is True
     assert provider._max_retries == 3
     assert provider._max_tokens_floor == 16000
@@ -145,10 +145,10 @@ def test_anthropic_fallbacks_can_be_switched_off():
 @pytest.mark.parametrize(
     ("configured", "expected_model"),
     [
-        ("anthropic", "claude-opus-5-5"),
-        (" Anthropic ", "claude-opus-5-5"),
-        ("claude", "claude-opus-5-5"),
-        ('"Claude"', "claude-opus-5-5"),
+        ("anthropic", DEFAULT_ANTHROPIC_MODEL),
+        (" Anthropic ", DEFAULT_ANTHROPIC_MODEL),
+        ("claude", DEFAULT_ANTHROPIC_MODEL),
+        ('"Claude"', DEFAULT_ANTHROPIC_MODEL),
         # A model id typed into the provider field is also the model asked
         # for: selecting Claude but billing the default model instead would
         # turn a cheap Haiku run into an Opus one.

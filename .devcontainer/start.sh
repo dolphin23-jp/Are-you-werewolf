@@ -24,7 +24,7 @@ PROVIDER="$(normalize "${WEREWOLF_LLM_PROVIDER:-mock}")"
 PROVIDER_MODEL=""
 case "$PROVIDER" in
   # A model name typed into the provider field means its provider, as in
-  # the backend: "claude" / "claude-opus-5-5" -> anthropic, "gpt-6-luna" -> luna.
+  # the backend: "claude" / "claude-sonnet-5-5" -> anthropic, "gpt-6-luna" -> luna.
   claude) PROVIDER="anthropic" ;;
   claude-*)
     PROVIDER_MODEL="$PROVIDER"
@@ -45,7 +45,7 @@ case "$PROVIDER" in
       echo "!!! WEREWOLF_LLM_PROVIDER は ${PROVIDER_MODEL}、WEREWOLF_ANTHROPIC_MODEL は ${CONFIGURED_MODEL} で、" >&2
       echo "!!! モデルが食い違っています。どちらか一方だけにしてください(このままではサーバーが起動しません)。" >&2
     fi
-    echo "==> モデル: ${CONFIGURED_MODEL:-${PROVIDER_MODEL:-claude-opus-5-5}}"
+    echo "==> モデル: ${CONFIGURED_MODEL:-${PROVIDER_MODEL:-claude-sonnet-5-5}}"
     if [ -z "${WEREWOLF_ANTHROPIC_API_KEY:-}" ]; then
       echo "!!! WEREWOLF_LLM_PROVIDER=anthropic ですが WEREWOLF_ANTHROPIC_API_KEY が空です。" >&2
       echo "!!! GitHub の Settings → Codespaces → Secrets を確認してください。" >&2

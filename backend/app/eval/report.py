@@ -12,8 +12,10 @@ from collections.abc import Mapping, Sequence
 from typing import Any, Literal
 
 from app.eval.analyzers import AnalysisResult
+from app.eval.reasoning_analyzer import AllyVoteKind, VoteChangeKind, audit_ballots
 from app.eval.release_gate import HARD_FAILURE_FIELDS
 from app.eval.transcript import GameTranscript
+from app.eval.transcript_render import team_label
 
 _SEVERITY_ORDER = {"high": 0, "medium": 1, "low": 2}
 
@@ -43,6 +45,12 @@ EVENT_LABELS: dict[str, str] = {
     "obligation_posted_by_code": "コードが出した公開義務の文",
     "speech_discarded_after_phase_end": "議論の終了後に届いて捨てた発言",
     "discussion_stalled": "連続失敗で止まった議論",
+    "designation_question_unanswered": "本指定で出た、答える番の無い質問",
+    "night_not_resolved": "夜を解決できなかった(襲撃が無いまま)",
+    "night_code_bite": "人狼の襲撃をコードが代わりに決めた夜",
+    "summary_without_speaker": "まとめ役が見つからずまとめを飛ばした日",
+    "directed_question_target_unnamed": "本文が相手を名指していないので捨てた名指しの質問",
+    "directed_question_on_code_line": "コードが書いた行の名指しの質問(捨てた)",
 }
 
 # `release_gate.HARD_FAILURE_FIELDS`, in words. Any non-zero count fails the
@@ -56,8 +64,12 @@ HARD_FAILURE_LABELS: dict[str, str] = {
     "duplicate_required_result_count": "同じ能力結果を重ねて出した",
     "displayed_target_mismatch_count": "表示した対象と決めた対象が違った",
     "stale_evidence_publicly_emitted_count": "訂正済みの古い根拠を公開発言に出した",
-    "unexplained_vote_change_count": "理由のない投票先の変更",
-    "unplanned_wolf_ally_vote_count": "計画のない人狼の仲間投票",
+    "unexplained_vote_change_count": (
+        "卓で名指しした吊り先から、新しい関連の公開情報も引いた論もなく変えた投票"
+    ),
+    "unplanned_wolf_ally_vote_count": (
+        "計画のない人狼の仲間投票（指定に従わない、指定がない、または処刑を決めた票）"
+    ),
     "duplicate_night_action_count": "同じ夜の行動の重複",
 }
 
@@ -68,7 +80,7 @@ VALIDATION_LABELS: dict[str, str] = {
     "dead_target_selections": "死亡者・選べない相手を対象にした",
     "public_fact_flips": "公開結果と逆の白黒を書いた",
     "vote_history_misreads": "投票の記録を読み違えた",
-    "vote_plan_mismatches": "言った吊り先と違う相手に投票した",
+    "vote_plan_mismatches": "メモ(v3)・発言(v2)の吊り先と違う相手に投票した",
 }
 
 _PRICING_SOURCE_LABELS = {
@@ -174,6 +186,12 @@ def render_report(
 
     add(f"\n## 3. {HARD_CORRECTNESS_HEADING}\n")
     add(_render_hard_correctness(per_game))
+    wolf_chat_plans = _render_wolf_chat_plans(games)
+    if wolf_chat_plans:
+        add(f"\n{wolf_chat_plans}")
+    ballot_lists = _render_ballot_lists(games)
+    if ballot_lists:
+        add(f"\n{ballot_lists}")
 
     add("\n## 4. ルールベース検査(役職整合性・矛盾・人狼の連携)\n")
     add(_render_findings(games))
@@ -350,7 +368,11 @@ def _render_call_health(
             days = int(game.get("days") or 0)
             utterances = int(game.get("public_utterances") or 0)
             per_day = f"{utterances / days:.1f}" if days else "—"
-            winner = game.get("winner") or ("(中断)" if not game.get("finished") else "—")
+            winner = (
+                team_label(game["winner"])
+                if game.get("winner")
+                else ("(中断)" if not game.get("finished") else "—")
+            )
             hard = game.get("hard_failures")
             hard_text = "—" if hard is None else str(sum(int(v) for v in hard.values()))
             out.append(
@@ -419,6 +441,268 @@ def _render_hard_correctness(per_game: Sequence[Mapping[str, Any]] | None) -> st
     return "\n".join(out)
 
 
+WOLF_CHAT_PLANS_HEADING = "### 人狼チャットの文から「計画あり」と読んだ仲間への投票"
+
+
+def _render_wolf_chat_plans(games: list[tuple[GameTranscript, AnalysisResult]]) -> str:
+    """Every ballot on a partner that counted as planned because of a wolf-chat line.
+
+    Whether a line planned that ballot is read from its wording by a pattern
+    rule (`coordinator._wolf_chat_ballot_plan`), not established as a fact. It
+    is conservative, and a misreading still makes a betrayal pass the gate as
+    planned -- so each such ballot is listed with the line it rests on, and a
+    reader checks it instead of trusting a count. A ballot planned by a public
+    mark rests on the table's own record and is not listed.
+    """
+    rows: list[str] = []
+    for transcript, _analysis in games:
+        names = transcript.names
+        for plan in transcript.wolf_ally_vote_plans:
+            if plan.basis != "wolf_chat":
+                continue
+            voter = names.get(plan.voter_id, plan.voter_id)
+            target = names.get(plan.target_id, plan.target_id)
+            sentence = plan.story_reason.replace("|", "｜").replace("\n", " ")
+            round_note = f"(決選{plan.round_number}回目)" if plan.round_number > 1 else ""
+            rows.append(
+                f"| {transcript.seed if transcript.seed is not None else '—'} "
+                f"| {plan.day}{round_note} | {voter} → {target} | {sentence} |"
+            )
+    if not rows:
+        return ""
+    return "\n".join(
+        [
+            WOLF_CHAT_PLANS_HEADING,
+            "",
+            "上の「計画のない人狼の仲間投票」に数えなかった投票のうち、人狼チャットの1文を"
+            "コードが「仲間に投票する計画」と読んだものです。読み取りは文の形だけによるので、"
+            "誤読なら実際には計画のない投票です。引用した文を確かめてください"
+            "(公開の黒や偽の確定を根拠にした投票は、卓の記録に基づくので載せていません)。",
+            "",
+            "| seed | 日 | 投票者 → 仲間 | 計画と読んだ文 |",
+            "|---|---|---|---|",
+            *rows,
+        ]
+    )
+
+
+BALLOT_LISTS_HEADING = "### 合否に数えない投票（引用つき）"
+UNEXPLAINED_LIST_HEADING = "### 合否に数えた、理由の見えない変更（引用つき）"
+
+# The non-hard changes with a cause the table could see, in words.
+_JUSTIFIED_LABELS: dict[VoteChangeKind, str] = {
+    VoteChangeKind.PUBLIC_ARGUMENT: "後の発言者の論を理由に挙げた",
+    VoteChangeKind.NEW_PUBLIC_EVIDENCE: "発言後に、どちらかの吊り先に関わる結果が出た",
+    VoteChangeKind.CORRECTION_ACCEPTED: "発言後に事実の訂正があった",
+    VoteChangeKind.TARGET_BECAME_INVALID: "吊り先が死亡した",
+    VoteChangeKind.RUNOFF_RESTRICTION: "決選の候補から外れた",
+    VoteChangeKind.GREY_RANDOM_POLICY: (
+        "発言後に進行役がグレランを宣言し、グレー外からグレーへ移した"
+    ),
+}
+
+
+def _quote(text: str) -> str:
+    """A line as a table cell: whole, on one line, without breaking the table."""
+    flat = " / ".join(part.strip() for part in text.splitlines() if part.strip())
+    return flat.replace("|", "｜") or "—"
+
+
+def _render_ballot_lists(games: list[tuple[GameTranscript, AnalysisResult]]) -> str:
+    """Every ballot the gate fails or does not judge, with the words it rests on.
+
+    The gate measures a seat's public stance against its vote. A ballot with
+    no basis was compared with nothing; a change off a memo target the seat
+    never said aloud left no stance the table saw; a change with a cause the
+    table could see is justified. None of them fails the gate, and each is
+    listed so a reader can check the reading rather than trust a count. The
+    unexplained changes the gate does fail come first, quoted the same way.
+    """
+    audited = [
+        (transcript, audit_ballots(transcript))
+        for transcript, _analysis in games
+        if any(audit.vote_target is not None for audit in transcript.decision_audits)
+    ]
+    if not audited:
+        return ""
+    out = [
+        BALLOT_LISTS_HEADING,
+        "",
+        "票を比べる基準は、その日の最後の手番のメモの吊り先です。ハードな失敗になるのは、"
+        "その名前を自分の公開発言で言っていて、発言後にどちらの吊り先にも関わる新しい"
+        "公開情報がなく、理由が後の発言者の論を挙げておらず、進行役のグレラン宣言で"
+        "グレー外からグレーへ移したのでもない変更だけです。",
+        "",
+        "比較できた票／全票（その日の手番がない票と、メモの吊り先が空の票は比較できません）:",
+        "",
+        "| seed | 比較できた票／全票 | 比較できない | 卓で言っていない吊り先からの変更 |",
+        "|---|---|---|---|",
+    ]
+    for transcript, verdicts in audited:
+        no_basis = sum(v.kind is VoteChangeKind.NO_BASIS for v in verdicts)
+        unspoken = sum(v.kind is VoteChangeKind.MEMO_TARGET_UNSPOKEN for v in verdicts)
+        out.append(
+            f"| {_seed(transcript)} | {len(verdicts) - no_basis} / {len(verdicts)} | "
+            f"{no_basis} | {unspoken} |"
+        )
+
+    unexplained_rows: list[str] = []
+    unspoken_rows: list[str] = []
+    justified_rows: list[str] = []
+    designated_rows: list[str] = []
+    mismatch_rows: list[str] = []
+    no_basis_lines: list[str] = []
+    for transcript, verdicts in audited:
+        names = transcript.names
+        no_basis_by_day: dict[int, list[str]] = {}
+        for verdict in verdicts:
+            voter = names.get(verdict.player_id, verdict.player_id)
+            basis = names.get(verdict.basis or "", verdict.basis or "—")
+            target = names.get(verdict.vote_target or "", verdict.vote_target or "—")
+            day = _day_label(verdict.day, verdict.round_number)
+            if verdict.reason_names_other:
+                others = "、".join(names.get(seat, seat) for seat in verdict.reason_names_other)
+                mismatch_rows.append(
+                    f"| {_seed(transcript)} | {day} | {voter} → {target} | {others} | "
+                    f"{_quote(verdict.reason)} |"
+                )
+            if verdict.ally_kind is AllyVoteKind.DESIGNATED:
+                tally = "・".join(
+                    f"{names.get(seat, seat)} {count}票" for seat, count in verdict.tally
+                )
+                designated_rows.append(
+                    f"| {_seed(transcript)} | {day} | {voter} → {target} | "
+                    f"{_quote(verdict.designation_line)} | {tally} | {_quote(verdict.reason)} |"
+                )
+            if verdict.kind is VoteChangeKind.UNEXPLAINED:
+                last_line = verdict.own_lines[-1] if verdict.own_lines else ""
+                unexplained_rows.append(
+                    f"| {_seed(transcript)} | {day} | {voter} | {basis} → {target} | "
+                    f"{_quote(last_line)} | {_quote(verdict.reason)} |"
+                )
+            elif verdict.kind is VoteChangeKind.MEMO_TARGET_UNSPOKEN:
+                last_line = verdict.own_lines[-1] if verdict.own_lines else ""
+                unspoken_rows.append(
+                    f"| {_seed(transcript)} | {day} | {voter} | {basis} → {target} | "
+                    f"{_quote(last_line)} | {_quote(verdict.reason)} |"
+                )
+            elif verdict.kind in _JUSTIFIED_LABELS:
+                justified_rows.append(
+                    f"| {_seed(transcript)} | {day} | {voter} | {basis} → {target} | "
+                    f"{_JUSTIFIED_LABELS[verdict.kind]} | {_quote(verdict.why)} |"
+                )
+            elif verdict.kind is VoteChangeKind.NO_BASIS:
+                runoff = (
+                    f"、決選{verdict.round_number}回目" if verdict.round_number > 1 else ""
+                )
+                no_basis_by_day.setdefault(verdict.day, []).append(
+                    f"{voter}→{target}（{verdict.why}{runoff}）"
+                )
+        for day_number, items in sorted(no_basis_by_day.items()):
+            no_basis_lines.append(
+                f"- seed {_seed(transcript)} {day_number}日目: {'、'.join(items)}"
+            )
+
+    # The failures first, under their own heading, quoted like the rest: a
+    # count alone asked the reader to trust the reading the lists below let
+    # them check (run 14 counted seven and quoted none).
+    failed = [
+        "",
+        UNEXPLAINED_LIST_HEADING,
+        "",
+        "その日の自分の発言でメモの吊り先の名前を出し、発言後に関わる公開情報も、"
+        "理由が挙げる後の発言者の論も、グレー外からグレーへ移す進行役のグレラン宣言も"
+        "ないまま、別の相手に入れた票です（`unexplained_vote_change_count`）。",
+        "",
+    ]
+    if unexplained_rows:
+        failed += [
+            "| seed | 日 | 投票者 | メモの吊り先 → 票 | その日の自分の最後の発言 | 票の理由 |",
+            "|---|---|---|---|---|---|",
+            *unexplained_rows,
+        ]
+    else:
+        failed.append("(ありません)")
+    out = [*failed[1:], "", *out]
+    out += [
+        "",
+        "#### 卓で言っていないメモの吊り先からの変更（`memo_target_unspoken`）",
+        "",
+        "メモの吊り先がその日の自分の発言に一度も出ていないまま、別の相手に入れた票です。"
+        "卓には離れる立場が見えていないので、合否に数えません。",
+        "",
+    ]
+    if unspoken_rows:
+        out += [
+            "| seed | 日 | 投票者 | メモの吊り先 → 票 | その日の自分の最後の発言 | 票の理由 |",
+            "|---|---|---|---|---|---|",
+            *unspoken_rows,
+        ]
+    else:
+        out.append("(ありません)")
+    out += [
+        "",
+        "#### 本指定に従った、結果を変えない仲間への投票",
+        "",
+        "人狼が計画なしに仲間へ入れた票のうち、その日の最後の指定どおりで、この票を除いて"
+        "数え直しても処刑される人が変わらないものです。合否に数えません"
+        "（指定と違う票、指定のない日の票、処刑を決めた票はハードな失敗のままです）。",
+        "",
+    ]
+    if designated_rows:
+        out += [
+            "| seed | 日 | 投票者 → 仲間 | その日の最後の指定 | 集計 | 票の理由 |",
+            "|---|---|---|---|---|---|",
+            *designated_rows,
+        ]
+    else:
+        out.append("(ありません)")
+    out += [
+        "",
+        "#### 理由が別の相手への投票を述べている票",
+        "",
+        "理由に「Xに入れる／Xに投票」とあり、X が票の相手でないものです（ほかの席の票を"
+        "述べた文は除いています）。票はモデルが決めたもので、理由から決め直すことは"
+        "しません。合否に数えません。",
+        "",
+    ]
+    if mismatch_rows:
+        out += [
+            "| seed | 日 | 投票者 → 票 | 理由が挙げた相手 | 票の理由 |",
+            "|---|---|---|---|---|",
+            *mismatch_rows,
+        ]
+    else:
+        out.append("(ありません)")
+    out += ["", "#### 卓に見える理由のある変更", ""]
+    if justified_rows:
+        out += [
+            "| seed | 日 | 投票者 | 基準 → 票 | 理由の区分 | 記録 |",
+            "|---|---|---|---|---|---|",
+            *justified_rows,
+        ]
+    else:
+        out.append("(ありません)")
+    out += [
+        "",
+        "#### 比較できない票（`no_basis`）",
+        "",
+        "その日に手番がなかった席の票と、メモの吊り先が空のまま投じた票です。"
+        "「変更なし」ではありません。",
+        "",
+        *(no_basis_lines or ["(ありません)"]),
+    ]
+    return "\n".join(out)
+
+
+def _seed(transcript: GameTranscript) -> str:
+    return str(transcript.seed) if transcript.seed is not None else "—"
+
+
+def _day_label(day: int, round_number: int) -> str:
+    return f"{day}(決選{round_number}回目)" if round_number > 1 else str(day)
+
+
 def _render_findings(games: list[tuple[GameTranscript, AnalysisResult]]) -> str:
     totals: dict[str, dict[str, Any]] = {}
     for _transcript, analysis in games:
@@ -464,7 +748,13 @@ def _render_speech_stats(games: list[tuple[GameTranscript, AnalysisResult]]) -> 
         return "(発言がありません)"
 
     total = sum(s["utterances"] for s in collected)
-    mean_len = sum(s["mean_length"] * s["utterances"] for s in collected) / max(total, 1)
+    # Lengths are over the lines with a part the model wrote (all of them in a
+    # transcript recorded before code-written prefixes were told apart).
+    measured = sum(s.get("length_lines", s["utterances"]) for s in collected)
+    mean_len = (
+        sum(s["mean_length"] * s.get("length_lines", s["utterances"]) for s in collected)
+        / max(measured, 1)
+    )
     over = sum(s["over_length_limit"] for s in collected)
     fallbacks = sum(s["fallback_lines"] for s in collected)
     repeats = sum(s["verbatim_repeat_players"] for s in collected)
@@ -472,56 +762,112 @@ def _render_speech_stats(games: list[tuple[GameTranscript, AnalysisResult]]) -> 
     def weighted(key: str) -> float:
         return float(sum(s[key] * s["utterances"] for s in collected) / max(total, 1))
 
+    def weighted_or_dash(key: str) -> str:
+        """A rate some transcripts cannot give (recorded before the field existed)."""
+        if any(s.get(key) is None for s in collected):
+            return "—"
+        return f"{weighted(key):.1%}"
+
     stance = _stance_rows(games)
+    examples = _adjacent_example_lines(collected)
     return "\n".join(
         [
             "| 指標 | 値 |",
             "|---|---|",
             f"| 発言数 | {total} |",
-            f"| 平均文字数 | {mean_len:.1f} |",
-            f"| 人格別の発言長上限超過 | {over} ({over / max(total, 1):.1%}) |",
+            f"| 平均文字数(モデルが書いた部分) | {mean_len:.1f} |",
+            f"| 発言長上限超過(モデルが書いた部分) | {over} ({over / max(measured, 1):.1%}) |",
             f"| フォールバック定型文 | {fallbacks} ({fallbacks / max(total, 1):.1%}) |",
             f"| 同一発言の繰り返し | {repeats} |",
             f"| クロスプレイヤー論点重複率 | {weighted('cross_player_topic_overlap_rate'):.1%} |",
             f"| クロスプレイヤー平均Jaccard | {weighted('cross_player_mean_jaccard'):.3f} |",
+            f"| 直前の発言との重複率(Jaccard 0.25以上) | "
+            f"{weighted('adjacent_overlap_rate'):.1%} |",
+            f"| 直前の発言との平均Jaccard | {weighted('adjacent_mean_jaccard'):.3f} |",
             f"| 発言回数ジニ係数 | {weighted('speech_count_gini'):.3f} |",
-            f"| 返信率 | {weighted('reply_rate'):.1%} |",
+            f"| 返信率(返信先の欄が埋まった公開発言の割合) | {weighted('reply_rate'):.1%} |",
             f"| 未回答質問残存率 | {weighted('unanswered_question_rate'):.1%} |",
+            f"| うち相手に手番が来なかった質問 | "
+            f"{weighted_or_dash('unanswered_never_served_rate')} |",
+            f"| うち手番は来たが返信リンクのない質問(本文で答えたか、答えなかった) | "
+            f"{weighted_or_dash('unanswered_served_without_reply_link_rate')} |",
             f"| 発言長の分散 | {weighted('length_variance'):.1f} |",
-            f"| 定型句を含むAI発言率 | {weighted('template_phrase_rate'):.1%} |",
+            f"| 定型句を含むAI発言率(プロンプト由来とコードが書いた文の合計) | "
+            f"{weighted('template_phrase_rate'):.1%} |",
+            f"| うちプロンプトの語彙 | {weighted('prompt_template_phrase_rate'):.1%} |",
+            f"| うちコードが文頭に足したCO・結果の文 | "
+            f"{sum(s['code_fact_sentence_lines'] for s in collected)}行 "
+            f"({weighted('code_fact_sentence_rate'):.1%}) |",
             f"| ID表記(pN)を含むAI発言率 | {weighted('id_mention_rate'):.1%} |",
             f"| 1日あたり公開発言数 | {weighted('public_messages_per_day'):.1f} |",
-            f"| 公開発言の平均文字数 | {weighted('public_mean_length'):.1f} |",
+            f"| 公開発言の平均文字数(AI発言はモデルが書いた部分) | "
+            f"{weighted('public_mean_length'):.1f} |",
             *stance,
+            *examples,
         ]
     )
 
 
+def _adjacent_example_lines(collected: list[dict[str, Any]]) -> list[str]:
+    """The strongest echoes, so the overlap rate can be checked against the lines."""
+    pairs = sorted(
+        (example for stats in collected for example in stats.get("adjacent_overlap_examples", [])),
+        key=lambda example: example["jaccard"],
+        reverse=True,
+    )[:3]
+    if not pairs:
+        return []
+    lines = ["", "直前の発言との重複が大きい組(先頭80字):", ""]
+    for pair in pairs:
+        lines.append(
+            f"- {pair['day']}日目 `{pair['first']}` → `{pair['second']}` "
+            f"(Jaccard {pair['jaccard']:.2f})"
+        )
+        lines.append(f"  > {pair['first_text']}")
+        lines.append(f"  > {pair['second_text']}")
+    return lines
+
+
 def _stance_rows(games: list[tuple[GameTranscript, AnalysisResult]]) -> list[str]:
-    """Rows for how often a seat moved its candidate, summed over the games."""
+    """Rows for how often a seat moved its candidate, summed over the games.
+
+    The denominator is the pairs of turns where a change *could* be seen: both
+    turns state a candidate and the old one is still alive. A pair with a blank
+    side is reported apart, because "did not move" is not observable there --
+    the first Claude game's 19 "acknowledged without change" were 11 such pairs,
+    3 misread words and 5 reasoned partial concessions.
+    """
     collected = [s for _t, a in games if (s := a.stats.get("stance")) is not None]
     if not collected:
         return []
 
     def total(key: str) -> int:
-        return sum(s[key] or 0 for s in collected)
+        return sum(s.get(key) or 0 for s in collected)
 
     turns = total("follow_up_turns")
     moved = total("voluntary_changes")
     replying = (
         "—"
-        if any(s["voluntary_changes_replying"] is None for s in collected)
+        if any(s.get("voluntary_changes_replying") is None for s in collected)
         else str(total("voluntary_changes_replying"))
     )
     return [
-        f"| 疑い先の自発的な変更(疑い先の死亡による変更を除く) | {moved} / {turns}手番 |",
+        "| 吊り先の自発的な変更(両方の手番に吊り先があり、元の吊り先が生きていた対) | "
+        f"{moved} / {total('observable_follow_ups')}対(全後続手番 {turns}) |",
         f"| うち同じ日のうちの変更 | {total('voluntary_changes_same_day')} |",
         f"| うち相手の発言に返信しての変更 | {replying} |",
         f"| うち認める言葉(確かに・認める・撤回…)を伴う変更 | "
         f"{total('voluntary_changes_acknowledged')} |",
-        f"| 疑い先の死亡による変更 | {total('forced_changes')} |",
-        f"| 認める・撤回すると言いながら疑い先が変わらない発言 | "
-        f"{total('acknowledged_without_change')} |",
+        f"| 吊り先の死亡による変更 | {total('forced_changes')} |",
+        f"| 認める言葉を言いながら同じ吊り先のまま | {total('acknowledged_without_change')} |",
+        f"| うち逆接と理由を添えた部分的な譲歩 | "
+        f"{total('acknowledged_without_change_with_reason')} |",
+        f"| うち理由のない空約束 | {total('acknowledged_without_change_no_reason')} |",
+        f"| 吊り先が片方でも空欄の対(変化を観測できない) | "
+        f"{total('target_unstated_follow_ups')} |",
+        f"| うち認める言葉を伴う | {total('target_unstated_acknowledged')} |",
+        f"| うち空欄から吊り先を置いた(認める言葉を伴う) | "
+        f"{total('target_adopted_acknowledged')} |",
     ]
 
 
@@ -549,73 +895,12 @@ def render_transcript(transcript: GameTranscript, *, partial: bool = False) -> s
     """Readable per-game log, with each speaker's hidden role and persona
     shown inline so Japanese quality and persona drift can be eyeballed.
 
+    Written in full -- private notes, vote reasons, night results, audits --
+    by `app.eval.transcript_render`; nothing is shortened.
+
     `partial` marks a snapshot taken while the game is still being played, so a
     run that was cancelled or timed out leaves a file that says what it is
     instead of announcing a winner of None."""
-    lines = [f"# 対戦記録 (seed={transcript.seed})\n"]
-    if partial:
-        lines.append(
-            "> **途中経過です。** 対戦はまだ終わっていません。"
-            "実行が止まった場合は、ここまでが残った分です。\n"
-        )
-    lines.append("## 配役\n")
-    lines.append("| プレイヤー | 役職 | 人格 | 騙り役 |")
-    lines.append("|---|---|---|---|")
-    fake_roles = transcript.deception.get("fake_role_by_player", {})
-    lurkers = set(transcript.deception.get("lurking_player_ids", []))
-    for pid, name in transcript.names.items():
-        deception = fake_roles.get(pid)
-        label = f"偽{deception}" if deception else ("潜伏" if pid in lurkers else "-")
-        lines.append(
-            f"| {name} (`{pid}`) | {transcript.roles.get(pid, '?')} | "
-            f"{transcript.personalities.get(pid, '-')} | {label} |"
-        )
+    from app.eval.transcript_render import render_transcript_full
 
-    lines.append(f"\n人狼陣営の方針: {transcript.deception.get('wolf_pattern_label', '-')}\n")
-
-    current_day = None
-    for u in transcript.utterances:
-        if u.day != current_day:
-            current_day = u.day
-            lines.append(f"\n## {u.day}日目\n")
-        speaker = f"{u.player_name}({u.role}/{u.personality})"
-        if u.kind == "discussion":
-            flag = " [フォールバック]" if u.used_fallback else ""
-            lines.append(f"- **{speaker}**{flag}: {u.text}")
-        elif u.kind == "vote":
-            lines.append(f"- _{speaker} → 投票: {u.target}_ ({u.text})")
-        elif u.kind == "night_action":
-            lines.append(f"- _{speaker} → 夜行動: {u.target}_ ({u.text})")
-        elif u.kind in ("wolf_chat", "freemason_chat"):
-            lines.append(f"- `[{u.kind}]` {speaker}: {u.text}")
-        elif u.kind == "summary":
-            lines.append(f"- _要約_: {u.text}")
-
-    lines.append("\n## システム記録\n")
-    names = transcript.names
-    for death in transcript.final_state.get("death_records", []):
-        pid = death["player_id"]
-        lines.append(
-            f"- {death['day']}日目: {names.get(pid, pid)}({pid})が"
-            f"{death['cause']}で死亡"
-        )
-    guards = {
-        (record["day"], record["target_id"])
-        for record in transcript.final_state.get("guard_records", [])
-    }
-    for attack in transcript.final_state.get("attack_records", []):
-        target = attack["target_id"]
-        guarded = (attack["day"], target) in guards
-        outcome = "護衛され失敗" if guarded else ("成功" if attack["succeeded"] else "失敗")
-        lines.append(
-            f"- {attack['day']}日目夜: {names.get(attack['wolf_id'], attack['wolf_id'])}が"
-            f"{names.get(target, target)}({target})を襲撃 → {outcome}"
-        )
-
-    if partial:
-        lines.append("\n## 結果\n\n(対戦は未完了)")
-        return "\n".join(lines) + "\n"
-    winner = transcript.final_state.get("winner")
-    reason = transcript.final_state.get("victory_reason", "")
-    lines.append(f"\n## 結果\n\n勝者: {winner} / {reason}")
-    return "\n".join(lines) + "\n"
+    return render_transcript_full(transcript, partial=partial)

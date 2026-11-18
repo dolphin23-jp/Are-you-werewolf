@@ -86,11 +86,20 @@ class StrategyAnalyzer:
         )
 
     @staticmethod
-    def _rope_count(estimated_wolves: int, alive_count: int) -> int:
-        """Rough number of daytime executions the village can still afford
-        to "miss" a wolf before wolves reach parity/majority."""
-        non_wolves = alive_count - estimated_wolves
-        return max(0, non_wolves - estimated_wolves - 1)
+    def _rope_count(
+        estimated_wolves: int, alive_count: int, *, fox_may_be_alive: bool = True
+    ) -> int:
+        """Daytime executions the village can still afford to "miss".
+
+        Executions left are (alive - 1) // 2 when every night costs a life;
+        the misses are what remains after hanging every wolf that may live and
+        the fox while it may live. The same count as the v3 board memo's 縄
+        line (`board_memo.ropes_left`). The old `alive - 2 * wolves - 1`
+        allowed nine misses on day 1 of a 17A game that allows three.
+        """
+        executions = max(0, (alive_count - 1) // 2)
+        to_hang = estimated_wolves + (1 if fox_may_be_alive else 0)
+        return max(0, executions - to_hang)
 
 
 ROLE_LABELS: dict[RoleName, str] = {

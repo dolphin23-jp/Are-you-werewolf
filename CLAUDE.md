@@ -6,7 +6,8 @@
 - Default LLM provider is `mock` (`WEREWOLF_LLM_PROVIDER=mock`) — zero cost, zero
   network. Tests always run against mock; never wire a live provider into CI.
 - The real provider is `anthropic` (`WEREWOLF_LLM_PROVIDER=anthropic`, default model
-  `claude-opus-5-5`); `luna` stays selectable but dormant. `WEREWOLF_ANTHROPIC_API_KEY`
+  `claude-sonnet-5-5` since 2026-11-16, approach-reset §11.8; `claude-opus-5-5` stays
+  selectable); `luna` stays selectable but dormant. `WEREWOLF_ANTHROPIC_API_KEY`
   lives only as a GitHub Actions secret for the manually dispatched eval workflows or
   as a Codespaces secret — never in `ci.yml`, never in a committed file. The app reads
   only `WEREWOLF_ANTHROPIC_*`, never the SDK's ambient `ANTHROPIC_*` variables.
@@ -28,6 +29,12 @@
 - Do not word prompts or wire fields as the model's 思考 / thought / reasoning: a
   request to write out its thinking can be refused as `reasoning_extraction`, and
   refusal fallbacks do not retry that.
+- Never send `thinking` (`disabled` and thinking budgets are a 400 on both Sonnet 5.5
+  and Opus 5.5), sampling parameters or a forced `tool_choice`; steer depth with
+  `output_config.effort` per call kind. Refusal fallbacks (`fallbacks="default"`)
+  re-run a declined turn on the requested model's own fallback (Sonnet 5.5 ->
+  Sonnet 5, Opus 5.5 -> Opus 5 / Opus 4.8), and the budget reserves at those rates
+  (`app/ai/provider/pricing.py`).
 - Read `docs/approach-reset-2026-10.md` §11 before changing the provider.
 - Run backend tests: `cd backend && source .venv/bin/activate && pytest`.
 - Run backend lint/types: `ruff check app tests scripts && mypy app --exclude '^app/training/torch_.*\.py$'`

@@ -200,9 +200,9 @@ def test_the_per_game_table_reads_on_a_phone() -> None:
     table = [line for line in section.splitlines() if line.startswith("| ") and "|" in line[2:]]
     header = next(line for line in table if line.startswith("| seed"))
     assert header.count("|") - 1 <= 6  # few columns: readable on a phone
-    assert "| 1 | village | 12.0 | 1:02:05 | $7.50 | 0 |" in section
+    assert "| 1 | 村人陣営 | 12.0 | 1:02:05 | $7.50 | 0 |" in section
     assert "| 2 | (中断) | 12.0 | 1:02:05 | $7.50 | 2 |" in section
-    assert "| 3 | village | 12.0 | 1:02:05 | — | — |" in section
+    assert "| 3 | 村人陣営 | 12.0 | 1:02:05 | — | — |" in section
 
 
 def test_hard_correctness_passes_only_when_every_count_is_zero() -> None:
@@ -271,3 +271,62 @@ def test_no_calls_still_shows_the_event_counters() -> None:
 def test_format_duration() -> None:
     assert format_duration(59.6) == "01:00"
     assert format_duration(3725) == "1:02:05"
+
+
+# -- ballots on a partner that a wolf-chat line was read as planning --
+
+
+def _plan(basis: str, sentence: str, *, round_number: int = 1) -> Any:
+    from app.eval.transcript import WolfAllyVotePlan
+
+    return WolfAllyVotePlan(
+        plan_id=f"g:3:{round_number}:p1:p2",
+        voter_id="p1",
+        target_id="p2",
+        day=3,
+        round_number=round_number,
+        public_evidence_ids=(),
+        story_reason=sentence,
+        strategy_reason="",
+        source_event_id="m9",
+        basis=basis,
+    )
+
+
+def _played(*plans: Any) -> list[Any]:
+    from app.eval.analyzers import AnalysisResult
+    from app.eval.transcript import GameTranscript
+
+    transcript = GameTranscript(seed=2, names={"p1": "ハルト", "p2": "ダイキ"})
+    transcript.wolf_ally_vote_plans.extend(plans)
+    return [(transcript, AnalysisResult())]
+
+
+def test_a_ballot_planned_by_a_wolf_chat_line_is_listed_with_that_line() -> None:
+    """The plan is a reading of wording, not a fact: a misread line would let a
+    betrayal pass the gate as planned, so the report shows the line it rests on."""
+    from app.eval.report import WOLF_CHAT_PLANS_HEADING
+
+    report = _render(
+        games=_played(
+            _plan("wolf_chat", "明日はダイキ吊りで決まり|仕方ない"),
+            _plan("wolf_chat", "ダイキに入れよう", round_number=2),
+        ),
+        per_game=[_game(2, hard=_zero())],
+    )
+
+    section = _section(report, HARD_CORRECTNESS_HEADING)
+    assert WOLF_CHAT_PLANS_HEADING in section
+    assert "| 2 | 3 | ハルト → ダイキ | 明日はダイキ吊りで決まり｜仕方ない |" in section
+    assert "| 2 | 3(決選2回目) | ハルト → ダイキ | ダイキに入れよう |" in section
+
+
+def test_a_ballot_planned_by_a_public_mark_is_not_listed() -> None:
+    from app.eval.report import WOLF_CHAT_PLANS_HEADING
+
+    report = _render(
+        games=_played(_plan("public_mark", "公開の黒")),
+        per_game=[_game(2, hard=_zero())],
+    )
+
+    assert WOLF_CHAT_PLANS_HEADING not in report

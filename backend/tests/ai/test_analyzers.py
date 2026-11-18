@@ -4,6 +4,8 @@ a detector that flags everything is as useless as one that flags nothing."""
 
 from __future__ import annotations
 
+from dataclasses import asdict
+
 from app.eval.analyzers import analyze
 from app.eval.transcript import GameTranscript, Utterance
 
@@ -335,6 +337,91 @@ def test_length_limit_uses_each_recorded_personality_limit():
     assert analyze(t).stats["speech"]["over_length_limit"] == 1
 
 
+_CODE_PREFIX = "占いCO。占い結果、ハルトは白(人狼ではない)です。"
+
+
+def test_length_counts_only_what_the_model_wrote():
+    """The review's len_repro.py: a seer's own 99-character line under the
+    120 cap was counted over it once code put its CO and result in front.
+    A line code wrote whole is not the model's overrun at all; a line from a
+    transcript recorded before the split counts in full, as it always did."""
+    model_line = "あ" * 99
+    t = _transcript(
+        utterances=[
+            _say(
+                "p1",
+                _CODE_PREFIX + model_line,
+                effective_length_limit=120,
+                model_text_chars=len(model_line),
+            ),
+            _say("p2", _CODE_PREFIX * 2, effective_length_limit=30, model_text_chars=0),
+            _say("p3", "い" * 130, effective_length_limit=120),
+        ]
+    )
+    assert len(_CODE_PREFIX + model_line) > 120
+
+    stats = analyze(t).stats["speech"]
+
+    assert stats["over_length_limit"] == 1  # p3's legacy line only
+    assert stats["length_lines"] == 2
+    assert stats["mean_length"] == (99 + 130) / 2
+    assert stats["max_length"] == 130
+
+
+def test_the_public_mean_length_counts_the_models_part_of_an_ai_line():
+    model_line = "あ" * 40
+    t = _transcript(
+        utterances=[
+            _say("p1", _CODE_PREFIX + model_line, model_text_chars=len(model_line)),
+            _say("p2", _CODE_PREFIX, model_text_chars=0),
+        ],
+        final_state={
+            "chat_log": [
+                {
+                    "channel": "public",
+                    "day": 1,
+                    "author_id": "p1",
+                    "content": _CODE_PREFIX + model_line,
+                },
+                {"channel": "public", "day": 1, "author_id": "p2", "content": _CODE_PREFIX},
+                {"channel": "public", "day": 1, "author_id": "p0", "content": "はい"},
+            ]
+        },
+    )
+
+    stats = analyze(t).stats["speech"]
+
+    # The code-written line is left out; the human's line counts in full.
+    assert stats["public_mean_length"] == (40 + 2) / 2
+    assert stats["public_messages_per_day"] == 3
+
+
+def test_a_transcript_recorded_before_the_split_loads_and_reads_the_whole_text():
+    item = asdict(_say("p1", _CODE_PREFIX + "あ" * 99, effective_length_limit=120))
+    del item["model_text_chars"]
+
+    t = GameTranscript.from_dict(asdict(_transcript()) | {"utterances": [item]})
+
+    assert t.utterances[0].model_text_chars is None
+    assert analyze(t).stats["speech"]["over_length_limit"] == 1
+
+
+def test_the_report_weighs_lengths_by_the_lines_the_model_wrote():
+    from app.eval.report import _render_speech_stats
+
+    t = _transcript(
+        utterances=[
+            _say("p1", _CODE_PREFIX + "あ" * 50, effective_length_limit=60, model_text_chars=50),
+            _say("p2", _CODE_PREFIX * 3, effective_length_limit=30, model_text_chars=0),
+        ]
+    )
+
+    table = _render_speech_stats([(t, analyze(t))])
+
+    assert "| 平均文字数(モデルが書いた部分) | 50.0 |" in table
+    assert "| 発言長上限超過(モデルが書いた部分) | 0 (0.0%) |" in table
+
+
 def test_clean_transcript_produces_no_findings():
     t = _transcript(
         utterances=[
@@ -511,5 +598,254 @@ def test_the_report_shows_how_often_a_candidate_moved():
 
     table = _render_speech_stats([(t, analyze(t))])
 
-    assert "疑い先の自発的な変更(疑い先の死亡による変更を除く) | 1 / 1手番" in table
+    assert (
+        "吊り先の自発的な変更(両方の手番に吊り先があり、元の吊り先が生きていた対) | "
+        "1 / 1対(全後続手番 1)" in table
+    )
     assert "うち相手の発言に返信しての変更 | 1" in table
+
+
+# -- listening, as the first Claude game showed it has to be read --
+#
+# The report counted 19 "acknowledged without change" turns in that game. On a
+# full re-read, 11 had no stated candidate on one side (so "unchanged" could
+# not be seen), 3 used 認め about somebody else's admission or an earlier
+# concession, and the rest kept the view with a stated reason. None was a
+# hollow concession (backend/artifacts/live-v3-claude-opus55-seed1-2026-11-16/
+# analysis.md, section 3).
+
+
+def test_an_acknowledgement_with_no_stated_candidate_is_not_counted_as_unmoved():
+    t = _transcript(
+        utterances=[
+            _turn("p1", "様子を見ます", None, 1),
+            _turn("p1", "確かにそうだね。さっきのはいったん引っ込めるよ", None, 1),
+            _turn("p1", "その通り。なのでユイで見ます", "p3", 1),
+        ]
+    )
+
+    stance = analyze(t).stats["stance"]
+
+    assert stance["acknowledged_without_change"] == 0
+    assert stance["target_unstated_follow_ups"] == 2
+    assert stance["target_unstated_acknowledged"] == 2
+    # The second pair went from no candidate to one, while taking a point.
+    assert stance["target_adopted_acknowledged"] == 1
+    assert stance["observable_follow_ups"] == 0
+
+
+def test_thanking_or_pointing_back_to_an_admission_is_not_taking_a_point():
+    t = _transcript(
+        utterances=[
+            _turn("p1", "ハルトが怪しい", "p2", 3),
+            _turn("p1", "ハルトさん、認めてくださってありがとう。でも変えません", "p2", 3),
+            _turn("p1", "ハルト、認めたのは評価する。ただ吊りは変えない", "p2", 3),
+            _turn("p1", "票乗りの指摘は前に認めた通り。ハルトで", "p2", 3),
+        ]
+    )
+
+    stance = analyze(t).stats["stance"]
+
+    assert stance["observable_follow_ups"] == 3
+    assert stance["acknowledged_without_change"] == 0
+
+
+def test_a_concession_that_keeps_the_view_with_a_reason_is_told_from_an_empty_one():
+    t = _transcript(
+        utterances=[
+            _turn("p1", "ハルトが怪しい", "p2", 5),
+            _turn(
+                "p1",
+                "確かにその筋は一応ありますね。でも霊媒対抗が出てないので、ハルトのままにします",
+                "p2",
+                5,
+            ),
+            _turn("p1", "なるほど、そうですね。ハルトのままで", "p2", 5),
+        ]
+    )
+
+    stance = analyze(t).stats["stance"]
+
+    assert stance["acknowledged_without_change"] == 2
+    assert stance["acknowledged_without_change_with_reason"] == 1
+    assert stance["acknowledged_without_change_no_reason"] == 1
+
+
+def test_the_observable_denominator_is_the_pairs_that_could_show_a_change():
+    t = _transcript(
+        utterances=[
+            _turn("p1", "ハルト", "p2", 1),
+            _turn("p1", "ハルトのまま", "p2", 1),  # observable, unchanged
+            _turn("p1", "ユイにする", "p3", 1),  # observable, moved
+            _turn("p1", "まだ決めきれない", None, 2),  # unstated
+            _turn("p1", "あなたで", "p0", 2),  # unstated
+            _turn("p1", "あなたのまま", "p0", 3),  # observable
+        ],
+        final_state={"winner": "village", "death_records": []},
+    )
+
+    stance = analyze(t).stats["stance"]
+
+    assert stance["follow_up_turns"] == 5
+    assert stance["observable_follow_ups"] == 3
+    assert stance["target_unstated_follow_ups"] == 2
+    assert stance["voluntary_changes"] == 1
+
+
+def test_saying_one_changes_ones_mind_counts_as_acknowledging():
+    t = _transcript(
+        utterances=[
+            _turn("p1", "灰に縄を回したい", None, 5),
+            _turn("p1", "ただアカリさんの指摘で考えを変えます。ユイ吊りに同意します", "p3", 5),
+        ]
+    )
+
+    assert analyze(t).stats["stance"]["target_adopted_acknowledged"] == 1
+
+
+def test_the_report_shows_the_observable_denominator_and_the_unstated_bucket():
+    from app.eval.report import _render_speech_stats
+
+    t = _transcript(
+        utterances=[
+            _turn("p1", "ハルト", "p2", 1),
+            _turn("p1", "確かに。でも票がそろっているので、ハルトのまま", "p2", 1),
+            _turn("p1", "まだ決めきれない", None, 1),
+        ]
+    )
+
+    table = _render_speech_stats([(t, analyze(t))])
+
+    assert "| 0 / 1対(全後続手番 2) |" in table
+    assert "うち逆接と理由を添えた部分的な譲歩 | 1 |" in table
+    assert "うち理由のない空約束 | 0 |" in table
+    assert "吊り先が片方でも空欄の対(変化を観測できない) | 1 |" in table
+
+
+# -- what the code wrote into a player's line --
+
+
+def test_fact_sentences_the_code_prepended_count_as_template_lines():
+    """`ensure_fact_sentences` prepends the canonical CO and result sentences
+    when the prose does not state them. The first Claude game had 11 such
+    lines (14%), one of them saying the same result twice; the template rate
+    counted none of them."""
+    t = _transcript(
+        utterances=[
+            _say("p1", "霊媒CO。霊媒結果、ハルトは黒(人狼)です。おはよう。霊媒結果です。"),
+            _say("p2", "占いCO。占い結果、ユイは白(人狼ではない)です。お待たせしました。"),
+            _say("p3", "占いCO。リク、そこは認める！"),
+            # The model's own claim wording, not the canonical sentence.
+            _say("p0", "霊媒師COします。まだ結果はありません。"),
+            _say("p1", "占い師CO。0日目の結果、リクは白。"),
+            _say("p2", "第二候補はユイ。"),
+        ]
+    )
+
+    stats = analyze(t).stats["speech"]
+
+    assert stats["code_fact_sentence_lines"] == 3
+    assert stats["code_fact_sentence_rate"] == 0.5
+    assert stats["prompt_template_phrase_rate"] == round(1 / 6, 4)
+    # Either source is wording no player chose.
+    assert stats["template_phrase_rate"] == round(4 / 6, 4)
+
+
+def test_a_fact_sentence_inside_the_prose_is_not_a_prefix():
+    t = _transcript(utterances=[_say("p1", "昨日の結果を言うね。霊媒CO。ハルトは黒(人狼)です。")])
+
+    assert analyze(t).stats["speech"]["code_fact_sentence_lines"] == 0
+
+
+# -- unanswered questions: no turn, or a turn without a reply link --
+
+
+def test_unanswered_questions_split_never_served_from_served_without_a_link():
+    """In the first Claude game the 35% "unanswered" was 4 questions whose
+    target never got a turn (all asked in the day-closing summary) and 10 the
+    target did get a turn for but answered without a reply link."""
+    t = _transcript(
+        utterances=[
+            _say(
+                "p1",
+                "ハルト、昨日の票は？ユイ、占い先は？あなたは？",
+                directed_question_targets=["p2", "p3", "p0"],
+            ),
+            _say("p2", "票は情報なし。"),
+        ],
+        final_state={
+            "pending_questions": {
+                "p2": [{"source_message_id": "m1", "served": True}],
+                "p3": [{"source_message_id": "m1", "served": False}],
+            },
+        },
+    )
+
+    stats = analyze(t).stats["speech"]
+
+    assert stats["unanswered_question_rate"] == round(2 / 3, 4)
+    assert stats["unanswered_never_served_rate"] == round(1 / 3, 4)
+    assert stats["unanswered_served_without_reply_link_rate"] == round(1 / 3, 4)
+
+
+def test_questions_recorded_before_served_was_kept_cannot_be_split():
+    t = _transcript(
+        utterances=[_say("p1", "ハルト、昨日の票は？", directed_question_targets=["p2"])],
+        final_state={"pending_questions": {"p2": [{"source_message_id": "m1"}]}},
+    )
+
+    stats = analyze(t).stats["speech"]
+
+    assert stats["unanswered_question_rate"] == 1.0
+    assert stats["unanswered_never_served_rate"] is None
+    assert stats["unanswered_served_without_reply_link_rate"] is None
+
+
+# -- echo: the next seat restating the line before it --
+
+
+def test_adjacent_lines_that_restate_each_other_are_measured_on_their_own():
+    """The all-pairs overlap averaged a restatement away (0.04% in the first
+    Claude game). The next seat repeating the line before it is the echo a
+    reader notices, so adjacent lines are measured apart."""
+    restated = "1日目夜に占われたのはシオンとソウタだけなので、溶けたのはソウタだけ。"
+    t = _transcript(
+        utterances=[
+            _say("p1", restated, day=3),
+            _say("p2", "リクの整理、確かに。" + restated, day=3),
+            _say("p3", "ではハルトに質問。昨日の票の理由は？", day=3),
+            # Another day: never an adjacent pair with the line before it.
+            _say("p0", "ではハルトに質問。昨日の票の理由は？", day=4),
+        ]
+    )
+
+    stats = analyze(t).stats["speech"]
+
+    assert stats["adjacent_pairs"] == 2
+    assert stats["adjacent_overlap_rate"] == 0.5
+    assert stats["adjacent_mean_jaccard"] > stats["cross_player_mean_jaccard"]
+    (example,) = stats["adjacent_overlap_examples"]
+    assert example["day"] == 3 and example["second"] == "p2"
+
+
+# -- the discussion stage of each line --
+
+
+def test_utterances_without_a_recorded_stage_report_none():
+    """Transcripts do not record the discussion stage yet; the stat says so
+    instead of reporting an empty breakdown as if every line were stageless."""
+    t = _transcript(utterances=[_say("p1", "様子見。")])
+
+    assert analyze(t).stats["speech"]["utterances_by_stage"] is None
+
+
+def test_a_recorded_stage_is_counted_per_stage():
+    first, second = _say("p1", "おはよう。"), _say("p2", "まとめます。")
+    first.stage = "immediate"  # type: ignore[attr-defined]
+    second.stage = "consensus_summary"  # type: ignore[attr-defined]
+    t = _transcript(utterances=[first, second])
+
+    assert analyze(t).stats["speech"]["utterances_by_stage"] == {
+        "immediate": 1,
+        "consensus_summary": 1,
+    }

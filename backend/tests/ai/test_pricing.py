@@ -13,14 +13,78 @@ from app.ai.provider.pricing import (
     cost_usd,
     is_same_model,
     price_for,
+    refusal_fallback_models,
+    worst_case_price,
 )
+from app.config import DEFAULT_ANTHROPIC_MODEL
 
 
-def test_the_default_model_has_its_verified_list_price():
+def test_the_default_model_has_a_known_price():
+    # A default the table did not know would be priced at its dearest row.
+    assert price_for(DEFAULT_ANTHROPIC_MODEL)[1] is True
+
+
+def test_opus_5_5_has_its_verified_list_price():
     price, known = price_for("claude-opus-5-5")
     assert known is True
     assert price == ModelPrice(
         input=4.0, cache_write_5m=5.0, cache_write_1h=8.0, cache_read=0.20, output=20.0
+    )
+
+
+def test_sonnet_5_5_has_its_verified_list_price():
+    price, known = price_for("claude-sonnet-5-5")
+    assert known is True
+    assert price == ModelPrice(
+        input=2.0, cache_write_5m=2.50, cache_write_1h=4.0, cache_read=0.10, output=10.0
+    )
+
+
+def test_sonnet_5_the_sonnet_fallback_has_its_own_row():
+    # Same rates as Sonnet 5.5 except cache reads, at twice Sonnet 5.5's.
+    assert price_for("claude-sonnet-5") == (ModelPrice(2.0, 2.50, 4.0, 0.20, 10.0), True)
+    # `claude-sonnet-5` is a prefix of `claude-sonnet-5-5`; the longer key wins.
+    assert price_for("claude-sonnet-5-5-20261101")[0] == STANDARD_PRICES["claude-sonnet-5-5"]
+    assert price_for("claude-sonnet-5-20260601")[0] == STANDARD_PRICES["claude-sonnet-5"]
+
+
+@pytest.mark.parametrize(
+    ("requested", "fallbacks"),
+    [
+        ("claude-sonnet-5-5", ("claude-sonnet-5",)),
+        ("claude-sonnet-5-5-20261101", ("claude-sonnet-5",)),
+        ("claude-opus-5-5", ("claude-opus-5", "claude-opus-4-8")),
+        # No server-side fallback exists for Haiku 5.5.
+        ("claude-haiku-5-5", ()),
+    ],
+)
+def test_the_refusal_fallbacks_follow_the_requested_model(
+    requested: str, fallbacks: tuple[str, ...]
+):
+    assert refusal_fallback_models(requested) == fallbacks
+
+
+def test_an_unknown_model_may_fall_back_to_any_known_fallback_model():
+    union = refusal_fallback_models("claude-opus-9")
+    assert set(union) == {"claude-sonnet-5", "claude-opus-5", "claude-opus-4-8"}
+
+
+def test_every_fallback_model_is_priced():
+    for model in refusal_fallback_models("an-unknown-model"):
+        assert price_for(model)[1] is True, model
+
+
+def test_the_worst_case_price_covers_the_requested_model_and_its_fallbacks():
+    sonnet = worst_case_price("claude-sonnet-5-5", fallbacks=True)
+    assert sonnet == ModelPrice(2.0, 2.50, 4.0, 0.20, 10.0)
+    assert worst_case_price("claude-sonnet-5-5", fallbacks=False) == (
+        STANDARD_PRICES["claude-sonnet-5-5"]
+    )
+    assert worst_case_price("claude-opus-5-5", fallbacks=True) == STANDARD_PRICES["claude-opus-5"]
+    # An unknown model is priced at the dearest row, and may fall back anywhere.
+    dearest = max(STANDARD_PRICES.values(), key=lambda p: p.output)
+    assert worst_case_price("claude-opus-9", fallbacks=True) == dearest.elementwise_max(
+        STANDARD_PRICES["claude-opus-5"]
     )
 
 

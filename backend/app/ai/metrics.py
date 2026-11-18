@@ -16,11 +16,12 @@ import statistics
 import threading
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from time import perf_counter
 from typing import Any
 
+from app.ai.call_context import current_call_context
 from app.ai.provider.pricing import is_same_model
 
 
@@ -72,6 +73,11 @@ class CallRecord:
     # not price its own calls (mock, luna).
     estimated_cost: float | None = None
     effort: str | None = None
+    # Which seat made the call and which call of the game it was, stamped from
+    # `app.ai.call_context` when the record is stored. They join a record to
+    # the prompt the evaluation log saved for it; None outside a labelled call.
+    seat_id: str | None = None
+    call_index: int | None = None
 
     @property
     def succeeded(self) -> bool:
@@ -149,6 +155,17 @@ class MetricsCollector:
         return merged
 
     def record(self, record: CallRecord) -> None:
+        context = current_call_context()
+        if (record.seat_id is None and context.seat_id is not None) or (
+            record.call_index is None and context.call_index is not None
+        ):
+            record = replace(
+                record,
+                seat_id=record.seat_id if record.seat_id is not None else context.seat_id,
+                call_index=(
+                    record.call_index if record.call_index is not None else context.call_index
+                ),
+            )
         with self._lock:
             self.records.append(record)
 

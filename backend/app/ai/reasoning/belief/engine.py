@@ -52,8 +52,8 @@ from app.ai.reasoning.belief.utility import (
     execution_utility,
     guard_utility,
 )
-from app.ai.reasoning.facts import MEDIUM_RESULT, PublicFactLedger
-from app.ai.reasoning.observations import ObservationSet
+from app.ai.reasoning.facts import MEDIUM_RESULT, PublicFactLedger, PublicResultFact
+from app.ai.reasoning.observations import ObservationSet, PublicVerdict
 from app.ai.reasoning.perspectives import Perspective
 from app.ai.reasoning.solver.backend import Certainty, has_role
 from app.ai.reasoning.solver.queries import RoleSolver
@@ -261,7 +261,7 @@ class BeliefEngine:
         # Retractions and corrections happen mid-game, and a reason that outlives
         # its fact is the same failure as a misremembered vote, only quieter.
         self.synchronise_public_facts(ledger, observations)
-        self._derive_verdict_evidence(ledger)
+        self._derive_verdict_evidence(ledger, observations)
         self._derive_claim_evidence(ledger)
         self._derive_majority_pressure(ledger)
         if observations is not None:
@@ -341,8 +341,23 @@ class BeliefEngine:
             pid for pid, alive in observations.alive.items() if alive
         )
 
-    def _derive_verdict_evidence(self, ledger: PublicFactLedger) -> None:
-        for result in ledger.public_results():
+    def _derive_verdict_evidence(
+        self, ledger: PublicFactLedger, observations: ObservationSet | None = None
+    ) -> None:
+        """One reason per published verdict, dated as the projection dates it.
+
+        The ledger's standing version of a verdict said again on a later day,
+        without a night, carries that later day; read as is, the explanation
+        says it was published today about last night. `observations` dates it
+        by the statement it repeats (`ObservationSet.verdicts`), so it is read
+        from there whenever it is supplied. The evidence id is keyed on the
+        verdict alone, so an engine that already read the original keeps its
+        record either way; only a fresh engine depended on this.
+        """
+        verdicts: Sequence[PublicVerdict | PublicResultFact] = (
+            observations.verdicts if observations is not None else ledger.public_results()
+        )
+        for result in verdicts:
             ability = "霊媒" if result.result_type == MEDIUM_RESULT else "占い"
             colour = "黒" if result.is_werewolf else "白"
             base = (

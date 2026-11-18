@@ -12,11 +12,12 @@ import asyncio
 from app.ai.coordinator import AICoordinator
 from app.ai.provider.mock import MockProvider
 from app.ai.reasoning.belief import EvidenceRecord, vote_fact_id
+from app.ai.reasoning.facts import PublicFactLedger
 from app.ai.reasoning.runtime import (
     MAX_OPENING_SPEAKERS,
-    MIN_OPENING_SPEAKERS,
     ReasoningRuntime,
 )
+from app.ai.reasoning.summaries import day_results_and_claims
 from app.engine.phases import Phase
 from app.engine.roles import RoleName
 from app.engine.state import ChatChannel, ChatMessage, VoteRecord
@@ -100,8 +101,11 @@ def test_only_a_handful_of_seats_open_the_day():
 
     speakers = runtime.select_opening_speakers(state)
 
-    assert MIN_OPENING_SPEAKERS <= len(speakers) <= MAX_OPENING_SPEAKERS
+    # Three seats without a CO, beside the duty speakers the coordinator adds
+    # (seed-1 review: the old three-to-five counted the duty seats in).
+    assert len(speakers) == MAX_OPENING_SPEAKERS == 3
     assert len(set(speakers)) == len(speakers)
+    assert "p4" not in speakers  # the seer CO is not a gray seat
 
 
 def test_speech_value_prefers_the_seats_with_something_to_say():
@@ -499,5 +503,6 @@ def test_under_v3_no_split_is_reported_because_stated_targets_are_private():
 
     assert any("割れている" in point for point in v2_points)
     assert not any("割れている" in point for point in v3_points)
-    # The public facts are still summarised.
-    assert [p for p in v2_points if "割れている" not in p] == v3_points
+    # v3 lists the day's own COs and verdicts only, dated by the night they are
+    # about (review 1-D3); the board memo carries the rest every turn.
+    assert v3_points == day_results_and_claims(PublicFactLedger(state), state.day)

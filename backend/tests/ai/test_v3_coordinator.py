@@ -179,12 +179,12 @@ def test_the_vote_prompt_tells_the_model_what_it_said():
     asyncio.run(coordinator._cast_vote(controller, state, speaker))
 
     _schema, _system, user = next(p for p in provider.prompts if p[0] is VoteOutput)
-    assert f"【昼にあなたが推した吊り先】{state.players[rogue].name}" in user
+    assert f"【今日のメモの吊り先】{state.players[rogue].name}" in user
     assert MEMO_HEADING in user
 
 
 def _stated_line(user: str) -> str:
-    heading = "【昼にあなたが推した吊り先】"
+    heading = "【今日のメモの吊り先】"
     return next(line for line in user.splitlines() if line.startswith(heading))
 
 
@@ -202,7 +202,7 @@ def test_yesterdays_candidate_is_neither_shown_nor_compared():
 
     assert state.pending_votes[speaker] == other
     _schema, _system, user = next(p for p in provider.prompts if p[0] is VoteOutput)
-    assert _stated_line(user) == "【昼にあなたが推した吊り先】特に名指ししていない"
+    assert _stated_line(user) == "【今日のメモの吊り先】なし"
     assert coordinator.validation.vote_plan_mismatches == []
 
 

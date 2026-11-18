@@ -113,6 +113,18 @@ def _omit_description(schema: dict[str, Any]) -> None:
     schema.pop("description", None)
 
 
+def _plan_note_before_message(schema: dict[str, Any]) -> None:
+    """The v3 discussion schema as sent: the plan note is required, ahead of
+    the message, so the model writes it first.
+
+    Only the sent schema says so. Parsing keeps the note's default, so an
+    answer without one (the prompt-embedded `json_object` path is not
+    grammar-enforced) still validates instead of costing the turn.
+    """
+    _omit_description(schema)
+    schema["required"] = ["plan_note", "public_message"]
+
+
 # PlanNote field -> ReasoningMemo field. One table, so the wire conversion and
 # the prompt's echo of the previous memo cannot drift apart.
 PLAN_NOTE_MEMO_FIELDS: dict[str, str] = {
@@ -140,12 +152,15 @@ class PlanNote(BaseModel):
 
     model_config = ConfigDict(json_schema_extra=_omit_description)
 
+    # `plan` (the comparison of candidates) before `execution_target` (the
+    # pick), for the same reason the note precedes the message: optional
+    # properties are emitted in schema order.
+    plan: str = ""
     execution_target: str | None = None
     suspects: list[str] = Field(default_factory=list)
     trusted: list[str] = Field(default_factory=list)
     trusted_seer: str | None = None
     fox_candidates: list[str] = Field(default_factory=list)
-    plan: str = ""
     team_plan: str = ""
 
     def to_memo(self) -> ReasoningMemo:
@@ -174,17 +189,22 @@ class ChatDiscussionOutput(BaseModel):
     counted, and Anthropic structured outputs refuse a request whose schema has
     more than 24 optional or 16 union-typed parameters ("Schema is too complex
     for compilation", a 400 no retry can fix). The v3 prompt asks for a small
-    subset anyway, so the wire form is exactly that subset (18 optional, 6
+    subset anyway, so the wire form is exactly that subset (17 optional, 6
     union, pinned by tests/ai/test_schema_complexity.py). Every caller still
     receives a `DiscussionOutput` through `to_discussion_output`, which leaves
     the fields v3 does not request at their defaults.
     """
 
-    model_config = ConfigDict(json_schema_extra=_omit_description)
+    model_config = ConfigDict(json_schema_extra=_plan_note_before_message)
 
+    # Order matters on the wire: Anthropic structured outputs emit required
+    # properties first, in schema order, then the optional ones. The note comes
+    # first so the candidates are compared before the line is committed --
+    # with low effort a model may do no thinking at all, and a message written
+    # before its own plan cannot follow from it. See `_plan_note_before_message`.
+    plan_note: PlanNote = Field(default_factory=PlanNote)
     public_message: str
     reply_to: str | None = None
-    plan_note: PlanNote = Field(default_factory=PlanNote)
     public_claim_role: str | None = None
     public_results: list[PublicResultClaim] = Field(default_factory=list)
     directed_questions: list[DirectedQuestion] = Field(default_factory=list)
@@ -239,17 +259,38 @@ class MorningIntentOutput(BaseModel):
     priority_reason: str = ""
 
 
+def _evidence_before_ballot(schema: dict[str, Any]) -> None:
+    """The vote as sent: what decided it is required and written first, then
+    the target. With the target the only required property, and first, the
+    ballot was fixed before any reason existed, and a reason written after it
+    could argue against it (seed-1 review R4, 2-A3). Parsing keeps the default,
+    as for the plan note (see `_plan_note_before_message`)."""
+    _omit_description(schema)
+    schema["required"] = ["decisive_evidence", "vote_target"]
+
+
+def _reason_before_target(schema: dict[str, Any]) -> None:
+    """A night action as sent: the reason first, then the target it leads to."""
+    _omit_description(schema)
+    schema["required"] = ["reason", "target"]
+
+
 class VoteOutput(BaseModel):
+    model_config = ConfigDict(json_schema_extra=_evidence_before_ballot)
+
+    # Declaration order is the order on the wire; see `_evidence_before_ballot`.
+    decisive_evidence: str = ""
     vote_target: str
     reason: str = ""
-    decisive_evidence: str = ""
     countercase: str = ""
     alternative_target: str | None = None
 
 
 class NightActionOutput(BaseModel):
-    target: str
+    model_config = ConfigDict(json_schema_extra=_reason_before_target)
+
     reason: str = ""
+    target: str
 
 
 class WolfChatOutput(BaseModel):

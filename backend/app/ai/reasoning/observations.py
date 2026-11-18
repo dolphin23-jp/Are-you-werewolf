@@ -13,11 +13,12 @@ what it means live in the solver.
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 
-from app.ai.reasoning.facts import PublicFactLedger
+from app.ai.reasoning.facts import PublicFactLedger, PublicResultFact, ResultVersion
 from app.engine.roles import RoleName
+from app.engine.speech_events import ResultStatus
 from app.engine.state import DeathCause, GameState
 
 
@@ -179,16 +180,7 @@ class ObservationSet:
                 for claim in ledger.co_declarations()
             ),
             verdicts=tuple(
-                PublicVerdict(
-                    claimant_id=result.claimant_id,
-                    result_type=result.result_type,
-                    target_id=result.target_id,
-                    is_werewolf=result.is_werewolf,
-                    day=result.day,
-                    source_message_id=result.source_message_id,
-                    referenced_day=result.referenced_day,
-                )
-                for result in ledger.public_results()
+                _dated_by_first_statement(ledger, result) for result in ledger.public_results()
             ),
             executed_ids=ledger.executed_ids(),
             executions=tuple(
@@ -320,6 +312,76 @@ class ObservationSet:
                 if pid != player_id and self.true_roles[pid] == role
             )
         return SeatKnowledge(player_id=player_id, self_role=role, ally_ids=allies)
+
+
+def _dated_by_first_statement(ledger: PublicFactLedger, result: PublicResultFact) -> PublicVerdict:
+    """The standing verdict, dated by the statement it repeats.
+
+    The engine keeps every version of a published result and drops only a
+    same-day repeat, so a seer who mentions yesterday's white again today --
+    without naming the night -- leaves a standing version dated today. Read as
+    is, that is a result for *last* night: the curse arithmetic loses the night
+    it was really about, and the timeline check reports two divinations on one
+    night that nobody made. Saying a verdict again is not a new verdict
+    (docs/real_game_log_reasoning_plan.md, principle 3), so a plain restatement
+    takes the publication day, night and source message of the run of
+    same-colour statements it continues. Naming the same night again ("昨日も
+    言ったが1日目の夜はp2黒") is still a restatement. A correction, a
+    re-publication after a retraction, and a restatement that names a
+    different night are new statements and keep their own date.
+    """
+    day, referenced, source = result.day, result.referenced_day, result.source_message_id
+    run = _restatement_run(
+        ledger.result_versions(
+            claimant_id=result.claimant_id,
+            result_type=result.result_type,
+            target_id=result.target_id,
+        )
+    )
+    if len(run) > 1:
+        origin = run[0]
+        origin_night = next(
+            (v.referenced_day for v in run if v.referenced_day is not None), origin.day - 1
+        )
+        if referenced is None or referenced == origin_night:
+            day = origin.day
+            source = origin.source_message_id or source
+            referenced = next((v.referenced_day for v in run if v.referenced_day is not None), None)
+    return PublicVerdict(
+        claimant_id=result.claimant_id,
+        result_type=result.result_type,
+        target_id=result.target_id,
+        is_werewolf=result.is_werewolf,
+        day=day,
+        source_message_id=source,
+        referenced_day=referenced,
+    )
+
+
+def _restatement_run(versions: Sequence[ResultVersion]) -> list[ResultVersion]:
+    """The standing version and the unbroken run of statements it repeats, oldest first.
+
+    The run stops at a retraction, at a change of colour, and at (including) a
+    correction -- each of those began a new statement.
+    """
+    active_index = next(
+        (index for index in range(len(versions) - 1, -1, -1) if versions[index].is_active), None
+    )
+    if active_index is None:
+        return []
+    active = versions[active_index]
+    run = [active]
+    if active.corrected:
+        return run
+    for previous in reversed(versions[:active_index]):
+        if previous.status is not ResultStatus.SUPERSEDED:
+            break
+        if previous.is_werewolf != active.is_werewolf:
+            break
+        run.append(previous)
+        if previous.corrected:
+            break
+    return list(reversed(run))
 
 
 def board_version(state: GameState) -> str:

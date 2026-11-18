@@ -1,8 +1,9 @@
 """Night events: death, attack, guard, and the fox's curse.
 
 There are exactly two ways to die overnight in this ruleset -- the wolves' one
-attack, and the curse that kills a divined fox. Everything below is a
-consequence of that, and every consequence is gated on knowing *which* it was.
+attack, and the curse that kills a divined fox (night 0 included; that night has
+no attack, only the scripted first victim). Everything below is a consequence of
+that, and every consequence is gated on knowing *which* it was.
 
 The table cannot tell. A corpse in the morning is an attack victim or a cursed
 fox, and the public death cause deliberately collapses the two. So the public
@@ -27,10 +28,17 @@ from app.engine.roles import RoleName
 class DeathRuleModule(BaseRuleModule):
     """What the whole table can conclude from the corpses alone.
 
-    Usually nothing: one night death is an attack or a curse and there is no way
-    to tell. Two on the same night is the exception -- there is only one attack
-    and only one curse per night, so one of the two was the fox. That is public,
-    exact, and worth a great deal.
+    Usually little: one night death is an attack or a curse and there is no way
+    to tell which. What is public and exact:
+
+    * A night corpse is not a wolf. The attack only reaches a non-wolf (the
+      engine refuses a wolf target since 2026-11-17) and the curse only the
+      fox.
+    * Two on the same night -- there is only one attack and only one curse per
+      night, so one of the two was the fox.
+    * Any night death on night 0. There is no attack that night (the scripted
+      first victim is announced as such and is not in `night_deaths`), so the
+      only other way to die is the curse, and the corpse is the fox.
     """
 
     module_id = "death"
@@ -43,6 +51,28 @@ class DeathRuleModule(BaseRuleModule):
     ) -> None:
         for night in observations.nights_with_deaths():
             deaths = observations.deaths_on(night)
+            for death in deaths if night > 0 else ():
+                self._record(
+                    builder,
+                    f"night_death_not_wolf:{night}:{death.player_id}",
+                    RoleIsNot(player_id=death.player_id, role=RoleName.WEREWOLF),
+                    (
+                        f"{night}日目の夜に死んだ{death.player_id}は、襲撃（人狼以外しか狙えない）か"
+                        "呪殺（妖狐）で死んだので、人狼ではありません。"
+                    ),
+                )
+            if night == 0:
+                for death in deaths:
+                    self._record(
+                        builder,
+                        f"night_zero_death_is_fox:{death.player_id}",
+                        RoleIs(player_id=death.player_id, role=RoleName.FOX),
+                        (
+                            f"0日目の夜は襲撃がなく、初日犠牲者のほかに死んだ{death.player_id}は"
+                            "占われて呪殺された妖狐です。"
+                        ),
+                    )
+                continue
             if len(deaths) < 2:
                 # One corpse could be either cause. Saying more here is exactly
                 # the overclaim this module exists to avoid.
@@ -141,6 +171,11 @@ class FoxCurseRuleModule(BaseRuleModule):
     A divined fox always dies that night. So the seat the seer looked at is not
     the fox if it survived, and any *other* seat that died that night is not the
     fox either -- nothing cursed it, and the attack cannot kill a fox.
+
+    "Always" includes night 0. The engine skipped the curse on that night until
+    2026-11, so a real seer who divined the fox on night 0 saw it survive and
+    this module ruled the true world out from their own seat; the engine now
+    curses on night 0 too (`NightResolver.resolve_day_zero`), and the two agree.
     """
 
     module_id = "fox_curse"

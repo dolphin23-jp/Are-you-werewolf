@@ -414,11 +414,18 @@ def ensure_fact_sentences(
     Without this a structured verdict either goes unpublished (silently losing
     the result) or is published while the visible message never says it, which
     leaves the table arguing about a claim nobody made.
+
+    A CO the speaker already holds is not announced again: the code fills in a
+    result's role every morning, and re-opening each result line with "霊媒CO。"
+    for a CO made days ago is the most machine-sounding line a table hears.
     """
+    standing = ledger.claimed_role_of(speaker_id)
     missing = [
         draft.fact_sentence
         for draft in drafts
-        if draft.fact_sentence and not _states(message, draft, ledger, speaker_id=speaker_id)
+        if draft.fact_sentence
+        and not (draft.event_type is SpeechEventType.ROLE_CLAIM and draft.role == standing)
+        and not _states(message, draft, ledger, speaker_id=speaker_id)
     ]
     if not missing:
         return message
@@ -462,10 +469,105 @@ def _states(
             result.target_id == draft.target_id
             and result.is_werewolf == draft.result_is_werewolf
             for result in published
+        ) or _says_declared_verdict(
+            message,
+            draft.target_id,
+            bool(draft.result_is_werewolf),
+            ledger,
+            speaker_id=speaker_id,
         )
     if draft.target_id is not None:
         return mentions_player(message, draft.target_id, ledger.name_of(draft.target_id))
     return True
+
+
+# What may stand between a target's name and the verdict when a sentence states
+# that verdict: an honorific, a particle, the result noun or the divination verb,
+# punctuation and quotes. Anything else -- another name, an opinion -- ends the
+# gap, and the verdict is then not read as being about this player. "Xの" alone
+# is left out on purpose: "Xの占い結果" is X's own divination, and "Xの黒要素"
+# is an impression.
+_VERDICT_GAP_RE = re.compile(
+    r"(?:"
+    r"\(p\d+\)|さん|くん|君|ちゃん|氏"
+    r"|を占(?:いました|った|って)"
+    r"|(?:占い|霊媒|霊能|霊)(?:の)?(?:結果|判定)|の?(?:結果|判定)"
+    r"|で(?=[、，,])"
+    r"|は|が|も|=|＝|:|：|→"
+    r"|[、，,。\s「『\"“(（]"
+    r")*"
+)
+_LOOSE_WHITE = r"人狼(?:では|じゃ)(?:な(?:い|かった)|ありません(?:でした)?)|人間|村人|白|○|シロ"
+_LOOSE_BLACK = r"人狼|黒|●|クロ"
+_LOOSE_VERDICT_RE = re.compile(rf"(?P<white>{_LOOSE_WHITE})|(?P<black>{_LOOSE_BLACK})")
+# Right after the colour, these turn it into an impression ("黒っぽい", "白寄り",
+# "黒目"), a side ("人狼側"), a negation or a hypothetical ("黒なら").
+_VERDICT_TAIL_REJECT_RE = re.compile(
+    r"^[」』\"”)）]*(?:っぽ|ぽい|寄り|より|目|め|く見|い|視|要素|印象|すぎ|過ぎ|塗|置き|位置"
+    r"|側|陣営|候補|確|では|じゃ|なら|だったら|だとしたら|として|かも|と思|だと思|に見)"
+)
+# Anywhere in the rest of the sentence, these make the whole verdict a guess.
+_VERDICT_HEDGE_RE = re.compile(
+    r"と思|に見え|かもしれ|可能性|気がする|はず|でしょう|だろう|なら|だったら|としたら"
+)
+_SENTENCE_END_RE = re.compile(r"[。！？!?\n]")
+
+
+def _says_declared_verdict(
+    message: str,
+    target_id: str,
+    is_werewolf: bool,
+    ledger: PublicFactLedger,
+    *,
+    speaker_id: str,
+) -> bool:
+    """Whether the prose already says this declared result in its own words.
+
+    `detect_public_results` reads free text, where a loose reading would put a
+    result on the record nobody published, so it accepts only the compact forms.
+    Here the result is already declared in the structured output; the only
+    question is whether the prose says it too, and the cost of a miss is the
+    same result heard twice. So the everyday ways of saying it count --
+    「Xさんは「黒」でした」, 「Xを占って、結果は黒です」, 「占いはXさんで、白でした」 --
+    while an impression, a hypothetical, the opposite colour or someone else's
+    quoted verdict still gets the canonical sentence.
+    """
+    name = ledger.name_of(target_id)
+    if not name:
+        return False
+    others = sorted(
+        (
+            ledger.name_of(pid)
+            for pid in ledger.known_player_ids()
+            if pid not in (target_id, speaker_id) and ledger.name_of(pid)
+        ),
+        key=len,
+        reverse=True,
+    )
+    quoted_owner = (
+        re.compile(
+            rf"(?:{'|'.join(re.escape(other) for other in others)})"
+            r"(?:さん|くん|君|ちゃん|氏)?(?:の|→)\s*$"
+        )
+        if others
+        else None
+    )
+    for match in re.finditer(rf"(?<![0-9A-Za-z]){re.escape(name)}(?![0-9])", message):
+        if quoted_owner is not None and quoted_owner.search(message[: match.start()]):
+            continue
+        gap = _VERDICT_GAP_RE.match(message, match.end())
+        position = gap.end() if gap is not None else match.end()
+        verdict = _LOOSE_VERDICT_RE.match(message, position)
+        if verdict is None or (verdict.group("black") is not None) != is_werewolf:
+            continue
+        rest = message[verdict.end() :]
+        if _VERDICT_TAIL_REJECT_RE.match(rest):
+            continue
+        sentence_end = _SENTENCE_END_RE.search(rest)
+        if _VERDICT_HEDGE_RE.search(rest[: sentence_end.start()] if sentence_end else rest):
+            continue
+        return True
+    return False
 
 
 # -- registration --

@@ -232,8 +232,8 @@ export const ROLE_DEFINITIONS_JA: Record<RoleName, string> = {
   werewolf: "夜に仲間と相談し襲撃先を決定する",
   madman: "人狼陣営。特殊能力はないが人狼の勝利を助ける",
   seer: "毎夜1人を占い人狼か判定する",
-  medium: "処刑者の正体を自動で知る",
-  hunter: "2日目夜から毎夜1人を護衛する",
+  medium: "処刑された人が人狼かどうかを自動で知る",
+  hunter: "1日目夜から毎夜1人を護衛する（自分は不可・連続護衛は可）",
   fox: "占われると呪殺される。生き残れば勝利する",
   freemason: "相方と確定白として協調する",
 };

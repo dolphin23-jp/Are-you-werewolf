@@ -34,6 +34,7 @@ from app.ai.schemas import (
     VoteOutput,
     WolfChatOutput,
 )
+from app.config import DEFAULT_ANTHROPIC_MODEL
 
 API_KEY = "test-key"
 BASE_URL = "https://example.invalid"
@@ -188,10 +189,33 @@ async def test_request_shape_matches_the_api_contract():
     output_format = body["output_config"]["format"]
     assert output_format["type"] == "json_schema"
     assert output_format["schema"]["additionalProperties"] is False
-    assert output_format["schema"]["required"] == ["vote_target"]
+    # The deciding evidence is required and precedes the target (review R4).
+    assert output_format["schema"]["required"] == ["decisive_evidence", "vote_target"]
     assert body["output_config"]["effort"] == "medium"
     assert "fallbacks" not in body
     assert FALLBACK_BETA not in server.requests[0].headers.get("anthropic-beta", "")
+
+
+async def test_the_default_sonnet_request_is_one_the_model_accepts():
+    """Sonnet 5.5 (the default since 2026-11-16) answers 400 to `thinking:
+    disabled`, a thinking budget, a forced `tool_choice` and non-default
+    sampling parameters, and prefers the scalar `fallbacks="default"` form.
+    The provider sends none of the four and the scalar form, with an explicit
+    effort on every call -- Sonnet 5.5's own default is `high`."""
+    server = _Server(_message(model="claude-sonnet-5-5"))
+    provider = _provider(server, model=DEFAULT_ANTHROPIC_MODEL, fallbacks=True)
+
+    assert await _vote(provider, temperature=0.3) is not None
+
+    (body,) = server.bodies
+    assert body["model"] == "claude-sonnet-5-5"
+    for rejected in ("thinking", "tool_choice", "tools", "temperature", "top_p", "top_k"):
+        assert rejected not in body
+    assert body["output_config"]["effort"] == "medium"
+    assert body["fallbacks"] == "default"
+    assert FALLBACK_BETA in server.requests[0].headers["anthropic-beta"]
+    # No prefill: the last message is the user's.
+    assert body["messages"][-1]["role"] == "user"
 
 
 async def test_a_larger_caller_budget_than_the_floor_is_kept():
@@ -324,6 +348,53 @@ async def test_a_request_with_fallbacks_reserves_a_second_attempt():
     assert without > 0.0
     assert with_fallback == pytest.approx(2 * without)
     assert budget.reserved_cost == pytest.approx(0.0)
+
+
+async def test_a_sonnet_game_reserves_at_sonnet_family_rates():
+    """A declined Sonnet 5.5 turn is re-run on Sonnet 5, not on an Opus model.
+    The fallback set used to be a fixed Opus pair, so every Sonnet call was
+    reserved at Opus 5 rates -- 2 x 12000 output tokens at $25 per million,
+    $0.60 before any input -- and a per-game cap refused calls whose real
+    worst case was well under it."""
+    reserved: list[float] = []
+    budget = EvaluationBudget(max_requests=10, max_estimated_cost=0.40)
+
+    def served(request: httpx2.Request) -> httpx2.Response:
+        reserved.append(budget.reserved_cost)
+        return _message(model="claude-sonnet-5-5")
+
+    server = _Server(served)
+    provider = _provider(server, model="claude-sonnet-5-5", fallbacks=True)
+    provider.set_request_budget(budget)
+
+    assert await _vote(provider) is not None
+
+    (in_flight,) = reserved
+    sonnet_family = price_for("claude-sonnet-5-5")[0].elementwise_max(
+        price_for("claude-sonnet-5")[0]
+    )
+    output_part = 2 * cost_usd(sonnet_family, output_tokens=12000)
+    # Two attempts' output at Sonnet-family rates, plus a few cents of input.
+    assert output_part <= in_flight < output_part + 0.01
+    assert server.bodies[0]["fallbacks"] == "default"
+
+
+async def test_an_opus_game_still_reserves_for_its_opus_fallbacks():
+    reserved: list[float] = []
+    budget = EvaluationBudget(max_requests=10, max_estimated_cost=5.0)
+
+    def served(request: httpx2.Request) -> httpx2.Response:
+        reserved.append(budget.reserved_cost)
+        return _message()
+
+    provider = _provider(_Server(served), model="claude-opus-5-5", fallbacks=True)
+    provider.set_request_budget(budget)
+
+    assert await _vote(provider) is not None
+
+    (in_flight,) = reserved
+    # Opus 5.5 declines are re-run on Opus 5 or Opus 4.8, the dearer rows.
+    assert in_flight >= 2 * cost_usd(price_for("claude-opus-5")[0], output_tokens=12000)
 
 
 # --- credentials and endpoint are ours, never the environment's --------------

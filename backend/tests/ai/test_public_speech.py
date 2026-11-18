@@ -1,3 +1,5 @@
+import pytest
+
 from app.ai.public_speech import (
     DetectedPublicResult,
     detect_public_result,
@@ -116,3 +118,52 @@ def test_an_addressee_before_the_verdict_does_not_take_ownership_of_it():
     # "アカリ、" is who is being spoken to, not whose result it is.
     assert _verdicts("占いCO。アカリ、ソウタ白でした。", role_claimed=True) == [("p4", False)]
     assert _verdicts("占い結果はアカリ白、ダイキ黒でした。") == [("p1", False), ("p12", True)]
+
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "ソウタは黒っぽい。",
+        "ソウタは白っぽいけど保留。",
+        "ソウタが黒なら吊る。",
+        "ソウタは黒寄り。",
+        "ソウタは黒目。",
+        "ソウタは人狼側。",
+        "ソウタは黒ではない。",
+        "ソウタは人狼だったら怖い。",
+        "ソウタは人狼だとしたら票が合わない。",
+        "ソウタが人狼でしたら吊ります。",
+        "ソウタは人狼ではないなら誰が狼か。",
+    ],
+)
+def test_an_impression_or_a_hypothetical_is_not_a_published_result(text: str) -> None:
+    """A colour followed by an impression, a side, a negation or a condition is
+    talk about the target, not a result. Each of these used to register as a
+    binding verdict on the public record."""
+    assert (
+        detect_public_results(
+            text, RoleName.SEER, {"p5": "ソウタ"}, role_claimed_in_message=True
+        )
+        == []
+    )
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("ソウタは黒でした。", [("p5", True)]),
+        ("ソウタは人狼です。", [("p5", True)]),
+        ("ソウタは人狼だ。", [("p5", True)]),
+        ("ソウタは人狼ではなかった。", [("p5", False)]),
+        ("ソウタ●、ケント○", [("p5", True), ("p6", False)]),
+        ("ソウタは黒、ケントは白でした。", [("p5", True), ("p6", False)]),
+        ("ソウタを占って、黒。", [("p5", True)]),
+    ],
+)
+def test_a_plain_verdict_is_still_read(text: str, expected: list[tuple[str, bool]]) -> None:
+    found = detect_public_results(
+        text, RoleName.SEER, {"p5": "ソウタ", "p6": "ケント"}, role_claimed_in_message=True
+    )
+
+    assert [(item.target_id, item.is_werewolf) for item in found] == expected

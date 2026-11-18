@@ -233,7 +233,12 @@ def test_question_topic_ledger_is_seeded_from_existing_pending_questions():
     assert (1, "p2", "claim_reason") in coordinator._asked_question_topics
 
 
-def test_concentrated_pressure_schedules_a_minority_review_before_summary():
+def test_concentrated_pressure_no_longer_assigns_a_minority_reviewer():
+    # This pinned a system-assigned "minority review" turn whenever 60% of
+    # the plan notes named one seat. The owner removed it (seed-1 review,
+    # 3-A3): when talk piles onto one person, someone pushing back should
+    # emerge from the table, not be appointed by code. Every silent seat now
+    # gets its own short turn before the summary instead.
     controller = make_controller(seed=4)
     coordinator = AICoordinator(
         controller.state, ["p1", "p2", "p3", "p4"], MorningPriorityProvider(), seed=1
@@ -245,7 +250,8 @@ def test_concentrated_pressure_schedules_a_minority_review_before_summary():
         outputs.append((player_id, output))
     round_state = DiscussionRoundState(
         day=1,
-        order=[],
+        order=["p1", "p2", "p3", "p4"],
+        cursor=4,
         outputs=outputs,
         speech_counts={player_id: 1 for player_id, _output in outputs},
         major_targets_ready=True,
@@ -254,9 +260,9 @@ def test_concentrated_pressure_schedules_a_minority_review_before_summary():
 
     speaker, stage = coordinator._next_discussion_speaker(controller.state, round_state)
 
-    assert speaker in {"p1", "p2", "p3", "p4"}
-    assert stage == "minority_review:p0"
-    assert round_state.summary_done is False
+    assert speaker == "p1"
+    assert stage == "consensus_summary"
+    assert round_state.summary_done is True
 
 
 class ReplyLoopProvider:
@@ -304,7 +310,10 @@ def test_direct_reply_queue_is_globally_bounded_and_returns_control():
 
     asyncio.run(coordinator.run_discussion_round(session))
 
-    assert provider.calls <= 5
+    # Five, plus the facilitator's one provisional designation: the summary
+    # here questions only its own speaker, which names nobody, and since the
+    # seed-1 review such a summary no longer ends the day on its own.
+    assert provider.calls <= 6
     # Questions now reach targets even before their first turn; the target can
     # therefore be queued for a focused follow-up rather than being discarded.
     authors = [message.author_id for message in controller.state.chat_log]

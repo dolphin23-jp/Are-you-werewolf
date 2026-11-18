@@ -1,0 +1,115 @@
+{
+  "seed": 1,
+  "configs": [
+    "claude-opus-5-5:low",
+    "claude-opus-5-5:medium",
+    "claude-opus-5-5:low:fast",
+    "claude-sonnet-5-5:low",
+    "claude-haiku-5-5:low"
+  ],
+  "requests": 200,
+  "max_tokens_floor": 12000,
+  "captured_prompts": 181,
+  "captured_schema_counts": {
+    "ChatDiscussionOutput": 57,
+    "NightActionOutput": 14,
+    "VoteOutput": 90,
+    "WolfChatOutput": 20
+  },
+  "sample_schema_counts": {
+    "ChatDiscussionOutput": 16,
+    "VoteOutput": 12,
+    "NightActionOutput": 6,
+    "WolfChatOutput": 6
+  },
+  "sample_prompt_indices": [
+    0,
+    2,
+    3,
+    4,
+    8,
+    18,
+    27,
+    31,
+    32,
+    39,
+    46,
+    54,
+    55,
+    61,
+    69,
+    83,
+    84,
+    92,
+    94,
+    95,
+    96,
+    99,
+    101,
+    115,
+    120,
+    121,
+    125,
+    126,
+    128,
+    131,
+    135,
+    140,
+    151,
+    157,
+    161,
+    163,
+    164,
+    165,
+    175,
+    180
+  ],
+  "worst_case_usd": 49.325342,
+  "expected_usd": 8.760195,
+  "estimates": [
+    {
+      "label": "claude-opus-5-5:low",
+      "requests": 40,
+      "worst_case_usd": 10.900628,
+      "expected_usd": 1.7238,
+      "price_known": true
+    },
+    {
+      "label": "claude-opus-5-5:medium",
+      "requests": 40,
+      "worst_case_usd": 10.900628,
+      "expected_usd": 2.6838,
+      "price_known": true
+    },
+    {
+      "label": "claude-opus-5-5:low:fast",
+      "requests": 40,
+      "worst_case_usd": 21.801256,
+      "expected_usd": 3.4476,
+      "price_known": true
+    },
+    {
+      "label": "claude-sonnet-5-5:low",
+      "requests": 40,
+      "worst_case_usd": 5.450314,
+      "expected_usd": 0.8619,
+      "price_known": true
+    },
+    {
+      "label": "claude-haiku-5-5:low",
+      "requests": 40,
+      "worst_case_usd": 0.2725157,
+      "expected_usd": 0.043095,
+      "price_known": true
+    }
+  ],
+  "expected_output_tokens_assumption": {
+    "low": 800,
+    "medium": 2000,
+    "high": 4000,
+    "xhigh": 6000,
+    "max": 8000
+  },
+  "max_cost": 10.0,
+  "timing_only": true
+}

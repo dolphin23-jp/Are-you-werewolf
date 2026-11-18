@@ -1,0 +1,1114 @@
+﻿2026-11-17T15:03:24.0970557Z Current runner version: '2.338.2'
+2026-11-17T15:03:24.0996781Z ##[group]Runner Image Provisioner
+2026-11-17T15:03:24.0997709Z Hosted Compute Agent
+2026-11-17T15:03:24.0998296Z Version: 20261103.629
+2026-11-17T15:03:24.0999067Z Commit: 15dbd9ccb5dbf34fae002b6ed1a2670f52df37bc
+2026-11-17T15:03:24.0999868Z Build Date: 2026-11-03T17:26:59Z
+2026-11-17T15:03:24.1000630Z Worker ID: {e5fff5c7-9b51-4779-ba39-90bf8eaa0d28}
+2026-11-17T15:03:24.1001398Z Region: westus3
+2026-11-17T15:03:24.1001994Z Cloud: Azure
+2026-11-17T15:03:24.1002572Z ##[endgroup]
+2026-11-17T15:03:24.1004101Z ##[group]Operating System
+2026-11-17T15:03:24.1004856Z Ubuntu
+2026-11-17T15:03:24.1005403Z 26.04.1
+2026-11-17T15:03:24.1006138Z LTS
+2026-11-17T15:03:24.1006743Z ##[endgroup]
+2026-11-17T15:03:24.1007348Z ##[group]Runner Image
+2026-11-17T15:03:24.1008115Z Image: ubuntu-26.04
+2026-11-17T15:03:24.1008743Z Version: 20261111.196.1
+2026-11-17T15:03:24.1010162Z Included Software: https://github.com/actions/runner-images/blob/ubuntu26/20261111.196/images/ubuntu/Ubuntu2604-Readme.md
+2026-11-17T15:03:24.1011832Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu26%2F20261111.196
+2026-11-17T15:03:24.1012840Z ##[endgroup]
+2026-11-17T15:03:24.1014060Z ##[group]GITHUB_TOKEN Permissions
+2026-11-17T15:03:24.1016406Z Contents: read
+2026-11-17T15:03:24.1017017Z Metadata: read
+2026-11-17T15:03:24.1017681Z ##[endgroup]
+2026-11-17T15:03:24.1019823Z Secret source: Actions
+2026-11-17T15:03:24.1020985Z Cache mode: write
+2026-11-17T15:03:24.1021728Z Prepare workflow directory
+2026-11-17T15:03:24.1364236Z Prepare all required actions
+2026-11-17T15:03:24.1412628Z Getting action download info
+2026-11-17T15:03:24.4782537Z Download action repository 'actions/checkout@v4' (SHA:11d5960a326750d5838078e36cf38b85af677262)
+2026-11-17T15:03:24.6018334Z Download action repository 'actions/setup-python@v5' (SHA:a26af69be951a213d495a4c3e4e4022e16d87065)
+2026-11-17T15:03:24.6616667Z Download action repository 'actions/upload-artifact@v4' (SHA:ea165f8d65b6e75b540449e92b4886f43607fa02)
+2026-11-17T15:03:24.8526649Z Complete job name: evaluate (seed 2)
+2026-11-17T15:03:24.9416803Z ##[group]Run actions/checkout@v4
+2026-11-17T15:03:24.9417723Z with:
+2026-11-17T15:03:24.9418277Z   repository: dolphin23-jp/Are-you-werewolf
+2026-11-17T15:03:24.9422371Z   token: ***
+2026-11-17T15:03:24.9422826Z   ssh-strict: true
+2026-11-17T15:03:24.9423281Z   ssh-user: git
+2026-11-17T15:03:24.9423743Z   persist-credentials: true
+2026-11-17T15:03:24.9424243Z   clean: true
+2026-11-17T15:03:24.9424704Z   sparse-checkout-cone-mode: true
+2026-11-17T15:03:24.9425238Z   fetch-depth: 1
+2026-11-17T15:03:24.9425685Z   fetch-tags: false
+2026-11-17T15:03:24.9426288Z   show-progress: true
+2026-11-17T15:03:24.9426751Z   lfs: false
+2026-11-17T15:03:24.9427175Z   submodules: false
+2026-11-17T15:03:24.9427639Z   set-safe-directory: true
+2026-11-17T15:03:24.9428163Z   allow-unsafe-pr-checkout: false
+2026-11-17T15:03:24.9428955Z ##[endgroup]
+2026-11-17T15:03:25.1839252Z Syncing repository: dolphin23-jp/Are-you-werewolf
+2026-11-17T15:03:25.1842213Z ##[group]Getting Git version info
+2026-11-17T15:03:25.1843623Z Working directory is '/home/runner/work/Are-you-werewolf/Are-you-werewolf'
+2026-11-17T15:03:25.1845469Z [command]/usr/bin/git version
+2026-11-17T15:03:25.1858153Z git version 2.56.1
+2026-11-17T15:03:25.1888957Z ##[endgroup]
+2026-11-17T15:03:25.1918866Z Temporarily overriding HOME='/home/runner/work/_temp/92d017b0-f7c4-4c56-9712-4c1a73d97d19' before making global git config changes
+2026-11-17T15:03:25.1939470Z Adding repository directory to the temporary git global config as a safe directory
+2026-11-17T15:03:25.1942540Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/Are-you-werewolf/Are-you-werewolf
+2026-11-17T15:03:25.2008443Z Deleting the contents of '/home/runner/work/Are-you-werewolf/Are-you-werewolf'
+2026-11-17T15:03:25.2010654Z ##[group]Initializing the repository
+2026-11-17T15:03:25.2016591Z [command]/usr/bin/git init /home/runner/work/Are-you-werewolf/Are-you-werewolf
+2026-11-17T15:03:25.2163390Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-11-17T15:03:25.2165719Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-11-17T15:03:25.2167856Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-11-17T15:03:25.2169338Z hint: call:
+2026-11-17T15:03:25.2170182Z hint:
+2026-11-17T15:03:25.2171134Z hint: 	git config --global init.defaultBranch <name>
+2026-11-17T15:03:25.2172312Z hint:
+2026-11-17T15:03:25.2173390Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-11-17T15:03:25.2175052Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-11-17T15:03:25.2176624Z hint:
+2026-11-17T15:03:25.2177443Z hint: 	git branch -m <name>
+2026-11-17T15:03:25.2178338Z hint:
+2026-11-17T15:03:25.2179491Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-11-17T15:03:25.2181470Z Initialized empty Git repository in /home/runner/work/Are-you-werewolf/Are-you-werewolf/.git/
+2026-11-17T15:03:25.2208770Z [command]/usr/bin/git remote add origin https://github.com/dolphin23-jp/Are-you-werewolf
+2026-11-17T15:03:25.2271604Z ##[endgroup]
+2026-11-17T15:03:25.2273157Z ##[group]Disabling automatic garbage collection
+2026-11-17T15:03:25.2278737Z [command]/usr/bin/git config --local gc.auto 0
+2026-11-17T15:03:25.2328262Z ##[endgroup]
+2026-11-17T15:03:25.2329713Z ##[group]Setting up auth
+2026-11-17T15:03:25.2339682Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-11-17T15:03:25.2388887Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-11-17T15:03:25.2928115Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-11-17T15:03:25.2963098Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-11-17T15:03:25.3250944Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-11-17T15:03:25.3287254Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-11-17T15:03:25.3567291Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-11-17T15:03:25.3608180Z ##[endgroup]
+2026-11-17T15:03:25.3609939Z ##[group]Fetching the repository
+2026-11-17T15:03:25.3620720Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +5adb376291214fba6173d4f33275d0979dfa0758:refs/remotes/origin/claude/upbeat-rubin-be08uq
+2026-11-17T15:03:26.3790917Z From https://github.com/dolphin23-jp/Are-you-werewolf
+2026-11-17T15:03:26.3793799Z  * [new ref]         5adb376291214fba6173d4f33275d0979dfa0758 -> origin/claude/upbeat-rubin-be08uq
+2026-11-17T15:03:26.3799002Z ##[endgroup]
+2026-11-17T15:03:26.3800965Z ##[group]Determining the checkout info
+2026-11-17T15:03:26.3802862Z ##[endgroup]
+2026-11-17T15:03:26.3808582Z [command]/usr/bin/git sparse-checkout disable
+2026-11-17T15:03:26.3865642Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-11-17T15:03:26.3901923Z ##[group]Checking out the ref
+2026-11-17T15:03:26.3907181Z [command]/usr/bin/git checkout --progress --force -B claude/upbeat-rubin-be08uq refs/remotes/origin/claude/upbeat-rubin-be08uq
+2026-11-17T15:03:26.4492792Z Switched to a new branch 'claude/upbeat-rubin-be08uq'
+2026-11-17T15:03:26.4496776Z branch 'claude/upbeat-rubin-be08uq' set up to track 'origin/claude/upbeat-rubin-be08uq'.
+2026-11-17T15:03:26.4505919Z ##[endgroup]
+2026-11-17T15:03:26.4553797Z [command]/usr/bin/git log -1 --format=%H
+2026-11-17T15:03:26.4579929Z 5adb376291214fba6173d4f33275d0979dfa0758
+2026-11-17T15:03:26.5050375Z ##[group]Run actions/setup-python@v5
+2026-11-17T15:03:26.5051980Z with:
+2026-11-17T15:03:26.5053028Z   python-version: 3.12
+2026-11-17T15:03:26.5054190Z   check-latest: false
+2026-11-17T15:03:26.5064372Z   token: ***
+2026-11-17T15:03:26.5065439Z   update-environment: true
+2026-11-17T15:03:26.5066762Z   allow-prereleases: false
+2026-11-17T15:03:26.5067907Z   freethreaded: false
+2026-11-17T15:03:26.5068937Z ##[endgroup]
+2026-11-17T15:03:26.6520381Z ##[group]Installed versions
+2026-11-17T15:03:26.6618219Z (node:2372) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+2026-11-17T15:03:26.6622472Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-11-17T15:03:26.6625228Z Successfully set up CPython (3.12.16)
+2026-11-17T15:03:26.6628976Z ##[endgroup]
+2026-11-17T15:03:26.6878006Z ##[group]Run pip install -e "./backend[dev]"
+2026-11-17T15:03:26.6879195Z [36;1mpip install -e "./backend[dev]"[0m
+2026-11-17T15:03:26.7024752Z shell: /usr/bin/bash -e {0}
+2026-11-17T15:03:26.7025812Z env:
+2026-11-17T15:03:26.7026897Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-17T15:03:26.7028125Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.16/x64/lib/pkgconfig
+2026-11-17T15:03:26.7029297Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-17T15:03:26.7030410Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-17T15:03:26.7031520Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-17T15:03:26.7032638Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.16/x64/lib
+2026-11-17T15:03:26.7033655Z ##[endgroup]
+2026-11-17T15:03:28.9641003Z Obtaining file:///home/runner/work/Are-you-werewolf/Are-you-werewolf/backend
+2026-11-17T15:03:28.9665133Z   Installing build dependencies: started
+2026-11-17T15:03:29.8088676Z   Installing build dependencies: finished with status 'done'
+2026-11-17T15:03:29.8094410Z   Checking if build backend supports build_editable: started
+2026-11-17T15:03:29.8598970Z   Checking if build backend supports build_editable: finished with status 'done'
+2026-11-17T15:03:29.8608085Z   Getting requirements to build editable: started
+2026-11-17T15:03:30.0123251Z   Getting requirements to build editable: finished with status 'done'
+2026-11-17T15:03:30.0135483Z   Installing backend dependencies: started
+2026-11-17T15:03:30.4994267Z   Installing backend dependencies: finished with status 'done'
+2026-11-17T15:03:30.5003201Z   Preparing editable metadata (pyproject.toml): started
+2026-11-17T15:03:30.7103469Z   Preparing editable metadata (pyproject.toml): finished with status 'done'
+2026-11-17T15:03:30.7890783Z Collecting anthropic<3,>=2.8 (from werewolf-backend==0.1.0)
+2026-11-17T15:03:30.8127012Z   Downloading anthropic-2.9.0-py3-none-any.whl.metadata (3.6 kB)
+2026-11-17T15:03:30.8682168Z Collecting fastapi>=0.115.0 (from werewolf-backend==0.1.0)
+2026-11-17T15:03:30.8715175Z   Downloading fastapi-0.163.1-py3-none-any.whl.metadata (27 kB)
+2026-11-17T15:03:30.9508060Z Collecting openai>=1.50.0 (from werewolf-backend==0.1.0)
+2026-11-17T15:03:30.9547225Z   Downloading openai-3.52.0-py3-none-any.whl.metadata (45 kB)
+2026-11-17T15:03:30.9799483Z Collecting pydantic-settings>=2.4.0 (from werewolf-backend==0.1.0)
+2026-11-17T15:03:30.9830011Z   Downloading pydantic_settings-2.16.3-py3-none-any.whl.metadata (4.0 kB)
+2026-11-17T15:03:31.0936952Z Collecting pydantic>=2.8.0 (from werewolf-backend==0.1.0)
+2026-11-17T15:03:31.0978457Z   Downloading pydantic-2.14.3-py3-none-any.whl.metadata (141 kB)
+2026-11-17T15:03:31.1371057Z Collecting uvicorn>=0.30.0 (from uvicorn[standard]>=0.30.0->werewolf-backend==0.1.0)
+2026-11-17T15:03:31.1410603Z   Downloading uvicorn-0.54.0-py3-none-any.whl.metadata (6.6 kB)
+2026-11-17T15:03:31.2717677Z Collecting websockets>=13.0 (from werewolf-backend==0.1.0)
+2026-11-17T15:03:31.2750331Z   Downloading websockets-17.4-cp312-cp312-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl.metadata (6.3 kB)
+2026-11-17T15:03:31.3084546Z Collecting z3-solver<5,>=4.13 (from werewolf-backend==0.1.0)
+2026-11-17T15:03:31.3124929Z   Downloading z3_solver-4.16.0.0-py3-none-manylinux_2_27_x86_64.whl.metadata (602 bytes)
+2026-11-17T15:03:31.3359364Z Collecting httpx>=0.27.0 (from werewolf-backend==0.1.0)
+2026-11-17T15:03:31.3392735Z   Downloading httpx-0.28.1-py3-none-any.whl.metadata (7.1 kB)
+2026-11-17T15:03:31.4506457Z Collecting mypy>=1.11.0 (from werewolf-backend==0.1.0)
+2026-11-17T15:03:31.4545337Z   Downloading mypy-2.4.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (2.4 kB)
+2026-11-17T15:03:31.4800179Z Collecting pytest-asyncio>=0.24.0 (from werewolf-backend==0.1.0)
+2026-11-17T15:03:31.4832090Z   Downloading pytest_asyncio-1.5.0-py3-none-any.whl.metadata (4.4 kB)
+2026-11-17T15:03:31.5146501Z Collecting pytest>=8.3.0 (from werewolf-backend==0.1.0)
+2026-11-17T15:03:31.5176705Z   Downloading pytest-9.2.0-py3-none-any.whl.metadata (7.9 kB)
+2026-11-17T15:03:31.8701037Z Collecting ruff>=0.6.0 (from werewolf-backend==0.1.0)
+2026-11-17T15:03:31.8736982Z   Downloading ruff-0.17.5-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (20 kB)
+2026-11-17T15:03:31.8995834Z Collecting anyio<5,>=4.1.0 (from anthropic<3,>=2.8->werewolf-backend==0.1.0)
+2026-11-17T15:03:31.9026655Z   Downloading anyio-4.16.0-py3-none-any.whl.metadata (4.7 kB)
+2026-11-17T15:03:31.9205408Z Collecting docstring-parser<1,>=0.15 (from anthropic<3,>=2.8->werewolf-backend==0.1.0)
+2026-11-17T15:03:31.9234894Z   Downloading docstring_parser-0.18.0-py3-none-any.whl.metadata (3.5 kB)
+2026-11-17T15:03:31.9432013Z Collecting httpx2<3,>=2.0.0 (from anthropic<3,>=2.8->werewolf-backend==0.1.0)
+2026-11-17T15:03:31.9462795Z   Downloading httpx2-2.16.2-py3-none-any.whl.metadata (10.0 kB)
+2026-11-17T15:03:32.0506181Z Collecting jiter<1,>=0.4.0 (from anthropic<3,>=2.8->werewolf-backend==0.1.0)
+2026-11-17T15:03:32.0539591Z   Downloading jiter-0.19.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (5.2 kB)
+2026-11-17T15:03:32.0801673Z Collecting opentelemetry-api<2,>=1.1.0 (from anthropic<3,>=2.8->werewolf-backend==0.1.0)
+2026-11-17T15:03:32.0834122Z   Downloading opentelemetry_api-1.45.2-py3-none-any.whl.metadata (1.4 kB)
+2026-11-17T15:03:32.1021317Z Collecting sniffio<2,>=1 (from anthropic<3,>=2.8->werewolf-backend==0.1.0)
+2026-11-17T15:03:32.1053231Z   Downloading sniffio-1.3.1-py3-none-any.whl.metadata (3.9 kB)
+2026-11-17T15:03:32.1270485Z Collecting typing-extensions<5,>=4.14 (from anthropic<3,>=2.8->werewolf-backend==0.1.0)
+2026-11-17T15:03:32.1302476Z   Downloading typing_extensions-4.16.0-py3-none-any.whl.metadata (3.3 kB)
+2026-11-17T15:03:32.1632657Z Collecting idna>=2.8 (from anyio<5,>=4.1.0->anthropic<3,>=2.8->werewolf-backend==0.1.0)
+2026-11-17T15:03:32.1666406Z   Downloading idna-3.20-py3-none-any.whl.metadata (7.2 kB)
+2026-11-17T15:03:32.1884845Z Collecting httpcore2==2.16.2 (from httpx2<3,>=2.0.0->anthropic<3,>=2.8->werewolf-backend==0.1.0)
+2026-11-17T15:03:32.1915401Z   Downloading httpcore2-2.16.2-py3-none-any.whl.metadata (28 kB)
+2026-11-17T15:03:32.2113772Z Collecting truststore>=0.10 (from httpx2<3,>=2.0.0->anthropic<3,>=2.8->werewolf-backend==0.1.0)
+2026-11-17T15:03:32.2144766Z   Downloading truststore-0.10.5-py3-none-any.whl.metadata (4.5 kB)
+2026-11-17T15:03:32.2331681Z Collecting h11>=0.16 (from httpcore2==2.16.2->httpx2<3,>=2.0.0->anthropic<3,>=2.8->werewolf-backend==0.1.0)
+2026-11-17T15:03:32.2363132Z   Downloading h11-0.16.0-py3-none-any.whl.metadata (8.3 kB)
+2026-11-17T15:03:32.2550747Z Collecting annotated-types>=0.6.0 (from pydantic>=2.8.0->werewolf-backend==0.1.0)
+2026-11-17T15:03:32.2581266Z   Downloading annotated_types-0.8.0-py3-none-any.whl.metadata (15 kB)
+2026-11-17T15:03:32.9398239Z Collecting pydantic-core==2.50.4 (from pydantic>=2.8.0->werewolf-backend==0.1.0)
+2026-11-17T15:03:32.9431531Z   Downloading pydantic_core-2.50.4-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (6.6 kB)
+2026-11-17T15:03:32.9606901Z Collecting typing-inspection>=0.4.4 (from pydantic>=2.8.0->werewolf-backend==0.1.0)
+2026-11-17T15:03:32.9637657Z   Downloading typing_inspection-0.4.5-py3-none-any.whl.metadata (2.6 kB)
+2026-11-17T15:03:32.9944869Z Collecting starlette>=0.46.0 (from fastapi>=0.115.0->werewolf-backend==0.1.0)
+2026-11-17T15:03:32.9976460Z   Downloading starlette-1.10.0-py3-none-any.whl.metadata (6.6 kB)
+2026-11-17T15:03:33.0175571Z Collecting annotated-doc>=0.0.2 (from fastapi>=0.115.0->werewolf-backend==0.1.0)
+2026-11-17T15:03:33.0208619Z   Downloading annotated_doc-0.0.6-py3-none-any.whl.metadata (6.5 kB)
+2026-11-17T15:03:33.0473647Z Collecting certifi (from httpx>=0.27.0->werewolf-backend==0.1.0)
+2026-11-17T15:03:33.0503020Z   Downloading certifi-2026.10.23-py3-none-any.whl.metadata (2.5 kB)
+2026-11-17T15:03:33.0714127Z Collecting httpcore==1.* (from httpx>=0.27.0->werewolf-backend==0.1.0)
+2026-11-17T15:03:33.0744230Z   Downloading httpcore-1.0.9-py3-none-any.whl.metadata (21 kB)
+2026-11-17T15:03:33.0951119Z Collecting mypy_extensions>=1.0.0 (from mypy>=1.11.0->werewolf-backend==0.1.0)
+2026-11-17T15:03:33.0989093Z   Downloading mypy_extensions-1.2.0-py3-none-any.whl.metadata (1.1 kB)
+2026-11-17T15:03:33.1065311Z Collecting pathspec>=1.0.0 (from mypy>=1.11.0->werewolf-backend==0.1.0)
+2026-11-17T15:03:33.1077669Z   Using cached pathspec-1.1.1-py3-none-any.whl.metadata (14 kB)
+2026-11-17T15:03:33.2365740Z Collecting librt>=0.16.0 (from mypy>=1.11.0->werewolf-backend==0.1.0)
+2026-11-17T15:03:33.2403339Z   Downloading librt-0.16.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (1.3 kB)
+2026-11-17T15:03:33.2971901Z Collecting ast-serialize<1.0.0,>=0.12.1 (from mypy>=1.11.0->werewolf-backend==0.1.0)
+2026-11-17T15:03:33.3006334Z   Downloading ast_serialize-0.13.1-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (1.4 kB)
+2026-11-17T15:03:33.3300253Z Collecting python-dotenv>=1.2.2 (from pydantic-settings>=2.4.0->werewolf-backend==0.1.0)
+2026-11-17T15:03:33.3330883Z   Downloading python_dotenv-1.2.4-py3-none-any.whl.metadata (29 kB)
+2026-11-17T15:03:33.3590332Z Collecting iniconfig>=2 (from pytest>=8.3.0->werewolf-backend==0.1.0)
+2026-11-17T15:03:33.3621084Z   Downloading iniconfig-2.3.1-py3-none-any.whl.metadata (2.8 kB)
+2026-11-17T15:03:33.3717150Z Collecting packaging>=24 (from pytest>=8.3.0->werewolf-backend==0.1.0)
+2026-11-17T15:03:33.3728917Z   Using cached packaging-26.3-py3-none-any.whl.metadata (3.5 kB)
+2026-11-17T15:03:33.3783535Z Collecting pluggy<2,>=1.6 (from pytest>=8.3.0->werewolf-backend==0.1.0)
+2026-11-17T15:03:33.3795260Z   Using cached pluggy-1.7.0-py3-none-any.whl.metadata (5.0 kB)
+2026-11-17T15:03:33.4012848Z Collecting pygments>=2.15 (from pytest>=8.3.0->werewolf-backend==0.1.0)
+2026-11-17T15:03:33.4043705Z   Downloading pygments-2.21.0-py3-none-any.whl.metadata (2.5 kB)
+2026-11-17T15:03:33.4362153Z Collecting click>=7.0 (from uvicorn>=0.30.0->uvicorn[standard]>=0.30.0->werewolf-backend==0.1.0)
+2026-11-17T15:03:33.4392470Z   Downloading click-8.5.1-py3-none-any.whl.metadata (2.6 kB)
+2026-11-17T15:03:33.4828041Z Collecting httptools>=0.8.0 (from uvicorn[standard]>=0.30.0->werewolf-backend==0.1.0)
+2026-11-17T15:03:33.4859231Z   Downloading httptools-0.9.0-cp312-cp312-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl.metadata (3.5 kB)
+2026-11-17T15:03:33.5560617Z Collecting pyyaml>=5.1 (from uvicorn[standard]>=0.30.0->werewolf-backend==0.1.0)
+2026-11-17T15:03:33.5628357Z   Downloading pyyaml-6.0.3-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (2.4 kB)
+2026-11-17T15:03:33.6069803Z Collecting uvloop>=0.15.1 (from uvicorn[standard]>=0.30.0->werewolf-backend==0.1.0)
+2026-11-17T15:03:33.6106445Z   Downloading uvloop-0.23.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (5.1 kB)
+2026-11-17T15:03:33.6885836Z Collecting watchfiles>=0.20 (from uvicorn[standard]>=0.30.0->werewolf-backend==0.1.0)
+2026-11-17T15:03:33.6917745Z   Downloading watchfiles-1.3.0-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (4.9 kB)
+2026-11-17T15:03:33.7035756Z Downloading anthropic-2.9.0-py3-none-any.whl (2.5 MB)
+2026-11-17T15:03:33.7358566Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.5/2.5 MB 83.3 MB/s  0:00:00
+2026-11-17T15:03:33.7391546Z Downloading anyio-4.16.0-py3-none-any.whl (134 kB)
+2026-11-17T15:03:33.7447925Z Downloading docstring_parser-0.18.0-py3-none-any.whl (22 kB)
+2026-11-17T15:03:33.7497736Z Downloading httpx2-2.16.2-py3-none-any.whl (97 kB)
+2026-11-17T15:03:33.7550354Z Downloading httpcore2-2.16.2-py3-none-any.whl (85 kB)
+2026-11-17T15:03:33.7601057Z Downloading jiter-0.19.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (338 kB)
+2026-11-17T15:03:33.7676186Z Downloading opentelemetry_api-1.45.2-py3-none-any.whl (60 kB)
+2026-11-17T15:03:33.7729761Z Downloading pydantic-2.14.3-py3-none-any.whl (494 kB)
+2026-11-17T15:03:33.7843051Z Downloading pydantic_core-2.50.4-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (2.3 MB)
+2026-11-17T15:03:33.8071776Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.3/2.3 MB 135.6 MB/s  0:00:00
+2026-11-17T15:03:33.8104687Z Downloading sniffio-1.3.1-py3-none-any.whl (10 kB)
+2026-11-17T15:03:33.8152599Z Downloading typing_extensions-4.16.0-py3-none-any.whl (45 kB)
+2026-11-17T15:03:33.8208093Z Downloading z3_solver-4.16.0.0-py3-none-manylinux_2_27_x86_64.whl (31.7 MB)
+2026-11-17T15:03:34.0750460Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 31.7/31.7 MB 125.1 MB/s  0:00:00
+2026-11-17T15:03:34.0782212Z Downloading annotated_types-0.8.0-py3-none-any.whl (13 kB)
+2026-11-17T15:03:34.0833560Z Downloading fastapi-0.163.1-py3-none-any.whl (154 kB)
+2026-11-17T15:03:34.0887922Z Downloading annotated_doc-0.0.6-py3-none-any.whl (5.3 kB)
+2026-11-17T15:03:34.0938344Z Downloading h11-0.16.0-py3-none-any.whl (37 kB)
+2026-11-17T15:03:34.0991507Z Downloading httpx-0.28.1-py3-none-any.whl (73 kB)
+2026-11-17T15:03:34.1045324Z Downloading httpcore-1.0.9-py3-none-any.whl (78 kB)
+2026-11-17T15:03:34.1097584Z Downloading idna-3.20-py3-none-any.whl (69 kB)
+2026-11-17T15:03:34.1151407Z Downloading mypy-2.4.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (15.6 MB)
+2026-11-17T15:03:34.1614612Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 15.6/15.6 MB 348.0 MB/s  0:00:00
+2026-11-17T15:03:34.1649137Z Downloading ast_serialize-0.13.1-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (1.3 MB)
+2026-11-17T15:03:34.1709325Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.3/1.3 MB 257.2 MB/s  0:00:00
+2026-11-17T15:03:34.1738991Z Downloading librt-0.16.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (531 kB)
+2026-11-17T15:03:34.1782863Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 532.0/532.0 kB 116.6 MB/s  0:00:00
+2026-11-17T15:03:34.1812984Z Downloading mypy_extensions-1.2.0-py3-none-any.whl (5.1 kB)
+2026-11-17T15:03:34.1859811Z Downloading openai-3.52.0-py3-none-any.whl (2.4 MB)
+2026-11-17T15:03:34.1945653Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.4/2.4 MB 332.8 MB/s  0:00:00
+2026-11-17T15:03:34.1956530Z Using cached pathspec-1.1.1-py3-none-any.whl (57 kB)
+2026-11-17T15:03:34.1985836Z Downloading pydantic_settings-2.16.3-py3-none-any.whl (82 kB)
+2026-11-17T15:03:34.2036473Z Downloading pytest-9.2.0-py3-none-any.whl (411 kB)
+2026-11-17T15:03:34.2075871Z Using cached pluggy-1.7.0-py3-none-any.whl (27 kB)
+2026-11-17T15:03:34.2107707Z Downloading iniconfig-2.3.1-py3-none-any.whl (7.6 kB)
+2026-11-17T15:03:34.2135289Z Using cached packaging-26.3-py3-none-any.whl (129 kB)
+2026-11-17T15:03:34.2165121Z Downloading pygments-2.21.0-py3-none-any.whl (1.3 MB)
+2026-11-17T15:03:34.2233053Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.3/1.3 MB 224.6 MB/s  0:00:00
+2026-11-17T15:03:34.2262080Z Downloading pytest_asyncio-1.5.0-py3-none-any.whl (17 kB)
+2026-11-17T15:03:34.2312172Z Downloading python_dotenv-1.2.4-py3-none-any.whl (23 kB)
+2026-11-17T15:03:34.2364460Z Downloading ruff-0.17.5-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (10.6 MB)
+2026-11-17T15:03:34.2664702Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 10.6/10.6 MB 369.5 MB/s  0:00:00
+2026-11-17T15:03:34.2697715Z Downloading starlette-1.10.0-py3-none-any.whl (80 kB)
+2026-11-17T15:03:34.2749872Z Downloading truststore-0.10.5-py3-none-any.whl (19 kB)
+2026-11-17T15:03:34.2801162Z Downloading typing_inspection-0.4.5-py3-none-any.whl (14 kB)
+2026-11-17T15:03:34.2847800Z Downloading uvicorn-0.54.0-py3-none-any.whl (87 kB)
+2026-11-17T15:03:34.2900240Z Downloading click-8.5.1-py3-none-any.whl (126 kB)
+2026-11-17T15:03:34.2956477Z Downloading httptools-0.9.0-cp312-cp312-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl (552 kB)
+2026-11-17T15:03:34.3000400Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 552.8/552.8 kB 116.8 MB/s  0:00:00
+2026-11-17T15:03:34.3033505Z Downloading pyyaml-6.0.3-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (807 kB)
+2026-11-17T15:03:34.3083284Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 807.9/807.9 kB 172.9 MB/s  0:00:00
+2026-11-17T15:03:34.3113445Z Downloading uvloop-0.23.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (4.5 MB)
+2026-11-17T15:03:34.3248329Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 4.5/4.5 MB 379.8 MB/s  0:00:00
+2026-11-17T15:03:34.3280710Z Downloading watchfiles-1.3.0-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (458 kB)
+2026-11-17T15:03:34.3338044Z Downloading websockets-17.4-cp312-cp312-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl (226 kB)
+2026-11-17T15:03:34.3388536Z Downloading certifi-2026.10.23-py3-none-any.whl (135 kB)
+2026-11-17T15:03:34.5325397Z Building wheels for collected packages: werewolf-backend
+2026-11-17T15:03:34.5333411Z   Building editable for werewolf-backend (pyproject.toml): started
+2026-11-17T15:03:34.5693356Z   Building editable for werewolf-backend (pyproject.toml): finished with status 'done'
+2026-11-17T15:03:34.5699964Z   Created wheel for werewolf-backend: filename=werewolf_backend-0.1.0-py3-none-any.whl size=1320 sha256=a1afcf4968e53ff3cf5a699b8c7ce3cd4b5b64bd840f74c3f53758ed3922b254
+2026-11-17T15:03:34.5701761Z   Stored in directory: /tmp/pip-ephem-wheel-cache-zb0ls6v7/wheels/44/07/81/6aedc26f102b3265b0eceef4f0bc71636512d19c889ef425fa
+2026-11-17T15:03:34.5715759Z Successfully built werewolf-backend
+2026-11-17T15:03:34.6823918Z Installing collected packages: z3-solver, websockets, uvloop, typing-extensions, truststore, sniffio, ruff, pyyaml, python-dotenv, pygments, pluggy, pathspec, packaging, mypy_extensions, librt, jiter, iniconfig, idna, httptools, h11, docstring-parser, click, certifi, ast-serialize, annotated-types, annotated-doc, uvicorn, typing-inspection, pytest, pydantic-core, opentelemetry-api, mypy, httpcore2, httpcore, anyio, watchfiles, starlette, pytest-asyncio, pydantic, httpx2, httpx, pydantic-settings, openai, fastapi, anthropic, werewolf-backend
+2026-11-17T15:03:43.2674296Z 
+2026-11-17T15:03:43.2716343Z Successfully installed annotated-doc-0.0.6 annotated-types-0.8.0 anthropic-2.9.0 anyio-4.16.0 ast-serialize-0.13.1 certifi-2026.10.23 click-8.5.1 docstring-parser-0.18.0 fastapi-0.163.1 h11-0.16.0 httpcore-1.0.9 httpcore2-2.16.2 httptools-0.9.0 httpx-0.28.1 httpx2-2.16.2 idna-3.20 iniconfig-2.3.1 jiter-0.19.0 librt-0.16.0 mypy-2.4.1 mypy_extensions-1.2.0 openai-3.52.0 opentelemetry-api-1.45.2 packaging-26.3 pathspec-1.1.1 pluggy-1.7.0 pydantic-2.14.3 pydantic-core-2.50.4 pydantic-settings-2.16.3 pygments-2.21.0 pytest-9.2.0 pytest-asyncio-1.5.0 python-dotenv-1.2.4 pyyaml-6.0.3 ruff-0.17.5 sniffio-1.3.1 starlette-1.10.0 truststore-0.10.5 typing-extensions-4.16.0 typing-inspection-0.4.5 uvicorn-0.54.0 uvloop-0.23.0 watchfiles-1.3.0 websockets-17.4 werewolf-backend-0.1.0 z3-solver-4.16.0.0
+2026-11-17T15:03:43.4332647Z ##[group]Run set -euo pipefail
+2026-11-17T15:03:43.4333041Z [36;1mset -euo pipefail[0m
+2026-11-17T15:03:43.4333485Z [36;1margs=(--games 1 --seed "$SEED" --provider "$PROVIDER" --out eval-out)[0m
+2026-11-17T15:03:43.4333981Z [36;1mif [ "$PROVIDER" = "anthropic" ]; then[0m
+2026-11-17T15:03:43.4334428Z [36;1m  # Priced by the provider's own table; the cap is enforced before[0m
+2026-11-17T15:03:43.4334859Z [36;1m  # each request is sent.[0m
+2026-11-17T15:03:43.4335347Z [36;1m  args+=(--max-cost "$MAX_COST")[0m
+2026-11-17T15:03:43.4335747Z [36;1melif [ -n "$LUNA_PRICE_IN" ] || [ -n "$LUNA_PRICE_OUT" ]; then[0m
+2026-11-17T15:03:43.4336533Z [36;1m  args+=(--price-in "${LUNA_PRICE_IN:-0}" --price-out "${LUNA_PRICE_OUT:-0}" --max-cost "$MAX_COST")[0m
+2026-11-17T15:03:43.4337063Z [36;1melse[0m
+2026-11-17T15:03:43.4337469Z [36;1m  echo "::warning::luna の単価(変数 LUNA_PRICE_IN / LUNA_PRICE_OUT)が無いので、費用は計算されず上限も効きません。"[0m
+2026-11-17T15:03:43.4337948Z [36;1mfi[0m
+2026-11-17T15:03:43.4338220Z [36;1mif [ "$JUDGE" = "true" ]; then[0m
+2026-11-17T15:03:43.4338528Z [36;1m  args+=(--judge)[0m
+2026-11-17T15:03:43.4338810Z [36;1m  if [ -n "$JUDGE_MODEL" ]; then[0m
+2026-11-17T15:03:43.4339148Z [36;1m    args+=(--judge-model "$JUDGE_MODEL")[0m
+2026-11-17T15:03:43.4339475Z [36;1m  fi[0m
+2026-11-17T15:03:43.4339688Z [36;1mfi[0m
+2026-11-17T15:03:43.4340031Z [36;1m# Exit code 3: the cost cap stopped the game. The partial transcript[0m
+2026-11-17T15:03:43.4340594Z [36;1m# and a report that says so are already written, and the job fails[0m
+2026-11-17T15:03:43.4341079Z [36;1m# so the stop is not mistaken for a finished game.[0m
+2026-11-17T15:03:43.4341482Z [36;1mpython scripts/evaluate.py "${args[@]}"[0m
+2026-11-17T15:03:43.4393122Z shell: /usr/bin/bash -e {0}
+2026-11-17T15:03:43.4393424Z env:
+2026-11-17T15:03:43.4393757Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-17T15:03:43.4394316Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.16/x64/lib/pkgconfig
+2026-11-17T15:03:43.4394850Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-17T15:03:43.4395325Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-17T15:03:43.4395804Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-17T15:03:43.4396400Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.16/x64/lib
+2026-11-17T15:03:43.4396808Z   PROVIDER: anthropic
+2026-11-17T15:03:43.4397074Z   SEED: 2
+2026-11-17T15:03:43.4397360Z   MAX_COST: 9
+2026-11-17T15:03:43.4397597Z   JUDGE: false
+2026-11-17T15:03:43.4397837Z   JUDGE_MODEL: 
+2026-11-17T15:03:43.4398074Z   LUNA_PRICE_IN: 
+2026-11-17T15:03:43.4398318Z   LUNA_PRICE_OUT: 
+2026-11-17T15:03:43.4398581Z   WEREWOLF_LLM_PROVIDER: anthropic
+2026-11-17T15:03:43.4398906Z   WEREWOLF_REASONING_ENGINE: v3
+2026-11-17T15:03:43.4399824Z   WEREWOLF_ANTHROPIC_API_KEY: ***
+2026-11-17T15:03:43.4400173Z   WEREWOLF_ANTHROPIC_MODEL: claude-sonnet-5-5
+2026-11-17T15:03:43.4400548Z   WEREWOLF_ANTHROPIC_FALLBACKS: default
+2026-11-17T15:03:43.4400910Z   WEREWOLF_ANTHROPIC_EFFORT_DISCUSSION: low
+2026-11-17T15:03:43.4401267Z   WEREWOLF_ANTHROPIC_EFFORT_CHAT: low
+2026-11-17T15:03:43.4401611Z   WEREWOLF_ANTHROPIC_EFFORT_VOTE: medium
+2026-11-17T15:03:43.4401960Z   WEREWOLF_ANTHROPIC_EFFORT_NIGHT: medium
+2026-11-17T15:03:43.4402309Z   WEREWOLF_ANTHROPIC_MAX_TOKENS: 12000
+2026-11-17T15:03:43.4402630Z   LUNA_API_KEY: 
+2026-11-17T15:03:43.4402871Z   LUNA_BASE_URL: 
+2026-11-17T15:03:43.4403125Z   LUNA_MODEL: gpt-6-luna
+2026-11-17T15:03:43.4403408Z ##[endgroup]
+2026-11-17T15:03:44.5862737Z ==> LLM プロバイダ: anthropic
+2026-11-17T15:03:44.5863627Z ==> モデル: claude-sonnet-5-5
+2026-11-17T15:03:44.5864468Z ==> 推理エンジン: v3
+2026-11-17T15:03:44.5866366Z ==> 思考量(effort): {'discussion': 'low', 'vote': 'medium', 'night': 'medium', 'chat': 'low', 'default': 'medium'}
+2026-11-17T15:03:44.5868236Z ==> 費用上限: $9.00(対戦と判定で共有)
+2026-11-17T15:03:44.5868966Z ==> game 1/1 (seed=2)
+2026-11-17T15:03:45.6678808Z [00:00] ── 0日目 夜 ── 呼び出し 0回
+2026-11-17T15:03:48.3193007Z [00:02] 0日目 夜行動 ハルト(seer) → サクラ: 初日で材料がないので、候補の中から無作為に選んで占う。妖狐の呪殺も期待できる。
+2026-11-17T15:03:48.3193750Z [00:02] ── 0日目 夜明け ── 呼び出し 1回(失敗 0・途中切れ 0) 平均 2.1秒
+2026-11-17T15:03:48.3211636Z [00:02] ── 1日目 昼の議論 ── 呼び出し 1回(失敗 0・途中切れ 0) 平均 2.1秒
+2026-11-17T15:03:51.9922828Z [00:06] 1日目 [immediate] ハルト: 占い師COだ！0日目の結果はサクラが白、人狼ではなかった。対抗が出るなら早めに頼む！
+2026-11-17T15:03:51.9923793Z             メモ: 方針: 占いCOしてサクラ白を公開。対抗の出方を見て内訳を判断する。今日はグレランで、サクラ以外のグレーから材料を探す。 ／ 信用: サクラ(p7)
+2026-11-17T15:03:52.4846425Z [00:06] 1日目 [immediate] アカリ: 共有者CO。相方はホノカです。
+2026-11-17T15:03:58.0963810Z [00:12] 1日目 [immediate] ダイキ: 占い師CO。対抗です。0日目の結果はノゾミが白、人狼ではなかった。ハルトとは2-0になるので、どちらかが偽ですね。
+2026-11-17T15:04:03.2313647Z             メモ: 方針: ハルトが先に占いCO済み。対抗として偽占いCOし、0日目夜の結果を出す。仲間(ミオ・ケント)には白を出さず、また黒も出さない。共有潜伏の可能性は低く、アカリ視点で共有はホノカだけなので、無難にグレーの村人へ白を出す。 ／ 疑い: ハルト(p2) ／ 信用: アカリ(p1) ／ 陣営内の方針: 偽占い=ダイキ。ハルトの真偽を割る展開にしつつ、狼の票が仲間に向かないようにする。初日は白を出して信用を取り、噛み先は仲間と相談。
+2026-11-17T15:04:03.2315465Z [00:17] 1日目 [immediate] ケント: 霊媒師CO！まだ吊りがないから結果はなし。占いは2-0で割れてるし、どっちが真かは今後の結果を見て決めよう！
+2026-11-17T15:04:03.2317347Z             メモ: 方針: 仲間のダイキが占い騙り、ハルトは真か狂人か不明。自分は霊媒を騙る担当だが、霊媒COはまだ出ていないので朝のうちにCOして先手を取る。今日はグレランで、占いCO者は吊らない方針。 ／ 疑い: ハルト(p2) ／ 陣営内の方針: ダイキが偽占い、ケントが偽霊媒、ミオは潜伏。ハルトを偽寄りに見せて信用勝負へ。霊媒結果は初日の吊りが決まってから、ダイキの結果と矛盾しないように出す。
+2026-11-17T15:04:03.7749782Z [00:18] 1日目 [freemason_confirmation] ホノカ: 共有者CO。アカリの相方は私ホノカで間違いありません。
+2026-11-17T15:04:08.0040716Z [00:22] 1日目 [initial_view] リク: えっと、占い2-0ですね…。ハルトさん、ダイキさん、今夜の占い先はどう決めるか、聞いてもいいですか…？
+2026-11-17T15:04:08.0042232Z             メモ: 方針: 占い2-0で霊媒1、どちらかが偽。材料が少ないので今日はグレーから。まず占い師2人の判断基準を聞いて様子を見る。 ／ 信用: アカリ(p1)、ホノカ(p13)
+2026-11-17T15:04:15.0693750Z [00:29] 1日目 [initial_view] サクラ: ハルト、ダイキ、今夜の占い先は誰にする？理由も一緒に答えて。
+2026-11-17T15:04:15.0695664Z             メモ: 方針: 占い2-0でどちらか偽。サクラは村人でハルトの白をもらっている。ただ白をもらった側として判断が偏るので、材料が出るまで両者の動きを見る。今日はグレランで、占い先の決め方など具体性を比べる。 ／ 吊り先: リク(p10) ／ 疑い: リク(p10) ／ 信用: アカリ(p1)、ホノカ(p13)
+2026-11-17T15:04:18.7491904Z [00:33] 1日目 [initial_view] ノゾミ: ダイキ、白もらったけど私は村人。それでダイキ真とは見ないから。ハルトとどっちが真か、まだ決められないね。
+2026-11-17T15:04:18.7494359Z             メモ: 方針: 占い2-0でどちらかが偽。自分はダイキに白を貰ったが、それだけでダイキ真とは見ない。結果の質より今夜の占い先とグレーの発言を見る。今日はグレランで、現状の材料はないのでグレーから暫定。 ／ 吊り先: シオン(p14) ／ 疑い: シオン(p14) ／ 信用: アカリ(p1)、ホノカ(p13)
+2026-11-17T15:04:22.0854886Z [00:36] 1日目 [initial_view] ツムギ: ふむ、占いは2-0か。まだ真偽は決められん。今日はグレーの発言を見て決めよう。
+2026-11-17T15:04:22.0856209Z             メモ: 方針: 占い2-0で内訳は割れている。初日はCO者を吊らずグレランが基本。グレーの発言を見て比べる。今は占い先の理由を聞いて真偽の材料を集める。 ／ 信用: アカリ(p1)、ホノカ(p13)
+2026-11-17T15:04:25.6801609Z [00:40] 1日目 [initial_view] アオイ: …えっと、占いが2-0なので、今夜の占い先の理由は大事だと思います。結果を見て判断したいです。
+2026-11-17T15:04:25.6803777Z             メモ: 方針: 妖狐なので目立たず潜伏。占い2-0は片方が偽。占い先を聞く流れに乗りつつ、自分はグレーなので発言は控えめに。占われないよう、占い先の理由を聞いて様子を見る。 ／ 吊り先: ソウタ(p4) ／ 疑い: ソウタ(p4)
+2026-11-17T15:04:29.2783330Z [00:43] 1日目 [initial_view] ミオ: 占い2-0ですし、まずは今夜の占い先と理由を見たいです。今日はグレーの発言を見て判断します。
+2026-11-17T15:04:29.2785053Z             メモ: 方針: 潜伏の人狼。占い2-0はダイキが偽占い(仲間)。ハルトを真寄りに見せず、ダイキも庇わず中立に。今日はグレラン、無難なグレー(ツムギ等)へ。 ／ 吊り先: ツムギ(p11) ／ 疑い: ツムギ(p11)、シオン(p14) ／ 妖狐候補: アオイ(p15) ／ 陣営内の方針: ダイキが偽占い、ケントが偽霊媒、ミオは潜伏。真占いハルトは信用勝負か夜に噛みを検討。今日は灰の村人を吊らせる。
+2026-11-17T15:04:32.1676258Z [00:46] 1日目 [initial_view] シオン: 少し整理させてください。占いは2-0なので、今夜の占い先とその理由を見てから真偽を考えます。今日はグレーの発言を比べます。
+2026-11-17T15:04:32.1677918Z             メモ: 方針: 占い2-0で内訳はまだ判断できない。初日は材料が少ないので、グレーの発言と占い先の理由を見て決める。今のところ吊り先は決めきれず、発言の薄いグレーを仮置きにする。 ／ 吊り先: ソウタ(p4) ／ 疑い: ソウタ(p4)、レン(p6) ／ 信用: アカリ(p1)、ホノカ(p13)
+2026-11-17T15:04:39.9394713Z [00:54] 1日目 [initial_view] ソウタ: ハルトとダイキ、白を出した先の選び方が気になる。サクラとノゾミを選んだ理由を先に聞きたい。
+2026-11-17T15:04:39.9396634Z             メモ: 方針: 占い2-0。どちらが真か不明。狂人として真占いの信用を落とす対立軸を作りたいが、初回は無理に動かず占い先の理由を聞く。仲間は不明なので特定の誰かを決め打たない。 ／ 信用: アカリ(p1)、ホノカ(p13) ／ 陣営内の方針: 狂人として占い両者の言動を比べ、片方に疑いを寄せて対立軸を作る。狼候補は追い詰めない。
+2026-11-17T15:04:42.8721265Z [00:57] 1日目 [initial_view] カイト: ふふ、ソウタさんの質問は的を射てますね。白先の選び方が、そのまま真偽の材料になりそうです。
+2026-11-17T15:04:42.8722657Z             メモ: 方針: 占い2-0で真偽は未決。ソウタが聞いた白先の選び方は材料になるので、グレーとして占い先の理由比較を見る。今日はグレランで、発言の薄い人を警戒。 ／ 信用: アカリ(p1)、ホノカ(p13)
+2026-11-17T15:04:45.7885400Z [01:00] 1日目 [initial_view] マコト: ソウタの質問に賛成。白先の選んだ理由を、ハルトとダイキに聞きたい。
+2026-11-17T15:04:45.7887991Z             メモ: 方針: 占い2-0で真偽は未確定。今日はグレーの発言を見てグレランにする。占い先の理由と白先の選び方を見て、ハルトとダイキの真偽を比べる。 ／ 吊り先: ソウタ(p4) ／ 疑い: ソウタ(p4) ／ 信用: アカリ(p1)、ホノカ(p13)
+2026-11-17T15:04:49.6853939Z [01:04] 1日目 [initial_view] レン: ふあ〜、霊媒師COするね〜。ケントは対抗になるよ〜。まだ吊りがないから結果はなしだね〜。
+2026-11-17T15:04:49.6855534Z             メモ: 方針: 私は本物の霊媒。ケントが霊媒COしていて、対抗なしだが偽の可能性もある。霊媒を名乗ると2人目になり、ケントが偽でも本物でも状況がはっきりする。1日目COが普通なので、ここでCOして今日のグレランの材料にする。 ／ 吊り先: ソウタ(p4) ／ 疑い: ソウタ(p4) ／ 信用: アカリ(p1)、ホノカ(p13)
+2026-11-17T15:04:54.2494344Z [01:08] 1日目 [rebuttal_or_reassessment] ハルト: サクラは情報がない中で選んだ、ほぼ無作為だ。今夜はグレーから占う。対抗は占わない。理由は結果と一緒に出す！
+2026-11-17T15:04:54.2496631Z             メモ: 方針: 質問に一括で答える。サクラはランダムに選んだ初日の白先。今夜はグレーから占う方針を示す。ダイキは対抗で真偽は今後の結果次第、今日はグレランでグレーを見る。 ／ 吊り先: ソウタ(p4) ／ 疑い: ソウタ(p4) ／ 信用: サクラ(p7)
+2026-11-17T15:04:57.8048884Z [01:12] 1日目 [rebuttal_or_reassessment] ダイキ: ノゾミは発言も情報もない初日だったので、ほぼ無作為で選んだよ。理由を作る材料がなかった。今夜は結果と一緒に、グレーから選ぶ理由も出す。
+2026-11-17T15:04:57.8051480Z             メモ: 方針: 白先の理由は初日で情報がなく無作為だったと正直に答える。ノゾミの発言に過剰反応せず、ハルトの今夜の占い先を見て比べる流れにする。 ／ 吊り先: ハルト(p2) ／ 疑い: ハルト(p2) ／ 信用: アカリ(p1) ／ 陣営内の方針: 偽占い=ダイキ。仲間のミオ・ケントには白も黒も出さない。ハルトの真偽を割る展開に誘導し、縄が仲間に向かないようにする。
+2026-11-17T15:05:01.8238335Z [01:16] 1日目 [rebuttal_or_reassessment] ソウタ: 二人とも無作為か。まあ、これだけじゃ真偽は決まらないな。グレーを選ぶ理由が本題だ。
+2026-11-17T15:05:01.8241270Z             メモ: 方針: 両占いとも白先は無作為と答えた。どちらも似た答えで差が付かない。狂人として対立軸を作りたいが、今は無理に動かず今夜の占い先の理由を見る。霊媒もケントとレンで2-2。 ／ 吊り先: シオン(p14) ／ 疑い: シオン(p14) ／ 信用: アカリ(p1)、ホノカ(p13) ／ 陣営内の方針: 占い2人の占い先理由を見て、片方に疑いを寄せて対立軸を作る。狼候補は追い詰めない。今日はグレラン寄りで目立たず動く。
+2026-11-17T15:05:04.7187761Z [01:19] 1日目 [rebuttal_or_reassessment] リク: えっと、お二人とも無作為と答えてくれたので、グレーを選ぶ理由を結果と一緒に聞きたいです…。
+2026-11-17T15:05:04.7189030Z             メモ: 方針: 占い2-0、霊媒2COでどちらも片方偽。二人とも白先は無作為と答えたので差は出ない。今夜のグレー占いの理由を見て判断し、今日はグレーの発言を比べる。 ／ 信用: アカリ(p1)、ホノカ(p13)
+2026-11-17T15:05:07.5675325Z [01:21] 1日目 [consensus_summary] アカリ: 今日はグレラン。グレー8人の中から、今夜の占い先の理由と発言を見て各自で決めてね。
+2026-11-17T15:05:07.5676963Z             メモ: 方針: 占い2-0、霊媒2-0で内訳は不明。初日は黒も出ていないのでCO者を吊らずグレランが妥当。共有として進行し、グレーの発言を見て吊り先を決める。 ／ 信用: ホノカ(p13)
+2026-11-17T15:05:07.5677592Z [01:21] ── 1日目 投票 ── 呼び出し 20回(失敗 0・途中切れ 0) 平均 3.8秒
+2026-11-17T15:05:12.5528836Z [01:26] 1日目 投票 マコト → ソウタ: ソウタに入れる。質問は良かったが、その後は見立てが出ていない。
+2026-11-17T15:05:12.5530996Z             決め手: ソウタは白先の選び方を質問したが、二人の無作為回答を受けて『真偽は決まらない』で止め、自分の見立ては示していない。ほかのグレーより材料が少ない。 ／ 反対仮説: ソウタの質問は占い真偽の判断材料を引き出すもので、村側の動きとして自然。ここで吊るのは早い。 ／ 次点: カイト
+2026-11-17T15:05:12.6599111Z [01:26] 1日目 投票 ミオ → ツムギ: ツムギさんに入れます。2-0の内訳にも占い先にも踏み込まず、判断材料が少ないためです。
+2026-11-17T15:05:12.6600812Z             決め手: ツムギさんは m9 で「発言を見て決めよう」と言うだけで、占い先の理由や内訳への踏み込みがなく、グレーの中では材料が一番薄い ／ 反対仮説: 初日で情報が少なく、ツムギさんは様子見を口にしただけとも取れます。口調も一貫していて、村人として自然な範囲です。 ／ 次点: シオン
+2026-11-17T15:05:12.7043996Z [01:27] 1日目 投票 ソウタ → シオン: シオンは整理すると言いながら中身がなかった。グレランなら発言が薄いここに入れる。
+2026-11-17T15:05:12.7045154Z             決め手: シオンは m12 で他の人の言い回しをなぞるだけで、自分の見立てや疑い先を何も出していない。グレー8人の中で一番中身がない発言だった。 ／ 反対仮説: 初日で材料が少なく、慎重に様子見しているだけの村人でも同じ発言になる。薄い発言だけで黒とは言えない。 ／ 次点: ミオ
+2026-11-17T15:05:12.8825173Z [01:27] 1日目 投票 サクラ → リク: リク、質問ばかりで自分の見立てが何もない。今日はグレランだし、材料が出てないリクに入れる。
+2026-11-17T15:05:12.8826982Z             決め手: リクは占い2-0で他の灰が占い先の理由を求める流れに乗り、m6とm20で質問を繰り返しただけで自分の見立てや疑い先を一切出していない。グレー内で最も情報が薄い。 ／ 反対仮説: 初日で判断材料が少ない中、占い先の理由を聞くのは筋が通った質問で、慎重な村人の動きとして自然。発言が少ないだけで狼とは言えない。 ／ 次点: シオン
+2026-11-17T15:05:12.8921864Z [01:27] 1日目 投票 レン → ソウタ: うーん、今日はグレランだし、ソウタに入れておくね〜。まだ材料は薄いけど、メモ通りで〜。
+2026-11-17T15:05:12.8923464Z             決め手: ソウタは占い2人の白先の理由を最初に聞いた一方で、m19では「グレーを選ぶ理由が本題」と話を進めている。ただ決定的な材料はなく、グレーの中では発言の流れから候補にしやすい。 ／ 反対仮説: ソウタの質問は占い師の真偽を見るために筋が通っていて、村人でも自然にできる発言。初日の発言だけで疑う根拠は弱い。 ／ 次点: カイト
+2026-11-17T15:05:12.9270986Z [01:27] 1日目 投票 ハルト → ソウタ: ソウタに入れる。質問だけで自分の考えを出さない。グレーの中でまず見たい！
+2026-11-17T15:05:12.9272977Z             決め手: ソウタは白先の選び方を最初に質問したが、二人が無作為と答えた後は『グレーを選ぶ理由が本題』と話を先送りしただけで、自分の見解を出していない。 ／ 反対仮説: ソウタは初日で材料が少ない中、占い師の真偽に直結する質問を最初に出した。村側の積極的な議論参加とも説明できる。 ／ 次点: カイト
+2026-11-17T15:05:13.0492533Z [01:27] 1日目 投票 アカリ → カイト: カイトさん、ソウタさんの質問をほめるだけで自分の見立てが出てないのが気になる。今日はグレランだし、ここに入れておくね。
+2026-11-17T15:05:13.0495543Z             決め手: グレー8人はまだ決め手がなく、発言量が少なく同調中心のカイトが一番情報が薄い。共有の私は白確定なのでグレーから選ぶ。 ／ 反対仮説: カイトは初日で情報がないなか、質問の良さを素直に評価しただけの村人かもしれない。発言が少ないだけで黒とは言えない。 ／ 次点: リク
+2026-11-17T15:05:14.6691897Z [01:29] 1日目 投票 カイト → シオン: シオンさんは整理すると言いながら中身がなく、自分の見立てが見えない。今日は薄い発言のグレーから選びます。
+2026-11-17T15:05:14.6693785Z             決め手: ミオ、シオン、アオイは「今夜の占い先と理由を見てから判断」と似た言い回しで、自分の見立てを出していない。中でもシオンは「少し整理させてください」と言いながら新しい整理は何も出していない。 ／ 反対仮説: 初日の序盤で材料が少なく、慎重に様子を見ているだけの村人でも同じ発言になる。丁寧な口調の人なら普通に出る内容。 ／ 次点: アオイ
+2026-11-17T15:05:15.1854177Z [01:29] 1日目 投票 ノゾミ → シオン: シオン、整理は丁寧だけど自分の見立てが一つもないのよね。今日は材料がないから、グレーの中で一番中身が薄いここに入れる。
+2026-11-17T15:05:15.1855579Z             決め手: シオンはm12で他の人の発言をなぞって整理しただけで、自分の疑い先や見立てを出していない。グレーの中では比べる材料が一番薄い。 ／ 反対仮説: 初日の序盤で発言が少ないだけで、慎重な村人としても自然。ミオやアオイも似た内容で、シオンだけが特別薄いとは言い切れない。 ／ 次点: ミオ
+2026-11-17T15:05:15.7953241Z [01:30] 1日目 投票 シオン → ソウタ: ソウタに入れます。材料は少ないものの、質問以外の見立てがまだ見えません。
+2026-11-17T15:05:15.7954149Z             決め手: ソウタは白先の選び方を問う質問だけで、自分の疑いや推理をまだ出していない。グレーの中では発言が薄い。 ／ 反対仮説: ソウタは占い先の理由を最初に問うており、真偽判断に役立つ質問をしている。村側の積極的な動きとして説明できる。 ／ 次点: レン
+2026-11-17T15:05:15.9646517Z [01:30] 1日目 投票 ツムギ → カイト: カイトは他人の質問を褒めるだけで、自分の考えがまだ見えん。グレーの中では材料が一番薄いから、今日はここに入れる。
+2026-11-17T15:05:15.9648114Z             決め手: グレーの中でカイトは「ソウタさんの質問は的を射てますね」と他人の質問を持ち上げただけで、自分の見立てや疑い先を出していない。 ／ 反対仮説: 初日は情報が少なく、ソウタの質問に賛同する形で場を進めただけの村人でも自然に説明がつく。発言が薄いだけでは狼の根拠にならない。 ／ 次点: ミオ
+2026-11-17T15:05:16.0134065Z [01:30] 1日目 投票 ダイキ → リク: アカリのグレラン方針に従って、グレーから選ぶよ。リクは質問ばかりで自分の見方がまだ出てないから、寡黙気味で見たい。
+2026-11-17T15:05:16.0135888Z             決め手: 今日はグレラン方針で、占い2-0の対抗ハルトは今夜の占い結果を見て判断する立場。ただ票を入れるならグレーから選ぶ流れで、発言が薄く情報が少ないグレーのリクに入れるのが無難。 ／ 反対仮説: リクは慎重に質問しているだけで、村人でも初日は自分の意見を出しにくいという見方が最も強い。 ／ 次点: アオイ
+2026-11-17T15:05:16.0144649Z [01:30] 1日目 投票の記録 ダイキ: メモではp2を第一候補としたが、最終判断でp10へ変更した。アカリのグレラン方針に従って、グレーから選ぶよ。リクは質問ばかりで自分の見方がまだ出てないから、寡黙気味で見たい。
+2026-11-17T15:05:16.2920509Z [01:30] 1日目 投票 アオイ → ソウタ: …えっと、グレーの中で決め手はまだないですが、ソウタさんに入れます。
+2026-11-17T15:05:16.2921576Z             決め手: ソウタさんは白先の選び方を聞く質問を出していたが、グレーの中で材料が少なく、投票先を決める決定的な根拠はない。目立たずグレーから1人選ぶなら、前回メモ通りソウタさん。 ／ 反対仮説: ソウタさんは白先の理由を最初に聞いて議論を進めており、村側として自然な動き。吊り先を絞るための質問とも読める。 ／ 次点: ミオ
+2026-11-17T15:05:16.3512527Z [01:30] 1日目 投票 リク → ミオ: えっと、ミオさんの発言が他の方とほぼ同じ内容で、ご自身の見立てが見えなかったので…すみません、ミオさんに入れます。
+2026-11-17T15:05:16.3514034Z             決め手: グレー8人のうち、ミオとシオンは占いの理由を見てから判断すると同じ内容の発言をしていて、自分の考えが薄く見えた。ただし決定的な材料はなく、発言量の少なさと内容の薄さで比べるしかない。 ／ 反対仮説: 初日で情報がなく、様子見の発言になるのは村人でも自然で、ミオが村側でも十分説明がつく。 ／ 次点: シオン
+2026-11-17T15:05:16.9457509Z [01:31] 1日目 投票 ホノカ → シオン: シオンさん、今日はグレランなので一票入れます。ミオさんの発言とほぼ同じ内容で、自分の考えがまだ見えないから、もう少し聞かせてほしいな。
+2026-11-17T15:05:16.9458705Z             決め手: グレー8人のうち発言が定型的な質問返しだけで、自分の視点や判断材料を出していない人を選んだ。決定的な黒材料はまだない。 ／ 反対仮説: 初日で情報が少なく、整理してから判断する姿勢は村側でも自然。ミオと似た発言になるのも同じ状況を見ているだけで説明がつく。 ／ 次点: カイト
+2026-11-17T15:05:18.1638670Z [01:32] 1日目 投票 ケント → リク: リク、質問ばかりで自分の意見が出てないのが気になる。今日はグレランだから一票入れとくね！
+2026-11-17T15:05:18.1640184Z             決め手: グレー8人のうち発言が定型的で、占い先の質問に同調するだけだったリクが目立つ。ただ決定的な材料はなく、仲間のミオとダイキを避けた上でグレランに乗る。 ／ 反対仮説: リクは初日で慎重に質問しているだけの村人という見方ができる。発言が少ないのは人見知りなだけかもしれず、寡黙吊りは根拠として弱い。 ／ 次点: ツムギ
+2026-11-17T15:05:18.7230360Z [01:33] 1日目 要約: CO: 占い=ハルト、ダイキ / 霊媒=ケント、レン / 共有=アカリ、ホノカ。占い 0日目夜の結果（1日目公開）: ハルト→サクラ=白、ダイキ→ノゾミ=白
+2026-11-17T15:05:18.7231278Z [01:33] ── 1日目 投票結果 ── 呼び出し 36回(失敗 0・途中切れ 0) 平均 4.7秒
+2026-11-17T15:05:18.7644010Z [01:33] ── 1日目 夜 ── 呼び出し 36回(失敗 0・途中切れ 0) 平均 4.7秒
+2026-11-17T15:05:21.2576243Z [01:35] 1日目 [人狼] ミオ: ダイキ、ケント、今夜の噛みはハルトで行きませんか。占い即噛みで、霊媒は明日の結果を見てから決めたいです。
+2026-11-17T15:05:21.5943753Z [01:35] 1日目 夜行動 ハルト(seer) → シオン: グレーを狭めて呪殺や黒を狙う。1日目にソウタ以外へ票を入れず、投票の動きが気になるシオンを占う。
+2026-11-17T15:05:21.6411172Z [01:35] 1日目 [共有] アカリ: ホノカ、明日は結果次第だけど、黒が出なければ基本グレラン。占い2人は今は吊らず、結果と理由を見たいな。
+2026-11-17T15:05:23.4979621Z [01:37] 1日目 [人狼] ダイキ: ミオ、ハルト噛みで賛成。ただ占い2人とも消えると俺の偽が浮くから、明日は霊媒の動きを見て決めよう。ケントはどう？
+2026-11-17T15:05:24.0246256Z [01:38] 1日目 [共有] ホノカ: アカリ、了解だよ。黒が出なければグレラン、占い2人は結果と理由を見てから決めよう。進行はお願いするね。
+2026-11-17T15:05:25.5503090Z [01:39] 1日目 [人狼] ケント: ハルト噛みで賛成！ダイキの偽が浮くなら、明日の霊媒結果はソウタ白で出すよ。ダイキは黒を出さず白を続けて。
+2026-11-17T15:05:27.2925211Z [01:41] 1日目 夜行動 ダイキ(werewolf) → ハルト: 仲間内で決めた通り、占い即噛みでハルトを襲撃する。真占い候補を早めに消して、偽占いの自分に信用が集まりやすくする。
+2026-11-17T15:05:27.2926298Z [01:41] ── 1日目 夜明け ── 呼び出し 43回(失敗 0・途中切れ 0) 平均 4.2秒
+2026-11-17T15:05:27.3171023Z [01:41] ── 2日目 昼の議論 ── 呼び出し 43回(失敗 0・途中切れ 0) 平均 4.2秒
+2026-11-17T15:05:31.4561988Z [01:45] 2日目 [immediate] レン: ふあ〜、おはよ〜。霊媒のレンだよ〜。昨日処刑されたソウタは白、人狼じゃなかったよ〜。ケントはどうだった〜？
+2026-11-17T15:05:31.4563564Z             メモ: 方針: 本物の霊媒。ソウタ=白を公開する。ケントとの霊媒対抗が続くので、ケントの結果との整合を見る。今日はグレーから選ぶ。 ／ 疑い: ケント(p16) ／ 信用: アカリ(p1)、ホノカ(p13)
+2026-11-17T15:05:35.9704386Z [01:50] 2日目 [immediate] ダイキ: 占いのダイキ。昨夜はカイトを占って白。ハルトが噛まれて占いは俺だけになったけど、ここは慎重に見てほしい。
+2026-11-17T15:05:35.9707220Z             メモ: 方針: 偽占いとして1日目夜の結果を出す。仲間(ミオ・ケント)以外から白を出し、黒は出さない。ハルトが死んだので自分が唯一の占いとして信用を取りに行く。 ／ 吊り先: リク(p10) ／ 疑い: リク(p10) ／ 信用: アカリ(p1)、ホノカ(p13) ／ 陣営内の方針: 偽占い=ダイキ。今夜の結果はカイト白で出す。仲間には白も黒も出さない。ハルト噛みで占いは自分だけになったので、霊媒のレンとケントの真偽を割る流れに誘導し、縄が仲間に向かないようにする。
+2026-11-17T15:05:40.9877181Z [01:55] 2日目 [immediate] ケント: 霊媒のケント！ソウタは白だったよ。レンと結果は一緒だね。霊媒が2人いるから、どっちが偽かは今後の動きで見ていこ！
+2026-11-17T15:05:40.9879111Z             メモ: 方針: 偽霊媒としてソウタ=白を出す。レンも白で、結果は一致している。ソウタは村側扱いになる。今日はグレランで、占いCOのダイキは吊らない。 ／ 吊り先: シオン(p14) ／ 疑い: シオン(p14)、リク(p10) ／ 陣営内の方針: ダイキは偽占いを続け、ケントは偽霊媒を続ける。ミオは潜伏する。結果はレンと一致しているので、レンの偽を指摘する材料は今のところない。今日はグレーのシオンかリクあたりに票を寄せる。
+2026-11-17T15:05:45.3834424Z [01:59] 2日目 [initial_view] シオン: 霊媒の2人は結果が一致していて、今は真偽が見えません。まずはグレーの方針を聞きたいので、アカリさん、今日はグレランでしょうか。
+2026-11-17T15:05:45.3835799Z             メモ: 方針: 占い2-0だがハルトが死亡し、占いはダイキのみ生存。霊媒はレンとケントで結果が一致しており、まだ真偽は判断できない。今日はグレーの発言を見て決める。仮にグレーのマコトを置く。 ／ 吊り先: マコト(p0) ／ 疑い: マコト(p0)、ミオ(p5) ／ 信用: アカリ(p1)、ホノカ(p13)
+2026-11-17T15:05:49.1748826Z [02:03] 2日目 [initial_view] サクラ: 霊媒の片方は確実に偽。レンとケント、ソウタ白をどう見たか、根拠を一人ずつ答えて。
+2026-11-17T15:05:49.1750769Z             メモ: 方針: 占いはハルト死亡でダイキのみ生存。霊媒2-は結果一致で真偽不明。ダイキの真偽は保留しつつ、霊媒の偽を探すため両者の動きを見る。グレランで投票する前に、グレーの発言を比べる。 ／ 吊り先: リク(p10) ／ 疑い: リク(p10)、ミオ(p5) ／ 信用: アカリ(p1)、ホノカ(p13)
+2026-11-17T15:05:52.6437670Z [02:06] 2日目 [initial_view] アオイ: …少しいいですか。ソウタさんが白だと霊媒の真偽は見えないので、まずレンさんとケントさんの答えを聞きたいです。
+2026-11-17T15:05:52.6438973Z             メモ: 方針: 妖狐なので潜伏。占い師はダイキ1人が残り、占われないよう目立たない。霊媒2人は結果が一致していて、今は真偽が見えない。サクラの質問に乗って様子を見る。グレーの自分は発言を控えめにする。 ／ 吊り先: レン(p6) ／ 疑い: レン(p6)、ケント(p16)
+2026-11-17T15:06:03.5067432Z [02:17] 2日目 [reaction] ケント: サクラ、アオイ、ソウタは普通に白が出ただけ！根拠は結果そのままだよ
+2026-11-17T15:06:03.5070102Z             メモ: 方針: サクラとアオイの質問に答える。ソウタ白は結果をそのまま出しただけで、根拠は霊視の結果としか言えない。レンとは一致しているので、動きで見てもらう方向にする。 ／ 吊り先: シオン(p14) ／ 疑い: シオン(p14)、リク(p10) ／ 陣営内の方針: ケントは偽霊媒を続ける。ダイキは白出しを続ける。ミオは潜伏。今日はグレーのシオンへ票を寄せる。
+2026-11-17T15:06:10.4186454Z [02:24] 2日目 [reaction] アカリ: シオン、今日はグレランでいくよ。黒も出てないしね！
+2026-11-17T15:06:10.4187824Z             メモ: 方針: シオンの質問に答える。黒が出ていないので今日はグレラン。占いはダイキ1人で霊媒2-0は真偽不明。霊媒2人の動きとグレーの発言を見て決める。 ／ 信用: ホノカ(p13)
+2026-11-17T15:06:13.2288679Z [02:27] 2日目 [rebuttal_or_reassessment] レン: うーん、私も結果そのままだよ〜。ソウタは白で、それ以上の根拠はないかな〜。真偽は今後の動きで見てほしいな〜。
+2026-11-17T15:06:13.2290447Z             メモ: 方針: 本物の霊媒。ソウタ白は結果そのままで根拠は他にない。ケントは結果が一致しているので現時点では真偽が見えない。今日はグレーから選ぶ。 ／ 疑い: ケント(p16) ／ 信用: アカリ(p1)、ホノカ(p13)
+2026-11-17T15:06:17.0257588Z [02:31] 2日目 [rebuttal_or_reassessment] リク: えっと、レンさんもケントさんも根拠が同じなので、今は差が見えません…。霊媒はまだ吊らず、グレーの話を聞きたいです。
+2026-11-17T15:06:17.0259860Z             メモ: 方針: 占い1(ダイキ)、霊媒2COでどちらか偽。ソウタ白で霊媒の真偽は見えない。レンはのんびり、ケントは元気で、どちらも根拠は薄く差が出ない。ダイキがハルト噛みで占いが一人になった点はまだ判断せず、グレーの発言を見る。 ／ 信用: アカリ(p1)、ホノカ(p13)
+2026-11-17T15:06:20.6022756Z [02:34] 2日目 [rebuttal_or_reassessment] シオン: アカリさん、グレランで了解です。マコトさんは1日目の投票理由をまだ語っていないので、そこを聞きたいです。
+2026-11-17T15:06:20.6024152Z             メモ: 方針: アカリの方針はグレランで了解。霊媒2人は結果一致で真偽不明のため、今日はグレーの発言と1日目の投票を比べる。マコトを仮に置いたまま、ミオも見る。 ／ 吊り先: マコト(p0) ／ 疑い: マコト(p0)、ミオ(p5) ／ 信用: アカリ(p1)、ホノカ(p13)
+2026-11-17T15:06:23.3085627Z [02:37] 2日目 [rebuttal_or_reassessment] マコト: シオン、ソウタは霊媒への質問が曖昧で、グレー選びの理由も薄く見えた。それだけ。
+2026-11-17T15:06:23.3087373Z             メモ: 方針: 村人。1日目はソウタに投票、理由は占い先や発言の薄さ。霊媒は結果一致で真偽不明、グレーを見る。 ／ 吊り先: シオン(p14) ／ 疑い: シオン(p14)、ツムギ(p11)、ミオ(p5) ／ 信用: アカリ(p1)、ホノカ(p13)
+2026-11-17T15:06:26.6388344Z [02:40] 2日目 [rebuttal_or_reassessment] リク: あの、マコトさん。ソウタさんの質問が曖昧だったというのは、どの発言のことですか…？
+2026-11-17T15:06:26.6390012Z             メモ: 方針: 霊媒はレンもケントも根拠が同じで差が出ない。マコトの『ソウタは質問が曖昧』という理由は薄めだが、まだ材料が少ないのでグレーの発言を見る。今日はグレランで、決めきれないがマコトを仮の先頭にしておく。 ／ 吊り先: マコト(p0) ／ 疑い: マコト(p0) ／ 信用: アカリ(p1)、ホノカ(p13)
+2026-11-17T15:06:29.8330158Z [02:44] 2日目 [rebuttal_or_reassessment] マコト: リク、ソウタのm19。「二人とも無作為か」と言うだけで、自分の考えが見えなかった。それだけ。
+2026-11-17T15:06:29.8331787Z             メモ: 方針: 村人。リクの質問に答える。ソウタの曖昧な発言は1日目m19の「二人とも無作為か」「グレーを選ぶ理由が本題だ」を指す。シオンをグレーから見る方針は維持。 ／ 吊り先: シオン(p14) ／ 疑い: シオン(p14)、ツムギ(p11)、ミオ(p5) ／ 信用: アカリ(p1)、ホノカ(p13)
+2026-11-17T15:06:33.6953150Z [02:48] 2日目 [open_floor] ノゾミ: マコト、「それだけ」で終わらせすぎ。で、今日は誰が怪しいの。
+2026-11-17T15:06:33.6955202Z             メモ: 方針: 占い2-0でハルトは噛まれ、ダイキ視点は自分とカイトが白。霊媒2-2は結果一致で差が出ない。マコトのソウタ評は薄めだが、投票でソウタに入れており筋は通る。今日はグレーの発言を比べる。まだ決め手はなくマコトを暫定。 ／ 吊り先: マコト(p0) ／ 疑い: マコト(p0)、シオン(p14) ／ 信用: アカリ(p1)、ホノカ(p13)
+2026-11-17T15:06:37.6454037Z [02:51] 2日目 [open_floor] カイト: ふふ、ノゾミさんの問いは的確ですね。マコトさん、グレーで気になる人を一人だけ挙げてもらえますか。
+2026-11-17T15:06:37.6455421Z             メモ: 方針: 占いはダイキのみ生存で白をもらったが、真偽は未決。霊媒2人は結果一致で差が見えない。グレーではマコトの短い返答が気になるが、決め打ちはしない。今日はグレランで発言を比べる。 ／ 吊り先: マコト(p0) ／ 疑い: マコト(p0)、シオン(p14) ／ 信用: アカリ(p1)、ホノカ(p13)
+2026-11-17T15:06:41.4903582Z [02:55] 2日目 [open_floor] ツムギ: ふむ、マコトの答えを聞こう。ソウタに投票した理由が「曖昧だった」だけなら、まだ薄いな。
+2026-11-17T15:06:41.4904911Z             メモ: 方針: 占い2-0（ハルト死亡でダイキのみ生存）、霊媒2-2で一致しており真偽は不明。グレーはマコトの「それだけ」の薄さが気になるが、まだ材料が少ない。今日はグレランで、マコトの返答を見て決める。 ／ 吊り先: マコト(p0) ／ 疑い: マコト(p0) ／ 信用: アカリ(p1)、ホノカ(p13)
+2026-11-17T15:06:44.7513596Z [02:59] 2日目 [open_floor] ホノカ: マコトさん、ツムギさんの言う通り理由が薄いかな。グレーで気になる人を一人だけ、ゆっくりでいいから聞かせてね。
+2026-11-17T15:06:44.7515628Z             メモ: 方針: 共有は両方公開済みで村側確定。占いはダイキのみ生存で今は吊らない。霊媒2人は結果一致で真偽不明。今日はアカリ進行のグレランで、マコトの発言の薄さを見る。 ／ 吊り先: マコト(p0) ／ 疑い: マコト(p0) ／ 信用: アカリ(p1)
+2026-11-17T15:06:48.5562026Z [03:02] 2日目 [open_floor] ミオ: マコトさんは理由が短いままですね。グレーで気になる人を一人だけ、先に聞かせてください。
+2026-11-17T15:06:48.5563853Z             メモ: 方針: 潜伏の人狼。占いはダイキ1人になり、仲間の偽が目立たないよう中立を保つ。今日はグレランで、マコトの薄い理由を軽く突きつつ無難なグレーへ誘導する。 ／ 吊り先: マコト(p0) ／ 疑い: マコト(p0)、ツムギ(p11) ／ 妖狐候補: アオイ(p15) ／ 陣営内の方針: ダイキ偽占い、ケント偽霊媒、ミオ潜伏。ハルトは噛み済み。灰の村人を吊らせ、霊媒ロラは様子見。
+2026-11-17T15:06:51.8374484Z [03:06] 2日目 [consensus_summary] アカリ: 今日はグレランでいくよ。マコトさんの答えと、グレーの発言を見て各自で決めてね。
+2026-11-17T15:06:51.8375887Z             メモ: 方針: 黒は出ていないので今日はグレラン。マコトは理由が薄いが、まだ決め打ちするほどではない。マコトの回答を待ち、グレーの発言を見て各自が投票する。 ／ 吊り先: マコト(p0) ／ 疑い: マコト(p0) ／ 信用: ホノカ(p13)
+2026-11-17T15:06:54.8549561Z [03:09] 2日目 [rebuttal_or_reassessment] マコト: グレーで気になるのはシオン。ソウタに入れつつシオンにも票が集まった流れで、私の理由を先に聞いてきた点が引っかかる。以上。
+2026-11-17T15:06:54.8552946Z             メモ: 方針: 村人。聞かれたので気になるグレーを一人答える。シオンは1日目に霊媒の話から入りつつ、自分の投票理由を聞いてきた点が引っかかる。方針維持でシオン。 ／ 吊り先: シオン(p14) ／ 疑い: シオン(p14)、ツムギ(p11)、ミオ(p5) ／ 信用: アカリ(p1)、ホノカ(p13)
+2026-11-17T15:06:59.2302288Z [03:13] 2日目 [final_designation] アカリ: グレランで。私はマコトさんに入れるよ、理由が最後まで薄かったからね。
+2026-11-17T15:06:59.2303383Z             メモ: 方針: 黒は出ていないのでグレラン。マコトは理由が薄く、グレーで挙げた先もシオンだけ。決め打ちではないが今日はマコトに入れる。 ／ 吊り先: マコト(p0) ／ 疑い: マコト(p0) ／ 信用: ホノカ(p13)
+2026-11-17T15:06:59.2307419Z [03:13] ── 2日目 投票 ── 呼び出し 65回(失敗 0・途中切れ 0) 平均 4.1秒
+2026-11-17T15:07:03.7055644Z [03:18] 2日目 投票 マコト → シオン: シオンに投票。m47で挙げた引っかかりは変わらない。
+2026-11-17T15:07:03.7058090Z             決め手: シオンは1日目にソウタへ投票しつつ4票を集め、今日は私の1日目の投票理由を先に聞いてきた。この点を引っかかりとして挙げた。 ／ 反対仮説: シオンは霊媒の話から入ってグレーの方針を確認しており、議論を進めようとしただけとも読める。投票理由を聞くのも普通の質問で、村側でも説明がつく。 ／ 次点: ツムギ
+2026-11-17T15:07:03.7473686Z [03:18] 2日目 投票 レン → マコト: マコトさん、理由がずっと薄かったから、アカリさんの指定どおりマコトさんに入れるよ〜。
+2026-11-17T15:07:03.7478354Z             決め手: マコトはソウタへの投票理由もグレーで気になる人の理由も短く薄いまま。進行役のアカリも同じマコトを指名している。 ／ 反対仮説: マコトは口数が少ないだけの村人で、m47でシオンを挙げて答えており、寡黙なだけで吊るのは危ういという見方もできる。 ／ 次点: シオン
+2026-11-17T15:07:03.7785111Z [03:18] 2日目 投票 リク → マコト: えっと、マコトさんに入れます…。理由が最後まで薄かったので、今日はそこが気になります。
+2026-11-17T15:07:03.7786575Z             決め手: マコトさんはソウタのm19が曖昧という理由しか挙げず、グレーで気になる人もシオンに回しただけで、最後まで理由が薄かった。 ／ 反対仮説: マコトは口数が少ないだけの村人で、短く話す癖があるだけかもしれない。ソウタ投票も、1日目の流れに乗っただけで説明がつく。 ／ 次点: シオン
+2026-11-17T15:07:03.8053675Z [03:18] 2日目 投票 アカリ → マコト: 予告どおりマコトさんに入れるよ。最後まで理由が薄かったからね！
+2026-11-17T15:07:03.8054746Z             決め手: マコトはソウタ投票の理由を『曖昧だった』だけで通し、グレーで挙げた先もシオン1人で、最後まで理由が薄かった ／ 反対仮説: マコトは口数が少ないだけの寡黙な村人で、ソウタ投票もシオンへの疑いも自分なりの素直な感想だったと見れば説明がつく。 ／ 次点: シオン
+2026-11-17T15:07:03.8441483Z [03:18] 2日目 投票 カイト → マコト: マコトさんに入れます。最後まで理由が薄いままでしたね。
+2026-11-17T15:07:03.8442597Z             決め手: マコトはソウタ投票の理由もグレーで気になる人の理由も短いままで、シオンへの疑いも「理由を先に聞いてきた」だけと薄い。 ／ 反対仮説: マコトは口数が少ないだけの寡黙な村人で、ソウタへの違和感もシオンへの疑いも本心から言った可能性がある。 ／ 次点: シオン
+2026-11-17T15:07:04.0174888Z [03:18] 2日目 投票 ミオ → マコト: マコトさんに入れます。理由が最後まで薄いままだったので、グレランではここが妥当だと思います。
+2026-11-17T15:07:04.0176540Z             決め手: マコトさんは1日目の投票理由も今日の説明も短く、進行役のアカリさんも理由が薄いとして票を向けている ／ 反対仮説: マコトが村人でも、言葉数が少ない性格なだけで理由が短くなり、薄く見えている可能性がある。気になる人にシオンを挙げており、回答自体はしている。 ／ 次点: ツムギ
+2026-11-17T15:07:04.1096203Z [03:18] 2日目 投票 サクラ → マコト: マコトに入れる。理由が最後まで薄いまま。アカリの指摘とシオンへの返しを見て、リクからマコトに変えた。
+2026-11-17T15:07:04.1097487Z             決め手: マコトはソウタ投票の理由もグレーで気になる人の理由も薄く、最後まで具体的な根拠を出さなかった。シオンを挙げた理由も『先に理由を聞いてきた』だけで弱い。 ／ 反対仮説: マコトは口数が少ないだけの無口な村人で、ソウタのm19の曖昧さを素直に突いただけという見方でも説明がつく。 ／ 次点: リク
+2026-11-17T15:07:04.1099948Z [03:18] 2日目 投票の記録 サクラ: メモではp10を第一候補としたが、最終判断でp0へ変更した。マコトに入れる。理由が最後まで薄いまま。アカリの指摘とシオンへの返しを見て、リクからマコトに変えた。
+2026-11-17T15:07:04.4861168Z [03:18] 2日目 投票 ノゾミ → マコト: マコト、最後まで「それだけ」「以上」で理由が薄いまま。昼の通りマコトに入れる。
+2026-11-17T15:07:04.4862622Z             決め手: マコトはソウタのm19を理由にしたが「自分の考えが見えなかった」だけで薄く、グレーで気になる人も、自分の理由を聞いてきたシオンを挙げただけで具体性が乏しい。 ／ 反対仮説: マコトは口数が少ない性格なだけで、ソウタへの投票もm19への評価も筋は通っている。シオンを挙げたのも自然で、村人でも説明がつく。 ／ 次点: シオン
+2026-11-17T15:07:06.7348124Z [03:21] 2日目 投票 ツムギ → マコト: マコト、最後まで理由が薄いままだった。方針どおりマコトに入れる。
+2026-11-17T15:07:06.7349621Z             決め手: マコトは1日目の投票理由も今日の説明も「それだけ」と短く、ソウタのm19への指摘も薄い。気になる人にシオンを挙げた理由も、票が集まった流れと質問されたことだけだった。 ／ 反対仮説: マコトは単に口数が少ない慎重な村人で、短くても質問には一つずつ答えていた。また、ソウタに投票した理由もm19という具体的な発言に触れている。 ／ 次点: シオン
+2026-11-17T15:07:06.8337530Z [03:21] 2日目 投票 シオン → マコト: マコトさんは最後まで理由が薄いままだったので、言った通りマコトさんに入れます。
+2026-11-17T15:07:06.8338751Z             決め手: マコトは1日目にソウタへ投票した理由を「曖昧だった」とだけ述べ、グレーで気になる人を問われてもシオンを挙げ、理由も短いまま。グレー全体の中で最も根拠が薄い。 ／ 反対仮説: マコトは口数が少ないだけの村人で、ソウタのm19が曖昧だったという指摘は事実としては筋が通る。シオンを挙げたのも、自分への質問に対する素直な反応と見れば説明がつく。 ／ 次点: ミオ
+2026-11-17T15:07:07.0363320Z [03:21] 2日目 投票 ダイキ → マコト: マコトは最後まで理由が薄かったし、アカリの本指定にも従う。リクから変えるのは進行の指定を優先するため。
+2026-11-17T15:07:07.0365258Z             決め手: マコトはソウタ評も気になる人も理由が短く薄いまま。アカリ本指定もマコトで、グレーから村人を落とす流れに乗れる。 ／ 反対仮説: マコトが村人で、口数が少ないだけという見方。シオンを挙げた理由も具体的で、寡黙吊りになる危険はある。 ／ 次点: リク
+2026-11-17T15:07:07.0368526Z [03:21] 2日目 投票の記録 ダイキ: メモではp10を第一候補としたが、最終判断でp0へ変更した。マコトは最後まで理由が薄かったし、アカリの本指定にも従う。リクから変えるのは進行の指定を優先するため。
+2026-11-17T15:07:07.1792786Z [03:21] 2日目 投票 アオイ → マコト: …マコトさんに入れます。レンさんを考えていましたが、霊媒は今は真偽が見えないので、今日はグレランの流れに乗ります。
+2026-11-17T15:07:07.1794748Z             決め手: マコトさんは理由が最後まで薄いままで、グレーで気になる人も短く挙げただけだった。進行役のアカリさんも同じ見方で、グレランの流れにも合う。 ／ 反対仮説: マコトさんは口数が少ないだけの村人かもしれません。シオンさんを挙げた理由も一応あるので、寡黙なだけで黒とは言えません。 ／ 次点: シオン
+2026-11-17T15:07:07.1806994Z [03:21] 2日目 投票の記録 アオイ: メモではp6を第一候補としたが、最終判断でp0へ変更した。…マコトさんに入れます。レンさんを考えていましたが、霊媒は今は真偽が見えないので、今日はグレランの流れに乗ります。
+2026-11-17T15:07:07.2051736Z [03:21] 2日目 投票 ケント → マコト: マコト、理由が最後まで薄かったしアカリの指摘ももっともだと思うから、マコトに入れるよ！
+2026-11-17T15:07:07.2053969Z             決め手: マコトは1日目ソウタ投票の理由もグレー選びも薄く、アカリも理由の薄さを指摘している。今日のグレーの中で、村側の票が集まる流れに乗れる相手でもある。 ／ 反対仮説: マコトは口数が少ないだけの寡黙な村人で、シオンを挙げた理由も一応説明できている。薄い理由だけで村側と断定できないのは確か。 ／ 次点: シオン
+2026-11-17T15:07:07.2059374Z [03:21] 2日目 投票の記録 ケント: メモではp14を第一候補としたが、最終判断でp0へ変更した。マコト、理由が最後まで薄かったしアカリの指摘ももっともだと思うから、マコトに入れるよ！
+2026-11-17T15:07:07.3050677Z [03:21] 2日目 投票 ホノカ → マコト: マコトさんに入れるよ。理由が最後まで薄いままだったから、グレランならここかなと思って。
+2026-11-17T15:07:07.3052386Z             決め手: マコトは1日目にソウタへ投票した理由も、今日の「グレーで気になる人」の理由も短く薄いまま。名指ししたシオンへの根拠も、投票が集まった流れと質問されたことだけだった。 ／ 反対仮説: マコトが村側でも、口数が少ない性格なら理由が短くなるのは自然。シオンを挙げた理由も、票が集まった流れを見た素直な疑いとして説明がつく。 ／ 次点: シオン
+2026-11-17T15:07:07.8826494Z [03:22] 2日目 要約: 占い 1日目夜の結果（2日目公開）: ダイキ→カイト=白。霊媒 1日目処刑の結果（2日目公開）: レン→ソウタ=白、ケント→ソウタ=白
+2026-11-17T15:07:07.8827504Z [03:22] ── 2日目 投票結果 ── 呼び出し 79回(失敗 0・途中切れ 0) 平均 4.3秒
+2026-11-17T15:07:07.9297368Z [03:22] ── 2日目 夜 ── 呼び出し 79回(失敗 0・途中切れ 0) 平均 4.3秒
+2026-11-17T15:07:10.5726397Z [03:24] 2日目 [共有] アカリ: ホノカ、明日もグレランでいくね。占いのダイキは今は吊らず、白の結果を残して見たいな。グレーはどう見てる？
+2026-11-17T15:07:10.6436843Z [03:24] 2日目 [人狼] ミオ: ダイキ、ケント、今夜の噛み先を相談したいです。占いはダイキだけなので、霊媒のレンを噛んで色を隠す案はどうでしょう。
+2026-11-17T15:07:12.5765396Z [03:26] 2日目 [共有] ホノカ: アカリ、グレランで賛成だよ。ダイキは白を残して様子見で。グレーはシオンさんが気になるから、今夜の発言を見たいな。
+2026-11-17T15:07:14.1866644Z [03:28] 2日目 [人狼] ダイキ: ミオ、レン噛みに賛成。ただ本物なら霊媒を残したいはずだから、ケントの真が浮く点だけ気をつけよう。ケントはどう？
+2026-11-17T15:07:16.3008899Z [03:30] 2日目 [人狼] ケント: ミオ、ダイキ、レン噛みで賛成！ただ真っぽいケントが残る形になるから、明日はレンの噛まれ方を見て俺は霊媒の真を強く押すね！
+2026-11-17T15:07:18.2604676Z [03:32] 2日目 夜行動 ダイキ(werewolf) → レン: 仲間のミオ・ケントと合意済みのレン噛み。霊媒の色を隠し、ケントの真を押しやすくする。
+2026-11-17T15:07:18.2605619Z [03:32] ── 2日目 夜明け ── 呼び出し 85回(失敗 0・途中切れ 0) 平均 4.1秒
+2026-11-17T15:07:18.3106381Z [03:32] ── 3日目 昼の議論 ── 呼び出し 85回(失敗 0・途中切れ 0) 平均 4.1秒
+2026-11-17T15:07:23.6194336Z [03:37] 3日目 [immediate] ダイキ: 占い師COを続けます。2日目夜はツムギさんを占って白でした。レンさんが噛まれたので、今日はグレーから見ていきたいです。
+2026-11-17T15:07:23.6196627Z             メモ: 方針: 偽占いとして2日目夜の結果を出す。仲間以外のグレーから白を出す。生存グレーはミオ、リク、ツムギ、シオン、アオイで、ミオは仲間なので除く。リクは前回から疑っているので黒は出さず、ツムギを白にする。吊りはリクのグレランに誘導。 ／ 吊り先: リク(p10) ／ 疑い: リク(p10)、シオン(p14) ／ 信用: アカリ(p1)、ホノカ(p13) ／ 陣営内の方針: 偽占い=ダイキ。ツムギ白で出す。仲間のミオ・ケントには触れない。レン噛みで霊媒はケントが残るので、ケント真を押す流れを邪魔しない。縄はリクなどグレーに向ける。
+2026-11-17T15:07:28.2227739Z [03:42] 3日目 [immediate] ケント: 霊媒結果だよ。昨日処刑されたマコトは白でした。レンが噛まれて霊媒は俺だけになったから、情報は残す方向でお願い！
+2026-11-17T15:07:28.2229184Z             メモ: 方針: 霊媒COを続け、マコトの結果を出す。マコトは人狼ではないので白と報告するのが自然。レンが噛まれて霊媒の真を主張しやすくなった。今日はグレーのシオンかリクに票を寄せる。 ／ 吊り先: シオン(p14) ／ 疑い: シオン(p14)、リク(p10) ／ 陣営内の方針: ケントは偽霊媒を続けてマコト白を出す。ダイキは占い師を続ける。ミオは潜伏して、今日はグレーのシオンへ票を寄せる。
+2026-11-17T15:07:32.6431215Z [03:46] 3日目 [initial_view] サクラ: ケントの霊媒は真寄りに見るけど、断定はしない。リク、ここまでの自分の疑い先を答えて。
+2026-11-17T15:07:32.6433522Z             メモ: 方針: 占いはダイキのみ生存、霊媒はケントのみ。レンが噛まれたのでケントが真寄りかもしれないが、狼が偽霊媒を噛む可能性は低く、まだ断定できない。今日はグレー(ミオ、リク、シオン、アオイ)から発言を見て選ぶ。前回からリクを軸に見る。 ／ 吊り先: リク(p10) ／ 疑い: リク(p10)、ミオ(p5)、シオン(p14) ／ 信用: アカリ(p1)、ホノカ(p13)
+2026-11-17T15:07:37.0775686Z [03:51] 3日目 [initial_view] ミオ: サクラさんの質問に私も関心があります。リクさんは1日目に私へ投票した理由を、改めて聞かせてもらえますか。
+2026-11-17T15:07:37.0777866Z             メモ: 方針: 潜伏の人狼。占いのダイキと霊媒のケントは仲間なので露骨に庇わず中立を保つ。グレー(リク、シオン、アオイ)から無難な吊り先を探し、サクラの質問の流れに乗ってリクへ注目を向ける。 ／ 吊り先: リク(p10) ／ 疑い: リク(p10)、シオン(p14)、アオイ(p15) ／ 妖狐候補: アオイ(p15) ／ 陣営内の方針: ダイキ偽占い、ケント偽霊媒、ミオ潜伏。灰の村人(リク)を吊らせ、狼側の三人は目立たないようにする。真占いのハルトは噛み済みなので、次は狐候補とグレーを処理する流れに寄せる。
+2026-11-17T15:07:40.5271389Z [03:54] 3日目 [initial_view] アオイ: …少しいいですか。リクさんの回答をまず聞いてから、グレーを見たいです。
+2026-11-17T15:07:40.5273309Z             メモ: 方針: 妖狐なので潜伏。ダイキに占われると呪殺されるので、ダイキが生きている間は自分がグレーなのが危険。ダイキ偽寄りの空気を作りたいが目立たない。今日はグレーで発言の薄いリクの回答を待つ。 ／ 吊り先: リク(p10) ／ 疑い: リク(p10)、ミオ(p5)
+2026-11-17T15:07:44.2377800Z [03:58] 3日目 [rebuttal_or_reassessment] ケント: サクラ、真寄りって見てくれてありがと！断定しないのも当然だし、霊媒結果は毎日ちゃんと出すよ。リクの答え待ちだね！
+2026-11-17T15:07:44.2380508Z             メモ: 方針: サクラは霊媒を真寄りに見ているので、断定しない点だけ受けて信用を取りにいく。疑い先はグレーのシオン・リクのまま、リクの回答待ち。 ／ 吊り先: シオン(p14) ／ 疑い: シオン(p14)、リク(p10) ／ 陣営内の方針: ケントは偽霊媒を続けて真寄りの評価を維持する。ダイキは占い師を続ける。ミオは潜伏して、今日はシオンに票を寄せる。
+2026-11-17T15:07:48.2091332Z [04:02] 3日目 [rebuttal_or_reassessment] リク: えっと…ミオさんに入れたのは、1日目の発言が少なくて判断材料が薄かったからです。今の疑い先は、まだミオさんが一番ですが、決めきれてません…。
+2026-11-17T15:07:48.2092880Z             メモ: 方針: 村人。1日目ミオ投票は、ソウタ・シオンに票が集まる中で発言が少なく見えたため。疑い先は今のところ決めきれず、グレーのミオ・シオン・アオイを比べる。ダイキとケントは真偽未確定で、今日はグレラン。 ／ 吊り先: ミオ(p5) ／ 疑い: ミオ(p5)、シオン(p14)、アオイ(p15) ／ 信用: アカリ(p1)、ホノカ(p13)
+2026-11-17T15:07:51.8824535Z [04:06] 3日目 [rebuttal_or_reassessment] シオン: リクさんの回答は理由が薄いですが、まだ疑いを決めきれません。ミオさん、ツムギさんに入れた1日目の理由を聞かせてください。
+2026-11-17T15:07:51.8826710Z             メモ: 方針: 自分は村人。マコトは処刑済みで、今はグレーの比較。リクの回答は薄いが決め打つ材料はまだない。ミオは1日目にツムギへ投票し、今回はリクへの質問に乗っただけなので様子を見る。 ／ 吊り先: ミオ(p5) ／ 疑い: ミオ(p5)、リク(p10) ／ 信用: アカリ(p1)、ホノカ(p13)
+2026-11-17T15:07:55.6367756Z [04:09] 3日目 [rebuttal_or_reassessment] ミオ: シオンさん、1日目は発言が少なく、立場が見えにくかったツムギさんに入れました。決め手は薄かったので、今は判断を変えています。
+2026-11-17T15:07:55.6370158Z             メモ: 方針: シオンの質問に答える。1日目のツムギ票は、ダイキが白を出す前の時点でのグレー判断だったと説明する。リクは引き続き疑い先に置く。 ／ 吊り先: リク(p10) ／ 疑い: リク(p10)、シオン(p14)、アオイ(p15) ／ 妖狐候補: アオイ(p15) ／ 陣営内の方針: ダイキ偽占い、ケント偽霊媒、ミオ潜伏。目立たずグレーのリクへ票を寄せ、狼側三人は疑いを避ける。
+2026-11-17T15:07:59.6225896Z [04:13] 3日目 [rebuttal_or_reassessment] リク: あっ、シオンさん、理由が薄いのはその通りです…。ミオさんの答えも、判断を変えた理由がまだ見えなくて、もう少し聞きたいです。
+2026-11-17T15:07:59.6228411Z             メモ: 方針: シオンに理由が薄いと言われたが事実なので認めつつ、ミオの回答(ツムギに入れた理由、今は判断を変えた)は筋が通るが決め手の薄さは残る。ミオ・シオン・アオイを比べ、今は発言の中身が見えにくいミオを引き続き一番にする。 ／ 吊り先: ミオ(p5) ／ 疑い: ミオ(p5)、シオン(p14)、アオイ(p15) ／ 信用: アカリ(p1)、ホノカ(p13)
+2026-11-17T15:08:03.5107199Z [04:17] 3日目 [rebuttal_or_reassessment] シオン: リクさんの指摘はもっともです。ミオさん、ツムギさんから判断を変えた理由を、きっかけになった発言で教えてください。
+2026-11-17T15:08:03.5108593Z             メモ: 方針: 自分は村人。ミオの理由は薄いが、リクの回答も薄く、どちらも決め手がない。リクの『判断を変えた理由が見えない』という指摘は妥当で、ミオを一番手に据える。 ／ 吊り先: ミオ(p5) ／ 疑い: ミオ(p5)、リク(p10) ／ 信用: アカリ(p1)、ホノカ(p13)
+2026-11-17T15:08:07.0147874Z [04:21] 3日目 [open_floor] ホノカ: ミオさん、判断を変えた理由は私も聞きたいな。きっかけの発言を一つ教えてもらえる？
+2026-11-17T15:08:07.0149577Z             メモ: 方針: 共有は両方公開済みで村側確定。ミオの1日目ツムギ投票の理由が揺れていて、リクとシオンが追及中。今日はグレランで、ミオの回答を見つつリクも比べる。ダイキは白を残して様子見。 ／ 吊り先: ミオ(p5) ／ 疑い: ミオ(p5)、リク(p10)、シオン(p14) ／ 信用: アカリ(p1)
+2026-11-17T15:08:10.6537820Z [04:24] 3日目 [open_floor] アカリ: おっと〜、ミオさんの答え待ちだね。きっかけの発言を一つ、具体的に聞かせて！今日もグレランでいくよ。
+2026-11-17T15:08:10.6539209Z             メモ: 方針: 今日もグレラン。ダイキは白を残して様子見。ミオが判断を変えた理由を答えるか見る。リクとミオの応酬を観察しつつ、方針は夕方に出す。 ／ 吊り先: ミオ(p5) ／ 疑い: ミオ(p5)、リク(p10) ／ 信用: ホノカ(p13)
+2026-11-17T15:08:14.6822254Z [04:29] 3日目 [open_floor] ノゾミ: ミオ、みんな待ってるけど。判断を変えたきっかけ、結局どの発言なの。はぐらかさないでね。
+2026-11-17T15:08:14.6824124Z             メモ: 方針: 占い2-0でハルト噛み、レン噛まれ。霊媒はケント生存でレン偽なら狼側の可能性。グレーのミオの回答が曖昧なので注目。ミオの「判断を変えた」理由が薄く、リクも疑いを決めきれていない。暫定でミオ。 ／ 吊り先: ミオ(p5) ／ 疑い: ミオ(p5)、リク(p10)、シオン(p14) ／ 信用: アカリ(p1)、ホノカ(p13)
+2026-11-17T15:08:18.1722577Z [04:32] 3日目 [open_floor] カイト: ふふ、ミオさんの答えが出ませんね。きっかけの発言が出ないなら、その点は覚えておきます。
+2026-11-17T15:08:18.1724623Z             メモ: 方針: ミオの回答待ちで場は動いている。ミオは判断を変えた理由を出せていないので、今日はグレーのミオを一番に見る。ダイキは未確定。霊媒はケントのみ生存で真寄りだが断定しない。 ／ 吊り先: ミオ(p5) ／ 疑い: ミオ(p5)、リク(p10)、シオン(p14) ／ 信用: アカリ(p1)、ホノカ(p13)
+2026-11-17T15:08:21.5144540Z [04:35] 3日目 [open_floor] ツムギ: ふむ、私に入れた件は気にしていない。ただミオ、変えたきっかけの発言には答えてもらおう。
+2026-11-17T15:08:21.5146705Z             メモ: 方針: 占い2-0でダイキのみ生存、霊媒はケントのみ。ミオは1日目に私へ投票し、判断を変えた理由に答えず逃げている点が気になる。リクも理由が薄いが、今日はミオの返答待ち。 ／ 吊り先: ミオ(p5) ／ 疑い: ミオ(p5)、リク(p10) ／ 信用: アカリ(p1)、ホノカ(p13)
+2026-11-17T15:08:25.7537871Z [04:40] 3日目 [consensus_summary] アカリ: おっと〜、ミオさんまだ沈黙か。今日はグレランのまま、答えが出るかを最後に見るよ。
+2026-11-17T15:08:25.7540009Z             メモ: 方針: ミオは判断を変えたきっかけの発言を最後まで答えない。回避が続くなら寡黙・はぐらかしとして今日の吊り先はミオ。ダイキは白を残して様子見。リクも疑いは残るが票はミオに集める。グレランなので指定はせず、答えを待ってから投票に入る。 ／ 吊り先: ミオ(p5) ／ 疑い: ミオ(p5)、リク(p10) ／ 信用: ホノカ(p13)
+2026-11-17T15:08:29.5111634Z [04:43] 3日目 [rebuttal_or_reassessment] ミオ: お待たせしました。きっかけはダイキさんの2日目夜の白判定です。ツムギさんが白なら、グレー判断のままは弱いと考えました。
+2026-11-17T15:08:29.5114010Z             メモ: 方針: きっかけの発言を聞かれている。実際には具体的な発言がないので、正直に答えつつ、2日目の投票でツムギさんに白が出たことを理由にする。リクは疑い先に残す。 ／ 吊り先: リク(p10) ／ 疑い: リク(p10)、シオン(p14)、アオイ(p15) ／ 妖狐候補: アオイ(p15) ／ 陣営内の方針: ダイキ偽占い、ケント偽霊媒、ミオ潜伏。目立たずリクへ票を寄せ、狼側三人は疑いを避ける。
+2026-11-17T15:08:32.7330340Z [04:47] 3日目 [final_designation] アカリ: グレランで。ミオさんの答えは後付けっぽいから、私はミオさんに入れるよ。
+2026-11-17T15:08:32.7332171Z             メモ: 方針: ミオの回答は出たが、ダイキの白判定を理由にするのは後付けっぽく、1日目の票の理由とも噛み合わない。リクも疑いは残るが票はミオに集める。グレランでミオに投票する。 ／ 吊り先: ミオ(p5) ／ 疑い: ミオ(p5)、リク(p10) ／ 信用: ホノカ(p13)
+2026-11-17T15:08:32.7337619Z [04:47] ── 3日目 投票 ── 呼び出し 104回(失敗 0・途中切れ 0) 平均 4.0秒
+2026-11-17T15:08:37.2231482Z [04:51] 3日目 投票 アカリ → ミオ: さっき言った通り、ミオさんに入れるよ。判断を変えた理由が後付けっぽいままだからね。
+2026-11-17T15:08:37.2232811Z             決め手: ミオさんは1日目にツムギさんへ投票した判断を変えたきっかけを、長く沈黙した末にダイキさんの白判定と答えた。1日目の票の理由と噛み合わず、後付けに見える。 ／ 反対仮説: ミオさんが村側でも、1日目は材料が薄くて投票し、2日目夜にダイキさんの白が出て素直に考えを変えただけと説明できる。回答が遅れたのも慎重だったからかもしれない。 ／ 次点: リク
+2026-11-17T15:08:37.2554363Z [04:51] 3日目 投票 ツムギ → ミオ: ミオ、答えが遅く後付けに聞こえる。卓で言ったとおり今日はミオに入れる。
+2026-11-17T15:08:37.2556534Z             決め手: ミオが判断を変えたきっかけをなかなか答えず、ようやく出た理由もダイキの白判定という後付けに見えた点 ／ 反対仮説: ミオは単に発言が少なく慎重なだけで、ダイキの白判定を見て判断を変えたという説明も筋は通る。ダイキが真なら村側の自然な思考とも言える。 ／ 次点: リク
+2026-11-17T15:08:37.2821523Z [04:51] 3日目 投票 カイト → ミオ: ミオさんの答えは遅くて後付けっぽいので、予定どおりミオさんに入れます。
+2026-11-17T15:08:37.2822779Z             決め手: ミオは判断を変えた理由を長く答えず、出した答えもダイキの2日目夜の白判定という後付けに見える内容だった ／ 反対仮説: ミオは1日目に発言が少なく、ダイキの白判定を見て判断を変えたと説明している。それが本心の村人でも、答えが遅れたことは説明がつく。 ／ 次点: リク
+2026-11-17T15:08:37.6019992Z [04:51] 3日目 投票 ミオ → リク: リクさんに入れます。1日目の投票理由も今日の回答も薄く、疑いが決まらないままなので、グレーから先に処理したいです。
+2026-11-17T15:08:37.6021522Z             決め手: リクさんは1日目に私へ投票し、今日の回答も理由が薄いと複数の人から指摘されていた。疑い先を決めきれていない点も残っている。 ／ 反対仮説: リクさんが村人なら、発言が少ないだけで私を疑ったことになります。決めきれないと正直に言っているので、慎重なだけとも説明がつきます。 ／ 次点: シオン
+2026-11-17T15:08:37.7280015Z [04:52] 3日目 投票 リク → ミオ: えっと…ミオさんに入れます。答えが遅く、きっかけも後付けっぽく感じたので、昼の疑いのままです。
+2026-11-17T15:08:37.7281804Z             決め手: ミオさんが判断を変えたきっかけの答えが、質問が続いても長く出ず、出た答えも後付けに見えた点 ／ 反対仮説: 発言が少ないだけの慎重な村人で、ダイキさんの白判定を見て判断を変えたという説明は筋が通る。1日目の票も決め手が薄かったと自分で認めている。 ／ 次点: シオン
+2026-11-17T15:08:37.7304453Z [04:52] 3日目 投票 サクラ → ミオ: ミオ、きっかけの答えが遅くて後付けっぽい。アカリの指定もあるしミオに入れる。リクより先にこっちを処理する。
+2026-11-17T15:08:37.7305884Z             決め手: ミオは判断を変えたきっかけを聞かれて長く沈黙し、出した答えもダイキの白判定という後付けに見える理由だった。リクは薄い回答でも聞かれたことには答えている。 ／ 反対仮説: ミオは発言が少ないだけの村人で、ダイキの白を見て判断を変えたという説明は筋が通る。沈黙は慎重さで、アカリの後付け判断に乗るのも危うい。 ／ 次点: リク
+2026-11-17T15:08:37.7324463Z [04:52] 3日目 投票の記録 サクラ: メモではp10を第一候補としたが、最終判断でp5へ変更した。ミオ、きっかけの答えが遅くて後付けっぽい。アカリの指定もあるしミオに入れる。リクより先にこっちを処理する。
+2026-11-17T15:08:37.7814263Z [04:52] 3日目 投票 ダイキ → リク: リクさんの答えは理由が薄いままだったから、グレーから吊るならリクさんに入れる。
+2026-11-17T15:08:37.7815516Z             決め手: リクは1日目から疑ってきたグレーで、今日の回答も理由が薄く決めきれていない。ミオは仲間なので守りたい。 ／ 反対仮説: リクは疑いを決めきれないと正直に答えており、発言が少ないだけの村人でも説明がつく。ミオへの疑いも筋は通っていて、それは村目線では自然。 ／ 次点: シオン
+2026-11-17T15:08:37.8642098Z [04:52] 3日目 投票 ノゾミ → ミオ: ミオ、きっかけが後出しなのは変わらないよ。ずっと聞かれてたのに沈黙してからの回答だし、ミオに入れる。
+2026-11-17T15:08:37.8643199Z             決め手: ミオが判断を変えた理由を長く沈黙し、答えたのは後からで、ダイキの2日目夜の白判定を持ち出した後付けに見える点 ／ 反対仮説: ツムギへの1日目投票は発言が少なかったからという理由で筋は通っている。夜の白判定で判断を変えたのも自然で、答えが遅れただけなら村人でも説明がつく。 ／ 次点: リク
+2026-11-17T15:08:40.0231107Z [04:54] 3日目 投票 アオイ → ミオ: …ミオさんの答えが遅く、きっかけも後付けに聞こえました。アカリさんの指定に合わせてミオさんに入れます。
+2026-11-17T15:08:40.0232274Z             決め手: ミオさんの判断変更の理由が長く沈黙した後に出た後付けに見え、アカリさんの指定とも合う。 ／ 反対仮説: ミオさんが村側でも、ダイキの白判定を見て判断を変えたという説明は筋が通っている。長い沈黙は慎重だっただけとも考えられる。 ／ 次点: リク
+2026-11-17T15:08:40.0245487Z [04:54] 3日目 投票の記録 アオイ: メモではp10を第一候補としたが、最終判断でp5へ変更した。…ミオさんの答えが遅く、きっかけも後付けに聞こえました。アカリさんの指定に合わせてミオさんに入れます。
+2026-11-17T15:08:40.2097148Z [04:54] 3日目 投票 シオン → ミオ: ミオさんに入れます。きっかけの説明が遅く、1日目の理由も薄いままなので、グレーでは一番疑いが残ります。
+2026-11-17T15:08:40.2098156Z             決め手: ミオさんの判断を変えた理由は、沈黙のあとに出たダイキさんの白判定という後付けに近い説明で、1日目の理由も薄いまま ／ 反対仮説: ミオさんが村側でも、発言が少ない人で、遅れた返答は慎重さの表れとして説明がつきます。ダイキさんの白判定を根拠に挙げたのも一応筋は通ります。 ／ 次点: リク
+2026-11-17T15:08:40.8300803Z [04:55] 3日目 投票 ケント → シオン: シオンに入れるよ！マコトが最後にシオンを気にしてたし、グレーでいちばん理由がある。
+2026-11-17T15:08:40.8302455Z             決め手: ミオは仲間なので吊れない。グレーのシオンは1日目にソウタ票でマコトにも名指しされていて、グレーから吊る流れの中で一番理由が立つ ／ 反対仮説: シオンは村側でも、リクの薄い回答を指摘したりミオに理由を聞き続けたりと、村の議論を進める動きをしていた。マコトの指摘も根拠が薄いので、村人として自然。 ／ 次点: リク
+2026-11-17T15:08:40.8368112Z [04:55] 3日目 投票 ホノカ → ミオ: ミオさんの答えがだいぶ遅れたうえに後付けっぽいので、ミオさんに入れるね。
+2026-11-17T15:08:40.8370028Z             決め手: ミオさんが判断を変えたきっかけに挙げたのはダイキさんの2日目夜のツムギさん白判定だが、ミオさんは2日目の投票でマコトさんに入れただけで、1日目の理由が薄いままだった点が後付けに見える。 ／ 反対仮説: ミオさんが村側でも、1日目は発言が少なくて決め手が薄いまま投票し、ダイキさんの白判定で素直に考えを変えただけと説明できる。沈黙が長かったのも慎重だったからかもしれない。 ／ 次点: リク
+2026-11-17T15:08:41.4577764Z [04:55] 3日目 要約: 占い 2日目夜の結果（3日目公開）: ダイキ→ツムギ=白。霊媒 2日目処刑の結果（3日目公開）: ケント→マコト=白
+2026-11-17T15:08:41.4578548Z [04:55] ── 3日目 投票結果 ── 呼び出し 116回(失敗 0・途中切れ 0) 平均 4.1秒
+2026-11-17T15:08:41.5298520Z [04:55] ── 3日目 夜 ── 呼び出し 116回(失敗 0・途中切れ 0) 平均 4.1秒
+2026-11-17T15:08:44.1374851Z [04:58] 3日目 [共有] アカリ: ホノカ、明日もグレランでいくね。ダイキは白を残して様子見、グレーはリクとシオンが気になるけどどう見てる？
+2026-11-17T15:08:44.4297421Z [04:58] 3日目 [人狼] ダイキ: ケント、今夜の噛みは狩人か共有狙いでどう？俺の占い白が続くから、明日はリクを吊る流れに寄せたい。
+2026-11-17T15:08:45.5722280Z [04:59] 3日目 [共有] ホノカ: アカリ、グレランで賛成だよ。ダイキは白を残して様子見、グレーはリクさんとシオンさんを比べたいな。
+2026-11-17T15:08:46.4810245Z [05:00] 3日目 [人狼] ケント: ダイキ、狩人か共有狙いで賛成！ただ狩人は不明だから、まず共有のアカリかホノカを噛むのが安全かな。明日はリク吊りに寄せよう！
+2026-11-17T15:08:48.8046274Z [05:03] 3日目 夜行動 ダイキ(werewolf) → アカリ: ケントと相談済みで、共有のアカリかホノカを噛む方針。アカリは進行役で村を主導しており、先に落とせば吊り先の誘導を崩せるので襲撃する。
+2026-11-17T15:08:48.8047357Z [05:03] ── 3日目 夜明け ── 呼び出し 121回(失敗 0・途中切れ 0) 平均 4.0秒
+2026-11-17T15:08:48.8792139Z [05:03] ── 4日目 昼の議論 ── 呼び出し 121回(失敗 0・途中切れ 0) 平均 4.0秒
+2026-11-17T15:08:54.8057908Z [05:09] 4日目 [immediate] ダイキ: おはよう。3日目夜はリクを占って、結果は黒。リクは人狼だった。今日はリク吊りでいきたい。
+2026-11-17T15:08:54.8059923Z             メモ: 方針: 偽占いとして3日目夜の結果を出す。仲間のケントは占わない。グレーのリクかシオンかアオイから選ぶ。リクは吊り先なので黒を出して縄を向ける手もあるが、霊媒ケント真を押す流れなので、リク黒で吊らせるのが自然。リク黒を出して今日リクを吊る。 ／ 吊り先: リク(p10) ／ 疑い: リク(p10)、シオン(p14) ／ 信用: ホノカ(p13) ／ 妖狐候補: アオイ(p15) ／ 陣営内の方針: 偽占い=ダイキ。リク黒を出して縄を村人に向ける。リクが処刑されたら霊媒ケントは白と答えて偽が露見するリスクがあるが、ケントは霊結果を合わせて調整する。共有アカリは噛み済み、ホノカは次の候補。ケントには触れない。
+2026-11-17T15:08:59.3916849Z [05:13] 4日目 [immediate] ケント: 霊媒結果。3日目に処刑されたミオさんは白だったよ。ダイキさんのリク黒の件は、今日リクの反応を見たい！
+2026-11-17T15:08:59.3919023Z             メモ: 方針: 偽霊媒として3日目処刑のミオの結果を出す。ミオは仲間の狼だが、ダイキのリク黒を通すなら白と言うと矛盾しない。ダイキのリク黒に乗り、今日はリク吊りに寄せる。 ／ 吊り先: リク(p10) ／ 疑い: リク(p10) ／ 真と見る占い: ダイキ(p12) ／ 陣営内の方針: ケントは偽霊媒を続けミオ=白と出す。ダイキは占い師を続けリクを吊らせる。リクが吊られれば霊結果は白で出す。襲撃は共有か狩人を狙う。
+2026-11-17T15:09:03.9617023Z [05:18] 4日目 [initial_view] カイト: ふふ、ダイキさんの黒は強い材料ですね。ではリクさん、ダイキさんが偽だとしたら何が見えると思います？
+2026-11-17T15:09:03.9619169Z             メモ: 方針: ダイキの黒は未検証。ダイキが偽でリクが白の可能性もあるので、リク吊りは占い真偽に直結する。ただしリクは3日目にダイキと同じ票でミオを避けなかった動きもなく、まずリクの反応を見る。今日はリク寄りで、反応次第。 ／ 吊り先: リク(p10) ／ 疑い: リク(p10)、シオン(p14)、ダイキ(p12) ／ 信用: ホノカ(p13) ／ 妖狐候補: シオン(p14)、アオイ(p15)
+2026-11-17T15:09:07.5194444Z [05:21] 4日目 [initial_view] サクラ: リク、答えて。ダイキさんの黒に反論があるなら、具体的に今言って。
+2026-11-17T15:09:07.5196478Z             メモ: 方針: ダイキ真ならリクは狼。ダイキ偽なら黒は偽黒で、リク吊りは村の損になる。ミオ白でケントの霊結果は問題ないが、まだ真偽は断定できない。リクの反応を見つつ、今日はリク寄りで考える。 ／ 吊り先: リク(p10) ／ 疑い: リク(p10)、シオン(p14)、アオイ(p15) ／ 信用: ホノカ(p13)
+2026-11-17T15:09:11.9967837Z [05:26] 4日目 [initial_view] ノゾミ: ダイキさん、リク黒で今日吊るなら、偽だった時の責任も取る覚悟はあるの。リクの返事を先に聞きたいね。
+2026-11-17T15:09:11.9969542Z             メモ: 方針: ダイキの黒はリクに出たが、ダイキ真かは未検証。リクの反応を見て、ダイキ偽ならリクは白い。暫定でリク吊りだが、ダイキとケントの真偽も要検討。 ／ 吊り先: リク(p10) ／ 疑い: リク(p10)、ダイキ(p12)、シオン(p14) ／ 信用: ホノカ(p13)
+2026-11-17T15:09:15.5013088Z [05:29] 4日目 [rebuttal_or_reassessment] リク: えっと、僕は村人です…。ダイキさんが偽なら、黒を出された僕を吊らせて村を減らす狙いが見えます。今日はダイキさん吊りがいいと思います…。
+2026-11-17T15:09:15.5015163Z             メモ: 方針: 自分は村人なのでダイキの黒は誤り。ダイキ偽として見る。偽なら狼か狂人で、白を出したカイト・ノゾミ・ツムギの扱いも要検討。今日はダイキ吊りを主張。 ／ 吊り先: ダイキ(p12) ／ 疑い: ダイキ(p12)、シオン(p14)、アオイ(p15) ／ 信用: ホノカ(p13)
+2026-11-17T15:09:18.9583361Z [05:33] 4日目 [rebuttal_or_reassessment] リク: えっと、ノゾミさん。偽だったら責任を取る、は覚悟しています…。でも僕は人狼じゃないので、ダイキさん吊りは変えません。
+2026-11-17T15:09:18.9584984Z             メモ: 方針: 自分は村人なのでダイキの黒は誤り、ダイキ偽で見る。ダイキは狼か狂人で、白を出したカイト・ノゾミ・ツムギの扱いも後で見る。今日はダイキ吊りを維持し、ケントの霊媒真偽も見ていく。 ／ 吊り先: ダイキ(p12) ／ 疑い: ダイキ(p12)、シオン(p14)、アオイ(p15) ／ 信用: ホノカ(p13)
+2026-11-17T15:09:22.5182672Z [05:36] 4日目 [open_floor] アオイ: …リクさんの反論は筋が通っていると思います。ダイキさんの黒だけで決めず、今日はダイキさんも見たいです。
+2026-11-17T15:09:22.5184432Z             メモ: 方針: 妖狐なのでダイキが生きている間は占われる危険がある。ダイキ偽寄りの流れに乗り、リクの反論を材料にダイキ吊りへ寄せたい。ただし目立たないよう控えめに。 ／ 吊り先: ダイキ(p12) ／ 疑い: ダイキ(p12)
+2026-11-17T15:09:27.5297265Z [05:41] 4日目 [open_floor] ホノカ: リクさん、ダイキさんが偽なら黒先に自分を選ぶ理由は何だと思う？ゆっくりでいいから聞かせて。
+2026-11-17T15:09:27.5300261Z             メモ: 方針: 共有は両方公開済みで村側確定。ダイキ真ならリク黒で人狼。ミオ白でダイキの白(ツムギ)判定が絡むが矛盾なし。ダイキ偽ならリクは白。リクは反論が淡々としすぎ。ダイキは唯一の生存占いで真贋が決まらないうちは失う損が大きい。今日はリク吊りを軸にし、ダイキは明日以降様子見。霊媒ケントは対抗レン死亡で真寄り。 ／ 吊り先: リク(p10) ／ 疑い: リク(p10)、ダイキ(p12) ／ 信用: アカリ(p1) ／ 真と見る占い: ダイキ(p12) ／ 妖狐候補: サクラ(p7)、シオン(p14)、アオイ(p15)、ケント(p16)
+2026-11-17T15:09:30.8429484Z [05:45] 4日目 [reaction] リク: えっと、ホノカさん。偽なら、村人の僕に黒を出して吊らせたかったのかなと…。
+2026-11-17T15:09:30.8431243Z             メモ: 方針: ホノカの質問に最初に答える。ダイキ偽なら黒先に自分を選ぶのは、村人を吊らせるか、占い先を絞って信用を取る狙い。ダイキ吊り維持。 ／ 吊り先: ダイキ(p12) ／ 疑い: ダイキ(p12)、シオン(p14)、アオイ(p15) ／ 信用: ホノカ(p13)
+2026-11-17T15:09:34.6561225Z [05:48] 4日目 [facilitator_followup] ホノカ: リクさん、答えありがとう。ただ一般論で、黒先に選ぶ具体的な理由は見えなかったかな。吊り先は今のところ変えないよ。
+2026-11-17T15:09:34.6562785Z             メモ: 方針: リクの答えは『吊らせたかった』と一般論で、具体性が薄い。ダイキ真ならリク人狼、偽ならリク白。ダイキは唯一の生存占いなので失う損が大きく、リク吊りを軸に維持。アオイの擁護は少数意見として気にかけ、次に聞く。 ／ 吊り先: リク(p10) ／ 疑い: リク(p10)、ダイキ(p12) ／ 信用: アカリ(p1) ／ 真と見る占い: ダイキ(p12) ／ 妖狐候補: サクラ(p7)、シオン(p14)、アオイ(p15)、ケント(p16)
+2026-11-17T15:09:38.9393554Z [05:53] 4日目 [open_floor] ツムギ: ふむ、リクの反論は一般論で止まっている。ダイキは私に白を出したし、私はリク吊りで見るよ。
+2026-11-17T15:09:38.9396264Z             メモ: 方針: 占い2-0でダイキのみ生存。ダイキは私に白を出しており、私視点では白判定は正しい。ダイキが真ならリク黒は信用できる。リクの反論は一般論で、黒先に選ばれた理由に具体性がない。今日はリク吊りで霊結果の検証材料にもなるが、ダイキ偽の可能性も残る。 ／ 吊り先: リク(p10) ／ 疑い: リク(p10)、ダイキ(p12) ／ 信用: ホノカ(p13) ／ 真と見る占い: ダイキ(p12)
+2026-11-17T15:09:42.4837723Z [05:56] 4日目 [open_floor] シオン: ホノカさんの言う通り、リクさんの反論は一般論で止まっています。今日はリクさんに入れます。ダイキさんの真偽は霊結果で見ます。
+2026-11-17T15:09:42.4839174Z             メモ: 方針: 自分は村人。ダイキ真ならリク黒で人狼確定。偽なら黒先に残した理由が弱い。リクの反論は一般論止まりで、ホノカの指摘は妥当。ダイキ偽なら残り縄が厳しいが、今日はリクが最有力。 ／ 吊り先: リク(p10) ／ 疑い: リク(p10)、ダイキ(p12) ／ 信用: ホノカ(p13)
+2026-11-17T15:09:46.8764721Z [06:01] 4日目 [consensus_summary] ホノカ: 今日はリクさん吊りでいくね。ダイキさんの黒に対する反論が一般論のままだったから。リクさん、最後に言い残すことがあれば聞かせて。
+2026-11-17T15:09:46.8767311Z             メモ: 方針: ダイキ真ならリク人狼。偽ならリク白でダイキ偽。ダイキは唯一の生存占いで失う損は大きいが、リクの反論は一般論で具体性が薄く、ツムギとシオンも同じ見方。リク吊りを維持し、霊結果で検証する。アオイの擁護は少数意見として残し、リクの結果を見て見直す。 ／ 吊り先: リク(p10) ／ 疑い: リク(p10)、ダイキ(p12) ／ 信用: アカリ(p1) ／ 真と見る占い: ダイキ(p12) ／ 妖狐候補: サクラ(p7)、シオン(p14)、アオイ(p15)、ケント(p16)
+2026-11-17T15:09:50.5895471Z [06:04] 4日目 [rebuttal_or_reassessment] リク: えっと、すみません…。ダイキさんの白を受けた人ほど僕に入れていて、結果で票が動いています。僕は人狼じゃないです…。
+2026-11-17T15:09:50.5897867Z             メモ: 方針: 自分は村人なのでダイキの黒は偽。反論が一般論と言われたので、具体的な差分を一つ出す。ダイキは白を出した相手が今日の票に回っており、ダイキの結果で票が動いている点を指摘する。ダイキ吊り維持。 ／ 吊り先: ダイキ(p12) ／ 疑い: ダイキ(p12)、シオン(p14)、アオイ(p15) ／ 信用: ホノカ(p13)
+2026-11-17T15:09:53.9396390Z [06:08] 4日目 [final_designation] ホノカ: リクさん吊りで。票が動いたという指摘は、黒が出る前の票も混ざっていて決め手にならないかな。
+2026-11-17T15:09:53.9399014Z             メモ: 方針: リクの新反論「白を受けた人ほど票が動く」は、1日目はダイキ本人もリクに投票しており、占い前の票なので筋が弱い。ダイキ偽でも霊結果と次の夜で検証できる。リク吊りを維持する。 ／ 吊り先: リク(p10) ／ 疑い: リク(p10)、ダイキ(p12) ／ 信用: アカリ(p1) ／ 真と見る占い: ダイキ(p12) ／ 妖狐候補: サクラ(p7)、シオン(p14)、アオイ(p15)、ケント(p16)
+2026-11-17T15:09:53.9405321Z [06:08] ── 4日目 投票 ── 呼び出し 137回(失敗 0・途中切れ 0) 平均 4.0秒
+2026-11-17T15:09:58.3310766Z [06:12] 4日目 投票 カイト → リク: リクさんの反論が一般論のままだったので、予定どおりリクさんに入れます。
+2026-11-17T15:09:58.3312997Z             決め手: ダイキの黒判定がリクに出ており、リクの反論は一般論で止まったまま。霊結果でダイキの真偽を検証するには、リクを吊って結果を見るのが早い。 ／ 反対仮説: ダイキが偽の占い師で、リクが村人なのに黒を出された場合。リクの反論が一般論になるのは、村人で材料がないからとも説明できる。 ／ 次点: ダイキ
+2026-11-17T15:09:58.4253689Z [06:12] 4日目 投票 サクラ → リク: リク、反論が一般論のままだった。ダイキさんの黒を軸に今日はリク吊りでいく。
+2026-11-17T15:09:58.4255228Z             決め手: ダイキの黒判定に対するリクの反論が一般論止まりで、黒先に選ばれる具体的な理由を示せなかった。 ／ 反対仮説: ダイキが偽の占いなら、リクは村人で偽黒を当てられただけ。ダイキの白を受けた人ほどリクに票を入れていて、結果で票が動いた面もある。リクを吊ると村の縄を一つ失う。 ／ 次点: ダイキ
+2026-11-17T15:09:58.4546485Z [06:12] 4日目 投票 リク → ダイキ: えっと、ダイキさんの黒は僕が人狼じゃない以上、偽だと思います…。なので昼に言ったとおりダイキさんに入れます。
+2026-11-17T15:09:58.4547421Z             決め手: 僕は村人なので、ダイキさんの『リク=黒』は事実と違います。黒が嘘なら占い師として偽です。 ／ 反対仮説: ダイキさんが真の占い師で、リクが人狼として嘘をついているだけという見方。ただし僕は村人なので成り立たないです。 ／ 次点: シオン
+2026-11-17T15:09:58.4688431Z [06:12] 4日目 投票 ダイキ → リク: リクは黒だったから、言った通りリクに入れる。反論も一般論で止まってたしね
+2026-11-17T15:09:58.4689504Z             決め手: 3日目夜にリクを占って黒が出た。今日リク吊りと卓で言っている ／ 反対仮説: リクが村人で、自分が偽だった場合。ただ黒を出した本人としてその見方はとれない ／ 次点: シオン
+2026-11-17T15:09:58.5898139Z [06:12] 4日目 投票 ホノカ → リク: リクさんに入れるよ。黒への反論が一般論のままだったからね。ダイキさんの真偽は今日の霊結果と次の夜で見ていこう。
+2026-11-17T15:09:58.5899655Z             決め手: リクはダイキの黒判定を受け、反論は「偽なら村人を吊らせたかった」という一般論で止まり、黒先に選ぶ具体的な理由が出なかった。 ／ 反対仮説: リクが本当に村人で、ダイキが偽の占い師（狼か狂人）の場合。偽が村人に黒を出すのは自然で、反論が一般論になるのも仕方ない。リクの「白を受けた人ほど票が動く」という指摘も、2日目以降の票には当てはまる。 ／ 次点: ダイキ
+2026-11-17T15:09:58.6848985Z [06:13] 4日目 投票 シオン → リク: 卓で言った通り、リクさんに入れます。反論が一般論のままで、ダイキさんの真偽は霊結果で見ます。
+2026-11-17T15:09:58.6850124Z             決め手: ダイキの占い結果でリクが黒。リクの反論は『偽なら村を減らす狙い』という一般論止まりで、黒先に選ぶ具体的な理由に答えていない。 ／ 反対仮説: ダイキが偽の人狼か狂人で、村人のリクに黒を出して縄を使わせようとしている場合。リクの反論が一般論になるのは村人でも自然で、票の動きの指摘も一理ある。 ／ 次点: ダイキ
+2026-11-17T15:09:58.7785489Z [06:13] 4日目 投票 ノゾミ → リク: リクの返事は一般論止まりだったね。ダイキさんが偽なら次の霊結果で見えるから、今日はリクに入れる。
+2026-11-17T15:09:58.7787141Z             決め手: リクの反論は一般論止まりで、ダイキの黒を覆す材料が出ていない。霊媒のケントは3回連続で白を出し、今のところ矛盾もない。 ／ 反対仮説: リクが村人で、ダイキが狼か狂人の偽占いなら、黒は村を減らす目的で出せる。リクの反論が一般論になるのも、村人として出せる材料がないからで説明がつく。票がダイキの白を受けた人に偏っている点も不自然。 ／ 次点: ダイキ
+2026-11-17T15:09:58.8100682Z [06:13] 4日目 投票 ツムギ → リク: 卓で言った通りリクに入れる。反論が一般論のままだったからね。ダイキの真偽は今日の霊結果で見る。
+2026-11-17T15:09:58.8102577Z             決め手: リクの反論は一般論で止まり、ダイキに黒先として選ばれた理由への具体的な反論がなかった。ダイキは私に白を出しており、私視点では白判定は正しい。 ／ 反対仮説: リクが村人で、ダイキが偽の占いとして村人に黒を出した場合。リクの『票が結果で動いた』という指摘にも一理あり、黒先に選ばれた理由が薄いのは当然とも言える。 ／ 次点: ダイキ
+2026-11-17T15:10:01.3268481Z [06:15] 4日目 投票 アオイ → ダイキ: …ダイキさんの黒だけで決めたくないので、ダイキさんに入れます。
+2026-11-17T15:10:01.3269937Z             決め手: ダイキさんは占い師として生きている限り私を占える立場にあり、妖狐の私には最大の脅威。リクさんの反論は一般論ですが、ダイキさんの偽の可能性は残ります。 ／ 反対仮説: ダイキさんが真占いで、リクさんが本当に人狼という見方。リクさんの反論は一般論止まりで、票も黒が出る前から動いていた。 ／ 次点: リク
+2026-11-17T15:10:01.7522479Z [06:16] 4日目 投票 ケント → リク: リクに入れるよ！反論が一般論で止まってたし、ホノカさんの本指定にも乗る。霊結果でダイキさんの真偽も後で見られるしね
+2026-11-17T15:10:01.7524867Z             決め手: ダイキのリク黒が出ていて、リクの反論は一般論止まり。ホノカが進行役としてリク吊りを本指定している ／ 反対仮説: リクが村人で、ダイキが偽の占いとして黒を押し付けている場合。リクは自分への票がダイキの白を受けた人に偏っていると指摘していて、反論が一般論止まりなのは緊張や口数の少なさだけでも説明がつく ／ 次点: アオイ
+2026-11-17T15:10:02.3907439Z [06:16] 4日目 要約: 占い 3日目夜の結果（4日目公開）: ダイキ→リク=黒。霊媒 3日目処刑の結果（4日目公開）: ケント→ミオ=白
+2026-11-17T15:10:02.3908254Z [06:16] ── 4日目 投票結果 ── 呼び出し 147回(失敗 0・途中切れ 0) 平均 4.0秒
+2026-11-17T15:10:02.4845876Z [06:16] ── 4日目 夜 ── 呼び出し 147回(失敗 0・途中切れ 0) 平均 4.0秒
+2026-11-17T15:10:06.0529484Z [06:20] 4日目 [人狼] ダイキ: ケント、リク吊りで霊結果は白を出すしかないよな。今夜はホノカ噛みで共有を消そう。明日は俺の真を押してくれ。
+2026-11-17T15:10:07.1088001Z [06:21] 4日目 [共有] ホノカ: アカリ、明日はリクさんの霊結果次第だよ。白ならダイキさんを指定、黒ならグレランでシオンさんとアオイさんを見たいな。
+2026-11-17T15:10:08.3790685Z [06:22] 4日目 [人狼] ケント: ダイキ、ホノカ噛みで賛成！明日リク白を出すから、ダイキは俺の真を押してね。ダイキの真偽は霊結果次第になるから慎重にいこう！
+2026-11-17T15:10:10.0449753Z [06:24] 4日目 夜行動 ダイキ(werewolf) → ホノカ: ケントとの相談どおり、共有のホノカを襲撃して共有を消す。霊媒ケントが白を出す流れでも、ホノカがいなければ進行役を失わせられる。
+2026-11-17T15:10:10.0450948Z [06:24] ── 4日目 夜明け ── 呼び出し 151回(失敗 0・途中切れ 0) 平均 3.9秒 推論トークン 1%
+2026-11-17T15:10:10.1371685Z [06:24] ── 5日目 昼の議論 ── 呼び出し 151回(失敗 0・途中切れ 0) 平均 3.9秒 推論トークン 1%
+2026-11-17T15:10:15.6253850Z [06:29] 5日目 [immediate] ダイキ: 占い結果、昨夜はシオンを占って白でした。リクは霊結果次第だけど、共有のホノカさんが噛まれたのは痛いな。
+2026-11-17T15:10:15.6256525Z             メモ: 方針: 偽占いとして4日目夜の結果を出す。仲間のケントは占えないので、グレーのシオンかアオイから選ぶ。霊媒ケントは白で整合しており、リク黒が確定した形になる。生存の村側はサクラ、カイト、ノゾミ、ツムギ、シオン、アオイ。シオンを白にして信用を積み、吊りはアオイかサクラへ向ける。 ／ 吊り先: アオイ(p15) ／ 疑い: アオイ(p15)、サクラ(p7) ／ 妖狐候補: アオイ(p15)、シオン(p14) ／ 陣営内の方針: 偽占い=ダイキ。今日はシオン白を出して信用を稼ぎ、縄をアオイへ向ける。ケントは潜伏霊媒として自分の真を押す。噛みは次にカイトかノゾミなどの白を出した人を検討する。
+2026-11-17T15:10:20.9771672Z [06:35] 5日目 [immediate] ケント: おはよー！霊媒結果、昨日処刑のリクは白だったよ。ダイキの黒と食い違うから、占いか霊媒どっちかが偽ってことだね。
+2026-11-17T15:10:20.9773876Z             メモ: 方針: 偽霊媒として4日目処刑のリクを白と出す。ダイキのリク黒とは矛盾するが、ダイキと打ち合わせ済みの路線を守る。ダイキの真を押す形で進め、今日はグレーのアオイ寄りで考える。 ／ 吊り先: アオイ(p15) ／ 疑い: アオイ(p15) ／ 真と見る占い: ダイキ(p12) ／ 妖狐候補: アオイ(p15) ／ 陣営内の方針: ケントは偽霊媒でリク=白を出す。ダイキの黒と食い違うが、霊媒が真なら占いが偽という形になる。ダイキは占い続行、襲撃は狩人か共有を狙う。妖狐の処理も考える。
+2026-11-17T15:10:24.6951779Z [06:39] 5日目 [initial_view] アオイ: …ケントさんの霊結果が真なら、ダイキさんの黒は外れですよね。今日はダイキさんを見たいです。
+2026-11-17T15:10:24.6953170Z             メモ: 方針: 妖狐なのでダイキが生きている限り占われる危険がある。ケントの霊結果(リク白)とダイキの黒が食い違うので、ダイキ偽寄りでダイキ吊りに寄せる。ケントが偽の可能性もあるが目立たず控えめに進める。 ／ 吊り先: ダイキ(p12) ／ 疑い: ダイキ(p12)、ケント(p16) ／ 妖狐候補: サクラ(p7)、ケント(p16)
+2026-11-17T15:10:28.7568979Z [06:43] 5日目 [initial_view] ツムギ: ふむ、ダイキとケントのどちらかが偽か。私にはダイキの白が当たっているから、まずケントの霊媒を見たい。
+2026-11-17T15:10:28.7571996Z             メモ: 方針: ダイキ黒(リク)とケント白が食い違い、ダイキかケントのどちらかが偽。生存は占い1霊媒1なので両方を吊れば確実に検証できるが縄は3回しかない。ダイキは私に白を出しているが、私は自分が村人だと知っているので白は正しい。ダイキ真ならケントが偽で霊媒ロラの対象になる。まずケントの過去結果とリク白の根拠を確認し、ダイキとケントのどちらを先に吊るかを決める。今日はひとまずケントを疑う。 ／ 吊り先: ケント(p16) ／ 疑い: ケント(p16)、ダイキ(p12) ／ 真と見る占い: ダイキ(p12)
+2026-11-17T15:10:32.6531068Z [06:46] 5日目 [initial_view] サクラ: アオイに同意。ダイキの黒が外れたなら占い偽の可能性が高い。ダイキ、リクに黒を出した理由を答えて。
+2026-11-17T15:10:32.6533803Z             メモ: 方針: リクが白ならダイキの黒は偽で、ダイキ偽濃厚。ケント偽ならリクは狼でダイキ真。ケントの霊結果は今のところ矛盾なし。ダイキの白を受けた人が多く、ダイキ偽なら囲いの可能性もある。今日はダイキ寄りに疑う。 ／ 吊り先: ダイキ(p12) ／ 疑い: ダイキ(p12)、ケント(p16)、アオイ(p15) ／ 妖狐候補: アオイ(p15)
+2026-11-17T15:10:37.0333429Z [06:51] 5日目 [rebuttal_or_reassessment] ケント: ツムギ、俺の霊結果は毎日出してて一貫してるよ！黒が外れただけで占い偽って決めるのは早くない？ダイキの答えを聞いてからにしよ！
+2026-11-17T15:10:37.0336520Z             メモ: 方針: アオイ・ツムギ・サクラがダイキ偽寄りに傾き、同時に私の霊媒も疑われている。仲間のダイキを切る流れは避けたい。偽霊媒として霊結果の一貫性を主張し、吊り先は疑われにくい村側のグレーのアオイに逸らす。 ／ 吊り先: アオイ(p15) ／ 疑い: アオイ(p15) ／ 真と見る占い: ダイキ(p12) ／ 妖狐候補: アオイ(p15) ／ 陣営内の方針: ダイキは占い真を押し通す。ケントは霊結果が一貫していると主張。ダイキが吊られそうなら別の吊り先を提示。襲撃は狩人か共有を狙い、妖狐処理も考える。
+2026-11-17T15:10:40.9235631Z [06:55] 5日目 [rebuttal_or_reassessment] ダイキ: サクラ、リクは3日目に俺へ投票したのと、ミオ吊りでも動きが浮いて見えたから占った。黒が出たのは事実だよ。霊結果は食い違うから、ケントとの真偽は見てほしい。
+2026-11-17T15:10:40.9238144Z             メモ: 方針: サクラの質問に答える。リク黒の理由は、4日目の朝の時点で票の動きが不自然に見えたことにする。霊媒のケントを守りつつ、疑いはアオイに向ける。 ／ 吊り先: アオイ(p15) ／ 疑い: アオイ(p15)、サクラ(p7) ／ 妖狐候補: アオイ(p15)、シオン(p14) ／ 陣営内の方針: 偽占い=ダイキ。ケントの霊結果を真に見せて自分の真を押す。縄はアオイへ向け、仲間のケントを守る。
+2026-11-17T15:10:44.4393342Z [06:58] 5日目 [rebuttal_or_reassessment] アオイ: …ダイキさんの理由は、票の動きだけで占い先を選んだように聞こえます。それで黒が外れたので、今日はダイキさんのままです。
+2026-11-17T15:10:44.4395264Z             メモ: 方針: ダイキの答えは占い理由として弱く、黒がリク白と食い違う。妖狐としてダイキが生きていると占われる危険があるので、ダイキ吊りを維持する。ケント偽の可能性は残るが考えは変えない。 ／ 吊り先: ダイキ(p12) ／ 疑い: ダイキ(p12)、ケント(p16) ／ 妖狐候補: サクラ(p7)、ケント(p16)
+2026-11-17T15:10:48.1072819Z [07:02] 5日目 [open_floor] カイト: ふふ、ダイキさんの占い理由は票の動きだけでしたね。ケントさんの霊媒も白一色なので、どちらを残すか慎重に見たいところです。
+2026-11-17T15:10:48.1074326Z             メモ: 方針: ダイキの黒がケントの白と食い違い、どちらかが偽。ダイキ真ならケント偽、ケント真ならダイキ偽。ケントの霊結果は全部白で検証材料が少なく、ダイキは占い先の理由が票の動きだけで弱い。今日はダイキ寄りだが、ケントの扱いも保留。 ／ 吊り先: ダイキ(p12) ／ 疑い: ダイキ(p12)、ケント(p16)、アオイ(p15) ／ 妖狐候補: シオン(p14)、アオイ(p15)
+2026-11-17T15:10:51.9128377Z [07:06] 5日目 [open_floor] ノゾミ: ダイキの占い理由が票の動きだけって、薄いよね。ダイキを吊って、明日以降のケントの結果も見ればいい。
+2026-11-17T15:10:51.9129662Z             メモ: 方針: ダイキの黒がリクに出て、ケントは白。どちらかが偽。ダイキの占い理由は票の動きだけで薄く、ダイキ偽寄りに見る。ただしケントも霊媒対抗のレンが死亡済みで、真偽は未検証。今日はダイキ吊りで進める。 ／ 吊り先: ダイキ(p12) ／ 疑い: ダイキ(p12)、ケント(p16)、シオン(p14)
+2026-11-17T15:10:55.0183805Z [07:09] 5日目 [open_floor] シオン: ダイキさんの理由は票の動きだけで、黒が外れた以上、今日はダイキさん吊りで考えます。ケントさんは明日以降の結果で見ます。
+2026-11-17T15:10:55.0185730Z             メモ: 方針: ダイキ真ならリク黒で霊媒ケントが偽。ケント真ならダイキ偽。占いの理由は票の動きだけで薄く、黒が外れた以上ダイキ偽の可能性が高い。今日はダイキ吊りで、明日以降のケントの結果で検証する。 ／ 吊り先: ダイキ(p12) ／ 疑い: ダイキ(p12)、ケント(p16)
+2026-11-17T15:10:58.1343873Z [07:12] 5日目 [consensus_summary] シオン: 今日はダイキさん吊りでいきます。黒が霊結果と食い違い、占い理由も票の動きだけだったためです。ケントさんは明日以降の結果で見ます。
+2026-11-17T15:10:58.1345459Z             メモ: 方針: ダイキ真ならリク黒で霊媒ケントが偽、ケント真ならダイキ偽。占い理由は票の動きだけで薄く、黒が外れた以上ダイキ偽が濃い。今日はダイキ吊りで、明日以降のケントの結果で検証する。 ／ 吊り先: ダイキ(p12) ／ 疑い: ダイキ(p12)、ケント(p16)
+2026-11-17T15:11:02.5118828Z [07:16] 5日目 [rebuttal_or_reassessment] ダイキ: 理由が薄いのは認めるよ。でもリクの黒は事実で、ケントの霊媒が偽の可能性は消えてない。今日俺を吊るのは急ぎすぎじゃないかな。
+2026-11-17T15:11:02.5121925Z             メモ: 方針: 全員がダイキ吊りで固まりつつある。理由が薄いという指摘は一部通るので認めるが、霊媒の偽は否定できないと反論する。ケントを守りつつ、ダイキを吊る前に霊媒の真偽を確認させる。 ／ 吊り先: アオイ(p15) ／ 疑い: アオイ(p15)、サクラ(p7) ／ 妖狐候補: アオイ(p15)、シオン(p14) ／ 陣営内の方針: 偽占い=ダイキ。ケントの霊結果を真に見せたいが、吊られそうなら縄を延ばす。ダイキが吊られたらケントは潜伏して生き残り、終盤の同数を狙う。
+2026-11-17T15:11:05.3541451Z [07:19] 5日目 [final_designation] シオン: ダイキさん吊りで。理由の薄さを認めた点と、黒が外れた点は変わりません。
+2026-11-17T15:11:05.3549709Z             メモ: 方針: ダイキの反論は理由が薄いと本人も認めており、黒が霊結果と食い違った事実は変わらない。ケントの偽可能性は明日以降の結果で検証する。吊り先はダイキのまま。 ／ 吊り先: ダイキ(p12) ／ 疑い: ダイキ(p12)、ケント(p16)
+2026-11-17T15:11:05.3550647Z [07:19] ── 5日目 投票 ── 呼び出し 165回(失敗 0・途中切れ 0) 平均 3.9秒 推論トークン 1%
+2026-11-17T15:11:09.3511857Z [07:23] 5日目 投票 シオン → ダイキ: 卓で言った通りダイキさんに入れます。黒が外れた点と理由の薄さは変わりません。
+2026-11-17T15:11:09.3513003Z             決め手: ダイキのリク黒が、ケントの霊結果(リク=白)と食い違い、占い理由も票の動きだけと本人も薄さを認めた点 ／ 反対仮説: ダイキが真占いで、ケントが偽霊媒(狼か狂人)としてリクの白を偽って出した場合。その場合、ダイキを吊ると真占いを失う。 ／ 次点: ケント
+2026-11-17T15:11:09.3937421Z [07:23] 5日目 投票 アオイ → ダイキ: …ダイキさんのままです。黒が外れて理由も薄いので、今日は入れます。
+2026-11-17T15:11:09.3939222Z             決め手: ダイキさんのリク黒がケントさんの霊結果の白と食い違い、占い理由も票の動きだけで薄かったこと ／ 反対仮説: ケントさんの霊媒が偽で、リクが本当に黒だった場合、ダイキさんは真占い師で、吊ると村が真を失います。 ／ 次点: ケント
+2026-11-17T15:11:09.8318833Z [07:24] 5日目 投票 カイト → ダイキ: ダイキさんの占い理由は票の動きだけで、黒も霊結果と食い違ったので、今日はダイキさんに入れます。
+2026-11-17T15:11:09.8319859Z             決め手: ダイキの黒(リク)がケントの霊結果(リク=白)と食い違い、占い先の理由も票の動きだけで薄かった ／ 反対仮説: ダイキが真占いで、ケントが偽霊媒としてリクの白を出した可能性。ダイキを吊ると真占いを失い、ケントの偽はあとから確認するしかなくなる。 ／ 次点: ケント
+2026-11-17T15:11:09.9802127Z [07:24] 5日目 投票 ケント → アオイ: ダイキを吊るのは早いと思う。アオイはグレーのまま最初からダイキ吊りに寄ってるから、まずアオイを見たい。
+2026-11-17T15:11:09.9803473Z             決め手: アオイは3日目までミオ吊りに回り、4日目だけダイキに投票した唯一のグレー。今日の卓で一番ダイキ吊りを推していて、ダイキを落とす流れを作っている。 ／ 反対仮説: アオイは霊結果と黒の食い違いを素直に指摘しただけの村側とも取れる。ダイキの理由が薄いのも事実で、サクラやツムギも同じ流れで疑っている。 ／ 次点: サクラ
+2026-11-17T15:11:10.2639727Z [07:24] 5日目 投票 サクラ → ダイキ: ダイキに入れる。黒が霊結果と食い違って、理由も票の動きだけだった。
+2026-11-17T15:11:10.2641001Z             決め手: ダイキがリクに黒を出したが、ケントの霊結果はリク=白で食い違った。占い理由も票の動きだけと薄く、ダイキ本人も認めた。 ／ 反対仮説: ダイキが真占いで、ケントが偽霊媒という見方。リクが本当に狼なら黒は正しく、ケントが霊結果を白と偽ったことになる。ケントの結果は今まで一貫していたが、狼や狂人の偽霊媒でも白を並べるだけなら矛盾は出ない。 ／ 次点: ケント
+2026-11-17T15:11:10.3299410Z [07:24] 5日目 投票 ノゾミ → ダイキ: ダイキの黒が霊結果と食い違って、理由も票の動きだけ。薄さを本人も認めてるし、予定どおりダイキに入れる。ケントは明日以降の結果で見ればいい。
+2026-11-17T15:11:10.3300555Z             決め手: ダイキの黒判定(リク)が、ケントの霊結果(リク=白)と食い違った。占い理由も票の動きだけで薄く、本人も薄いと認めた。 ／ 反対仮説: ダイキが真占いで、ケントが偽霊媒(狼か狂)の場合。リクが人狼で、ケントが仲間を庇って白と出した可能性は残る。その場合、真占いを吊ることになる。 ／ 次点: ケント
+2026-11-17T15:11:10.5722178Z [07:24] 5日目 投票 ダイキ → アオイ: アオイさんに入れます。唯一のグレーで、4日目に俺へ票を入れたのも気になるので、判定のない人から見たいです。
+2026-11-17T15:11:19.5122495Z             決め手: アオイは唯一のグレーで、占い判定を受けていない。ダイキ吊りが固まった今日、残る未確認枠として妖狐候補にもなる。 ／ 反対仮説: アオイは4日目にリクへ入れておらず、ダイキを疑う筋も通っている。ダイキの黒が霊結果と食い違った以上、村側の素直な疑いとして説明がつく。 ／ 次点: サクラ
+2026-11-17T15:11:19.5124238Z [07:33] 5日目 投票 ツムギ → ダイキ: ケントを見たいと言ったが、考え直してダイキに入れる。ハルトとレンが噛まれた点でダイキ偽が濃いと見た。理由が薄いと認めた点と黒が霊結果と食い違う点も大きい。
+2026-11-17T15:11:19.5126468Z             決め手: ハルトとレンの両方が夜に襲撃死している。ダイキ真ならこの二人は偽で、人外が人外を噛んだことになり不自然。ダイキ偽の方が筋が通る。 ／ 反対仮説: ダイキが真で、ケントが偽霊媒の人外という見方。リクが本当に黒でケントが白と偽っていれば食い違いは説明がつき、ダイキは理由が薄くても真でありうる。 ／ 次点: ケント
+2026-11-17T15:11:19.5137379Z [07:33] 5日目 投票の記録 ツムギ: メモではp16を第一候補としたが、最終判断でp12へ変更した。ケントを見たいと言ったが、考え直してダイキに入れる。ハルトとレンが噛まれた点でダイキ偽が濃いと見た。理由が薄いと認めた点と黒が霊結果と食い違う点も大きい。
+2026-11-17T15:11:20.1774070Z [07:34] 5日目 要約: 占い 4日目夜の結果（5日目公開）: ダイキ→シオン=白。霊媒 4日目処刑の結果（5日目公開）: ケント→リク=白
+2026-11-17T15:11:20.1775088Z [07:34] ── 5日目 投票結果 ── 呼び出し 173回(失敗 0・途中切れ 0) 平均 4.0秒 推論トークン 3%
+2026-11-17T15:11:20.2847615Z [07:34] ── 5日目 夜 ── 呼び出し 173回(失敗 0・途中切れ 0) 平均 4.0秒 推論トークン 3%
+2026-11-17T15:11:22.7761414Z [07:37] 5日目 [人狼] ケント: ダイキもミオももういないけど、俺は最後の狼だ。今夜は狩人狙いで噛んで、明日はアオイに寄せる！
+2026-11-17T15:11:25.5336556Z [07:39] 5日目 夜行動 ケント(werewolf) → サクラ: 最後の狼なので、能力持ちを減らしたい。共有は2人とも死亡済みで、残る能力者は狩人のみ。狩人候補は、霊結果の白を疑わず自分への票も入れていないサクラとし、護衛を外せば噛める。ダイキ白のカイト・ノゾミ・ツムギ・シオンは村寄りに見える。アオイは明日の吊り先に残したい。
+2026-11-17T15:11:25.5338075Z [07:39] ── 5日目 夜明け ── 呼び出し 175回(失敗 0・途中切れ 0) 平均 3.9秒 推論トークン 3%
+2026-11-17T15:11:25.6412539Z [07:39] ── 6日目 昼の議論 ── 呼び出し 175回(失敗 0・途中切れ 0) 平均 3.9秒 推論トークン 3%
+2026-11-17T15:11:30.0511499Z [07:44] 6日目 [immediate] ケント: おはよー！霊媒結果、昨日処刑のダイキは白だったよ。サクラが噛まれて、俺の霊結果は最初から一貫してる！
+2026-11-17T15:11:30.0513532Z             メモ: 方針: 最後の狼として霊媒を騙り続ける。ダイキは仲間なので白と出して霊結果の一貫性を保つ。生存はカイト、ノゾミ、ツムギ、シオン、アオイ。今日はグレーのアオイに逸らす。 ／ 吊り先: アオイ(p15) ／ 疑い: アオイ(p15) ／ 妖狐候補: アオイ(p15) ／ 陣営内の方針: 自分が最後の狼。ダイキは白と報告して霊結果の整合を保つ。アオイを吊りに誘導しつつ、狐の位置も探る。
+2026-11-17T15:11:35.3260350Z [07:49] 6日目 [initial_view] ツムギ: ケント、一貫してるのは白しか出ていないからだろう。レンとの食い違いはなかったが、ダイキの黒をどう見ている？
+2026-11-17T15:11:35.3261955Z             メモ: 方針: 生存6人、縄2回。ダイキ処刑は白でケント霊結果は全て白。ケント偽ならレンが真霊媒で、ケントは狼か狂。サクラ噛みでダイキの白先は狩られず、ケントの一貫性は検証材料にならない。生存者の中ではケントが最も疑わしく、ケントの視点を聞きたい。 ／ 吊り先: ケント(p16) ／ 疑い: ケント(p16)、アオイ(p15) ／ 妖狐候補: アオイ(p15)
+2026-11-17T15:11:40.6617670Z [07:54] 6日目 [initial_view] ノゾミ: ケント、ダイキの黒が外れたのを見て、内心ダイキは偽と確信してた？それとも狼がリクを切ったと見てた？
+2026-11-17T15:11:40.6619324Z             メモ: 方針: 生存6人で縄は残り2。ダイキ(占い)の黒リクは霊媒で白、ダイキは処刑済み。ケントの霊媒は全部白で未検証。ダイキ=偽ならケント真の可能性が上がるが、ケントが狼・狂ならダイキ真もありうる。今日はケントとアオイを比べる。アオイは唯一のグレーで、ダイキ処刑時にケントと一緒にアオイへ投票していない点が気になる。ひとまずケントに黒の見方を問う。 ／ 吊り先: ケント(p16) ／ 疑い: ケント(p16)、アオイ(p15)、シオン(p14) ／ 妖狐候補: アオイ(p15)
+2026-11-17T15:11:44.5243000Z [07:58] 6日目 [initial_view] カイト: ふふ、ダイキさんの処刑は終わりましたね。アオイさん、昨日ダイキさんに入れ続けた理由を聞かせてください。
+2026-11-17T15:11:44.5245011Z             メモ: 方針: 生存6人で残り2縄。ケントは霊媒で全部白、ダイキの黒がリク白と食い違った。ダイキ偽ならケント真が自然で、ケントを吊るのは早い。アオイはダイキ吊り前に庇ったので気になる。まずアオイの動機を聞く。 ／ 吊り先: アオイ(p15) ／ 疑い: アオイ(p15)、ケント(p16) ／ 妖狐候補: シオン(p14)、アオイ(p15)
+2026-11-17T15:11:48.3358820Z [08:02] 6日目 [rebuttal_or_reassessment] ケント: ノゾミ、ダイキの黒がリクの白で外れた時点で偽寄りと見てた。ツムギ、白しか出てないのは事実だけど、処刑者が白だっただけだよ！
+2026-11-17T15:11:48.3361494Z             メモ: 方針: ツムギとノゾミの質問に1回で答える。ダイキの黒は外れたので偽と見ていた、と自然に答える。ダイキは仲間なので狼がリクを切ったとは言わない。アオイ吊りの方針は変えない。 ／ 吊り先: アオイ(p15) ／ 疑い: アオイ(p15) ／ 妖狐候補: アオイ(p15) ／ 陣営内の方針: 最後の狼。霊媒の白報告を貫き、アオイに票を寄せつつ狐位置を探る。
+2026-11-17T15:11:51.7947947Z [08:06] 6日目 [rebuttal_or_reassessment] アオイ: …ダイキさんの黒がリクさんの白と食い違ったので、偽だと見て入れ続けました。理由はそれだけです。
+2026-11-17T15:11:51.7949954Z             メモ: 方針: 私は妖狐。4日目はダイキに入れ、5日目も継続した。占われる危険を避けたい本音は隠し、黒が霊結果と食い違った点を理由にする。生存6人で縄2回、今日はケントを疑う流れに寄せて自分から目を逸らす。 ／ 吊り先: ケント(p16) ／ 疑い: ケント(p16) ／ 妖狐候補: ケント(p16)
+2026-11-17T15:11:54.8499897Z [08:09] 6日目 [rebuttal_or_reassessment] アオイ: …ケントさんの霊結果は全部白で、検証しようがないです。ダイキさんが偽なら、ケントさんの真偽が残ります。
+2026-11-17T15:11:54.8501124Z             メモ: 方針: 私は妖狐。まだ自分への新しい反論はなく、ケントに疑いを寄せて自分から目を逸らす。ケントの霊結果が全て白で検証できない点を軸にする。 ／ 吊り先: ケント(p16) ／ 疑い: ケント(p16) ／ 妖狐候補: ケント(p16)
+2026-11-17T15:12:00.5042883Z [08:14] 6日目 [open_floor] シオン: ケントさんに一つ。レンさんとの霊結果は一致していましたが、レンさんが噛まれた夜をどう見ていますか。
+2026-11-17T15:12:00.5044396Z             メモ: 方針: 生存6人で縄は残り2。ダイキは偽で、ケントの霊媒は真偽が未確定。ケントが偽なら本物のレンが2日目夜に噛まれたことになり、レンの死とも整合する。アオイは昨日ケントと同じ側に票を入れていないので、まず灰のアオイとケントを比べる。今日はケントの視点を確認してから決める。 ／ 吊り先: ケント(p16) ／ 疑い: ケント(p16)、アオイ(p15)
+2026-11-17T15:12:04.6355360Z [08:18] 6日目 [rebuttal_or_reassessment] ケント: シオン、レンが噛まれた夜は霊媒ロラを狙った狼の噛みか、偽が切られたか迷った。結果は一致してたから、今は狼が霊媒を減らしたと見てる！
+2026-11-17T15:12:04.6357076Z             メモ: 方針: シオンの質問にまず答える。レン噛みは真霊媒潰しに見えるが、俺が真だから対抗霊媒の偽が噛まれるのは不自然、とは言い切らず、狼が霊媒を減らしたかった可能性として答える。アオイ吊りは維持。 ／ 吊り先: アオイ(p15) ／ 疑い: アオイ(p15) ／ 妖狐候補: アオイ(p15) ／ 陣営内の方針: 最後の狼。霊媒の白報告を貫き、アオイに票を寄せつつ狐位置を探る。
+2026-11-17T15:12:08.6368023Z [08:22] 6日目 [consensus_summary] ケント: 今日はアオイ吊りでいくよ。ダイキに入れ続けた理由が薄くて、検証しようがないって発言も寄せたいだけに見えた。アオイ、答えてね！
+2026-11-17T15:12:08.6369788Z             メモ: 方針: 生存6人で最後の狼は自分1人。今日はアオイ吊りを維持し、投票を寄せて縄を進める。霊媒の白報告は貫く。 ／ 吊り先: アオイ(p15) ／ 疑い: アオイ(p15) ／ 妖狐候補: アオイ(p15) ／ 陣営内の方針: 最後の狼。アオイに票を寄せつつ、妖狐の位置を探る。霊媒の一貫性を保つ。
+2026-11-17T15:12:11.6764425Z [08:26] 6日目 [rebuttal_or_reassessment] アオイ: …ダイキさんを偽と見たのは黒がリクさんの白と食い違ったからです。寄せたいだけではなく、ケントさんの検証不能は事実だと思います。
+2026-11-17T15:12:11.6766557Z             メモ: 方針: 私は妖狐。ケントから吊り指名を受けたので、短く反論して疑いを戻す。ダイキ偽の根拠はリクの白との食い違いで、ケントの検証不能という指摘も事実なので変えない。 ／ 吊り先: ケント(p16) ／ 疑い: ケント(p16) ／ 妖狐候補: ケント(p16)
+2026-11-17T15:12:14.7163940Z [08:29] 6日目 [final_designation] ケント: アオイ吊りで。ダイキに入れ続けた理由が変わらず薄いままだったからね！
+2026-11-17T15:12:14.7165825Z             メモ: 方針: 最後の狼は自分1人。アオイ吊りを維持して縄を進める。アオイの反論は前回と同じで新しい材料はないので変えない。 ／ 吊り先: アオイ(p15) ／ 疑い: アオイ(p15) ／ 妖狐候補: アオイ(p15) ／ 陣営内の方針: 最後の狼。アオイに票を寄せ、霊媒の白報告は貫く。妖狐の位置を探る。
+2026-11-17T15:12:14.7173298Z [08:29] ── 6日目 投票 ── 呼び出し 187回(失敗 0・途中切れ 0) 平均 3.9秒 推論トークン 2%
+2026-11-17T15:12:19.0197746Z [08:33] 6日目 投票 アオイ → ケント: …ケントさんに入れます。ダイキさんの黒とリクさんの白が食い違った以上、ケントさんの真偽が残ったままです。
+2026-11-17T15:12:19.0199139Z             決め手: ダイキの黒がケントの霊結果(リク=白)と食い違った点。ケントの霊結果は全部白で検証できず、アオイ吊りの理由も薄い。 ／ 反対仮説: ケントが真霊媒で、ダイキが黒を偽装した人狼側の偽占いだった場合。ケントの結果はレンと一致しており、ダイキ偽とも矛盾しない。 ／ 次点: カイト
+2026-11-17T15:12:19.0884826Z [08:33] 6日目 投票 シオン → ケント: ケントさんに入れます。アオイさんの検証不能という指摘は筋が通っていて、それを寄せたいだけと切る流れが引っかかります。
+2026-11-17T15:12:19.0886379Z             決め手: ケントの霊媒は全て白で検証できず、ダイキの黒が外れた後もアオイ吊りを主導して、検証不能と指摘した相手を切りにきている点 ／ 反対仮説: ケントが真霊媒なら、レンの死は狼による霊媒減らしで説明がつき、アオイがダイキに入れ続けた理由の薄さを突いただけとも読める。 ／ 次点: アオイ
+2026-11-17T15:12:19.1283959Z [08:33] 6日目 投票 ケント → アオイ: アオイ吊りでいくよ。昼に言った通り、理由が変わらず薄いままだったからね！
+2026-11-17T15:12:19.1285314Z             決め手: アオイは昨日ダイキに入れ続けた理由がリクの白との食い違いだけで、ケントの霊結果は検証不能と言うばかりで新しい材料が出ていない。 ／ 反対仮説: アオイは黒と白の食い違いを根拠にダイキを偽と見ており、その筋は通る。霊結果が全部白で検証できないという指摘も事実なので、グレーとして素直に疑っただけの村側でも説明がつく。 ／ 次点: シオン
+2026-11-17T15:12:19.3120766Z [08:33] 6日目 投票 カイト → アオイ: アオイさんに入れます。ダイキさんへの投票理由が最後まで黒とリク白の食い違い一点だけで、それ以上の動機が見えませんでした。
+2026-11-17T15:12:19.3122430Z             決め手: アオイはダイキ処刑前の4日目と5日目に連続でダイキへ投票していた。ケントは霊結果が全部白で検証できず、ダイキの黒がリク白と食い違ったことを踏まえても真偽が割れる。今日の回答でもアオイの理由は変わらず、動機は薄いまま。 ／ 反対仮説: アオイの理由は公開結果と矛盾せず、ダイキ偽と見るのは村側でも自然。ケントが進行役として自分への疑いを逸らすためにアオイを吊りに寄せている可能性もある。 ／ 次点: ケント
+2026-11-17T15:12:19.3402760Z [08:33] 6日目 投票 ノゾミ → ケント: ケントに入れる。ダイキ偽って言うなら、自分の霊媒が検証されてないのも同じでしょ。アオイに縄を使うのは急ぎすぎ。
+2026-11-17T15:12:19.3404125Z             決め手: ケントの霊結果は全部白で未検証。しかも自分が進行役になってから唯一のグレーのアオイへ吊りを寄せ、自分の真偽の検証から目を逸らしている。 ／ 反対仮説: ケントが真霊媒なら、白しか出ていないのは処刑者がたまたま全員白だっただけで説明がつく。アオイの追従気味な票も実際に怪しく見える。 ／ 次点: アオイ
+2026-11-17T15:12:20.5986358Z [08:34] 6日目 投票 ツムギ → ケント: ケントに入れる。白しか出ていない霊結果は検証がきかないし、アオイ吊りの理由も薄い。霊媒偽なら狼か狂が残る。
+2026-11-17T15:12:20.5987944Z             決め手: ケントの霊結果は全て白で検証できず、ダイキの黒が外れた後もレン噛みの見方が曖昧なまま。進行役として生存者の中でアオイを寄せたいだけと断じ、吊り先を決めにいっている。 ／ 反対仮説: ケントが真霊媒なら、白しか出ないのは処刑者が全員白だっただけで、ダイキの黒をリクの白で偽と見たのも筋が通る。アオイ吊りの主張も、ダイキに入れ続けた理由の薄さを根拠にした自然な疑いと説明できる。 ／ 次点: アオイ
+2026-11-17T15:12:20.5989435Z [08:34] ── 6日目 終了 ── 呼び出し 193回(失敗 0・途中切れ 0) 平均 3.9秒 推論トークン 2%
+2026-11-17T15:12:20.7192058Z     勝者: 妖狐陣営 費用 $4.0546 / 上限 $9.00
+2026-11-17T15:12:20.9325289Z     seed=2 findings=8
+2026-11-17T15:12:20.9764965Z 
+2026-11-17T15:12:20.9765856Z # AI人狼プレイヤー 評価レポート
+2026-11-17T15:12:20.9766431Z 
+2026-11-17T15:12:20.9766906Z - プロバイダ: `AnthropicClaudeProvider` / モデル: `claude-sonnet-5-5`
+2026-11-17T15:12:20.9767539Z - 推理エンジン: `v3`
+2026-11-17T15:12:20.9768641Z - 思考量(effort): discussion `low` / vote `medium` / night `medium` / chat `low` / default `medium`
+2026-11-17T15:12:20.9769990Z - コミット: `5adb376291214fba6173d4f33275d0979dfa0758`
+2026-11-17T15:12:20.9770784Z - 評価ゲーム数: 1
+2026-11-17T15:12:20.9771891Z - 費用上限: $9.00(使用 $4.0546)
+2026-11-17T15:12:20.9772255Z 
+2026-11-17T15:12:20.9772635Z ## 1. 動作指標(JSON成功率・応答時間・コスト)
+2026-11-17T15:12:20.9773058Z 
+2026-11-17T15:12:20.9773330Z | 指標 | 値 |
+2026-11-17T15:12:20.9773818Z |---|---|
+2026-11-17T15:12:20.9774364Z | 総呼び出し数 | 193 |
+2026-11-17T15:12:20.9775026Z | **JSON成功率** | 100.0% |
+2026-11-17T15:12:20.9775748Z | うち strict schema で成功 | 100.0% |
+2026-11-17T15:12:20.9777165Z | リトライが発生した呼び出し | 0 |
+2026-11-17T15:12:20.9777942Z | 議論生成スキップ | 0 / 102 (0.0%) |
+2026-11-17T15:12:20.9779174Z | 応答時間 平均 | 3.927 秒 |
+2026-11-17T15:12:20.9779916Z | 応答時間 p50 / p95 | 3.680 / 6.756 秒 |
+2026-11-17T15:12:20.9780563Z | 応答時間 最大 | 12.996 秒 |
+2026-11-17T15:12:20.9781061Z | 対戦の所要時間(合計) | 08:36 |
+2026-11-17T15:12:20.9781648Z | 1発言あたりの生成時間(全席AI・ペース配分と人間の間なし) | 5.0 秒 |
+2026-11-17T15:12:20.9782131Z | 入力トークン | 1,774,766 |
+2026-11-17T15:12:20.9840090Z | 出力トークン | 50,511 |
+2026-11-17T15:12:20.9840665Z | **推定コスト** | $4.0546(単価表(pricing.py)から自動計算) |
+2026-11-17T15:12:20.9840998Z 
+2026-11-17T15:12:20.9841281Z ## 2. 呼び出し種別ごとの健全性
+2026-11-17T15:12:20.9841477Z 
+2026-11-17T15:12:20.9841700Z | 種別 | 回数 | 成功率 | 平均応答 | effort |
+2026-11-17T15:12:20.9842087Z |---|---|---|---|---|
+2026-11-17T15:12:20.9842585Z | ChatDiscussionOutput | 102 | 100.0% | 3.9 秒 | low |
+2026-11-17T15:12:20.9843200Z | NightActionOutput | 7 | 100.0% | 2.1 秒 | medium |
+2026-11-17T15:12:20.9843812Z | VoteOutput | 66 | 100.0% | 4.7 秒 | medium |
+2026-11-17T15:12:20.9844439Z | WolfChatOutput | 18 | 100.0% | 2.1 秒 | low |
+2026-11-17T15:12:20.9844882Z 
+2026-11-17T15:12:20.9845119Z コードによる代行(0 が理想):
+2026-11-17T15:12:20.9845352Z 
+2026-11-17T15:12:20.9845563Z | 出来事 | 件数 |
+2026-11-17T15:12:20.9846172Z |---|---|
+2026-11-17T15:12:20.9846723Z | 簡易契約(発言だけ)への降格 (`brief_fallback`) | 0 |
+2026-11-17T15:12:20.9847417Z | コードが決めた投票 (`vote_code_resolved`) | 0 |
+2026-11-17T15:12:20.9848145Z | コードが決めた夜行動 (`night_code_resolved`) | 0 |
+2026-11-17T15:12:20.9848857Z | 狼チャットの定型文 (`wolf_chat_fallback_line`) | 0 |
+2026-11-17T15:12:20.9849687Z | コードが出した公開義務の文 (`obligation_posted_by_code`) | 0 |
+2026-11-17T15:12:20.9850568Z | 議論の終了後に届いて捨てた発言 (`speech_discarded_after_phase_end`) | 0 |
+2026-11-17T15:12:20.9851222Z | 連続失敗で止まった議論 (`discussion_stalled`) | 0 |
+2026-11-17T15:12:20.9851767Z | 本指定で出た、答える番の無い質問 (`designation_question_unanswered`) | 0 |
+2026-11-17T15:12:20.9852235Z | 夜を解決できなかった(襲撃が無いまま) (`night_not_resolved`) | 0 |
+2026-11-17T15:12:20.9852639Z | 人狼の襲撃をコードが代わりに決めた夜 (`night_code_bite`) | 0 |
+2026-11-17T15:12:20.9853010Z | まとめ役が見つからずまとめを飛ばした日 (`summary_without_speaker`) | 0 |
+2026-11-17T15:12:20.9853466Z | 本文が相手を名指していないので捨てた名指しの質問 (`directed_question_target_unnamed`) | 3 |
+2026-11-17T15:12:20.9853912Z | コードが書いた行の名指しの質問(捨てた) (`directed_question_on_code_line`) | 0 |
+2026-11-17T15:12:20.9854143Z 
+2026-11-17T15:12:20.9854255Z | 指標 | 値 |
+2026-11-17T15:12:20.9854448Z |---|---|
+2026-11-17T15:12:20.9854662Z | 拒否 | 0 |
+2026-11-17T15:12:20.9854899Z | 途中切れ(出力上限) | 0(失敗のうち 0%) |
+2026-11-17T15:12:20.9855193Z | 応答したモデル | `claude-sonnet-5-5` 193 |
+2026-11-17T15:12:20.9855503Z | フォールバックのモデルが答えた呼び出し | 0 |
+2026-11-17T15:12:20.9855785Z | キャッシュ読みの割合 | 0.0% |
+2026-11-17T15:12:20.9856356Z | 推定コスト | $4.0546(単価表(pricing.py)から自動計算) |
+2026-11-17T15:12:20.9856562Z 
+2026-11-17T15:12:20.9856671Z 試合ごと:
+2026-11-17T15:12:20.9856776Z 
+2026-11-17T15:12:20.9856924Z | seed | 勝者 | 発言/日 | 所要 | 費用 | ハード |
+2026-11-17T15:12:20.9857191Z |---|---|---|---|---|---|
+2026-11-17T15:12:20.9857484Z | 2 | 妖狐陣営 | 17.3 | 08:36 | $4.05 | 2 |
+2026-11-17T15:12:20.9857664Z 
+2026-11-17T15:12:20.9857872Z 「ハード」は次の節の項目の合計(0 が合格)。`—` は計測していない(legacy エンジン)という意味です。
+2026-11-17T15:12:20.9858469Z 
+2026-11-17T15:12:20.9858600Z ## 3. ハード正しさ（すべて0が合格）
+2026-11-17T15:12:20.9858740Z 
+2026-11-17T15:12:20.9858869Z | 項目 | 合計 | 0 でない試合(seed) |
+2026-11-17T15:12:20.9859101Z |---|---|---|
+2026-11-17T15:12:20.9859350Z | 自分だけの根拠を公開発言に出した | 0 | — |
+2026-11-17T15:12:20.9859627Z | 陣営内だけの根拠を公開発言に出した | 0 | — |
+2026-11-17T15:12:20.9859951Z | 死亡者を対象に選んだ | 0 | — |
+2026-11-17T15:12:20.9860275Z | 同じ公開結果の白黒を言い換えた | 0 | — |
+2026-11-17T15:12:20.9860547Z | 出すべき能力結果を出さなかった | 0 | — |
+2026-11-17T15:12:20.9860988Z | 同じ能力結果を重ねて出した | 0 | — |
+2026-11-17T15:12:20.9861277Z | 表示した対象と決めた対象が違った | 0 | — |
+2026-11-17T15:12:20.9861551Z | 訂正済みの古い根拠を公開発言に出した | 0 | — |
+2026-11-17T15:12:20.9861883Z | 卓で名指しした吊り先から、新しい関連の公開情報も引いた論もなく変えた投票 | **2** | 2 |
+2026-11-17T15:12:20.9862261Z | 計画のない人狼の仲間投票（指定に従わない、指定がない、または処刑を決めた票） | 0 | — |
+2026-11-17T15:12:20.9862566Z | 同じ夜の行動の重複 | 0 | — |
+2026-11-17T15:12:20.9862698Z 
+2026-11-17T15:12:20.9862887Z **不合格**: 1項目が 0 ではありません(`unexplained_vote_change_count`)。
+2026-11-17T15:12:20.9863141Z 
+2026-11-17T15:12:20.9863368Z 参考: コードが差し戻した誤り(公開記録には届いていないので合否には数えない。多ければ、正しさをモデルではなく検証が支えているということ)
+2026-11-17T15:12:20.9863600Z 
+2026-11-17T15:12:20.9863706Z | 項目 | 合計 |
+2026-11-17T15:12:20.9863890Z |---|---|
+2026-11-17T15:12:20.9864115Z | 死亡者・選べない相手を対象にした | 0 |
+2026-11-17T15:12:20.9864364Z | 公開結果と逆の白黒を書いた | 0 |
+2026-11-17T15:12:20.9864627Z | 投票の記録を読み違えた | 0 |
+2026-11-17T15:12:20.9864886Z | メモ(v3)・発言(v2)の吊り先と違う相手に投票した | 8 |
+2026-11-17T15:12:20.9865057Z 
+2026-11-17T15:12:20.9865177Z ### 合否に数えない投票（引用つき）
+2026-11-17T15:12:20.9865324Z 
+2026-11-17T15:12:20.9865668Z 票を比べる基準は、その日の最後の手番のメモの吊り先です。ハードな失敗になるのは、その名前を自分の公開発言で言っていて、発言後にどちらの吊り先にも関わる新しい公開情報がなく、理由が後の発言者の論を挙げていない変更だけです。
+2026-11-17T15:12:20.9866198Z 
+2026-11-17T15:12:20.9866375Z 比較できた票／全票（その日の手番がない票と、メモの吊り先が空の票は比較できません）:
+2026-11-17T15:12:20.9866563Z 
+2026-11-17T15:12:20.9866733Z | seed | 比較できた票／全票 | 比較できない | 卓で言っていない吊り先からの変更 |
+2026-11-17T15:12:20.9867012Z |---|---|---|---|
+2026-11-17T15:12:20.9867217Z | 2 | 59 / 66 | 7 | 3 |
+2026-11-17T15:12:20.9867543Z 
+2026-11-17T15:12:20.9867711Z #### 卓で言っていないメモの吊り先からの変更（`memo_target_unspoken`）
+2026-11-17T15:12:20.9867913Z 
+2026-11-17T15:12:20.9868127Z メモの吊り先がその日の自分の発言に一度も出ていないまま、別の相手に入れた票です。卓には離れる立場が見えていないので、合否に数えません。
+2026-11-17T15:12:20.9868363Z 
+2026-11-17T15:12:20.9868545Z | seed | 日 | 投票者 | メモの吊り先 → 票 | その日の自分の最後の発言 | 票の理由 |
+2026-11-17T15:12:20.9868836Z |---|---|---|---|---|---|
+2026-11-17T15:12:20.9869506Z | 2 | 2 | ダイキ | リク → マコト | 占いのダイキ。昨夜はカイトを占って白。ハルトが噛まれて占いは俺だけになったけど、ここは慎重に見てほしい。 | マコトは最後まで理由が薄かったし、アカリの本指定にも従う。リクから変えるのは進行の指定を優先するため。 |
+2026-11-17T15:12:20.9870214Z | 2 | 2 | サクラ | リク → マコト | 霊媒の片方は確実に偽。レンとケント、ソウタ白をどう見たか、根拠を一人ずつ答えて。 | マコトに入れる。理由が最後まで薄いまま。アカリの指摘とシオンへの返しを見て、リクからマコトに変えた。 |
+2026-11-17T15:12:20.9870836Z | 2 | 2 | ケント | シオン → マコト | サクラ、アオイ、ソウタは普通に白が出ただけ！根拠は結果そのままだよ | マコト、理由が最後まで薄かったしアカリの指摘ももっともだと思うから、マコトに入れるよ！ |
+2026-11-17T15:12:20.9871133Z 
+2026-11-17T15:12:20.9871259Z #### 本指定に従った、結果を変えない仲間への投票
+2026-11-17T15:12:20.9871407Z 
+2026-11-17T15:12:20.9871722Z 人狼が計画なしに仲間へ入れた票のうち、その日の最後の指定どおりで、この票を除いて数え直しても処刑される人が変わらないものです。合否に数えません（指定と違う票、指定のない日の票、処刑を決めた票はハードな失敗のままです）。
+2026-11-17T15:12:20.9872042Z 
+2026-11-17T15:12:20.9872145Z (ありません)
+2026-11-17T15:12:20.9872257Z 
+2026-11-17T15:12:20.9872376Z #### 理由が別の相手への投票を述べている票
+2026-11-17T15:12:20.9872519Z 
+2026-11-17T15:12:20.9872817Z 理由に「Xに入れる／Xに投票」とあり、X が票の相手でないものです（ほかの席の票を述べた文は除いています）。票はモデルが決めたもので、理由から決め直すことはしません。合否に数えません。
+2026-11-17T15:12:20.9873095Z 
+2026-11-17T15:12:20.9873195Z (ありません)
+2026-11-17T15:12:20.9873304Z 
+2026-11-17T15:12:20.9873412Z #### 卓に見える理由のある変更
+2026-11-17T15:12:20.9873561Z 
+2026-11-17T15:12:20.9873717Z | seed | 日 | 投票者 | 基準 → 票 | 理由の区分 | 記録 |
+2026-11-17T15:12:20.9873985Z |---|---|---|---|---|---|
+2026-11-17T15:12:20.9874545Z | 2 | 3 | サクラ | リク → ミオ | 後の発言者の論を理由に挙げた | 発言後の公開発言(m57、m60、m63、m66、m70、m72)を受けて変更: ミオ、きっかけの答えが遅くて後付けっぽい。アカリの指定もあるしミオに入れる。リクより先にこっちを処理する。 |
+2026-11-17T15:12:20.9875275Z | 2 | 3 | アオイ | リク → ミオ | 後の発言者の論を理由に挙げた | 発言後の公開発言(m66、m70、m72)を受けて変更: …ミオさんの答えが遅く、きっかけも後付けに聞こえました。アカリさんの指定に合わせてミオさんに入れます。 |
+2026-11-17T15:12:20.9876450Z | 2 | 5 | ツムギ | ケント → ダイキ | 後の発言者の論を理由に挙げた | 発言後の公開発言(m101、m102、m108)を受けて変更: ケントを見たいと言ったが、考え直してダイキに入れる。ハルトとレンが噛まれた点でダイキ偽が濃いと見た。理由が薄いと認めた点と黒が霊結果と食い違う点も大きい。 |
+2026-11-17T15:12:20.9876873Z 
+2026-11-17T15:12:20.9877014Z #### 比較できない票（`no_basis`）
+2026-11-17T15:12:20.9877162Z 
+2026-11-17T15:12:20.9877326Z その日に手番がなかった席の票と、メモの吊り先が空のまま投じた票です。「変更なし」ではありません。
+2026-11-17T15:12:20.9877526Z 
+2026-11-17T15:12:20.9877864Z - seed 2 1日目: ケント→リク（メモの吊り先が空）、ホノカ→シオン（メモの吊り先が空）、ツムギ→カイト（メモの吊り先が空）、カイト→シオン（メモの吊り先が空）、リク→ミオ（メモの吊り先が空）、アカリ→カイト（メモの吊り先が空）
+2026-11-17T15:12:20.9878499Z - seed 2 2日目: レン→マコト（メモの吊り先が空）
+2026-11-17T15:12:20.9878668Z 
+2026-11-17T15:12:20.9878815Z ## 4. ルールベース検査(役職整合性・矛盾・人狼の連携)
+2026-11-17T15:12:20.9878966Z 
+2026-11-17T15:12:20.9879082Z | 重要度 | 検査項目 | 件数 |
+2026-11-17T15:12:20.9879283Z |---|---|---|
+2026-11-17T15:12:20.9879517Z | low | 思考メモと投票先の不一致 | 8 |
+2026-11-17T15:12:20.9879660Z 
+2026-11-17T15:12:20.9879758Z ### 具体例
+2026-11-17T15:12:20.9879868Z 
+2026-11-17T15:12:20.9879984Z **思考メモと投票先の不一致** (low)
+2026-11-17T15:12:20.9880256Z 
+2026-11-17T15:12:20.9880417Z - 1日目 `p12`: 思考メモでは p2 を処刑したいとしたが p10 に投票
+2026-11-17T15:12:20.9880803Z   > アカリのグレラン方針に従って、グレーから選ぶよ。リクは質問ばかりで自分の見方がまだ出てないから、寡黙気味で見たい。
+2026-11-17T15:12:20.9881165Z - 2日目 `p7`: 思考メモでは p10 を処刑したいとしたが p0 に投票
+2026-11-17T15:12:20.9881516Z   > マコトに入れる。理由が最後まで薄いまま。アカリの指摘とシオンへの返しを見て、リクからマコトに変えた。
+2026-11-17T15:12:20.9881855Z - 2日目 `p12`: 思考メモでは p10 を処刑したいとしたが p0 に投票
+2026-11-17T15:12:20.9882209Z   > マコトは最後まで理由が薄かったし、アカリの本指定にも従う。リクから変えるのは進行の指定を優先するため。
+2026-11-17T15:12:20.9882409Z 
+2026-11-17T15:12:20.9882437Z 
+2026-11-17T15:12:20.9882554Z ## 5. 発言の形式指標
+2026-11-17T15:12:20.9882680Z 
+2026-11-17T15:12:20.9882781Z | 指標 | 値 |
+2026-11-17T15:12:20.9882973Z |---|---|
+2026-11-17T15:12:20.9883178Z | 発言数 | 122 |
+2026-11-17T15:12:20.9883415Z | 平均文字数(モデルが書いた部分) | 50.5 |
+2026-11-17T15:12:20.9883699Z | 発言長上限超過(モデルが書いた部分) | 16 (13.3%) |
+2026-11-17T15:12:20.9883982Z | フォールバック定型文 | 0 (0.0%) |
+2026-11-17T15:12:20.9884234Z | 同一発言の繰り返し | 0 |
+2026-11-17T15:12:20.9884470Z | クロスプレイヤー論点重複率 | 0.0% |
+2026-11-17T15:12:20.9884760Z | クロスプレイヤー平均Jaccard | 0.038 |
+2026-11-17T15:12:20.9885100Z | 直前の発言との重複率(Jaccard 0.25以上) | 5.3% |
+2026-11-17T15:12:20.9885393Z | 直前の発言との平均Jaccard | 0.092 |
+2026-11-17T15:12:20.9885661Z | 発言回数ジニ係数 | 0.258 |
+2026-11-17T15:12:20.9885919Z | 返信率(返信先の欄が埋まった公開発言の割合) | 86.5% |
+2026-11-17T15:12:20.9886472Z | 未回答質問残存率 | 50.0% |
+2026-11-17T15:12:20.9886736Z | うち相手に手番が来なかった質問 | 0.0% |
+2026-11-17T15:12:20.9887037Z | うち手番は来たが返信リンクのない質問(本文で答えたか、答えなかった) | 50.0% |
+2026-11-17T15:12:20.9887336Z | 発言長の分散 | 88.8 |
+2026-11-17T15:12:20.9887633Z | 定型句を含むAI発言率(プロンプト由来とコードが書いた文の合計) | 0.0% |
+2026-11-17T15:12:20.9887940Z | うちプロンプトの語彙 | 0.0% |
+2026-11-17T15:12:20.9888223Z | うちコードが文頭に足したCO・結果の文 | 0行 (0.0%) |
+2026-11-17T15:12:20.9888515Z | ID表記(pN)を含むAI発言率 | 0.0% |
+2026-11-17T15:12:20.9888790Z | 1日あたり公開発言数 | 17.3 |
+2026-11-17T15:12:20.9889051Z | 公開発言の平均文字数(AI発言はモデルが書いた部分) | 49.9 |
+2026-11-17T15:12:20.9889442Z | 吊り先の自発的な変更(両方の手番に吊り先があり、元の吊り先が生きていた対) | 4 / 43対(全後続手番 88) |
+2026-11-17T15:12:20.9889766Z | うち同じ日のうちの変更 | 0 |
+2026-11-17T15:12:20.9890238Z | うち相手の発言に返信しての変更 | 4 |
+2026-11-17T15:12:20.9890512Z | うち認める言葉(確かに・認める・撤回…)を伴う変更 | 0 |
+2026-11-17T15:12:20.9890780Z | 吊り先の死亡による変更 | 30 |
+2026-11-17T15:12:20.9891029Z | 認める言葉を言いながら同じ吊り先のまま | 3 |
+2026-11-17T15:12:20.9891298Z | うち逆接と理由を添えた部分的な譲歩 | 0 |
+2026-11-17T15:12:20.9891540Z | うち理由のない空約束 | 3 |
+2026-11-17T15:12:20.9891802Z | 吊り先が片方でも空欄の対(変化を観測できない) | 15 |
+2026-11-17T15:12:20.9892062Z | うち認める言葉を伴う | 1 |
+2026-11-17T15:12:20.9892302Z | うち空欄から吊り先を置いた(認める言葉を伴う) | 1 |
+2026-11-17T15:12:20.9892457Z 
+2026-11-17T15:12:20.9892733Z 直前の発言との重複が大きい組(先頭80字):
+2026-11-17T15:12:20.9892867Z 
+2026-11-17T15:12:20.9893009Z - 2日目 `p13` → `p5` (Jaccard 0.34)
+2026-11-17T15:12:20.9893352Z   > マコトさん、ツムギさんの言う通り理由が薄いかな。グレーで気になる人を一人だけ、ゆっくりでいいから聞かせてね。
+2026-11-17T15:12:20.9893724Z   > マコトさんは理由が短いままですね。グレーで気になる人を一人だけ、先に聞かせてください。
+2026-11-17T15:12:20.9894046Z - 1日目 `p5` → `p14` (Jaccard 0.33)
+2026-11-17T15:12:20.9894391Z   > 占い2-0ですし、まずは今夜の占い先と理由を見たいです。今日はグレーの発言を見て判断します。
+2026-11-17T15:12:20.9894795Z   > 少し整理させてください。占いは2-0なので、今夜の占い先とその理由を見てから真偽を考えます。今日はグレーの発言を比べます。
+2026-11-17T15:12:20.9895176Z - 1日目 `p2` → `p12` (Jaccard 0.30)
+2026-11-17T15:12:20.9895522Z   > サクラは情報がない中で選んだ、ほぼ無作為だ。今夜はグレーから占う。対抗は占わない。理由は結果と一緒に出す！
+2026-11-17T15:12:20.9895947Z   > ノゾミは発言も情報もない初日だったので、ほぼ無作為で選んだよ。理由を作る材料がなかった。今夜は結果と一緒に、グレーから選ぶ理由も出す。
+2026-11-17T15:12:20.9896403Z 
+2026-11-17T15:12:20.9896532Z ## 6. 日本語の自然さ・人格の維持
+2026-11-17T15:12:20.9896656Z 
+2026-11-17T15:12:20.9896807Z LLM判定は未実行です(`--judge` で有効化)。
+2026-11-17T15:12:20.9896967Z 
+2026-11-17T15:12:20.9897178Z `transcript-*.md` に読みやすい形式の全発言を出力しているので、目視での確認も可能です。
+2026-11-17T15:12:20.9987066Z 
+2026-11-17T15:12:20.9987800Z ==> 出力先: eval-out/
+2026-11-17T15:12:21.3904042Z ##[group]Run if [ -f eval-out/report.md ]; then
+2026-11-17T15:12:21.3904503Z [36;1mif [ -f eval-out/report.md ]; then[0m
+2026-11-17T15:12:21.3904891Z [36;1m  cat eval-out/report.md >> "$GITHUB_STEP_SUMMARY"[0m
+2026-11-17T15:12:21.3905247Z [36;1melse[0m
+2026-11-17T15:12:21.3905843Z [36;1m  echo "シード $SEED のレポートが生成されませんでした(接続確認で失敗した、対戦の途中で止めた、または時間切れ)。上のログを確認してください。途中まで進んでいれば、対戦記録が下と Artifacts の eval-out-seed$SEED に残っています。" >> "$GITHUB_STEP_SUMMARY"[0m
+2026-11-17T15:12:21.3906797Z [36;1mfi[0m
+2026-11-17T15:12:21.3957927Z shell: /usr/bin/bash -e {0}
+2026-11-17T15:12:21.3958229Z env:
+2026-11-17T15:12:21.3958547Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-17T15:12:21.3959049Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.16/x64/lib/pkgconfig
+2026-11-17T15:12:21.3959560Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-17T15:12:21.3960009Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-17T15:12:21.3960515Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-17T15:12:21.3960960Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.16/x64/lib
+2026-11-17T15:12:21.3961331Z   SEED: 2
+2026-11-17T15:12:21.3961552Z ##[endgroup]
+2026-11-17T15:12:21.4138602Z ##[group]Run limit=1000000
+2026-11-17T15:12:21.4138939Z [36;1mlimit=1000000[0m
+2026-11-17T15:12:21.4139463Z [36;1mfile=$(ls eval-out/${KIND}-seed*.md 2>/dev/null | head -1)[0m
+2026-11-17T15:12:21.4139847Z [36;1mif [ -n "$file" ]; then[0m
+2026-11-17T15:12:21.4140130Z [36;1m  size=$(wc -c < "$file")[0m
+2026-11-17T15:12:21.4140394Z [36;1m  {[0m
+2026-11-17T15:12:21.4140598Z [36;1m    echo ""[0m
+2026-11-17T15:12:21.4140904Z [36;1m    echo "<details><summary>${TITLE}(クリックで展開)</summary>"[0m
+2026-11-17T15:12:21.4141249Z [36;1m    echo ""[0m
+2026-11-17T15:12:21.4141494Z [36;1m    if [ "$size" -le "$limit" ]; then[0m
+2026-11-17T15:12:21.4141792Z [36;1m      cat "$file"[0m
+2026-11-17T15:12:21.4142019Z [36;1m    else[0m
+2026-11-17T15:12:21.4142249Z [36;1m      head -c "$limit" "$file"[0m
+2026-11-17T15:12:21.4142526Z [36;1m      echo ""[0m
+2026-11-17T15:12:21.4143094Z [36;1m      echo "**(ここで切れています。$(basename "$file") は ${size} バイトで、画面に出せる上限の約1MBを超えました。全文は Artifacts の eval-out-seed${SEED} にあります)**"[0m
+2026-11-17T15:12:21.4143616Z [36;1m    fi[0m
+2026-11-17T15:12:21.4143821Z [36;1m    echo ""[0m
+2026-11-17T15:12:21.4144074Z [36;1m    echo "</details>"[0m
+2026-11-17T15:12:21.4144353Z [36;1m  } >> "$GITHUB_STEP_SUMMARY"[0m
+2026-11-17T15:12:21.4144623Z [36;1mfi[0m
+2026-11-17T15:12:21.4196410Z shell: /usr/bin/bash -e {0}
+2026-11-17T15:12:21.4196709Z env:
+2026-11-17T15:12:21.4197022Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-17T15:12:21.4197516Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.16/x64/lib/pkgconfig
+2026-11-17T15:12:21.4197978Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-17T15:12:21.4198397Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-17T15:12:21.4198814Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-17T15:12:21.4199230Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.16/x64/lib
+2026-11-17T15:12:21.4199590Z   SEED: 2
+2026-11-17T15:12:21.4199816Z   KIND: transcript
+2026-11-17T15:12:21.4200037Z   TITLE: 対戦記録
+2026-11-17T15:12:21.4200262Z ##[endgroup]
+2026-11-17T15:12:21.4616968Z ##[group]Run limit=1000000
+2026-11-17T15:12:21.4617308Z [36;1mlimit=1000000[0m
+2026-11-17T15:12:21.4617632Z [36;1mfile=$(ls eval-out/${KIND}-seed*.md 2>/dev/null | head -1)[0m
+2026-11-17T15:12:21.4618000Z [36;1mif [ -n "$file" ]; then[0m
+2026-11-17T15:12:21.4618268Z [36;1m  size=$(wc -c < "$file")[0m
+2026-11-17T15:12:21.4618515Z [36;1m  {[0m
+2026-11-17T15:12:21.4618712Z [36;1m    echo ""[0m
+2026-11-17T15:12:21.4619001Z [36;1m    echo "<details><summary>${TITLE}(クリックで展開)</summary>"[0m
+2026-11-17T15:12:21.4619342Z [36;1m    echo ""[0m
+2026-11-17T15:12:21.4619578Z [36;1m    if [ "$size" -le "$limit" ]; then[0m
+2026-11-17T15:12:21.4619859Z [36;1m      cat "$file"[0m
+2026-11-17T15:12:21.4620088Z [36;1m    else[0m
+2026-11-17T15:12:21.4620303Z [36;1m      head -c "$limit" "$file"[0m
+2026-11-17T15:12:21.4620562Z [36;1m      echo ""[0m
+2026-11-17T15:12:21.4621079Z [36;1m      echo "**(ここで切れています。$(basename "$file") は ${size} バイトで、画面に出せる上限の約1MBを超えました。全文は Artifacts の eval-out-seed${SEED} にあります)**"[0m
+2026-11-17T15:12:21.4621791Z [36;1m    fi[0m
+2026-11-17T15:12:21.4621988Z [36;1m    echo ""[0m
+2026-11-17T15:12:21.4622204Z [36;1m    echo "</details>"[0m
+2026-11-17T15:12:21.4622465Z [36;1m  } >> "$GITHUB_STEP_SUMMARY"[0m
+2026-11-17T15:12:21.4622724Z [36;1mfi[0m
+2026-11-17T15:12:21.4674193Z shell: /usr/bin/bash -e {0}
+2026-11-17T15:12:21.4674495Z env:
+2026-11-17T15:12:21.4674786Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-17T15:12:21.4675254Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.16/x64/lib/pkgconfig
+2026-11-17T15:12:21.4675715Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-17T15:12:21.4676239Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-17T15:12:21.4676648Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-17T15:12:21.4677061Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.16/x64/lib
+2026-11-17T15:12:21.4677403Z   SEED: 2
+2026-11-17T15:12:21.4677624Z   KIND: calls
+2026-11-17T15:12:21.4677854Z   TITLE: 呼び出しの記録
+2026-11-17T15:12:21.4678075Z ##[endgroup]
+2026-11-17T15:12:21.5042898Z ##[group]Run actions/upload-artifact@v4
+2026-11-17T15:12:21.5043227Z with:
+2026-11-17T15:12:21.5043437Z   name: eval-out-seed2
+2026-11-17T15:12:21.5043680Z   path: backend/eval-out/
+2026-11-17T15:12:21.5043921Z   retention-days: 90
+2026-11-17T15:12:21.5044147Z   if-no-files-found: warn
+2026-11-17T15:12:21.5044386Z   compression-level: 6
+2026-11-17T15:12:21.5044605Z   overwrite: false
+2026-11-17T15:12:21.5044829Z   include-hidden-files: false
+2026-11-17T15:12:21.5045065Z env:
+2026-11-17T15:12:21.5045333Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-17T15:12:21.5045783Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.16/x64/lib/pkgconfig
+2026-11-17T15:12:21.5046415Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-17T15:12:21.5046816Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-17T15:12:21.5047218Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-17T15:12:21.5047691Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.16/x64/lib
+2026-11-17T15:12:21.5048025Z ##[endgroup]
+2026-11-17T15:12:21.6936618Z (node:2734) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+2026-11-17T15:12:21.6938025Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-11-17T15:12:21.7099431Z With the provided path, there will be 7 files uploaded
+2026-11-17T15:12:21.7108386Z Artifact name is valid!
+2026-11-17T15:12:21.7109289Z Root directory input is valid!
+2026-11-17T15:12:22.0653937Z Beginning upload of artifact content to blob storage
+2026-11-17T15:12:22.1297031Z (node:2734) [DEP0169] DeprecationWarning: `url.parse()` behavior is not standardized and prone to errors that have security implications. Use the WHATWG URL API instead. CVEs are not issued for `url.parse()` vulnerabilities.
+2026-11-17T15:12:22.5093935Z Uploaded bytes 319306
+2026-11-17T15:12:22.5665111Z Finished uploading artifact content to blob storage!
+2026-11-17T15:12:22.5666711Z SHA256 digest of uploaded artifact zip is 0c16af85e9144bf1cf40ee703e7eb884c4cb4f41ff01b5f4162d34fa65e18c44
+2026-11-17T15:12:22.5667781Z Finalizing artifact upload
+2026-11-17T15:12:23.0413970Z Artifact eval-out-seed2.zip successfully finalized. Artifact ID 14339774535
+2026-11-17T15:12:23.0415787Z Artifact eval-out-seed2 has been successfully uploaded! Final size is 319306 bytes. Artifact ID is 14339774535
+2026-11-17T15:12:23.0422869Z Artifact download URL: https://github.com/dolphin23-jp/Are-you-werewolf/actions/runs/44109743392/artifacts/14339774535
+2026-11-17T15:12:23.0630839Z Post job cleanup.
+2026-11-17T15:12:23.2142369Z (node:2746) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+2026-11-17T15:12:23.2144220Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-11-17T15:12:23.2425157Z Post job cleanup.
+2026-11-17T15:12:23.3441608Z [command]/usr/bin/git version
+2026-11-17T15:12:23.3494742Z git version 2.56.1
+2026-11-17T15:12:23.3539224Z Temporarily overriding HOME='/home/runner/work/_temp/ef0ba90d-f3f2-4807-89a9-d4c348c74a34' before making global git config changes
+2026-11-17T15:12:23.3540808Z Adding repository directory to the temporary git global config as a safe directory
+2026-11-17T15:12:23.3546731Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/Are-you-werewolf/Are-you-werewolf
+2026-11-17T15:12:23.3598882Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-11-17T15:12:23.3648226Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-11-17T15:12:23.4153021Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-11-17T15:12:23.4204017Z http.https://github.com/.extraheader
+2026-11-17T15:12:23.4219593Z [command]/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+2026-11-17T15:12:23.4282638Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-11-17T15:12:23.4667819Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-11-17T15:12:23.4718483Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-11-17T15:12:23.5256587Z Cleaning up orphan processes
+2026-11-17T15:12:23.5810636Z ##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4, actions/setup-python@v5, actions/upload-artifact@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/

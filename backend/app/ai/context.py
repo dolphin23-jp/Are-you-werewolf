@@ -13,15 +13,24 @@ keeps total summary size bounded instead of ever-growing transcript replay.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Iterable, Sequence
+from dataclasses import dataclass, replace
 from typing import Any
 
 from app.ai.deception import FakeClaimGuard, WolfDeceptionAssignment
 from app.ai.knowledge_base import KnowledgeBase, KnowledgeContext
-from app.ai.personalities import Personality, discussion_length_range
+from app.ai.personalities import (
+    CHAT_STAGE_MAX_CHARS,
+    CHAT_TURN_CHARS,
+    Personality,
+    chat_stage_max_chars,
+    discussion_length_range,
+)
 from app.ai.provider.base import Message
-from app.ai.reasoning.board_memo import render_roster
-from app.ai.reasoning.facts import PublicFactLedger
+from app.ai.reasoning.board_memo import namify, render_roster, role_label
+from app.ai.reasoning.facts import SEER_RESULT, PublicFactLedger
+from app.ai.reasoning.summaries import render_day_record
 from app.ai.schemas import PLAN_NOTE_MEMO_FIELDS
 from app.ai.strategy import (
     StrategyAnalyzer,
@@ -29,9 +38,27 @@ from app.ai.strategy import (
     player_labels,
     render_board_analysis,
 )
-from app.engine.roles import ROLE_DEFINITIONS, RoleName
+from app.engine.roles import ROLE_DEFINITIONS, RoleName, Team
 from app.engine.speech_events import SpeechEventType
-from app.engine.state import ChatChannel, ChatMessage, GameState
+from app.engine.state import (
+    ChatChannel,
+    ChatMessage,
+    GameState,
+    PendingQuestion,
+    PublicDeathCause,
+)
+
+# Night 0 has no attack: the scripted first victim dies (and is never listed
+# here), and the only other way to die that night is a seer divining the fox.
+# So a body on the first morning is a curse, not "attack or curse" -- saying
+# otherwise would hand the table a doubt the rules have already settled. Before
+# the night-0 curse existed no such body could appear, so the older prompts
+# read exactly as they did on every other morning.
+_NIGHT_ZERO_DEATH_CHAT = "。0日目の夜は襲撃がないので、この死体は占われて呪殺された妖狐。"
+_NIGHT_ZERO_DEATH_STRUCTURED = (
+    "。0日目の夜は襲撃がないため、この死体は占われて呪殺された妖狐です。"
+    "どの占いCO者の0日目の占い先かを照合してください。"
+)
 
 # Upper bound for the key-point digest layer. The same statements appear in full in
 # the current-day log, so an unbounded digest just doubles the prompt as a day runs on.
@@ -41,6 +68,36 @@ _MAX_KEY_POINTS_SHOWN = 12
 # the log, which the prompt already carries in full.
 _DIGEST_ITEMS = 3
 _DIGEST_QUOTE_CHARS = 70
+
+# The team channel a role reads, for the next day's carry-over.
+_TEAM_CHANNELS: dict[RoleName, ChatChannel] = {
+    RoleName.WEREWOLF: ChatChannel.WOLF,
+    RoleName.FREEMASON: ChatChannel.FREEMASON,
+}
+
+# Each faction's win, for its v3 role card. Checked after every execution and
+# every night by `VictoryChecker`; the madman and the fox count as non-wolves.
+_WIN_LINES: dict[Team, str] = {
+    Team.VILLAGE: (
+        "【勝利条件】人狼が0人になった時点で村の勝ち。ただし妖狐が生きていれば妖狐の勝ち"
+    ),
+    Team.WEREWOLF: (
+        "【勝利条件】人狼が人狼以外（狂人・妖狐も数える）と同数以上になった時点で人狼陣営の勝ち。"
+        "ただし妖狐が生きていれば妖狐の勝ち。人狼が0人になれば負け"
+    ),
+    Team.FOX: (
+        "【勝利条件】人狼が0人になった時点、または人狼が人狼以外と同数以上になった時点で、"
+        "生きていれば妖狐の勝ち（村・人狼の勝ちを奪う）"
+    ),
+}
+
+# The turns that steer a day, and how a prompt quotes them: the summary and
+# the closing designation. A day with several of one keeps the last.
+_DIRECTION_STAGES: dict[str, str] = {
+    "consensus_summary": "進行役のまとめ",
+    "provisional_designation": "仮指定",
+    "final_designation": "本指定",
+}
 
 DISCUSSION_OUTPUT_INSTRUCTION = """以下のJSON形式で回答してください:
 {"public_message": "あなたの発言(人格に合った口調)", \
@@ -85,8 +142,8 @@ MORNING_INTENT_OUTPUT_INSTRUCTION = """公開発言前の非公開判断です�
 占霊結果を見てから出たい共有などはafter_results。意図的潜伏はholdを選んでください。"""
 
 VOTE_OUTPUT_INSTRUCTION = """以下のJSON形式で回答してください:
-{"vote_target": "投票する相手のplayer_id", "reason": "簡潔な理由", \
-"decisive_evidence": "人数や口調ではない、投票を決めた最も強い独立根拠", \
+{"decisive_evidence": "人数や口調ではない、投票を決めた最も強い独立根拠", \
+"vote_target": "投票する相手のplayer_id", "reason": "簡潔な理由", \
 "countercase": "その相手が村側・真役職でも説明できる最も強い反対仮説", \
 "alternative_target": "次点候補のplayer_idまたはnull"}
 多数派、共有指定、他者への同意だけを投票理由にしてはいけません。現在の最多候補を
@@ -95,7 +152,7 @@ VOTE_OUTPUT_INSTRUCTION = """以下のJSON形式で回答してください:
 できません。処刑で得る霊結果だけでなく、真役職だった場合に失う結果も比較します。"""
 
 NIGHT_ACTION_OUTPUT_INSTRUCTION = """以下のJSON形式で回答してください:
-{"target": "対象プレイヤーのplayer_id", "reason": "簡潔な理由"}"""
+{"reason": "簡潔な理由", "target": "対象プレイヤーのplayer_id"}"""
 
 WOLF_CHAT_OUTPUT_INSTRUCTION = """以下のJSON形式で回答してください:
 {"message": "内輪チャットでの発言(100文字以内)"}"""
@@ -113,15 +170,17 @@ SUMMARY_OUTPUT_INSTRUCTION = """以下のJSON形式で回答してください:
 # small enough for Anthropic structured outputs to compile, and none of its
 # keys or descriptions ask the model to write out its thinking, which can be
 # refused as reasoning extraction (see `PlanNote`).
-CHAT_DISCUSSION_OUTPUT_INSTRUCTION = """次のJSONだけを返してください（前後に説明文を付けない）:
-{"public_message": "卓に送るチャット1通。相手は名前で呼び、player_idは書かない", \
-"reply_to": "直前の誰かの発言に返すならその発言ID(mN)、なければnull", \
-"plan_note": {"execution_target": "今日吊りたい相手のplayer_idまたはnull", \
-"suspects": ["怪しいと思う順のplayer_id"], "trusted": ["信用しているplayer_id"], \
+CHAT_DISCUSSION_OUTPUT_INSTRUCTION = """次のJSONだけを返してください（前後に説明文を付けない）。\
+plan_noteを先に書き、そのメモに沿ってpublic_messageを書く:
+{"plan_note": {"plan": "非公開の方針メモ。内訳の見立て、候補の比べ合い、今日の方針を2〜3文で", \
+"execution_target": "今日投票するつもりの相手のplayer_id。決めきれていなくても今の\
+いちばんを書き、材料が何もないときだけnull", \
+"suspects": ["卓で疑いを向ける順のplayer_id"], "trusted": ["信用しているplayer_id"], \
 "trusted_seer": "真と見ている占いCO者のplayer_idまたはnull", \
 "fox_candidates": ["妖狐候補のplayer_id"], \
-"plan": "非公開の方針メモ。内訳の見立てと今日の方針を2〜3文で", \
 "team_plan": "非公開。人狼・狂人は陣営としての狙いと次の一手を短く。それ以外は空文字"}, \
+"public_message": "卓に送るチャット1通。相手は名前で呼び、player_idは書かない", \
+"reply_to": "直前の誰かの発言に返すならその発言ID(mN)、なければnull", \
 "public_claim_role": "この発言でCOする役職(seer/medium/hunter/freemason)。しないならnull", \
 "public_results": [{"result_type": "seerまたはmedium", "target_id": "pN", \
 "is_werewolf": trueまたはfalse, "referenced_day": その結果の夜(霊媒は処刑日)の日数}], \
@@ -132,12 +191,25 @@ CHAT_DISCUSSION_OUTPUT_INSTRUCTION = """次のJSONだけを返してください
 player_idは【名簿】で引いてください。public_messageの中にはplayer_idを書きません。
 public_resultsは本当に自分が持っている結果（騙りなら騙りとして出す結果）だけを入れます。"""
 
+# Wolf and madman seats only, after the contract above. execution_target and
+# suspects are the seat's position at the table for every role (the vote
+# prompt and its audit read them as that); a seat whose real read differs
+# from its position is told where the read goes. The schema is unchanged.
+CHAT_TEAM_READ_LINE = (
+    "execution_targetとsuspectsは卓での立場。"
+    "本当の見立て（真占い・狩人・狐の候補）はteam_planに書く。"
+)
+
 CHAT_VOTE_OUTPUT_INSTRUCTION = """次のJSONだけを返してください:
-{"vote_target": "投票する相手のplayer_id", "reason": "一言の理由（チャットで言う調子）", \
-"decisive_evidence": "決め手になった一つの根拠", \
+{"decisive_evidence": "決め手になった一つの根拠", \
+"vote_target": "投票する相手のplayer_id", "reason": "一言の理由（チャットで言う調子）", \
 "countercase": "その相手が村側でも説明がつく最も強い見方", \
 "alternative_target": "次点のplayer_idまたはnull"}
-昼に言った吊り先と違う相手に入れるなら、reasonに変えた理由を書いてください。"""
+卓で名指しした吊り先と違う相手に入れるなら、reasonに理由を書く。\
+誰かの発言を聞いて票を変えたなら、誰の発言で変えたのかをreasonに名前で書く\
+（例:『〇〇さんの指摘で変えます』）。\
+当日のログの自分の発言に無いことを『昼に言った』と書かない。\
+【今日のメモの吊り先】に添えた発言はその一部。"""
 
 CHAT_PRIVATE_CHAT_INSTRUCTION = """次のJSONだけを返してください:
 {"message": "内輪チャットの1通。1〜2文、80文字以内。相手は名前で呼ぶ"}"""
@@ -170,7 +242,7 @@ class DaySummaryManager:
             if len(current) > 200:
                 self.summaries[day] = current[:200] + "…(省略)"
 
-    def render(self) -> str:
+    def render(self, *, chat: bool = False) -> str:
         days = sorted(set(self.facts) | set(self.summaries))
         if not days:
             return "(まだ過去日の要約はありません)"
@@ -178,7 +250,13 @@ class DaySummaryManager:
         for day in days:
             facts = self.facts.get(day, "")
             summary = self.summaries.get(day, "")
-            if facts:
+            if chat:
+                # v3: the facts block carries its own dated heading; the day's
+                # results and COs follow under theirs, never under 【公開事実】.
+                blocks.append(facts or f"{day}日目:")
+                if summary:
+                    blocks.append(f"【{day}日目に出た結果・CO】{summary}")
+            elif facts:
                 body = "\n".join(part for part in (facts, summary) if part)
                 blocks.append(f"{day}日目:\n{body}")
             else:
@@ -189,6 +267,16 @@ class DaySummaryManager:
         return sum(len(s) for s in self.summaries.values()) + sum(
             len(s) for s in self.facts.values()
         )
+
+
+@dataclass(frozen=True)
+class _NoteSource:
+    """Where a seat's plan note was written: the day, the turn's stage and, once
+    the line is posted, its message id."""
+
+    day: int
+    stage: str
+    message_id: str | None = None
 
 
 class ContextBuilder:
@@ -215,11 +303,29 @@ class ContextBuilder:
         self._fake_claim_guard = fake_claim_guard
         self._observer_player_ids = observer_player_ids or set()
         self._reasoning_memos: dict[str, dict[str, Any]] = {}
+        self._note_sources: dict[str, _NoteSource] = {}
         self._key_points: dict[int, list[tuple[str, str, str]]] = {}
+        # Day -> stage -> the message posted at that stage, for the stages
+        # that steer the day (`_DIRECTION_STAGES`). The last one wins.
+        self._direction_ids: dict[int, dict[str, str]] = {}
         self._knowledge = KnowledgeBase()
 
-    def set_reasoning_memo(self, player_id: str, memo: dict[str, Any]) -> None:
+    def set_reasoning_memo(
+        self,
+        player_id: str,
+        memo: dict[str, Any],
+        *,
+        day: int | None = None,
+        stage: str | None = None,
+    ) -> None:
+        """Store the seat's latest note. `day` and `stage` say which turn wrote
+        it; the message id follows when that turn's line is posted (see
+        `record_key_point`). Without them the note is shown undated."""
         self._reasoning_memos[player_id] = memo
+        if day is None or stage is None:
+            self._note_sources.pop(player_id, None)
+        else:
+            self._note_sources[player_id] = _NoteSource(day=day, stage=stage)
 
     def get_reasoning_memo(self, player_id: str) -> dict[str, Any] | None:
         """The player's last persisted memo. Free-text fields in it are opinion,
@@ -227,30 +333,105 @@ class ContextBuilder:
         return self._reasoning_memos.get(player_id)
 
     def record_key_point(
-        self, day: int, message_id: str, player_id: str, key_point: str
+        self,
+        day: int,
+        message_id: str,
+        player_id: str,
+        key_point: str,
+        *,
+        stage: str | None = None,
     ) -> None:
+        """Note a posted turn: its key point and, given the turn's `stage`, the
+        message that carried the plan note the same turn wrote."""
         normalized = key_point.strip()
         if normalized:
             self._key_points.setdefault(day, []).append((message_id, player_id, normalized))
+        source = self._note_sources.get(player_id)
+        if (
+            source is not None
+            and source.message_id is None
+            and (source.day, source.stage) == (day, stage)
+        ):
+            self._note_sources[player_id] = replace(source, message_id=message_id)
+        if stage in _DIRECTION_STAGES:
+            self._direction_ids.setdefault(day, {})[stage] = message_id
 
-    def _layer_previous_memo(self, player_id: str) -> str:
+    def direction_lines(self, day: int) -> list[tuple[str, str]]:
+        """The lines that steered `day`, as (label, message id), in stage order."""
+        posted = self._direction_ids.get(day, {})
+        return [
+            (label, posted[stage]) for stage, label in _DIRECTION_STAGES.items() if stage in posted
+        ]
+
+    def day_record(self, state: GameState) -> str:
+        """v3: the day just voted on, for the past-days layer (`render_day_record`)."""
+        return render_day_record(state, state.day, self.direction_lines(state.day))
+
+    def _layer_previous_memo(self, state: GameState, player_id: str) -> str:
         memo = self._reasoning_memos.get(player_id)
         if self._chat:
-            # Shown back under the wire names the model wrote it with, so the
-            # v3 prompt never asks for (or echoes) a "thought" field. The stored
-            # memo keeps ReasoningMemo's names, because code reads those; fields
-            # the wire form does not carry (role_hypotheses) are left out.
-            if memo is None:
-                return "【前回の方針メモ】(まだありません)"
-            note = {
-                note_field: memo[memo_field]
-                for note_field, memo_field in PLAN_NOTE_MEMO_FIELDS.items()
-                if memo_field in memo
-            }
-            return "【前回の方針メモ】\n" + json.dumps(note, ensure_ascii=False)
+            return self._chat_previous_note(state, player_id, memo)
         if memo is None:
             return "【前回の非公開思考メモ】(まだありません)"
         return "【前回の非公開思考メモ】\n" + json.dumps(memo, ensure_ascii=False)
+
+    def _chat_previous_note(
+        self, state: GameState, player_id: str, memo: dict[str, Any] | None
+    ) -> str:
+        """The seat's last plan note, dated, its names read as they stand now.
+
+        A note is rewritten only on a discussion turn, so a seat without one
+        votes from whatever it wrote last -- days ago, perhaps, about a seat
+        confirmed or dead since. Echoed as ids with no date, that note read as
+        today's (seed-1 review 2-A4). Shown under the wire names the model
+        wrote it with, so the v3 prompt never asks for (or echoes) a "thought"
+        field; fields the wire form does not carry (role_hypotheses) are left
+        out, and so is an empty free-text field.
+        """
+        if memo is None:
+            return "【前回の方針メモ】(まだありません)"
+        source = self._note_sources.get(player_id)
+        heading = "【前回の方針メモ】"
+        if source is not None:
+            heading = f"【前回の方針メモ（{self._note_source_text(source)}で書いたもの）】"
+            if source.day < state.day:
+                heading += "それ以降の出来事は【盤面メモ】にある。"
+        lines = [heading]
+        for note_field, memo_field in PLAN_NOTE_MEMO_FIELDS.items():
+            if memo_field not in memo:
+                continue
+            value = memo[memo_field]
+            if isinstance(value, list):
+                rendered = (
+                    "、".join(self._noted_seat(state, player_id, item) for item in value)
+                    or "なし"
+                )
+            elif note_field in ("execution_target", "trusted_seer"):
+                rendered = self._noted_seat(state, player_id, value) if value else "なし"
+            else:
+                text = str(value or "").strip()
+                if not text:
+                    continue
+                rendered = namify(text, PublicFactLedger(state))
+            lines.append(f"- {note_field}: {rendered}")
+        return "\n".join(lines)
+
+    def _note_source_text(self, source: _NoteSource, *, with_stage: bool = True) -> str:
+        where = f"{source.day}日目"
+        if source.message_id:
+            where += f" {source.message_id}"
+        if with_stage:
+            where += f"・{self._stage_label(source.stage)}"
+        return where
+
+    @staticmethod
+    def _noted_seat(state: GameState, self_id: str, player_id: object) -> str:
+        """A seat named in a note: its name and its public status now."""
+        if not isinstance(player_id, str) or player_id not in state.players:
+            return str(player_id)
+        if player_id == self_id:
+            return "自分"
+        return f"{state.players[player_id].name}［{public_status(state, player_id)}］"
 
     def _label(self, state: GameState, player_id: str) -> str:
         """How a player is written in the prompt: `名前(pN)` normally, the name
@@ -314,16 +495,22 @@ class ContextBuilder:
         """
         player = state.players[player_id]
         personality = self._personalities[player_id]
-        minimum, maximum = discussion_length_range(personality.verbosity)
+        # One band for every persona. The first Claude game was asked for
+        # 80-100 and 180-200 characters and averaged 130; a persona's cadence
+        # is now said in its own section, in words.
+        low, high = CHAT_TURN_CHARS
+        longest = max(CHAT_STAGE_MAX_CHARS.values())
         return (
             f"あなたは17人村(17A)のチャット人狼に参加しているプレイヤー「{player.name}」です。"
             "相手は人間のプレイヤーだと思って、人間のプレイヤーとして話してください。\n"
             f"{personality.to_prompt_section(chat=True)}\n"
             "【チャットの話し方】\n"
-            f"- 1発言は短く。ふだんは1〜3文、{minimum}〜{max(minimum + 20, maximum // 3)}字くらい。"
-            f"CO・結果発表・投票前の整理のときだけ長くてよい(最大{maximum}字)\n"
+            f"- 1発言は短く。ふだんは1文、{low}〜{high}字。"
+            "場面ごとの上限は【いまの場面】に書いてある。"
+            f"CO・結果発表・投票前のまとめでも{longest}字まで\n"
             "- 相手は名前で呼ぶ。「(p3)」のようなIDは絶対に書かない\n"
-            "- 毎回同じ書き出しをしない。毎回「吊り候補は〇〇」と宣言しない。盤面の復唱をしない。"
+            "- 毎回同じ書き出しをしない。毎回名前の呼びかけから始めない。"
+            "毎回「吊り候補は〇〇」と宣言しない。盤面の復唱をしない。"
             "いま言いたいことを一つだけ言う\n"
             "- 誰かの発言に反応するときは、その人の名前を出して具体的に反応する"
             "(同意・反論・質問・回答)。名指しで聞かれたことには最初に答える\n"
@@ -336,21 +523,25 @@ class ContextBuilder:
             "一言で言い、その発言にreply_toを向ける\n"
             "- 筋が通らない、根拠が薄いと思うときは、変えずに理由を短く言う。強く言われただけで"
             "折れない。多数に合わせるだけで変えることもしない\n"
-            "- 「認める」「撤回する」と言ったなら、そのとおりに動く。認めたうえで変えないなら、"
-            "「そこは認めるけど、〜だから変えない」と理由を言う\n"
+            "- 「認める」「撤回する」と言ったなら、そのとおりに動く。考えを変えないなら、"
+            "同意の言葉を前置きせず、残る理由だけを言う\n"
+            "- 直前の人と同じ結論なら『〇〇に同意』と一言で。同じ理由を言い直さない\n"
             "- 一度答えたことは繰り返さない。同じ反論には「さっきの通り」と短く返す\n"
             "- 人狼・狂人・妖狐は陣営の目的を優先する。聞き入れたふりをするか、変えないかは"
             "戦術として選ぶ\n"
             "【考え方】\n"
             "- 【盤面メモ】の事実(CO・判定・投票・死亡)は正確に使う。メモにない判定や投票を"
             "作らない。思い込みで誰かのCOや結果を言い換えない\n"
-            "- 自分の見立てと方針はplan_noteに短く書く。発言はあなたの人格と、あなたの役職"
+            "- 自分の見立てと方針はplan_noteに短く書く。候補を比べるのもplan_noteで、"
+            "発言では比べた候補を並べない。発言はあなたの人格と、あなたの役職"
             "(騙っているなら騙り役)として自然な範囲で選ぶ\n"
+            "- plan_noteのexecution_targetには、決めきれていなくても今日投票するつもりの相手を"
+            "毎回書く。材料が何もないときだけnull\n"
             "- 発言で推した吊り先と投票先は原則そろえる。変えるときは一言理由を言う\n"
-            "- 自分の陣営の勝ちを目指す。人狼・狂人は本当の目的を発言で漏らさない。"
+            "- 自分の陣営の勝ちを目指す。人狼・狂人・妖狐は本当の目的を発言で漏らさない。"
             "妖狐は占われないこと・最後まで生き残ることを目指す\n"
             "- 「もっとも狼らしい人」と「今日吊るべき人」は別。縄数、霊結果の価値、真役職を"
-            "失う損失、狐の生存を考えてから決める\n"
+            "失う損失、狐の生存はplan_noteで比べてから決める\n"
             "- 自分自身を疑い先・吊り先・能力の対象にしない"
         )
 
@@ -362,6 +553,12 @@ class ContextBuilder:
         lines = [
             f"【役職情報】あなたの役職は「{definition.label_ja}」です。{definition.description_ja}"
         ]
+        if self._chat:
+            # When each side wins, as `app/engine/victory.py` decides it: a
+            # rule, not advice. Without it the fox's card said only that it
+            # wins by surviving, and nobody read the last wolf's execution as
+            # the fox's win (seed-1 review 5-B2).
+            lines.append(_WIN_LINES[definition.team])
 
         if player.role == RoleName.WEREWOLF:
             allies = [
@@ -379,6 +576,18 @@ class ContextBuilder:
                 )
             else:
                 lines.append("あなたは潜伏担当です。無理にCOせず村人として振る舞ってください。")
+
+        if (
+            self._chat
+            and player.role == RoleName.MEDIUM
+            and not any(
+                declaration.player_id == player_id and declaration.claimed_role == RoleName.MEDIUM
+                for declaration in state.co_declarations
+            )
+        ):
+            # A fact and a nudge; staying latent remains the seat's call
+            # (owner decision on review 1-B3).
+            lines.append("あなたはまだ霊媒COしていない。17Aでは1日目COが普通")
 
         if player.role == RoleName.MADMAN and self._madman_fake_role is not None:
             fake_label = ROLE_DEFINITIONS[self._madman_fake_role].label_ja
@@ -453,8 +662,12 @@ class ContextBuilder:
                 parts.append(
                     "【今朝の公開死体（最優先で考察）】"
                     + "、".join(night_names)
-                    + "。公開情報では死因の区別はつきません。"
-                    "死体数と公開占い結果を照合してください。"
+                    + (
+                        _NIGHT_ZERO_DEATH_STRUCTURED
+                        if state.day == 1
+                        else "。公開情報では死因の区別はつきません。"
+                        "死体数と公開占い結果を照合してください。"
+                    )
                 )
         if state.public_result_claims:
             result_lines = [
@@ -513,7 +726,11 @@ class ContextBuilder:
             parts.append(
                 "【今朝の死体】"
                 + self._labels(state, todays_deaths)
-                + "。公開情報では噛みか呪殺かの区別はつかない。"
+                + (
+                    _NIGHT_ZERO_DEATH_CHAT
+                    if state.day == 1
+                    else "。公開情報では噛みか呪殺かの区別はつかない。"
+                )
             )
         observers = [
             self._label(state, pid)
@@ -532,7 +749,7 @@ class ContextBuilder:
     # -- layer [D] --
 
     def _layer_d_summaries(self) -> str:
-        return f"【過去日の要約】\n{self._day_summaries.render()}"
+        return f"【過去日の要約】\n{self._day_summaries.render(chat=self._chat)}"
 
     # -- layer [E] --
 
@@ -560,6 +777,31 @@ class ContextBuilder:
             state, ChatChannel.PUBLIC, heading="【今日の公開議論のログ】"
         )
 
+    def _layer_last_night_team_chat(self, state: GameState, player_id: str) -> str:
+        """v3: the team chat of the night before, for the seats that wrote it.
+
+        The night's plan never reached the next day: wolves planned "tonight
+        ケント, then アカリ" and argued the next day without it (review 3-N1),
+        and the freemasons' chat was read by nobody (2-N1). Information only,
+        with the one line that the team's words are not the table's. Night N
+        chat carries day N, the day before the discussion that follows it.
+        """
+        role = state.players[player_id].role
+        channel = _TEAM_CHANNELS.get(role)
+        if channel is None:
+            return ""
+        lines = [
+            self._format_chat_line(state, message)
+            for message in state.chat_log
+            if message.channel is channel and message.day == state.day - 1
+        ]
+        if not lines:
+            return ""
+        heading = "人狼" if channel is ChatChannel.WOLF else "共有"
+        return (
+            f"【前夜の{heading}チャット】内輪の内容は卓でそのまま言わない。\n" + "\n".join(lines)
+        )
+
     def _layer_private_history(self, state: GameState, channel: ChatChannel) -> str:
         messages = [m for m in state.chat_log if m.channel == channel]
         if not messages:
@@ -581,9 +823,21 @@ class ContextBuilder:
             return "【あなたへの未回答の質問】(ありません)"
         lines = [
             f"[{item.source_message_id}] {self._label(state, item.asker)} →あなた:"
-            f"「{item.question}」"
+            f"「{self._asked_in_own_words(state, item) if self._chat else item.question}」"
             for item in questions
         ]
+        if self._chat:
+            # "Answer them together" came back as an opener -- five seats in
+            # the first Claude game began 「A、B、まとめて答える」. The same
+            # instruction, without a shape to copy.
+            return (
+                "【あなたへの未回答の質問】\n"
+                + "\n".join(lines)
+                + "\n最初にこれへ直接答える。何人かに聞かれていても、この1回の発言で答える"
+                "(答える前の前置きは要らない)。答えられないなら理由を言う。"
+                "答えるときはreply_toにその発言ID(mN)を入れる。"
+                "これらの質問はこの発言のあとで片づく扱いなので、次の発言で同じ答えを繰り返さない。"
+            )
         return (
             "【あなたへの未回答の質問】\n"
             + "\n".join(lines)
@@ -592,6 +846,45 @@ class ContextBuilder:
             "答えるときはreply_toにその発言ID(mN)を入れてください。"
             "これらの質問はこの発言のあとで片づく扱いなので、次の発言で同じ答えを繰り返さないでください。"
         )
+
+    @staticmethod
+    def _asked_in_own_words(state: GameState, question: PendingQuestion) -> str:
+        """The question as the asker put it: the sentences of its message that
+        name the target, as said (seed-1 review 4-A2).
+
+        The recorded question is the asker's structured paraphrase; shown as
+        "what m8 said", it put words in the asker's mouth -- 43 of 44 differed
+        from the message. A sentence that is only a call (「Player1さん。」)
+        takes the sentence after it, where the question is. Two sentences at
+        most, each cut around the name. A message that is gone, or that never
+        names the target, leaves the recorded text (such questions are the
+        registering side's to drop).
+        """
+        message = next(
+            (m for m in state.chat_log if m.message_id == question.source_message_id), None
+        )
+        if message is None or message.author_id != question.asker:
+            return question.question
+        sentences = _sentences(message.content)
+        quoted: list[str] = []
+        for index, sentence in enumerate(sentences):
+            span = next(
+                (
+                    (start, end)
+                    for start, end, pid in _mention_spans(state, sentence)
+                    if pid == question.target
+                ),
+                None,
+            )
+            if span is None:
+                continue
+            rest = (sentence[: span[0]] + sentence[span[1] :]).strip()
+            if len(_CALL_RESIDUE.sub("", rest)) == 0 and index + 1 < len(sentences):
+                sentence = f"{sentence}。{sentences[index + 1]}"
+            quoted.append(_excerpt(sentence, span[0]).translate(_NESTED_QUOTES))
+            if len(quoted) == 2:
+                break
+        return "」「".join(quoted) if quoted else question.question
 
     def _layer_since_last_turn(self, state: GameState, player_id: str) -> str:
         """Where this seat stood, and what has been said or shown since it spoke.
@@ -637,7 +930,16 @@ class ContextBuilder:
             stood = target.name
         else:
             stood = f"{target.name}(すでに死亡)"
-        lines = ["【前回の発言のあとに出たこと】", f"- あなたが推していた吊り先: {stood}"]
+        if self._chat:
+            # The note's value, not something said at the table, and as old as
+            # the note: dated, the name read as it stands now (review 2-A4).
+            source = self._note_sources.get(player_id)
+            when = f"（{self._note_source_text(source, with_stage=False)}）" if source else ""
+            if target is not None:
+                stood = self._noted_seat(state, player_id, target.player_id)
+            lines = ["【前回の発言のあとに出たこと】", f"- 前回のメモの吊り先{when}: {stood}"]
+        else:
+            lines = ["【前回の発言のあとに出たこと】", f"- あなたが推していた吊り先: {stood}"]
         if addressed:
             lines.append("- あなた宛ての発言:")
             lines.extend(self._digest_line(state, m) for m in addressed[-_DIGEST_ITEMS:])
@@ -652,7 +954,10 @@ class ContextBuilder:
                 "通らなければ変えずに理由を言う。"
             )
         elif heard:
-            lines.append("- あなた宛て・あなたの推し先に触れた発言・新しい結果は、まだありません。")
+            # v3 calls the seat's lean what the note calls it, 「メモの吊り先」, as
+            # the line above does; v2's measured wording is left as it was.
+            mention = "メモの吊り先" if self._chat else "あなたの推し先"
+            lines.append(f"- あなた宛て・{mention}に触れた発言・新しい結果は、まだありません。")
         else:
             lines.append("- まだ誰も話していません。")
         return "\n".join(lines)
@@ -742,18 +1047,62 @@ class ContextBuilder:
                 "共有相方として名指しされています。真の相方なら確認共有COを最初に述べ、"
                 "相方でなければ明確に否定してください。他の論点を先に話してはいけません。"
             )
-        elif stage.startswith("minority_review:"):
-            target_id = stage.split(":", 1)[1]
-            target = player_label(state, target_id) if target_id in state.players else target_id
+        elif stage == "open_floor":
+            stage_instruction = "今日はまだ発言していません。いま言いたいことを述べてください。"
+        elif stage == "summary_answer":
             stage_instruction = (
-                f"票・疑いが{target}へ集中しています。多数派の理由を再掲せず、"
-                "この人物が村側である反対仮説、本人の反論で妥当な点、別の処刑候補を"
-                "必ず比較してください。疑いを維持する場合も独立根拠だけを述べます。"
+                "進行役のまとめで名指しで質問されています。まずその質問に直接答えてください。"
+            )
+        elif stage == "facilitator_followup":
+            stage_instruction = (
+                "名指しで質問した相手から回答がありました。それを受けて、進行役として"
+                "一言述べてください。"
+            )
+        elif stage == "provisional_designation":
+            stage_instruction = (
+                "まとめで処刑先が示されなかったため、進行役として仮指定を出してください。"
+                "今日の処刑候補を一人挙げ、理由を1〜2文で述べます。この後その人物が弁明し、"
+                "あなたの本指定のあと投票に入ります。グレランにするなら「今日はグレラン」と"
+                "述べてもかまいません。そのときはこの発言のあとすぐ投票に入ります。"
             )
         elif stage == "consensus_summary":
             stage_instruction = (
                 "第一候補だけでなく第二候補、第一候補を処刑しない最強の理由、"
                 "本人の反論後にも残った独立根拠、少数意見を整理してください。"
+                "グレランで進めるなら処刑候補を挙げず「今日はグレラン」と述べてもかまいません。"
+                "この後、処刑候補に挙げた人物と名指しで質問した相手が一言ずつ答え、"
+                "あなたの本指定のあと投票に入ります。グレランなら本指定はなく、"
+                "回答が済めば投票に入ります。"
+            )
+        elif stage == "final_designation":
+            stage_instruction = (
+                "まとめのあとの締めです。ここまでに出た返答を踏まえ、今日の処刑先を一人だけ"
+                "1〜2文で短く指定してください。グレランにするなら「グレランで」と述べても"
+                "かまいません。新しい質問・新しい論点は出さず、directed_questionsは空にします。"
+                "この発言のあとすぐ投票に入ります。"
+            )
+        reply_note = (
+            "当日のログは各行の先頭に[mN]の発言IDが付いています。"
+            "誰かの発言を受けて話すなら、そのIDをreply_toに、該当箇所の原文をquoteに入れてください。"
+        )
+        if stage == "final_designation":
+            # The round closes on this turn. The shared trailer below asks for a
+            # length band and for one point nobody has raised yet, which is the
+            # opposite of "name one seat, briefly, nothing new"; telling the
+            # model both left it to pick. This turn hears only what it is for.
+            stage_text = (
+                f"【議論段階】{self._stage_label(stage)}。" + stage_instruction + reply_note
+            )
+        else:
+            stage_text = (
+                f"【議論段階】{self._stage_label(stage)}。発言長の目安は{target_chars}字です。"
+                + stage_instruction
+                + "直近の複数人がすでに述べた結論・質問を言い換えて繰り返してはいけません。"
+                "同じ処刑候補を支持する場合も、未提示の投票履歴・死体・能力結果・発言差を"
+                "一つ追加してください。名指しされた本人は質問への直接回答を最初に述べてください。"
+                + reply_note
+                + "consensus_summary段階では新説を広げず、"
+                "対立点と処刑候補を根拠付きでまとめてください。"
             )
         return self._assemble(
             [self._layer_a_system(state, player_id), self._layer_b_role(state, player_id)],
@@ -762,16 +1111,9 @@ class ContextBuilder:
                 self._layer_pending_questions(state, player_id),
                 self._layer_existing_key_points(state),
                 self._layer_d_summaries(),
-                self._layer_previous_memo(player_id),
+                self._layer_previous_memo(state, player_id),
                 self._layer_e_current_log(state, ChatChannel.PUBLIC),
-                f"【議論段階】{self._stage_label(stage)}。発言長の目安は{target_chars}字です。"
-                + stage_instruction
-                + "直近の複数人がすでに述べた結論・質問を言い換えて繰り返してはいけません。"
-                "同じ処刑候補を支持する場合も、未提示の投票履歴・死体・能力結果・発言差を"
-                "一つ追加してください。名指しされた本人は質問への直接回答を最初に述べてください。"
-                "当日のログは各行の先頭に[mN]の発言IDが付いています。"
-                "誰かの発言を受けて話すなら、そのIDをreply_toに、該当箇所の原文をquoteに入れてください。"
-                "consensus_summary段階では新説を広げず、対立点と処刑候補を根拠付きでまとめてください。",
+                stage_text,
                 DISCUSSION_OUTPUT_INSTRUCTION,
             ],
         )
@@ -798,7 +1140,8 @@ class ContextBuilder:
             self._layer_pending_questions(state, player_id),
             self._layer_since_last_turn(state, player_id),
             self._layer_d_summaries(),
-            self._layer_previous_memo(player_id),
+            *filter(None, [self._layer_last_night_team_chat(state, player_id)]),
+            self._layer_previous_memo(state, player_id),
             self._layer_e_current_log(state, ChatChannel.PUBLIC),
             f"【いまの場面】{self._stage_label(stage)}。{stage_instruction}"
             "当日のログは各行の先頭に[mN]の発言IDが付いている。誰かの発言を受けて話すなら"
@@ -807,41 +1150,79 @@ class ContextBuilder:
         if duties:
             user_layers.append(duties)
         user_layers.append(render_roster(ledger, player_id))
-        user_layers.append(CHAT_DISCUSSION_OUTPUT_INSTRUCTION)
+        contract = CHAT_DISCUSSION_OUTPUT_INSTRUCTION
+        if state.players[player_id].team is Team.WEREWOLF:
+            contract += "\n" + CHAT_TEAM_READ_LINE
+        user_layers.append(contract)
         return self._assemble(
             [self._layer_a_system(state, player_id), self._layer_b_role(state, player_id)],
             user_layers,
         )
 
     def _chat_stage_instruction(self, state: GameState, stage: str) -> str:
+        """What this turn is for, and its length cap.
+
+        Nothing here lists what to weigh: a checklist in the stage text ("the
+        second candidate, the strongest reason not to hang") came back as
+        speech in the first Claude game, and the table noticed. Comparisons go
+        in the plan note; the message says the conclusion. A stage this method
+        does not know gets the ordinary turn's text and cap.
+        """
+        cap = chat_stage_max_chars(stage)
         if stage == "immediate":
-            return "朝一。結果やCOがあるなら最初にそれを言い、必要なら一言添える。"
+            return f"朝一。結果やCOがあるなら最初にそれを言い、必要なら一言添える。{cap}字以内。"
         if stage == "reaction":
-            return "直前の発言への短い反応(同意・驚き・一言の反論・質問)。1〜2文でよい。"
+            return f"直前の発言への短い反応(同意・驚き・ツッコミ・質問)。1文、{cap}字以内。"
         if stage == "rebuttal_or_reassessment":
             return (
-                "自分が疑われている、または反論を受けた場面。相手の言い分の妥当な点は認め、"
-                "それでも残る根拠か反論を短く返す。"
+                "自分が疑われている、または反論を受けた場面。納得したなら考えを変えたと言い、"
+                f"納得しないなら反論を一つだけ返す。{cap}字以内。"
             )
         if stage == "freemason_confirmation":
             return (
                 "共有の相方として名指しされた。本当の相方なら最初に確認COし、"
-                "違うなら明確に否定する。他の話は後。"
-            )
-        if stage.startswith("minority_review:"):
-            target_id = stage.split(":", 1)[1]
-            target = self._label(state, target_id) if target_id in state.players else target_id
-            return (
-                f"票や疑いが{target}に集中している。多数派の繰り返しではなく、"
-                f"{target}が村側である可能性と別の候補を一言で出す。"
+                f"違うなら明確に否定する。他の話は後。{cap}字以内。"
             )
         if stage == "consensus_summary":
-            return "投票前の整理。今日の吊り先候補と理由、残る対立点を短くまとめる。"
+            # Says plainly what follows it, so a plan to hear someone first is
+            # one the day can carry out.
+            return (
+                f"投票前のまとめ。今日の吊り先と理由を一行で。{cap}字以内。"
+                "候補の比べ合いはplan_noteに書き、発言では並べない。"
+                "グレランにするなら誰も挙げずに「今日はグレラン」でよい。"
+                "この後、吊り先に挙げた人と名指しで聞いた人が一言ずつ答え、"
+                "あなたの本指定で投票に入る。グレランなら本指定はなく、答えが済めば投票に入る。"
+            )
+        if stage == "final_designation":
+            # The round closes on this turn: a question here could not be answered.
+            return (
+                "まとめのあとの締め。ここまでに出た返答を踏まえ、今日の吊り先を一言で決める。"
+                "グレランにするなら「グレランで」でよい。"
+                f"質問はしない。この発言のあとすぐ投票に入る。1文、{cap}字以内。"
+            )
         if stage == "human_followup":
-            return "人間のプレイヤーの発言に応答する。"
+            return f"人間のプレイヤーの発言に応答する。{cap}字以内。"
+        if stage == "summary_answer":
+            return f"進行役のまとめで名指しで聞かれた。まずその問いに答える。{cap}字以内。"
+        if stage == "facilitator_followup":
+            return (
+                "名指しで聞いた問いに答えが返ってきた。それを受けて進行役として一言。"
+                f"{cap}字以内。"
+            )
+        if stage == "provisional_designation":
+            return (
+                "まとめで吊り先が出なかったので、進行役として仮指定を出す。今日の吊り先を"
+                f"一人挙げ、理由を一言。{cap}字以内。この後その人が一言弁明し、"
+                "あなたの本指定のあと投票に入る。グレランにするなら「今日はグレラン」でよく、"
+                "そのときはこの発言のあとすぐ投票に入る。"
+            )
+        if stage == "open_floor":
+            # The seat has had no turn today. The turn is its opportunity;
+            # nothing here suggests what to use it for.
+            return f"今日はまだ話していない。いま言いたいことを言う。{cap}字以内。"
         return (
-            "今日の最初の発言。盤面を見て一番言いたいこと(内訳の見立て、吊り方針、"
-            "誰かへの質問のどれか)を一つ。"
+            "今日の最初の発言。盤面を見て一番言いたいこと(役職COがあるならそれ、内訳の見立て、"
+            f"吊り方針、誰かへの質問のどれか)を一つ。{cap}字以内。"
         )
 
     def build_morning_intent_context(
@@ -852,7 +1233,7 @@ class ContextBuilder:
             [
                 self._layer_c_state(state, player_id, self._role_specific_guides(state, player_id)),
                 self._layer_d_summaries(),
-                self._layer_previous_memo(player_id),
+                self._layer_previous_memo(state, player_id),
                 MORNING_INTENT_OUTPUT_INSTRUCTION,
             ],
         )
@@ -888,7 +1269,7 @@ class ContextBuilder:
                 # a plain villager.
                 self._layer_c_state(state, player_id, self._role_specific_guides(state, player_id)),
                 self._layer_d_summaries(),
-                self._layer_previous_memo(player_id),
+                self._layer_previous_memo(state, player_id),
                 self._layer_e_current_log(state, ChatChannel.PUBLIC),
                 f"{header}{candidates}",
                 VOTE_OUTPUT_INSTRUCTION,
@@ -906,34 +1287,132 @@ class ContextBuilder:
     ) -> tuple[str, list[Message]]:
         ledger = PublicFactLedger(state)
         header = (
-            f"【決選投票({state.vote_round}回目)】前回の投票が同数だったため、"
+            f"【決選投票({state.vote_round}回目)】{self._runoff_reason(state)}、"
             "候補は同数だったプレイヤーに限られる。次の中から選ぶ: "
             if state.runoff_candidates
             else "【投票候補】"
         )
-        stated = (
-            f"【昼にあなたが推した吊り先】{self._label(state, stated_target)}"
-            if stated_target is not None and stated_target in state.players
-            else "【昼にあなたが推した吊り先】特に名指ししていない"
+        stated = self._memo_target_line(state, player_id, stated_target)
+        # Facts only, each checkable against the board: who will see the
+        # ballot, who has not had a turn today, what the day was steered by,
+        # and what the table knows of each candidate. How to weigh them is
+        # the seat's (review 2-B6, 2-A2, 3-B1, 4-B6).
+        candidates = "、".join(
+            f"{self._label(state, pid)}（{public_status(state, pid)}）" for pid in candidate_ids
         )
+        layers = [
+            self._layer_c_state(
+                state,
+                player_id,
+                self._role_specific_guides(state, player_id),
+                board_memo=board_memo,
+            ),
+            self._layer_d_summaries(),
+            *filter(None, [self._layer_last_night_team_chat(state, player_id)]),
+            self._layer_previous_memo(state, player_id),
+            self._layer_e_current_log(state, ChatChannel.PUBLIC),
+        ]
+        direction = self._direction_layer(state)
+        if direction:
+            layers.append(direction)
+        waiting = "、".join(
+            "自分" if pid == player_id else self._label(state, pid)
+            for pid in self._seats_without_a_turn(state)
+        )
+        layers += [
+            stated,
+            "【投票について】\n- 投票先は全員に公開され、記録に残る\n"
+            "- AI席の手番は進行が割り振る。今日まだ手番が回っていない席: "
+            f"{waiting or 'なし'}（人間の席は含めない）",
+            f"{header}{candidates or 'なし'}",
+            render_roster(ledger, player_id),
+            CHAT_VOTE_OUTPUT_INSTRUCTION,
+        ]
         return self._assemble(
             [self._layer_a_system(state, player_id), self._layer_b_role(state, player_id)],
-            [
-                self._layer_c_state(
-                    state,
-                    player_id,
-                    self._role_specific_guides(state, player_id),
-                    board_memo=board_memo,
-                ),
-                self._layer_d_summaries(),
-                self._layer_previous_memo(player_id),
-                self._layer_e_current_log(state, ChatChannel.PUBLIC),
-                stated,
-                f"{header}{self._labels(state, candidate_ids)}",
-                render_roster(ledger, player_id),
-                CHAT_VOTE_OUTPUT_INSTRUCTION,
-            ],
+            layers,
         )
+
+    def _direction_layer(self, state: GameState) -> str:
+        """Today's summary and designation, quoted as said; empty if neither."""
+        posted = {message.message_id: message for message in state.chat_log}
+        lines = [
+            f"- {label}（{self._label(state, message.author_id)} {message_id}）:"
+            f"「{' '.join(message.content.split()).translate(_NESTED_QUOTES)}」"
+            for label, message_id in self.direction_lines(state.day)
+            if (message := posted.get(message_id)) is not None
+        ]
+        return "【進行役の方針】\n" + "\n".join(lines) if lines else ""
+
+    def _seats_without_a_turn(self, state: GameState) -> list[str]:
+        """Living AI seats that have not posted in public today, in seat order.
+
+        Human seats speak when they choose, so "no turn yet" says nothing
+        about them; observers never speak and are named in their own layer.
+        """
+        spoke = {
+            message.author_id
+            for message in state.chat_log
+            if message.channel is ChatChannel.PUBLIC and message.day == state.day
+        }
+        return [
+            pid
+            for pid in state.alive_ids()
+            if pid not in spoke
+            and not state.players[pid].is_human
+            and pid not in self._observer_player_ids
+        ]
+
+    @staticmethod
+    def _runoff_reason(state: GameState) -> str:
+        """Why the ballot is narrowed: who tied in the previous round, and on how many."""
+        previous = state.vote_round - 1
+        counts: dict[str, int] = {}
+        for vote in state.vote_records:
+            if vote.day == state.day and vote.round == previous:
+                counts[vote.target_id] = counts.get(vote.target_id, 0) + 1
+        tied = [pid for pid in state.runoff_candidates if pid in counts]
+        if len(tied) < 2 or len({counts[pid] for pid in tied}) != 1:
+            return "前回の投票が同数だったため"
+        names = "と".join(state.players[pid].name for pid in tied)
+        return f"前回の投票で{names}が各{counts[tied[0]]}票の同数だったため"
+
+    def _memo_target_line(
+        self, state: GameState, player_id: str, target_id: str | None
+    ) -> str:
+        """The day's execution target as the seat's own plan note holds it,
+        beside what the seat itself said about that name at the table today.
+
+        Labelled as the note, not as "what you pushed in daytime": in v3 this
+        is the private note's value, and calling it what the seat had said made
+        the model write "昼に言った通り" about a name it never said at the table.
+
+        Code states only what it can know. Whether a line pushed the name is
+        intent, and word lists read it wrong both ways (they missed
+        「灰はレン優先のまま押す」 and took a polite refusal for a push), so it
+        is not judged here. What is checked is whether the seat's own public
+        lines today contain the name; when they do, the seat's own sentences
+        that name it are quoted (see `_own_sentences_naming`) and the model
+        reads its words for itself. When the quote is not every such sentence
+        whole, the line says it is an excerpt: the vote instruction scopes
+        『昼に言った』 to the day's log, and the quote must not read as all of it.
+        """
+        if target_id is None or target_id not in state.players:
+            return "【今日のメモの吊り先】なし"
+        lines = [
+            message.content
+            for message in state.chat_log
+            if message.channel == ChatChannel.PUBLIC
+            and message.day == state.day
+            and message.author_id == player_id
+        ]
+        label = self._label(state, target_id)
+        quotes, whole = _own_sentences_naming(state, lines, target_id)
+        if not quotes:
+            return f"【今日のメモの吊り先】{label}(今日の卓ではまだこの名前を出していない)"
+        said = "".join(f"「{quote}」" for quote in quotes)
+        source = "今日の卓でこの名前に触れた自分の発言" + ("" if whole else "から抜粋")
+        return f"【今日のメモの吊り先】{label}({source}:{said})"
 
     def build_night_action_context(
         self,
@@ -960,7 +1439,7 @@ class ContextBuilder:
         if self._chat:
             user_layers.append(self._layer_todays_public_discussion(state))
         user_layers += [
-            self._layer_previous_memo(player_id),
+            self._layer_previous_memo(state, player_id),
             f"【夜行動: {action_label}({action_type})】候補: {candidates}{extra}",
         ]
         if self._chat:
@@ -993,6 +1472,44 @@ class ContextBuilder:
             board_memo=board_memo,
         )
 
+    @staticmethod
+    def _freemason_lead_note(state: GameState, player_id: str) -> str:
+        """Who leads tomorrow, as the scheduler will pick it -- not a question for the chat.
+
+        The summary and the designations fall to the first living AI seat
+        that claimed freemason (`AICoordinator._facilitator`). The chat used
+        to be asked 「どちらがまとめ役か」, and what it agreed was ignored: the
+        pair could settle on one and hear the other lead. A human partner
+        never leads, so with one the AI seat does.
+        """
+        lead = next(
+            (
+                claim.player_id
+                for claim in state.co_declarations
+                if claim.claimed_role == RoleName.FREEMASON
+                and claim.player_id in state.players
+                and state.players[claim.player_id].alive
+                and not state.players[claim.player_id].is_human
+            ),
+            None,
+        )
+        if lead is None:
+            partners = [
+                partner
+                for partner in state.players_by_role(RoleName.FREEMASON)
+                if partner.player_id != player_id and partner.alive
+            ]
+            if partners and all(partner.is_human for partner in partners):
+                lead = player_id
+        if lead == player_id:
+            return "まとめ役（進行役）はあなたが務める（決まっていることなので相談しない）。"
+        if lead is not None:
+            return (
+                f"まとめ役（進行役）は{state.players[lead].name}"
+                "（先に共有COした方。決まっていることなので相談しない）。"
+            )
+        return "まとめ役（進行役）は先に共有COした方が務める（決まっていることなので相談しない）。"
+
     def _build_private_chat_context(
         self,
         state: GameState,
@@ -1018,14 +1535,25 @@ class ContextBuilder:
                 self._layer_todays_public_discussion(state),
             ]
         user_layers += [
-            self._layer_previous_memo(player_id),
+            self._layer_previous_memo(state, player_id),
             self._layer_private_history(state, channel),
         ]
         if self._chat:
-            user_layers.append(
-                "【指示】内輪チャットの1通。仲間と、今夜の行動と明日の方針を人間のチャットのように"
-                "短く相談する。"
-            )
+            if channel is ChatChannel.FREEMASON:
+                # The freemasons have no night action; their chat is where the
+                # next day is set up, and the two of them are its only readers
+                # (owner decision on review 2-N1, 1-B5).
+                user_layers.append(
+                    "【指示】共有チャットの1通。相方と明日の進行を決める: "
+                    "方針（グレランか指定か）、候補、占いCO者の扱い。"
+                    f"{self._freemason_lead_note(state, player_id)}"
+                    "狩人はこのチャットを読めない（読めるのは共有の2人だけ）。"
+                )
+            else:
+                user_layers.append(
+                    "【指示】内輪チャットの1通。仲間と、今夜の行動と明日の方針を"
+                    "人間のチャットのように短く相談する。"
+                )
             user_layers.append(CHAT_PRIVATE_CHAT_INSTRUCTION)
         else:
             user_layers.append(instruction)
@@ -1077,8 +1605,6 @@ class ContextBuilder:
 
     @staticmethod
     def _stage_label(stage: str) -> str:
-        if stage.startswith("minority_review:"):
-            return "多数派への反証・代替候補の比較"
         return {
             "immediate": "朝一CO・結果発表",
             "initial_view": "初回意見",
@@ -1086,5 +1612,217 @@ class ContextBuilder:
             "rebuttal_or_reassessment": "反論・再評価",
             "freemason_confirmation": "共有相方の確認",
             "consensus_summary": "議論の整理",
+            "final_designation": "本指定",
             "human_followup": "人間発言への応答",
+            "open_floor": "ひとこと",
+            "summary_answer": "まとめへの回答",
+            "provisional_designation": "仮指定",
+            "facilitator_followup": "進行役の受け",
         }.get(stage, "議論")
+
+
+# -- the seat's own words about its memo target --
+#
+# Read for the vote prompt's 【今日のメモの吊り先】 line. Facts only: whether the
+# seat's public lines today contain the name, and the sentences that do. What
+# a sentence meant is left to the model reading it.
+
+# Two sentences, at most 60 characters each: enough for the seat to see what it
+# said, and the vote prompt grows by a bounded amount however long the day was.
+_QUOTE_LIMIT = 60
+# Characters kept before the name when a sentence is cut. A Japanese sentence
+# mostly says what it says about a name after it (「Xに投票」「Xは吊らない」), so
+# the rest of the room goes after. Seat names are short (32 at most, from the
+# API), so the name always fits whole.
+_QUOTE_LEAD = 20
+_ELLIPSIS = "…"
+_SENTENCE_ENDS = frozenset("。！？!?")
+_QUOTE_OPENS = frozenset("「『")
+_QUOTE_CLOSES = frozenset("」』")
+# The seat's sentence goes inside 「」; quotes inside it take the inner form.
+_NESTED_QUOTES = str.maketrans("「」", "『』")
+# Katakana letters (ァ..ヺ, ヽヾヿ) and the long vowel mark. A katakana name
+# inside a longer katakana word is not that name: レン in チャレンジ, サク in
+# サクッと. A long vowel mark that follows a non-katakana character belongs to
+# that word, not to a name (「ねーソウタ」), and one after the name draws out a
+# call (「ソウター、」) unless more katakana follows it.
+_KATAKANA = "\u30a1-\u30fa\u30fd-\u30ff"
+_LONG_VOWEL = "\u30fc"
+_KATAKANA_OR_LONG_RE = re.compile(f"[{_KATAKANA}{_LONG_VOWEL}]")
+# What is left of a sentence that only calls someone: an honorific and
+# punctuation (「Player1さん」「ホノカ、」).
+_CALL_RESIDUE = re.compile(r"さん|くん|ちゃん|様|[、,。！？!?\s…ー〜]")
+
+
+def _own_sentences_naming(
+    state: GameState, lines: Sequence[str], target_id: str
+) -> tuple[list[str], bool]:
+    """The seat's sentences that name `target_id`, most recent first, and
+    whether those are all of them, each whole.
+
+    At most two, picked by position, never by what they say. The first is the
+    day's last sentence naming the target. The second is the last one in the
+    nearest earlier line that names it in a different sentence; when no earlier
+    line does, it is the one before the first in that same line, so a sentence
+    the seat closed its line with does not hide the rest of that line. Each is
+    cut to `_QUOTE_LIMIT` characters around the name.
+    """
+    naming: list[list[tuple[str, int]]] = []
+    for line in lines:
+        found = [
+            (sentence, start)
+            for sentence in _sentences(line)
+            if (start := _first_mention(state, sentence, target_id)) is not None
+        ]
+        if found:
+            naming.append(found)
+    if not naming:
+        return [], True
+    *earlier, latest = naming
+    chosen = [latest[-1]]
+    for group in [*(line[::-1] for line in reversed(earlier)), latest[:-1][::-1]]:
+        other = next((item for item in group if item[0] != chosen[0][0]), None)
+        if other is not None:
+            chosen.append(other)
+            break
+    quotes = [_excerpt(sentence, start) for sentence, start in chosen]
+    distinct = {sentence for line in naming for sentence, _start in line}
+    whole = len(distinct) == len(chosen) and all(
+        quote == sentence for quote, (sentence, _start) in zip(quotes, chosen, strict=True)
+    )
+    return [quote.translate(_NESTED_QUOTES) for quote in quotes], whole
+
+
+def _first_mention(state: GameState, sentence: str, target_id: str) -> int | None:
+    spans = _mention_spans(state, sentence)
+    return next((start for start, _end, player_id in spans if player_id == target_id), None)
+
+
+def _sentences(text: str) -> list[str]:
+    """`text` split after 。！？ and at line breaks, never inside 「」『』.
+
+    A run of ends stays with its sentence (「本当に狼！？」), and a closing 。 is
+    dropped, as a quote drops it. Someone else's words quoted in the line keep
+    their own 。 without ending the seat's sentence.
+    """
+    sentences: list[str] = []
+    current: list[str] = []
+    depth = 0
+    for char in text:
+        ended = bool(current) and current[-1] in _SENTENCE_ENDS and depth == 0
+        if char == "\n" or (ended and char not in _SENTENCE_ENDS):
+            sentences.append("".join(current))
+            current = []
+            if char == "\n":
+                depth = 0
+                continue
+        if char in _QUOTE_OPENS:
+            depth += 1
+        elif char in _QUOTE_CLOSES and depth:
+            depth -= 1
+        current.append(char)
+    sentences.append("".join(current))
+    cleaned = (sentence.strip().removesuffix("。").strip() for sentence in sentences)
+    return [sentence for sentence in cleaned if sentence]
+
+
+def _excerpt(sentence: str, start: int) -> str:
+    """`sentence` cut to `_QUOTE_LIMIT` characters around the name at `start`,
+    with an ellipsis where it is cut (the ellipses count toward the limit)."""
+    if len(sentence) <= _QUOTE_LIMIT:
+        return sentence
+    begin = max(0, start - _QUOTE_LEAD)
+    if begin == 0:
+        return sentence[: _QUOTE_LIMIT - 1] + _ELLIPSIS
+    if begin + _QUOTE_LIMIT - 2 >= len(sentence):
+        return _ELLIPSIS + sentence[len(sentence) - _QUOTE_LIMIT + 1 :]
+    return _ELLIPSIS + sentence[begin : begin + _QUOTE_LIMIT - 2] + _ELLIPSIS
+
+
+def _mention_spans(state: GameState, text: str) -> list[tuple[int, int, str]]:
+    """Every seat the text names, as (start, end, player_id), in order.
+
+    Whole and id-safe: a label is not read inside a longer word of its own
+    script (see `_label_pattern`), so Player1 is not read inside Player11,
+    Ken not inside Kenji, レン not inside チャレンジ, while 「ソウタ1択」 and
+    「ソウタさん」 still name ソウタ. A label inside a longer seat's label at the
+    same place is that longer seat: サク inside サクラ.
+    """
+    found: list[tuple[int, int, str]] = []
+    for player_id, player in state.players.items():
+        for label in {player_id, player.name} - {""}:
+            pattern = _label_pattern(label)
+            found.extend((m.start(), m.end(), player_id) for m in pattern.finditer(text))
+    found.sort(key=lambda span: (span[0], span[0] - span[1]))
+    kept: list[tuple[int, int, str]] = []
+    for span in found:
+        if not any(start <= span[0] and span[1] <= end for start, end, _ in kept):
+            kept.append(span)
+    return kept
+
+
+def _label_pattern(label: str) -> re.Pattern[str]:
+    """`label` as a whole word, guarded by the script at each of its ends.
+
+    No ASCII letter or digit before any label. After it: no digit after a
+    label that ends in one (Player1, p1), no letter after one that ends in an
+    ASCII letter (Ken). A katakana end takes no katakana letter beside it,
+    nor a long vowel mark that joins it to one (see `_KATAKANA`). Anything
+    else may follow, so an honorific, a particle, kanji or a digit after a
+    name (「ソウタ1択」) does.
+    """
+    lead = r"(?<![0-9A-Za-z])"
+    if _KATAKANA_OR_LONG_RE.fullmatch(label[0]):
+        lead += rf"(?<![{_KATAKANA}])(?<![{_KATAKANA}]{_LONG_VOWEL})"
+    last = label[-1]
+    if last.isdigit():
+        trail = r"(?![0-9])"
+    elif last.isascii() and last.isalpha():
+        trail = r"(?![A-Za-z])"
+    elif _KATAKANA_OR_LONG_RE.fullmatch(last):
+        trail = rf"(?!{_LONG_VOWEL}*[{_KATAKANA}])"
+    else:
+        trail = ""
+    return re.compile(f"{lead}{re.escape(label)}{trail}")
+
+
+# -- a seat's public status, as notes and ballots name it --
+
+
+def public_status(state: GameState, player_id: str) -> str:
+    """What the table knows about a seat now, in a few words.
+
+    A dead seat by how and when it died; a living one by its standing CO and
+    the seer verdicts published on it, or グレー (無CO・未判定) when it has
+    neither. A freemason pair is 相互確認済み only once the named partner has
+    confirmed. Public facts only, so it reads the same for every seat.
+    """
+    ledger = PublicFactLedger(state)
+    player = ledger.player(player_id)
+    if player is None:
+        return ""
+    if not player.alive:
+        if player.death_cause is PublicDeathCause.FIRST_VICTIM:
+            return "初日犠牲者"
+        if player.death_day is None:
+            return "死亡"
+        if player.death_cause is PublicDeathCause.EXECUTED:
+            return f"{player.death_day}日目処刑"
+        return f"{player.death_day}日目夜死亡"
+    parts: list[str] = []
+    claimed = ledger.claimed_role_of(player_id)
+    if claimed is RoleName.FREEMASON:
+        confirmed = any(
+            claim.confirmed and player_id in (claim.claimant_id, claim.partner_id)
+            for claim in state.freemason_partner_claims
+        )
+        parts.append("共有・相互確認済み" if confirmed else "共有CO")
+    elif claimed is not None:
+        parts.append(f"{role_label(claimed)}CO")
+    verdicts = dict.fromkeys(
+        f"{ledger.name_of(result.claimant_id)}の{'黒' if result.is_werewolf else '白'}"
+        for result in ledger.public_results()
+        if result.target_id == player_id and result.result_type == SEER_RESULT
+    )
+    parts.extend(verdicts)
+    return "・".join(parts) or "グレー"

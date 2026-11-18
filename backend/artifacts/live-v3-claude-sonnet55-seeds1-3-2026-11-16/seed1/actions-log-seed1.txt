@@ -1,0 +1,817 @@
+﻿2026-11-16T23:30:02.3485918Z Current runner version: '2.338.2'
+2026-11-16T23:30:02.3503568Z ##[group]Runner Image Provisioner
+2026-11-16T23:30:02.3504296Z Hosted Compute Agent
+2026-11-16T23:30:02.3504681Z Version: 20261103.629
+2026-11-16T23:30:02.3505119Z Commit: 15dbd9ccb5dbf34fae002b6ed1a2670f52df37bc
+2026-11-16T23:30:02.3505656Z Build Date: 2026-11-03T17:26:59Z
+2026-11-16T23:30:02.3506093Z Worker ID: {e8f6f080-7d4b-48c0-94eb-87dbe87e5c49}
+2026-11-16T23:30:02.3506798Z Region: centralus
+2026-11-16T23:30:02.3507218Z Cloud: Azure
+2026-11-16T23:30:02.3507594Z ##[endgroup]
+2026-11-16T23:30:02.3508534Z ##[group]Operating System
+2026-11-16T23:30:02.3508947Z Ubuntu
+2026-11-16T23:30:02.3509345Z 26.04.1
+2026-11-16T23:30:02.3509717Z LTS
+2026-11-16T23:30:02.3510079Z ##[endgroup]
+2026-11-16T23:30:02.3510482Z ##[group]Runner Image
+2026-11-16T23:30:02.3510864Z Image: ubuntu-26.04
+2026-11-16T23:30:02.3511282Z Version: 20261111.196.1
+2026-11-16T23:30:02.3512170Z Included Software: https://github.com/actions/runner-images/blob/ubuntu26/20261111.196/images/ubuntu/Ubuntu2604-Readme.md
+2026-11-16T23:30:02.3513096Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu26%2F20261111.196
+2026-11-16T23:30:02.3513744Z ##[endgroup]
+2026-11-16T23:30:02.3514493Z ##[group]GITHUB_TOKEN Permissions
+2026-11-16T23:30:02.3515923Z Contents: read
+2026-11-16T23:30:02.3516291Z Metadata: read
+2026-11-16T23:30:02.3516634Z ##[endgroup]
+2026-11-16T23:30:02.3517975Z Secret source: Actions
+2026-11-16T23:30:02.3518894Z Cache mode: write
+2026-11-16T23:30:02.3519437Z Prepare workflow directory
+2026-11-16T23:30:02.3740395Z Prepare all required actions
+2026-11-16T23:30:02.3772165Z Getting action download info
+2026-11-16T23:30:02.6173667Z Download action repository 'actions/checkout@v4' (SHA:11d5960a326750d5838078e36cf38b85af677262)
+2026-11-16T23:30:02.7358629Z Download action repository 'actions/setup-python@v5' (SHA:a26af69be951a213d495a4c3e4e4022e16d87065)
+2026-11-16T23:30:02.8417868Z Download action repository 'actions/upload-artifact@v4' (SHA:ea165f8d65b6e75b540449e92b4886f43607fa02)
+2026-11-16T23:30:02.9951671Z Complete job name: evaluate (seed 1)
+2026-11-16T23:30:03.0530480Z ##[group]Run actions/checkout@v4
+2026-11-16T23:30:03.0530928Z with:
+2026-11-16T23:30:03.0531216Z   repository: dolphin23-jp/Are-you-werewolf
+2026-11-16T23:30:03.0533496Z   token: ***
+2026-11-16T23:30:03.0533754Z   ssh-strict: true
+2026-11-16T23:30:03.0534023Z   ssh-user: git
+2026-11-16T23:30:03.0534298Z   persist-credentials: true
+2026-11-16T23:30:03.0534590Z   clean: true
+2026-11-16T23:30:03.0534859Z   sparse-checkout-cone-mode: true
+2026-11-16T23:30:03.0535178Z   fetch-depth: 1
+2026-11-16T23:30:03.0535441Z   fetch-tags: false
+2026-11-16T23:30:03.0535707Z   show-progress: true
+2026-11-16T23:30:03.0536024Z   lfs: false
+2026-11-16T23:30:03.0536278Z   submodules: false
+2026-11-16T23:30:03.0536548Z   set-safe-directory: true
+2026-11-16T23:30:03.0536855Z   allow-unsafe-pr-checkout: false
+2026-11-16T23:30:03.0537240Z ##[endgroup]
+2026-11-16T23:30:03.2796626Z Syncing repository: dolphin23-jp/Are-you-werewolf
+2026-11-16T23:30:03.2797907Z ##[group]Getting Git version info
+2026-11-16T23:30:03.2798762Z Working directory is '/home/runner/work/Are-you-werewolf/Are-you-werewolf'
+2026-11-16T23:30:03.2799719Z [command]/usr/bin/git version
+2026-11-16T23:30:03.2800161Z git version 2.56.1
+2026-11-16T23:30:03.2809965Z ##[endgroup]
+2026-11-16T23:30:03.2820296Z Temporarily overriding HOME='/home/runner/work/_temp/69fe4ebf-d508-4b4d-b2bd-5277383c37d8' before making global git config changes
+2026-11-16T23:30:03.2821425Z Adding repository directory to the temporary git global config as a safe directory
+2026-11-16T23:30:03.2823446Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/Are-you-werewolf/Are-you-werewolf
+2026-11-16T23:30:03.2884854Z Deleting the contents of '/home/runner/work/Are-you-werewolf/Are-you-werewolf'
+2026-11-16T23:30:03.2887455Z ##[group]Initializing the repository
+2026-11-16T23:30:03.2890811Z [command]/usr/bin/git init /home/runner/work/Are-you-werewolf/Are-you-werewolf
+2026-11-16T23:30:03.3163994Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-11-16T23:30:03.3166848Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-11-16T23:30:03.3168713Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-11-16T23:30:03.3169415Z hint: call:
+2026-11-16T23:30:03.3169784Z hint:
+2026-11-16T23:30:03.3170241Z hint: 	git config --global init.defaultBranch <name>
+2026-11-16T23:30:03.3170758Z hint:
+2026-11-16T23:30:03.3171299Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-11-16T23:30:03.3172141Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-11-16T23:30:03.3172822Z hint:
+2026-11-16T23:30:03.3173308Z hint: 	git branch -m <name>
+2026-11-16T23:30:03.3173839Z hint:
+2026-11-16T23:30:03.3174412Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-11-16T23:30:03.3178706Z Initialized empty Git repository in /home/runner/work/Are-you-werewolf/Are-you-werewolf/.git/
+2026-11-16T23:30:03.3185870Z [command]/usr/bin/git remote add origin https://github.com/dolphin23-jp/Are-you-werewolf
+2026-11-16T23:30:03.3249274Z ##[endgroup]
+2026-11-16T23:30:03.3250079Z ##[group]Disabling automatic garbage collection
+2026-11-16T23:30:03.3253095Z [command]/usr/bin/git config --local gc.auto 0
+2026-11-16T23:30:03.3302987Z ##[endgroup]
+2026-11-16T23:30:03.3303420Z ##[group]Setting up auth
+2026-11-16T23:30:03.3303956Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-11-16T23:30:03.3344023Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-11-16T23:30:03.3714831Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-11-16T23:30:03.3746478Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-11-16T23:30:03.3977631Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-11-16T23:30:03.4008039Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-11-16T23:30:03.4240025Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-11-16T23:30:03.4273922Z ##[endgroup]
+2026-11-16T23:30:03.4274618Z ##[group]Fetching the repository
+2026-11-16T23:30:03.4280473Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +6bf918214c1e44fed0ab482789a4f5be3675e989:refs/remotes/origin/claude/upbeat-rubin-be08uq
+2026-11-16T23:30:04.0597150Z From https://github.com/dolphin23-jp/Are-you-werewolf
+2026-11-16T23:30:04.0598632Z  * [new ref]         6bf918214c1e44fed0ab482789a4f5be3675e989 -> origin/claude/upbeat-rubin-be08uq
+2026-11-16T23:30:04.0601279Z ##[endgroup]
+2026-11-16T23:30:04.0602083Z ##[group]Determining the checkout info
+2026-11-16T23:30:04.0603040Z ##[endgroup]
+2026-11-16T23:30:04.0607600Z [command]/usr/bin/git sparse-checkout disable
+2026-11-16T23:30:04.0682407Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-11-16T23:30:04.0709742Z ##[group]Checking out the ref
+2026-11-16T23:30:04.0713595Z [command]/usr/bin/git checkout --progress --force -B claude/upbeat-rubin-be08uq refs/remotes/origin/claude/upbeat-rubin-be08uq
+2026-11-16T23:30:04.1076697Z Switched to a new branch 'claude/upbeat-rubin-be08uq'
+2026-11-16T23:30:04.1080343Z branch 'claude/upbeat-rubin-be08uq' set up to track 'origin/claude/upbeat-rubin-be08uq'.
+2026-11-16T23:30:04.1087496Z ##[endgroup]
+2026-11-16T23:30:04.1132679Z [command]/usr/bin/git log -1 --format=%H
+2026-11-16T23:30:04.1152803Z 6bf918214c1e44fed0ab482789a4f5be3675e989
+2026-11-16T23:30:04.1469895Z ##[group]Run actions/setup-python@v5
+2026-11-16T23:30:04.1470792Z with:
+2026-11-16T23:30:04.1471318Z   python-version: 3.12
+2026-11-16T23:30:04.1471921Z   check-latest: false
+2026-11-16T23:30:04.1477960Z   token: ***
+2026-11-16T23:30:04.1478616Z   update-environment: true
+2026-11-16T23:30:04.1479243Z   allow-prereleases: false
+2026-11-16T23:30:04.1479843Z   freethreaded: false
+2026-11-16T23:30:04.1480395Z ##[endgroup]
+2026-11-16T23:30:04.2329414Z ##[group]Installed versions
+2026-11-16T23:30:04.2406527Z (node:2245) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+2026-11-16T23:30:04.2408616Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-11-16T23:30:04.2409581Z Successfully set up CPython (3.12.16)
+2026-11-16T23:30:04.2410567Z ##[endgroup]
+2026-11-16T23:30:04.2540219Z ##[group]Run pip install -e "./backend[dev]"
+2026-11-16T23:30:04.2541094Z [36;1mpip install -e "./backend[dev]"[0m
+2026-11-16T23:30:04.2598269Z shell: /usr/bin/bash -e {0}
+2026-11-16T23:30:04.2598877Z env:
+2026-11-16T23:30:04.2599490Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-16T23:30:04.2600543Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.16/x64/lib/pkgconfig
+2026-11-16T23:30:04.2601554Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-16T23:30:04.2602483Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-16T23:30:04.2603395Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-16T23:30:04.2604301Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.16/x64/lib
+2026-11-16T23:30:04.2605070Z ##[endgroup]
+2026-11-16T23:30:05.2240801Z Obtaining file:///home/runner/work/Are-you-werewolf/Are-you-werewolf/backend
+2026-11-16T23:30:05.2252844Z   Installing build dependencies: started
+2026-11-16T23:30:05.9696060Z   Installing build dependencies: finished with status 'done'
+2026-11-16T23:30:05.9700813Z   Checking if build backend supports build_editable: started
+2026-11-16T23:30:06.0057342Z   Checking if build backend supports build_editable: finished with status 'done'
+2026-11-16T23:30:06.0064778Z   Getting requirements to build editable: started
+2026-11-16T23:30:06.1082610Z   Getting requirements to build editable: finished with status 'done'
+2026-11-16T23:30:06.1091880Z   Installing backend dependencies: started
+2026-11-16T23:30:06.4714009Z   Installing backend dependencies: finished with status 'done'
+2026-11-16T23:30:06.4719259Z   Preparing editable metadata (pyproject.toml): started
+2026-11-16T23:30:06.5971645Z   Preparing editable metadata (pyproject.toml): finished with status 'done'
+2026-11-16T23:30:06.6770497Z Collecting anthropic<3,>=2.8 (from werewolf-backend==0.1.0)
+2026-11-16T23:30:06.7306144Z   Downloading anthropic-2.9.0-py3-none-any.whl.metadata (3.6 kB)
+2026-11-16T23:30:06.7707331Z Collecting fastapi>=0.115.0 (from werewolf-backend==0.1.0)
+2026-11-16T23:30:06.7835371Z   Downloading fastapi-0.163.1-py3-none-any.whl.metadata (27 kB)
+2026-11-16T23:30:06.8443000Z Collecting openai>=1.50.0 (from werewolf-backend==0.1.0)
+2026-11-16T23:30:06.8639088Z   Downloading openai-3.52.0-py3-none-any.whl.metadata (45 kB)
+2026-11-16T23:30:06.8864278Z Collecting pydantic-settings>=2.4.0 (from werewolf-backend==0.1.0)
+2026-11-16T23:30:06.8991828Z   Downloading pydantic_settings-2.16.3-py3-none-any.whl.metadata (4.0 kB)
+2026-11-16T23:30:06.9646755Z Collecting pydantic>=2.8.0 (from werewolf-backend==0.1.0)
+2026-11-16T23:30:06.9803567Z   Downloading pydantic-2.14.3-py3-none-any.whl.metadata (141 kB)
+2026-11-16T23:30:07.0193705Z Collecting uvicorn>=0.30.0 (from uvicorn[standard]>=0.30.0->werewolf-backend==0.1.0)
+2026-11-16T23:30:07.0321045Z   Downloading uvicorn-0.54.0-py3-none-any.whl.metadata (6.6 kB)
+2026-11-16T23:30:07.1070922Z Collecting websockets>=13.0 (from werewolf-backend==0.1.0)
+2026-11-16T23:30:07.1200601Z   Downloading websockets-17.4-cp312-cp312-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl.metadata (6.3 kB)
+2026-11-16T23:30:07.1452114Z Collecting z3-solver<5,>=4.13 (from werewolf-backend==0.1.0)
+2026-11-16T23:30:07.1584632Z   Downloading z3_solver-4.16.0.0-py3-none-manylinux_2_27_x86_64.whl.metadata (602 bytes)
+2026-11-16T23:30:07.1791311Z Collecting httpx>=0.27.0 (from werewolf-backend==0.1.0)
+2026-11-16T23:30:07.1919807Z   Downloading httpx-0.28.1-py3-none-any.whl.metadata (7.1 kB)
+2026-11-16T23:30:07.2554088Z Collecting mypy>=1.11.0 (from werewolf-backend==0.1.0)
+2026-11-16T23:30:07.2687051Z   Downloading mypy-2.4.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (2.4 kB)
+2026-11-16T23:30:07.2917236Z Collecting pytest-asyncio>=0.24.0 (from werewolf-backend==0.1.0)
+2026-11-16T23:30:07.3044116Z   Downloading pytest_asyncio-1.5.0-py3-none-any.whl.metadata (4.4 kB)
+2026-11-16T23:30:07.3302030Z Collecting pytest>=8.3.0 (from werewolf-backend==0.1.0)
+2026-11-16T23:30:07.3433857Z   Downloading pytest-9.2.0-py3-none-any.whl.metadata (7.9 kB)
+2026-11-16T23:30:07.5478973Z Collecting ruff>=0.6.0 (from werewolf-backend==0.1.0)
+2026-11-16T23:30:07.5611372Z   Downloading ruff-0.17.5-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (20 kB)
+2026-11-16T23:30:07.5943707Z Collecting anyio<5,>=4.1.0 (from anthropic<3,>=2.8->werewolf-backend==0.1.0)
+2026-11-16T23:30:07.6071540Z   Downloading anyio-4.16.0-py3-none-any.whl.metadata (4.7 kB)
+2026-11-16T23:30:07.6251165Z Collecting docstring-parser<1,>=0.15 (from anthropic<3,>=2.8->werewolf-backend==0.1.0)
+2026-11-16T23:30:07.6378208Z   Downloading docstring_parser-0.18.0-py3-none-any.whl.metadata (3.5 kB)
+2026-11-16T23:30:07.6566220Z Collecting httpx2<3,>=2.0.0 (from anthropic<3,>=2.8->werewolf-backend==0.1.0)
+2026-11-16T23:30:07.6695707Z   Downloading httpx2-2.16.2-py3-none-any.whl.metadata (10.0 kB)
+2026-11-16T23:30:07.7348602Z Collecting jiter<1,>=0.4.0 (from anthropic<3,>=2.8->werewolf-backend==0.1.0)
+2026-11-16T23:30:07.7580161Z   Downloading jiter-0.19.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (5.2 kB)
+2026-11-16T23:30:07.7804003Z Collecting opentelemetry-api<2,>=1.1.0 (from anthropic<3,>=2.8->werewolf-backend==0.1.0)
+2026-11-16T23:30:07.7933457Z   Downloading opentelemetry_api-1.45.2-py3-none-any.whl.metadata (1.4 kB)
+2026-11-16T23:30:07.8121657Z Collecting sniffio<2,>=1 (from anthropic<3,>=2.8->werewolf-backend==0.1.0)
+2026-11-16T23:30:07.8254909Z   Downloading sniffio-1.3.1-py3-none-any.whl.metadata (3.9 kB)
+2026-11-16T23:30:07.8452217Z Collecting typing-extensions<5,>=4.14 (from anthropic<3,>=2.8->werewolf-backend==0.1.0)
+2026-11-16T23:30:07.8579082Z   Downloading typing_extensions-4.16.0-py3-none-any.whl.metadata (3.3 kB)
+2026-11-16T23:30:07.8770403Z Collecting idna>=2.8 (from anyio<5,>=4.1.0->anthropic<3,>=2.8->werewolf-backend==0.1.0)
+2026-11-16T23:30:07.8898938Z   Downloading idna-3.20-py3-none-any.whl.metadata (7.2 kB)
+2026-11-16T23:30:07.9093631Z Collecting httpcore2==2.16.2 (from httpx2<3,>=2.0.0->anthropic<3,>=2.8->werewolf-backend==0.1.0)
+2026-11-16T23:30:07.9222962Z   Downloading httpcore2-2.16.2-py3-none-any.whl.metadata (28 kB)
+2026-11-16T23:30:07.9415506Z Collecting truststore>=0.10 (from httpx2<3,>=2.0.0->anthropic<3,>=2.8->werewolf-backend==0.1.0)
+2026-11-16T23:30:07.9542980Z   Downloading truststore-0.10.5-py3-none-any.whl.metadata (4.5 kB)
+2026-11-16T23:30:07.9725245Z Collecting h11>=0.16 (from httpcore2==2.16.2->httpx2<3,>=2.0.0->anthropic<3,>=2.8->werewolf-backend==0.1.0)
+2026-11-16T23:30:07.9852568Z   Downloading h11-0.16.0-py3-none-any.whl.metadata (8.3 kB)
+2026-11-16T23:30:08.0034210Z Collecting annotated-types>=0.6.0 (from pydantic>=2.8.0->werewolf-backend==0.1.0)
+2026-11-16T23:30:08.0164535Z   Downloading annotated_types-0.8.0-py3-none-any.whl.metadata (15 kB)
+2026-11-16T23:30:08.4110783Z Collecting pydantic-core==2.50.4 (from pydantic>=2.8.0->werewolf-backend==0.1.0)
+2026-11-16T23:30:08.4243268Z   Downloading pydantic_core-2.50.4-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (6.6 kB)
+2026-11-16T23:30:08.4430721Z Collecting typing-inspection>=0.4.4 (from pydantic>=2.8.0->werewolf-backend==0.1.0)
+2026-11-16T23:30:08.4560686Z   Downloading typing_inspection-0.4.5-py3-none-any.whl.metadata (2.6 kB)
+2026-11-16T23:30:08.4811454Z Collecting starlette>=0.46.0 (from fastapi>=0.115.0->werewolf-backend==0.1.0)
+2026-11-16T23:30:08.4939521Z   Downloading starlette-1.10.0-py3-none-any.whl.metadata (6.6 kB)
+2026-11-16T23:30:08.5135173Z Collecting annotated-doc>=0.0.2 (from fastapi>=0.115.0->werewolf-backend==0.1.0)
+2026-11-16T23:30:08.5261714Z   Downloading annotated_doc-0.0.6-py3-none-any.whl.metadata (6.5 kB)
+2026-11-16T23:30:08.5492977Z Collecting certifi (from httpx>=0.27.0->werewolf-backend==0.1.0)
+2026-11-16T23:30:08.5620173Z   Downloading certifi-2026.10.23-py3-none-any.whl.metadata (2.5 kB)
+2026-11-16T23:30:08.5813965Z Collecting httpcore==1.* (from httpx>=0.27.0->werewolf-backend==0.1.0)
+2026-11-16T23:30:08.5941835Z   Downloading httpcore-1.0.9-py3-none-any.whl.metadata (21 kB)
+2026-11-16T23:30:08.6139425Z Collecting mypy_extensions>=1.0.0 (from mypy>=1.11.0->werewolf-backend==0.1.0)
+2026-11-16T23:30:08.6266619Z   Downloading mypy_extensions-1.2.0-py3-none-any.whl.metadata (1.1 kB)
+2026-11-16T23:30:08.6319476Z Collecting pathspec>=1.0.0 (from mypy>=1.11.0->werewolf-backend==0.1.0)
+2026-11-16T23:30:08.6327035Z   Using cached pathspec-1.1.1-py3-none-any.whl.metadata (14 kB)
+2026-11-16T23:30:08.7075208Z Collecting librt>=0.16.0 (from mypy>=1.11.0->werewolf-backend==0.1.0)
+2026-11-16T23:30:08.7210277Z   Downloading librt-0.16.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (1.3 kB)
+2026-11-16T23:30:08.7593257Z Collecting ast-serialize<1.0.0,>=0.12.1 (from mypy>=1.11.0->werewolf-backend==0.1.0)
+2026-11-16T23:30:08.7721782Z   Downloading ast_serialize-0.13.1-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (1.4 kB)
+2026-11-16T23:30:08.7969745Z Collecting python-dotenv>=1.2.2 (from pydantic-settings>=2.4.0->werewolf-backend==0.1.0)
+2026-11-16T23:30:08.8097754Z   Downloading python_dotenv-1.2.4-py3-none-any.whl.metadata (29 kB)
+2026-11-16T23:30:08.8299295Z Collecting iniconfig>=2 (from pytest>=8.3.0->werewolf-backend==0.1.0)
+2026-11-16T23:30:08.8429470Z   Downloading iniconfig-2.3.1-py3-none-any.whl.metadata (2.8 kB)
+2026-11-16T23:30:08.8495255Z Collecting packaging>=24 (from pytest>=8.3.0->werewolf-backend==0.1.0)
+2026-11-16T23:30:08.8503360Z   Using cached packaging-26.3-py3-none-any.whl.metadata (3.5 kB)
+2026-11-16T23:30:08.8535958Z Collecting pluggy<2,>=1.6 (from pytest>=8.3.0->werewolf-backend==0.1.0)
+2026-11-16T23:30:08.8543687Z   Using cached pluggy-1.7.0-py3-none-any.whl.metadata (5.0 kB)
+2026-11-16T23:30:08.8753657Z Collecting pygments>=2.15 (from pytest>=8.3.0->werewolf-backend==0.1.0)
+2026-11-16T23:30:08.8888616Z   Downloading pygments-2.21.0-py3-none-any.whl.metadata (2.5 kB)
+2026-11-16T23:30:08.9166269Z Collecting click>=7.0 (from uvicorn>=0.30.0->uvicorn[standard]>=0.30.0->werewolf-backend==0.1.0)
+2026-11-16T23:30:08.9300034Z   Downloading click-8.5.1-py3-none-any.whl.metadata (2.6 kB)
+2026-11-16T23:30:08.9634451Z Collecting httptools>=0.8.0 (from uvicorn[standard]>=0.30.0->werewolf-backend==0.1.0)
+2026-11-16T23:30:08.9764360Z   Downloading httptools-0.9.0-cp312-cp312-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl.metadata (3.5 kB)
+2026-11-16T23:30:09.0393943Z Collecting pyyaml>=5.1 (from uvicorn[standard]>=0.30.0->werewolf-backend==0.1.0)
+2026-11-16T23:30:09.0524456Z   Downloading pyyaml-6.0.3-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (2.4 kB)
+2026-11-16T23:30:09.0840993Z Collecting uvloop>=0.15.1 (from uvicorn[standard]>=0.30.0->werewolf-backend==0.1.0)
+2026-11-16T23:30:09.0970693Z   Downloading uvloop-0.23.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (5.1 kB)
+2026-11-16T23:30:09.1468522Z Collecting watchfiles>=0.20 (from uvicorn[standard]>=0.30.0->werewolf-backend==0.1.0)
+2026-11-16T23:30:09.1598539Z   Downloading watchfiles-1.3.0-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (4.9 kB)
+2026-11-16T23:30:09.1784569Z Downloading anthropic-2.9.0-py3-none-any.whl (2.5 MB)
+2026-11-16T23:30:09.2303816Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.5/2.5 MB 59.5 MB/s  0:00:00
+2026-11-16T23:30:09.2434149Z Downloading anyio-4.16.0-py3-none-any.whl (134 kB)
+2026-11-16T23:30:09.2602695Z Downloading docstring_parser-0.18.0-py3-none-any.whl (22 kB)
+2026-11-16T23:30:09.2746621Z Downloading httpx2-2.16.2-py3-none-any.whl (97 kB)
+2026-11-16T23:30:09.2891602Z Downloading httpcore2-2.16.2-py3-none-any.whl (85 kB)
+2026-11-16T23:30:09.3033119Z Downloading jiter-0.19.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (338 kB)
+2026-11-16T23:30:09.3183280Z Downloading opentelemetry_api-1.45.2-py3-none-any.whl (60 kB)
+2026-11-16T23:30:09.3330549Z Downloading pydantic-2.14.3-py3-none-any.whl (494 kB)
+2026-11-16T23:30:09.3487114Z Downloading pydantic_core-2.50.4-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (2.3 MB)
+2026-11-16T23:30:09.3597911Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.3/2.3 MB 210.3 MB/s  0:00:00
+2026-11-16T23:30:09.3726367Z Downloading sniffio-1.3.1-py3-none-any.whl (10 kB)
+2026-11-16T23:30:09.3932338Z Downloading typing_extensions-4.16.0-py3-none-any.whl (45 kB)
+2026-11-16T23:30:09.4086411Z Downloading z3_solver-4.16.0.0-py3-none-manylinux_2_27_x86_64.whl (31.7 MB)
+2026-11-16T23:30:09.6922223Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 31.7/31.7 MB 111.8 MB/s  0:00:00
+2026-11-16T23:30:09.7062281Z Downloading annotated_types-0.8.0-py3-none-any.whl (13 kB)
+2026-11-16T23:30:09.7205465Z Downloading fastapi-0.163.1-py3-none-any.whl (154 kB)
+2026-11-16T23:30:09.7481995Z Downloading annotated_doc-0.0.6-py3-none-any.whl (5.3 kB)
+2026-11-16T23:30:09.7652040Z Downloading h11-0.16.0-py3-none-any.whl (37 kB)
+2026-11-16T23:30:09.7791412Z Downloading httpx-0.28.1-py3-none-any.whl (73 kB)
+2026-11-16T23:30:09.7935920Z Downloading httpcore-1.0.9-py3-none-any.whl (78 kB)
+2026-11-16T23:30:09.8079362Z Downloading idna-3.20-py3-none-any.whl (69 kB)
+2026-11-16T23:30:09.8225166Z Downloading mypy-2.4.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (15.6 MB)
+2026-11-16T23:30:09.9304344Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 15.6/15.6 MB 144.2 MB/s  0:00:00
+2026-11-16T23:30:09.9435805Z Downloading ast_serialize-0.13.1-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (1.3 MB)
+2026-11-16T23:30:09.9482070Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.3/1.3 MB 320.7 MB/s  0:00:00
+2026-11-16T23:30:09.9613260Z Downloading librt-0.16.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (531 kB)
+2026-11-16T23:30:09.9644888Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 532.0/532.0 kB 143.2 MB/s  0:00:00
+2026-11-16T23:30:09.9773191Z Downloading mypy_extensions-1.2.0-py3-none-any.whl (5.1 kB)
+2026-11-16T23:30:09.9916114Z Downloading openai-3.52.0-py3-none-any.whl (2.4 MB)
+2026-11-16T23:30:10.0076049Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.4/2.4 MB 149.8 MB/s  0:00:00
+2026-11-16T23:30:10.0084842Z Using cached pathspec-1.1.1-py3-none-any.whl (57 kB)
+2026-11-16T23:30:10.0217287Z Downloading pydantic_settings-2.16.3-py3-none-any.whl (82 kB)
+2026-11-16T23:30:10.0366733Z Downloading pytest-9.2.0-py3-none-any.whl (411 kB)
+2026-11-16T23:30:10.0397954Z Using cached pluggy-1.7.0-py3-none-any.whl (27 kB)
+2026-11-16T23:30:10.0534467Z Downloading iniconfig-2.3.1-py3-none-any.whl (7.6 kB)
+2026-11-16T23:30:10.0560073Z Using cached packaging-26.3-py3-none-any.whl (129 kB)
+2026-11-16T23:30:10.0700523Z Downloading pygments-2.21.0-py3-none-any.whl (1.3 MB)
+2026-11-16T23:30:10.0755204Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.3/1.3 MB 289.5 MB/s  0:00:00
+2026-11-16T23:30:10.0887824Z Downloading pytest_asyncio-1.5.0-py3-none-any.whl (17 kB)
+2026-11-16T23:30:10.1034536Z Downloading python_dotenv-1.2.4-py3-none-any.whl (23 kB)
+2026-11-16T23:30:10.1179450Z Downloading ruff-0.17.5-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (10.6 MB)
+2026-11-16T23:30:10.1889864Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 10.6/10.6 MB 149.3 MB/s  0:00:00
+2026-11-16T23:30:10.2022268Z Downloading starlette-1.10.0-py3-none-any.whl (80 kB)
+2026-11-16T23:30:10.2168255Z Downloading truststore-0.10.5-py3-none-any.whl (19 kB)
+2026-11-16T23:30:10.2308234Z Downloading typing_inspection-0.4.5-py3-none-any.whl (14 kB)
+2026-11-16T23:30:10.2451724Z Downloading uvicorn-0.54.0-py3-none-any.whl (87 kB)
+2026-11-16T23:30:10.2598951Z Downloading click-8.5.1-py3-none-any.whl (126 kB)
+2026-11-16T23:30:10.2770260Z Downloading httptools-0.9.0-cp312-cp312-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl (552 kB)
+2026-11-16T23:30:10.2809194Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 552.8/552.8 kB 124.0 MB/s  0:00:00
+2026-11-16T23:30:10.2938043Z Downloading pyyaml-6.0.3-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (807 kB)
+2026-11-16T23:30:10.2976057Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 807.9/807.9 kB 217.2 MB/s  0:00:00
+2026-11-16T23:30:10.3104088Z Downloading uvloop-0.23.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (4.5 MB)
+2026-11-16T23:30:10.3368980Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 4.5/4.5 MB 170.1 MB/s  0:00:00
+2026-11-16T23:30:10.3502431Z Downloading watchfiles-1.3.0-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (458 kB)
+2026-11-16T23:30:10.3655359Z Downloading websockets-17.4-cp312-cp312-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl (226 kB)
+2026-11-16T23:30:10.3816796Z Downloading certifi-2026.10.23-py3-none-any.whl (135 kB)
+2026-11-16T23:30:10.4970070Z Building wheels for collected packages: werewolf-backend
+2026-11-16T23:30:10.4976202Z   Building editable for werewolf-backend (pyproject.toml): started
+2026-11-16T23:30:10.5211180Z   Building editable for werewolf-backend (pyproject.toml): finished with status 'done'
+2026-11-16T23:30:10.5214955Z   Created wheel for werewolf-backend: filename=werewolf_backend-0.1.0-py3-none-any.whl size=1320 sha256=a1afcf4968e53ff3cf5a699b8c7ce3cd4b5b64bd840f74c3f53758ed3922b254
+2026-11-16T23:30:10.5216249Z   Stored in directory: /tmp/pip-ephem-wheel-cache-i5a05il4/wheels/44/07/81/6aedc26f102b3265b0eceef4f0bc71636512d19c889ef425fa
+2026-11-16T23:30:10.5224342Z Successfully built werewolf-backend
+2026-11-16T23:30:10.5846186Z Installing collected packages: z3-solver, websockets, uvloop, typing-extensions, truststore, sniffio, ruff, pyyaml, python-dotenv, pygments, pluggy, pathspec, packaging, mypy_extensions, librt, jiter, iniconfig, idna, httptools, h11, docstring-parser, click, certifi, ast-serialize, annotated-types, annotated-doc, uvicorn, typing-inspection, pytest, pydantic-core, opentelemetry-api, mypy, httpcore2, httpcore, anyio, watchfiles, starlette, pytest-asyncio, pydantic, httpx2, httpx, pydantic-settings, openai, fastapi, anthropic, werewolf-backend
+2026-11-16T23:30:16.1430547Z 
+2026-11-16T23:30:16.1453426Z Successfully installed annotated-doc-0.0.6 annotated-types-0.8.0 anthropic-2.9.0 anyio-4.16.0 ast-serialize-0.13.1 certifi-2026.10.23 click-8.5.1 docstring-parser-0.18.0 fastapi-0.163.1 h11-0.16.0 httpcore-1.0.9 httpcore2-2.16.2 httptools-0.9.0 httpx-0.28.1 httpx2-2.16.2 idna-3.20 iniconfig-2.3.1 jiter-0.19.0 librt-0.16.0 mypy-2.4.1 mypy_extensions-1.2.0 openai-3.52.0 opentelemetry-api-1.45.2 packaging-26.3 pathspec-1.1.1 pluggy-1.7.0 pydantic-2.14.3 pydantic-core-2.50.4 pydantic-settings-2.16.3 pygments-2.21.0 pytest-9.2.0 pytest-asyncio-1.5.0 python-dotenv-1.2.4 pyyaml-6.0.3 ruff-0.17.5 sniffio-1.3.1 starlette-1.10.0 truststore-0.10.5 typing-extensions-4.16.0 typing-inspection-0.4.5 uvicorn-0.54.0 uvloop-0.23.0 watchfiles-1.3.0 websockets-17.4 werewolf-backend-0.1.0 z3-solver-4.16.0.0
+2026-11-16T23:30:16.3253287Z ##[group]Run set -euo pipefail
+2026-11-16T23:30:16.3253534Z [36;1mset -euo pipefail[0m
+2026-11-16T23:30:16.3253764Z [36;1margs=(--games 1 --seed "$SEED" --provider "$PROVIDER" --out eval-out)[0m
+2026-11-16T23:30:16.3254019Z [36;1mif [ "$PROVIDER" = "anthropic" ]; then[0m
+2026-11-16T23:30:16.3254249Z [36;1m  # Priced by the provider's own table; the cap is enforced before[0m
+2026-11-16T23:30:16.3254468Z [36;1m  # each request is sent.[0m
+2026-11-16T23:30:16.3254765Z [36;1m  args+=(--max-cost "$MAX_COST")[0m
+2026-11-16T23:30:16.3254968Z [36;1melif [ -n "$LUNA_PRICE_IN" ] || [ -n "$LUNA_PRICE_OUT" ]; then[0m
+2026-11-16T23:30:16.3255280Z [36;1m  args+=(--price-in "${LUNA_PRICE_IN:-0}" --price-out "${LUNA_PRICE_OUT:-0}" --max-cost "$MAX_COST")[0m
+2026-11-16T23:30:16.3255538Z [36;1melse[0m
+2026-11-16T23:30:16.3255750Z [36;1m  echo "::warning::luna の単価(変数 LUNA_PRICE_IN / LUNA_PRICE_OUT)が無いので、費用は計算されず上限も効きません。"[0m
+2026-11-16T23:30:16.3255988Z [36;1mfi[0m
+2026-11-16T23:30:16.3256149Z [36;1mif [ "$JUDGE" = "true" ]; then[0m
+2026-11-16T23:30:16.3256310Z [36;1m  args+=(--judge)[0m
+2026-11-16T23:30:16.3256461Z [36;1m  if [ -n "$JUDGE_MODEL" ]; then[0m
+2026-11-16T23:30:16.3256635Z [36;1m    args+=(--judge-model "$JUDGE_MODEL")[0m
+2026-11-16T23:30:16.3256806Z [36;1m  fi[0m
+2026-11-16T23:30:16.3256919Z [36;1mfi[0m
+2026-11-16T23:30:16.3257100Z [36;1m# Exit code 3: the cost cap stopped the game. The partial transcript[0m
+2026-11-16T23:30:16.3257381Z [36;1m# and a report that says so are already written, and the job fails[0m
+2026-11-16T23:30:16.3257625Z [36;1m# so the stop is not mistaken for a finished game.[0m
+2026-11-16T23:30:16.3257976Z [36;1mpython scripts/evaluate.py "${args[@]}"[0m
+2026-11-16T23:30:16.3305448Z shell: /usr/bin/bash -e {0}
+2026-11-16T23:30:16.3305604Z env:
+2026-11-16T23:30:16.3305769Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-16T23:30:16.3306046Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.16/x64/lib/pkgconfig
+2026-11-16T23:30:16.3306300Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-16T23:30:16.3306522Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-16T23:30:16.3306745Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-16T23:30:16.3306970Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.16/x64/lib
+2026-11-16T23:30:16.3307156Z   PROVIDER: anthropic
+2026-11-16T23:30:16.3307287Z   SEED: 1
+2026-11-16T23:30:16.3307474Z   MAX_COST: 12
+2026-11-16T23:30:16.3307632Z   JUDGE: false
+2026-11-16T23:30:16.3307754Z   JUDGE_MODEL: 
+2026-11-16T23:30:16.3307871Z   LUNA_PRICE_IN: 
+2026-11-16T23:30:16.3307990Z   LUNA_PRICE_OUT: 
+2026-11-16T23:30:16.3308305Z   WEREWOLF_LLM_PROVIDER: anthropic
+2026-11-16T23:30:16.3308461Z   WEREWOLF_REASONING_ENGINE: v3
+2026-11-16T23:30:16.3308927Z   WEREWOLF_ANTHROPIC_API_KEY: ***
+2026-11-16T23:30:16.3309123Z   WEREWOLF_ANTHROPIC_MODEL: claude-sonnet-5-5
+2026-11-16T23:30:16.3309302Z   WEREWOLF_ANTHROPIC_FALLBACKS: default
+2026-11-16T23:30:16.3309474Z   WEREWOLF_ANTHROPIC_EFFORT_DISCUSSION: low
+2026-11-16T23:30:16.3309645Z   WEREWOLF_ANTHROPIC_EFFORT_CHAT: low
+2026-11-16T23:30:16.3309807Z   WEREWOLF_ANTHROPIC_EFFORT_VOTE: medium
+2026-11-16T23:30:16.3309973Z   WEREWOLF_ANTHROPIC_EFFORT_NIGHT: medium
+2026-11-16T23:30:16.3310144Z   WEREWOLF_ANTHROPIC_MAX_TOKENS: 12000
+2026-11-16T23:30:16.3310306Z   LUNA_API_KEY: 
+2026-11-16T23:30:16.3310426Z   LUNA_BASE_URL: 
+2026-11-16T23:30:16.3310558Z   LUNA_MODEL: claude-sonnet-5-5
+2026-11-16T23:30:16.3310709Z ##[endgroup]
+2026-11-16T23:30:16.8641088Z ==> LLM プロバイダ: anthropic
+2026-11-16T23:30:16.8641358Z ==> モデル: claude-sonnet-5-5
+2026-11-16T23:30:16.8641531Z ==> 推理エンジン: v3
+2026-11-16T23:30:16.8641839Z ==> 思考量(effort): {'discussion': 'low', 'vote': 'medium', 'night': 'medium', 'chat': 'low', 'default': 'medium'}
+2026-11-16T23:30:16.8642151Z ==> 費用上限: $12.00(対戦と判定で共有)
+2026-11-16T23:30:16.8642305Z ==> game 1/1 (seed=1)
+2026-11-16T23:30:17.4342280Z [00:00] ── 0日目 夜 ── 呼び出し 0回
+2026-11-16T23:30:19.9075507Z [00:02] 0日目 夜行動 ケント(seer) → リク
+2026-11-16T23:30:19.9076016Z [00:02] ── 0日目 夜明け ── 呼び出し 1回(失敗 0・途中切れ 0) 平均 2.2秒
+2026-11-16T23:30:19.9081002Z [00:02] ── 1日目 昼の議論 ── 呼び出し 1回(失敗 0・途中切れ 0) 平均 2.2秒
+2026-11-16T23:30:23.5997957Z [00:06] 1日目 ケント: 占い師CO。0日目夜はリクを占って白、人狼ではなかった。対抗は出るなら今のうちに出てきて。
+2026-11-16T23:30:27.0070663Z [00:09] 1日目 マコト: 共有者CO。相方はホノカです。
+2026-11-16T23:30:32.3225985Z [00:14] 1日目 ダイキ: 対抗で占い師CO！0日目夜はシオンを占って白、人狼ではなかった。ケントと2-1だね。結果で白黒つけよう！
+2026-11-16T23:30:36.6097311Z [00:19] 1日目 アオイ: 占い師CO。0日目夜はソウタを占って白、人狼ではなかった。発言材料がなく、ランダムで選びました。3-1になりますね。
+2026-11-16T23:30:40.6353652Z [00:23] 1日目 アカリ: 3-1ですね。占いは3人とも初日は白なので、今日は占いを吊らずグレーから決めませんか？まず共有のマコトさん、進行をお願いします。
+2026-11-16T23:30:44.1048990Z [00:26] 1日目 リク: アカリの案でいい。占いは結果が出揃うまで残そう。ホノカ、共有の相方か確認させてくれ。
+2026-11-16T23:30:48.4360061Z [00:31] 1日目 ミオ: アカリさんの方針に賛成です。まずホノカさん、マコトさんの相方指名は事実ですか。共有の確認を先に取りたいです。
+2026-11-16T23:30:54.1074414Z [00:36] 1日目 ハルト: 3-1か。占いは今日は残すのに賛成。ホノカの返事を先に聞きたいな。
+2026-11-16T23:30:58.0441366Z [00:40] 1日目 シオン: ホノカさんの返答を待ってから、グレーの吊り先を整理したいです。マコトさんの共有COの真偽がまず先ですね。
+2026-11-16T23:31:01.8674060Z [00:44] 1日目 ツムギ: 3-1は占い3人とも白で材料がまだ薄いねぇ。ホノカ、マコトの相方指名は本当か、まず一言ちょうだい！
+2026-11-16T23:31:04.4253592Z [00:46] 1日目 サクラ: ホノカの返答待ち。霊媒がまだ出ていない。霊媒は早めにCOしてほしい。
+2026-11-16T23:31:08.5165588Z [00:51] 1日目 カイト: ホノカの返答が全て。マコトの共有が本物か、ここで決まる。ホノカ、早めに出てきて。
+2026-11-16T23:31:11.2333993Z [00:53] 1日目 レン: ホノカの返事待ちだね〜。占いは今日は残して、グレーから見ていけばいいと思うよ〜。
+2026-11-16T23:31:15.5183883Z [00:58] 1日目 ソウタ: アオイの白は受けておく。ただ、ランダム占いでよりによって私なのは少し気になる。ホノカの返事を待ちたい。
+2026-11-16T23:31:19.5482606Z [01:02] 1日目 ユイ: みんなホノカ待ちばかりだけど、ホノカが出てこないまま流れるなら要警戒！反応が遅いのは放置できないよ！
+2026-11-16T23:31:22.5105510Z [01:05] 1日目 ホノカ: 共有者CO。マコトの相方は私ホノカで間違いありません。
+2026-11-16T23:31:25.9975285Z [01:08] 1日目 マコト: ホノカさん、ありがとうございます。これで共有は確定です。霊媒の方、出てきてもらえますか…？
+2026-11-16T23:31:36.5762168Z [01:19] 1日目 ケント: 共有は確定でいい。で、占い2人は偽なんだよね。アオイ、ランダムで選んだ割にソウタって理由は本当にないの？
+2026-11-16T23:31:46.3006662Z [01:28] 1日目 ホノカ: 返事遅くなってごめん！マコトの言う通り共有確定ね。今日は占い残してグレラン、霊媒は早めに出てきてほしいな！
+2026-11-16T23:31:56.8102601Z [01:39] 1日目 アオイ: ケントさん、本当にランダムです。初日は発言材料がなく、名簿から選んだだけです。ソウタさんに理由があったわけではありません。
+2026-11-16T23:32:00.6498418Z [01:43] 1日目 ホノカ: アオイのランダム占いは確かに薄いけど、今日は占いを吊らずグレランでいくよ。ソウタ、占われた側として何か気づいたことある？
+2026-11-16T23:32:04.0978462Z [01:46] 1日目 ソウタ: 気になるのはアオイだけ。ランダムで私を選んだ理由が薄いまま。ケントとダイキは今日の動きだけでは判断できない。
+2026-11-16T23:32:07.6331838Z [01:50] 1日目 マコト: 今日はグレランで、占い3人は残したいです。ソウタさん、アオイさん以外で気になるグレーはいますか…？
+2026-11-16T23:32:10.8080120Z [01:53] 1日目 ソウタ: グレーならユイかな。ホノカ待ちを急かす動きが少し強かった。
+2026-11-16T23:32:17.5588999Z [02:00] 1日目 マコト: 今日はグレランで、ユイさんに仮指定します。反論があれば聞かせてください。
+2026-11-16T23:32:17.5590049Z [02:00] ── 1日目 投票 ── 呼び出し 26回(失敗 0・途中切れ 0) 平均 4.5秒
+2026-11-16T23:32:20.4160595Z [02:02] 1日目 投票 サクラ → ユイ
+2026-11-16T23:32:20.6200339Z [02:03] 1日目 投票 マコト → ユイ
+2026-11-16T23:32:20.6518286Z [02:03] 1日目 投票 ソウタ → ユイ
+2026-11-16T23:32:20.7120149Z [02:03] 1日目 投票 ハルト → ユイ
+2026-11-16T23:32:21.1216300Z [02:03] 1日目 投票 ミオ → ユイ
+2026-11-16T23:32:21.3173661Z [02:03] 1日目 投票 ユイ → ソウタ
+2026-11-16T23:32:23.1288725Z [02:05] 1日目 投票 リク → ユイ
+2026-11-16T23:32:23.5683435Z [02:06] 1日目 投票 カイト → ユイ
+2026-11-16T23:32:24.0326059Z [02:06] 1日目 投票 ツムギ → ユイ
+2026-11-16T23:32:24.2791207Z [02:06] 1日目 投票 シオン → ユイ
+2026-11-16T23:32:24.3215690Z [02:06] 1日目 投票 ホノカ → ユイ
+2026-11-16T23:32:24.3743117Z [02:06] 1日目 投票 アカリ → ユイ
+2026-11-16T23:32:24.7213677Z [02:07] 1日目 投票 レン → ユイ
+2026-11-16T23:32:26.3011321Z [02:08] 1日目 投票 ケント → ユイ
+2026-11-16T23:32:27.2422620Z [02:09] 1日目 投票 ダイキ → ユイ
+2026-11-16T23:32:29.7120532Z [02:12] 1日目 投票 アオイ → ユイ
+2026-11-16T23:32:30.0017089Z [02:12] ── 1日目 投票結果 ── 呼び出し 42回(失敗 0・途中切れ 0) 平均 4.9秒
+2026-11-16T23:32:30.0051510Z [02:12] ── 1日目 夜 ── 呼び出し 42回(失敗 0・途中切れ 0) 平均 4.9秒
+2026-11-16T23:32:32.0479562Z [02:14] 1日目 [共有] マコト: ホノカさん、明日は霊媒の動きを見たいです。今夜は狩人に誰を守ってほしいか、一緒に考えてもらえますか…？
+2026-11-16T23:32:32.2271553Z [02:14] 1日目 [人狼] ハルト: カイト、ダイキ、今夜は真占い候補を探したい。ケントとアオイのどっちが真っぽいか、二人の見立てを聞かせて。
+2026-11-16T23:32:32.2916857Z [02:14] 1日目 夜行動 ケント(seer) → アオイ
+2026-11-16T23:32:33.9713103Z [02:16] 1日目 [人狼] カイト: ハルト、俺はアオイを偽寄りに見てる。ソウタに理由なしランダムは薄い。ケントは真か狂かだが、真ならまず噛む価値がある。ダイキの見立ても聞きたい。
+2026-11-16T23:32:34.0992434Z [02:16] 1日目 [共有] ホノカ: マコト、今夜は占い3人の誰かが噛まれそうだから、真占い候補を守ってほしいかな！霊媒も出てないし、明日の動き見て決めよ！
+2026-11-16T23:32:35.8292110Z [02:18] 1日目 [人狼] ダイキ: ハルト、カイト、俺もアオイは偽寄り。ケントは真なら今夜噛みたい。霊媒もまだ出てないし、まず占い即噛みで行こう。
+2026-11-16T23:32:36.1952908Z [02:18] 1日目 夜行動 ミオ(hunter) → ケント
+2026-11-16T23:32:41.8513261Z [02:24] 1日目 夜行動 カイト(werewolf) → ケント
+2026-11-16T23:32:41.8513731Z [02:24] ── 1日目 夜明け ── 呼び出し 50回(失敗 0・途中切れ 0) 平均 4.6秒
+2026-11-16T23:32:41.8550269Z [02:24] ── 2日目 昼の議論 ── 呼び出し 50回(失敗 0・途中切れ 0) 平均 4.6秒
+2026-11-16T23:32:45.5365022Z [02:28] 2日目 アカリ: 霊媒師COします。昨日処刑したユイさんは人狼ではない、白でした。占いの皆さん、昨夜の結果も聞かせてください。
+2026-11-16T23:32:56.7389798Z [02:39] 2日目 ケント: 占い結果。昨夜はアオイさんを占って白。アカリさん、霊媒COと結果は了解。ダイキさんとアオイさんも昨夜の結果を早く出して。
+2026-11-16T23:33:01.3906025Z [02:43] 2日目 ダイキ: 昨夜はミオさんを占って白でした。ケントさん、アオイさんに白を出したのは対抗同士の確認ですか？理由を聞きたい。
+2026-11-16T23:33:05.1049539Z [02:47] 2日目 アオイ: 昨夜はカイトさんを占って白でした。ケントさん、私への白は了解です。ただ占い先の理由は聞きたいです。
+2026-11-16T23:33:08.7399797Z [02:51] 2日目 マコト: えっと、ケントさんはなぜ対抗のアオイさんを占ったんですか…？理由を教えてもらえますか。
+2026-11-16T23:33:13.6283143Z [02:56] 2日目 ダイキ: マコトさんと同じ疑問。ケントさんが占い先の理由を言うまで、私は引かない。対抗への白は確認で済ませていい話じゃない！
+2026-11-16T23:33:17.7789796Z [03:00] 2日目 ケント: 対抗は人外濃厚だから、グレーより先に狼・狂・狐のどれか見たかった。それだけ。ダイキさん、引かないのは勝手だけど理由に穴はないはず。
+2026-11-16T23:33:21.4682193Z [03:04] 2日目 マコト: ケントさんの理由、一応わかりました。占いCOは今日は吊らず、グレーから選びたいです。皆さんは気になるグレーの方はいますか…？
+2026-11-16T23:33:21.4687201Z [03:04] ── 2日目 投票 ── 呼び出し 58回(失敗 0・途中切れ 0) 平均 4.6秒
+2026-11-16T23:33:24.2500453Z [03:06] 2日目 投票 マコト → レン
+2026-11-16T23:33:24.3676102Z [03:06] 2日目 投票 アカリ → ツムギ
+2026-11-16T23:33:24.4471882Z [03:07] 2日目 投票 サクラ → レン
+2026-11-16T23:33:24.7153306Z [03:07] 2日目 投票 ハルト → ホノカ
+2026-11-16T23:33:25.0475614Z [03:07] 2日目 投票 ソウタ → アオイ
+2026-11-16T23:33:25.2341665Z [03:07] 2日目 投票 ミオ → シオン
+2026-11-16T23:33:25.3470433Z [03:07] 2日目 投票 レン → シオン
+2026-11-16T23:33:25.5994849Z [03:08] 2日目 投票 カイト → アオイ
+2026-11-16T23:33:27.1240013Z [03:09] 2日目 投票 リク → ハルト
+2026-11-16T23:33:27.3193768Z [03:09] 2日目 投票 シオン → レン
+2026-11-16T23:33:27.4261305Z [03:09] 2日目 投票 ツムギ → ホノカ
+2026-11-16T23:33:27.5707385Z [03:10] 2日目 投票 ダイキ → ケント
+2026-11-16T23:33:28.5670384Z [03:11] 2日目 投票 アオイ → ケント
+2026-11-16T23:33:28.6436647Z [03:11] 2日目 投票 ホノカ → アオイ
+2026-11-16T23:33:29.1345196Z [03:11] 2日目 投票 ケント → ダイキ
+2026-11-16T23:33:31.2651250Z [03:13] 2日目 投票 レン → アオイ
+2026-11-16T23:33:32.0394259Z [03:14] 2日目 投票 マコト → アオイ
+2026-11-16T23:33:32.5152281Z [03:15] 2日目 投票 アカリ → レン
+2026-11-16T23:33:32.6198986Z [03:15] 2日目 投票 ハルト → レン
+2026-11-16T23:33:32.7124435Z [03:15] 2日目 投票 ソウタ → アオイ
+2026-11-16T23:33:33.1817627Z [03:15] 2日目 投票 ミオ → アオイ
+2026-11-16T23:33:33.4085631Z [03:15] 2日目 投票 サクラ → レン
+2026-11-16T23:33:34.0139782Z [03:16] 2日目 投票 カイト → アオイ
+2026-11-16T23:33:34.6416085Z [03:17] 2日目 投票 リク → アオイ
+2026-11-16T23:33:35.1839342Z [03:17] 2日目 投票 ツムギ → アオイ
+2026-11-16T23:33:35.4925872Z [03:18] 2日目 投票 アオイ → レン
+2026-11-16T23:33:35.6921647Z [03:18] 2日目 投票 ダイキ → アオイ
+2026-11-16T23:33:35.7221070Z [03:18] 2日目 投票 シオン → レン
+2026-11-16T23:33:35.8850690Z [03:18] 2日目 投票 ホノカ → アオイ
+2026-11-16T23:33:36.8840964Z [03:19] 2日目 投票 ケント → アオイ
+2026-11-16T23:33:37.1892910Z [03:19] ── 2日目 投票結果 ── 呼び出し 88回(失敗 0・途中切れ 0) 平均 4.5秒
+2026-11-16T23:33:37.1956722Z [03:19] ── 2日目 夜 ── 呼び出し 88回(失敗 0・途中切れ 0) 平均 4.5秒
+2026-11-16T23:33:39.8035500Z [03:22] 2日目 夜行動 ミオ(hunter) → ケント
+2026-11-16T23:33:39.8821959Z [03:22] 2日目 [共有] マコト: ホノカさん、今日はグレランで進めたいです。占い3人は誰も噛まれてないので、今夜も狩人の護衛先を一緒に考えてもらえますか…？
+2026-11-16T23:33:40.2221066Z [03:22] 2日目 夜行動 ケント(seer) → ダイキ
+2026-11-16T23:33:40.6370892Z [03:23] 2日目 [人狼] ハルト: カイト、ダイキ、アオイが吊られたし、今夜はケントを噛む路線で行こう。ただ昨夜は失敗してるから、狩人がまた守る可能性もある。霊媒のアカリはどう見る？
+2026-11-16T23:33:42.0924691Z [03:24] 2日目 [共有] ホノカ: マコト、今夜は霊媒のアカリさんか、白が続いてる占いを守ってほしいかな！狩人が出てないし、霊結果は大事だと思う！
+2026-11-16T23:33:42.5996426Z [03:25] 2日目 [人狼] カイト: ハルト、ケント噛みで異論なし。また護衛が入るなら霊媒のアカリに回す手もある。ダイキ、お前はどっちが通ると見る？
+2026-11-16T23:33:44.4167025Z [03:26] 2日目 [人狼] ダイキ: ハルト、カイト、ケント噛みで行こう。前夜に護衛が入った可能性が高いから、通らなければ次はアカリに回す。明日はグレーから吊る流れで話そう。
+2026-11-16T23:33:46.5469465Z [03:29] 2日目 夜行動 カイト(werewolf) → ケント
+2026-11-16T23:33:46.5469954Z [03:29] ── 2日目 夜明け ── 呼び出し 96回(失敗 0・途中切れ 0) 平均 4.3秒
+2026-11-16T23:33:46.5531642Z [03:29] ── 3日目 昼の議論 ── 呼び出し 96回(失敗 0・途中切れ 0) 平均 4.3秒
+2026-11-16T23:33:50.1195912Z [03:32] 3日目 アカリ: 霊媒結果です。昨日処刑されたアオイさんは白、人狼ではありませんでした。ケントさん、ダイキさんの昨夜の占い結果も聞かせてください。
+2026-11-16T23:33:53.6539630Z [03:36] 3日目 ケント: アカリさん、霊媒結果了解。昨夜の占いはダイキ=黒、人狼です。偽占いが黒だったので、今日はダイキを吊るでいいよね。
+2026-11-16T23:33:58.6762630Z [03:41] 3日目 ダイキ: 昨夜はサクラさんを占って白。ケントさんの私への黒は偽物です！私は人狼じゃない。今日吊るのはケントさんで、根拠言い切るぞ！
+2026-11-16T23:34:03.2106768Z [03:45] 3日目 リク: 焦るな。ケントが黒を出した以上、ダイキを吊って霊結果を見るのが検証としては筋だ。ダイキ、ケントが偽だと言う根拠は他にあるか？
+2026-11-16T23:34:06.8839859Z [03:49] 3日目 マコト: えっと、ダイキさんに聞きたいです。ケントさんが偽だと思う根拠は、結果以外に何かありますか…？
+2026-11-16T23:34:10.5548779Z [03:53] 3日目 ケント: ダイキ、「偽物」と言い切るだけで根拠がないよね。リクの言う通り、吊って霊結果で見ればいい。
+2026-11-16T23:34:14.4603112Z [03:57] 3日目 ダイキ: リクさん、マコトさん、ケントさん、まとめて答える。2日目の投票でケントさんは私に入れた。黒を出す前から私狙いだったのは不自然。結果以外ならそこ。
+2026-11-16T23:34:18.4042369Z [04:00] 3日目 ツムギ: ダイキの「ケントが私に投票した」は弱いね。投票は黒を出す前の話だし。ダイキ吊りで霊結果を見る流れに、今は乗るよ。
+2026-11-16T23:34:21.5699267Z [04:04] 3日目 マコト: ダイキさんの投票の話は、黒を出す前なのでツムギさんの言う通り弱いと思いました…。今日はダイキさんに入れます。
+2026-11-16T23:34:21.5706375Z [04:04] ── 3日目 投票 ── 呼び出し 105回(失敗 0・途中切れ 0) 平均 4.3秒
+2026-11-16T23:34:24.6320240Z [04:07] 3日目 投票 レン → ダイキ
+2026-11-16T23:34:24.9085385Z [04:07] 3日目 投票 アカリ → ダイキ
+2026-11-16T23:34:24.9159145Z [04:07] 3日目 投票 ソウタ → ダイキ
+2026-11-16T23:34:24.9181401Z [04:07] 3日目 投票 サクラ → ダイキ
+2026-11-16T23:34:24.9589762Z [04:07] 3日目 投票 ハルト → ケント
+2026-11-16T23:34:25.0292871Z [04:07] 3日目 投票 ミオ → ダイキ
+2026-11-16T23:34:25.0386702Z [04:07] 3日目 投票 マコト → ダイキ
+2026-11-16T23:34:25.5711664Z [04:08] 3日目 投票 カイト → ケント
+2026-11-16T23:34:27.0785082Z [04:09] 3日目 投票 リク → ダイキ
+2026-11-16T23:34:27.2411696Z [04:09] 3日目 投票 ケント → ダイキ
+2026-11-16T23:34:27.6815375Z [04:10] 3日目 投票 ダイキ → ケント
+2026-11-16T23:34:27.8207232Z [04:10] 3日目 投票 ツムギ → ダイキ
+2026-11-16T23:34:27.8422994Z [04:10] 3日目 投票 シオン → ダイキ
+2026-11-16T23:34:27.8566699Z [04:10] 3日目 投票 ホノカ → ダイキ
+2026-11-16T23:34:28.1791298Z [04:10] ── 3日目 投票結果 ── 呼び出し 119回(失敗 0・途中切れ 0) 平均 4.2秒
+2026-11-16T23:34:28.1867672Z [04:10] ── 3日目 夜 ── 呼び出し 119回(失敗 0・途中切れ 0) 平均 4.2秒
+2026-11-16T23:34:30.2187214Z [04:12] 3日目 [共有] マコト: ホノカさん、ダイキさん吊りで霊結果が出ます。今夜はアカリさんを守ってもらうのはどうでしょう…？
+2026-11-16T23:34:30.5393221Z [04:13] 3日目 夜行動 ミオ(hunter) → ケント
+2026-11-16T23:34:30.6146525Z [04:13] 3日目 [人狼] ハルト: カイト、ダイキが落ちたから今夜は慎重に。ケントは2連続で噛めてないし、護衛読みでアカリに回すか悩む。カイトはどう見る？
+2026-11-16T23:34:30.9369884Z [04:13] 3日目 夜行動 ケント(seer) → ハルト
+2026-11-16T23:34:32.2336862Z [04:14] 3日目 [共有] ホノカ: マコト、アカリさん守りに賛成！ケントの黒が本物ならダイキは狼だから、明日の霊結果が決め手だね。
+2026-11-16T23:34:32.3645286Z [04:14] 3日目 [人狼] カイト: ハルト、ケントは2連続で通ってない。護衛が固定なら今夜はアカリに回す。霊媒を落とせば色が隠せる。
+2026-11-16T23:34:34.5623921Z [04:17] 3日目 夜行動 カイト(werewolf) → アカリ
+2026-11-16T23:34:34.5624605Z [04:17] ── 3日目 夜明け ── 呼び出し 126回(失敗 0・途中切れ 0) 平均 4.1秒
+2026-11-16T23:34:34.5703307Z [04:17] ── 4日目 昼の議論 ── 呼び出し 126回(失敗 0・途中切れ 0) 平均 4.1秒
+2026-11-16T23:34:37.8122227Z [04:20] 4日目 ケント: 占い結果。ハルト=黒。昨日ダイキを黒と出した通り、ハルトも人狼。今日はハルトを吊る。
+2026-11-16T23:34:42.0517301Z [04:24] 4日目 マコト: えっと、ハルトさん、ケントさんの黒に対して反論はありますか…？
+2026-11-16T23:34:46.6965275Z [04:29] 4日目 カイト: ケントの黒は2連続で重い。ハルトの反論を聞くが、霊媒もいない今日は決め打ちできるのか、マコトに聞きたい。
+2026-11-16T23:34:50.6039608Z [04:33] 4日目 ソウタ: ハルトの反論をまず聞きたい。ケントの黒が2連続なのは確かに重い。ただ霊媒が死んだ今、真偽はまだ伏せておく。
+2026-11-16T23:34:55.1397409Z [04:37] 4日目 ハルト: 俺は村人で黒を出されても反論しにくい。ダイキ吊りの時はケントに入れてない。ダイキはケント真なら黒だけど、霊結果が出ない今はまだ決め打ちできないと思ってた。ケントの2連続黒は、真な…
+2026-11-16T23:34:58.2327330Z [04:40] 4日目 ケント: ハルト、反論になってないよね。真でも偽でもあり得るで逃げてるだけ。ダイキ黒は事実だし、結局ハルトは具体的な白要素が何も出てない。
+2026-11-16T23:35:01.4706488Z [04:44] 4日目 ハルト: 白要素を出せと言われても村人には難しい。ケントの黒もダイキの霊結果が無くて未検証だよね。そこで決め打ちはまだ早いと思う。
+2026-11-16T23:35:04.3266418Z [04:46] 4日目 マコト: ケントさんは真寄りで見てます。ただ決め打ちはせず、今日はハルトさんを仮で考えてます。
+2026-11-16T23:35:08.5009447Z [04:51] 4日目 ホノカ: ハルト、村人なら白要素は言動で出して。ダイキ吊りの時なぜケントに入れたのか、そこだけ答えて。
+2026-11-16T23:35:12.1985939Z [04:54] 4日目 ハルト: ホノカ、ダイキ黒は霊結果が出ないと検証できないから、ケントを真と決めきれなかった。それでケントに入れた。今も未検証のままだと思う。
+2026-11-16T23:35:15.6904918Z [04:58] 4日目 ホノカ: ハルト、未検証は分かるけど、ダイキ票でケントに入れた理由にはなってないよ。霊結果待ちなら吊り先は別に選べたはず。考えは変えないね。
+2026-11-16T23:35:18.8144322Z [05:01] 4日目 リク: ホノカの指摘は筋が通ってる。ハルトの説明は薄いままだ。今日はハルトで見る。
+2026-11-16T23:35:22.6825737Z [05:05] 4日目 マコト: 今日はハルトさんに投票します。ダイキさん票でケントさんに入れた理由が、まだ納得できないからです。最後に言いたいことはありますか…？
+2026-11-16T23:35:26.8460946Z [05:09] 4日目 ハルト: マコト、村人だと示せる決定的な根拠はない。ただ自分が吊られて白と出たら、ケントの偽が確定する。そこは覚えておいてほしい。
+2026-11-16T23:35:30.1551970Z [05:12] 4日目 マコト: ハルトさんの最後の話も、ケントさんに入れた理由の説明にはなっていないので、今日はハルトさんに投票します。
+2026-11-16T23:35:30.1554039Z [05:12] ── 4日目 投票 ── 呼び出し 141回(失敗 0・途中切れ 0) 平均 4.1秒
+2026-11-16T23:35:33.2777951Z [05:15] 4日目 投票 サクラ → ハルト
+2026-11-16T23:35:33.4478317Z [05:16] 4日目 投票 ソウタ → ハルト
+2026-11-16T23:35:33.5105779Z [05:16] 4日目 投票 レン → ハルト
+2026-11-16T23:35:33.6557773Z [05:16] 4日目 投票 マコト → ハルト
+2026-11-16T23:35:33.7673113Z [05:16] 4日目 投票 リク → ハルト
+2026-11-16T23:35:33.7983948Z [05:16] 4日目 投票 ハルト → ケント
+2026-11-16T23:35:33.8994976Z [05:16] 4日目 投票 ミオ → ハルト
+2026-11-16T23:35:33.9057258Z [05:16] 4日目 投票 カイト → ホノカ
+2026-11-16T23:35:36.1823591Z [05:18] 4日目 投票 ツムギ → ハルト
+2026-11-16T23:35:36.2092675Z [05:18] 4日目 投票 シオン → ハルト
+2026-11-16T23:35:36.2464469Z [05:18] 4日目 投票 ケント → ハルト
+2026-11-16T23:35:36.4570346Z [05:19] 4日目 投票 ホノカ → ハルト
+2026-11-16T23:35:36.7954994Z [05:19] ── 4日目 投票結果 ── 呼び出し 153回(失敗 0・途中切れ 0) 平均 4.0秒
+2026-11-16T23:35:36.8055489Z [05:19] ── 4日目 夜 ── 呼び出し 153回(失敗 0・途中切れ 0) 平均 4.0秒
+2026-11-16T23:35:39.0708720Z [05:21] 4日目 [共有] マコト: ホノカさん、ハルトさんの霊結果が明日出ます。今夜はケントさんを守ってもらうのはどうでしょう…？
+2026-11-16T23:35:39.1947455Z [05:21] 4日目 [人狼] カイト: ハルトもダイキも死んだ。残りは俺一人。ケントは真寄りだから、今夜は護衛を読んで噛み先を選ぶ。明日は潜伏のままグレーに寄せる。
+2026-11-16T23:35:39.2484928Z [05:21] 4日目 夜行動 ミオ(hunter) → ケント
+2026-11-16T23:35:40.0267364Z [05:22] 4日目 夜行動 ケント(seer) → カイト
+2026-11-16T23:35:41.0943041Z [05:23] 4日目 [共有] ホノカ: マコト、ケント守りに賛成！でも霊媒がもういないから、明日のハルトの結果は私たちで見ないとね。白なら即ケント偽だよ！
+2026-11-16T23:35:43.5151701Z [05:26] 4日目 夜行動 カイト(werewolf) → ケント
+2026-11-16T23:35:43.5152512Z [05:26] ── 4日目 夜明け ── 呼び出し 159回(失敗 0・途中切れ 0) 平均 4.0秒
+2026-11-16T23:35:43.5257281Z [05:26] ── 5日目 昼の議論 ── 呼び出し 159回(失敗 0・途中切れ 0) 平均 4.0秒
+2026-11-16T23:35:47.4737096Z [05:30] 5日目 ケント: 占い結果。カイト=黒。ダイキ、ハルトに続いて3人目の黒。今日はカイトを吊る。
+2026-11-16T23:35:52.3993293Z [05:34] 5日目 ツムギ: おっと、3連続黒は強いねぇ。でも霊媒もいないし検証できない。カイト本人の反論を先に聞きたいな。
+2026-11-16T23:35:56.4320850Z [05:38] 5日目 リク: ツムギの言う通り、まずカイト本人の言い分を聞こう。カイト、ケントに黒を出された理由で思い当たる点はあるか。
+2026-11-16T23:36:00.6264434Z [05:43] 5日目 ホノカ: カイト、反論聞かせて！ダイキ吊りの時にケントに入れてたのも気になるから、そこも説明ほしい！
+2026-11-16T23:36:05.6672039Z [05:48] 5日目 マコト: えっと、カイトさんの反論をまず聞きたいです。ケントさんを疑う理由があれば、それも教えてください…。
+2026-11-16T23:36:09.6765448Z [05:52] 5日目 カイト: 俺は村人だ。黒を出される心当たりはない。ケントが偽だと断言する根拠はないが、霊媒不在で検証できない黒を鵜呑みにするな。3日目のケント票は、ダイキ偽の占い結果を疑っただけだ。
+2026-11-16T23:36:13.2688174Z [05:55] 5日目 ケント: カイト、ダイキ偽を疑ったと言うけど、そのダイキは黒で吊られてる。ハルトも黒。その説明は通らないよね。
+2026-11-16T23:36:17.0270513Z [05:59] 5日目 カイト: 結果が黒だったのは認める。でも俺はあの時点で結果が出る前の話をしてる。ケントの黒は霊媒なしでは裏が取れない。
+2026-11-16T23:36:21.8184511Z [06:04] 5日目 シオン: カイトの3日目ケント票は黒結果の前なので、単独では決め手にしません。ケントの真偽と並べて見ます。
+2026-11-16T23:36:25.5917226Z [06:08] 5日目 マコト: シオンさんの指摘は納得です。ただカイトさんの反論に決め手がなくて、ケントさんの黒を信じて今日はカイトさんに入れます。
+2026-11-16T23:36:25.5926599Z [06:08] ── 5日目 投票 ── 呼び出し 169回(失敗 0・途中切れ 0) 平均 4.0秒
+2026-11-16T23:36:28.8584444Z [06:11] 5日目 投票 カイト → ケント
+2026-11-16T23:36:28.8814700Z [06:11] 5日目 投票 マコト → カイト
+2026-11-16T23:36:29.0332831Z [06:11] 5日目 投票 ミオ → カイト
+2026-11-16T23:36:29.1386167Z [06:11] 5日目 投票 ツムギ → ケント
+2026-11-16T23:36:29.2480127Z [06:11] 5日目 投票 サクラ → カイト
+2026-11-16T23:36:29.5729418Z [06:12] 5日目 投票 ソウタ → ケント
+2026-11-16T23:36:30.3805263Z [06:12] 5日目 投票 レン → カイト
+2026-11-16T23:36:31.4590259Z [06:14] 5日目 投票 ケント → カイト
+2026-11-16T23:36:31.5471417Z [06:14] 5日目 投票 ホノカ → カイト
+2026-11-16T23:36:31.7344012Z [06:14] 5日目 投票 シオン → カイト
+2026-11-16T23:36:35.9686756Z [06:18] 5日目 投票 リク → カイト
+2026-11-16T23:36:35.9688389Z [06:18] ── 5日目 終了 ── 呼び出し 180回(失敗 0・途中切れ 0) 平均 4.0秒
+2026-11-16T23:36:35.9806734Z     winner=fox 費用 $3.2228 / 上限 $12.00
+2026-11-16T23:36:36.0362423Z     seed=1 findings=11
+2026-11-16T23:36:36.0516474Z 
+2026-11-16T23:36:36.0517013Z # AI人狼プレイヤー 評価レポート
+2026-11-16T23:36:36.0517525Z 
+2026-11-16T23:36:36.0517695Z - プロバイダ: `AnthropicClaudeProvider` / モデル: `claude-sonnet-5-5`
+2026-11-16T23:36:36.0517959Z - 推理エンジン: `v3`
+2026-11-16T23:36:36.0518402Z - 思考量(effort): discussion `low` / vote `medium` / night `medium` / chat `low` / default `medium`
+2026-11-16T23:36:36.0518707Z - コミット: `6bf918214c1e44fed0ab482789a4f5be3675e989`
+2026-11-16T23:36:36.0518901Z - 評価ゲーム数: 1
+2026-11-16T23:36:36.0519068Z - 費用上限: $12.00(使用 $3.2228)
+2026-11-16T23:36:36.0519154Z 
+2026-11-16T23:36:36.0519307Z ## 1. 動作指標(JSON成功率・応答時間・コスト)
+2026-11-16T23:36:36.0519550Z 
+2026-11-16T23:36:36.0519615Z | 指標 | 値 |
+2026-11-16T23:36:36.0519737Z |---|---|
+2026-11-16T23:36:36.0519874Z | 総呼び出し数 | 180 |
+2026-11-16T23:36:36.0520019Z | **JSON成功率** | 100.0% |
+2026-11-16T23:36:36.0520210Z | うち strict schema で成功 | 100.0% |
+2026-11-16T23:36:36.0520380Z | リトライが発生した呼び出し | 0 |
+2026-11-16T23:36:36.0520537Z | 議論生成スキップ | 0 / 67 (0.0%) |
+2026-11-16T23:36:36.0520695Z | 応答時間 平均 | 4.009 秒 |
+2026-11-16T23:36:36.0520861Z | 応答時間 p50 / p95 | 3.528 / 6.988 秒 |
+2026-11-16T23:36:36.0521046Z | 応答時間 最大 | 11.508 秒 |
+2026-11-16T23:36:36.0521200Z | 対戦の所要時間(合計) | 06:19 |
+2026-11-16T23:36:36.0521406Z | 1発言あたりの生成時間(全席AI・ペース配分と人間の間なし) | 5.7 秒 |
+2026-11-16T23:36:36.0521576Z | 入力トークン | 1,404,883 |
+2026-11-16T23:36:36.0521714Z | 出力トークン | 41,300 |
+2026-11-16T23:36:36.0521898Z | **推定コスト** | $3.2228(単価表(pricing.py)から自動計算) |
+2026-11-16T23:36:36.0522009Z 
+2026-11-16T23:36:36.0522090Z ## 2. 呼び出し種別ごとの健全性
+2026-11-16T23:36:36.0522168Z 
+2026-11-16T23:36:36.0522250Z | 種別 | 回数 | 成功率 | 平均応答 | effort |
+2026-11-16T23:36:36.0522417Z |---|---|---|---|---|
+2026-11-16T23:36:36.0522601Z | ChatDiscussionOutput | 67 | 100.0% | 4.2 秒 | low |
+2026-11-16T23:36:36.0522828Z | NightActionOutput | 13 | 100.0% | 2.8 秒 | medium |
+2026-11-16T23:36:36.0523040Z | VoteOutput | 83 | 100.0% | 4.5 秒 | medium |
+2026-11-16T23:36:36.0523245Z | WolfChatOutput | 17 | 100.0% | 2.0 秒 | low |
+2026-11-16T23:36:36.0523355Z 
+2026-11-16T23:36:36.0523471Z コードによる代行(0 が理想):
+2026-11-16T23:36:36.0523545Z 
+2026-11-16T23:36:36.0523627Z | 出来事 | 件数 |
+2026-11-16T23:36:36.0523740Z |---|---|
+2026-11-16T23:36:36.0523897Z | 簡易契約(発言だけ)への降格 (`brief_fallback`) | 0 |
+2026-11-16T23:36:36.0524096Z | コードが決めた投票 (`vote_code_resolved`) | 0 |
+2026-11-16T23:36:36.0524286Z | コードが決めた夜行動 (`night_code_resolved`) | 0 |
+2026-11-16T23:36:36.0524481Z | 狼チャットの定型文 (`wolf_chat_fallback_line`) | 0 |
+2026-11-16T23:36:36.0524690Z | コードが出した公開義務の文 (`obligation_posted_by_code`) | 0 |
+2026-11-16T23:36:36.0524927Z | 議論の終了後に届いて捨てた発言 (`speech_discarded_after_phase_end`) | 0 |
+2026-11-16T23:36:36.0525157Z | 連続失敗で止まった議論 (`discussion_stalled`) | 0 |
+2026-11-16T23:36:36.0525387Z | 本指定で出た、答える番の無い質問 (`designation_question_unanswered`) | 0 |
+2026-11-16T23:36:36.0525510Z 
+2026-11-16T23:36:36.0525573Z | 指標 | 値 |
+2026-11-16T23:36:36.0525684Z |---|---|
+2026-11-16T23:36:36.0525809Z | 拒否 | 0 |
+2026-11-16T23:36:36.0525957Z | 途中切れ(出力上限) | 0(失敗のうち 0%) |
+2026-11-16T23:36:36.0526131Z | 応答したモデル | `claude-sonnet-5-5` 180 |
+2026-11-16T23:36:36.0526306Z | フォールバックのモデルが答えた呼び出し | 0 |
+2026-11-16T23:36:36.0526581Z | キャッシュ読みの割合 | 0.0% |
+2026-11-16T23:36:36.0526744Z | 推定コスト | $3.2228(単価表(pricing.py)から自動計算) |
+2026-11-16T23:36:36.0526848Z 
+2026-11-16T23:36:36.0526906Z 試合ごと:
+2026-11-16T23:36:36.0526973Z 
+2026-11-16T23:36:36.0527063Z | seed | 勝者 | 発言/日 | 所要 | 費用 | ハード |
+2026-11-16T23:36:36.0527211Z |---|---|---|---|---|---|
+2026-11-16T23:36:36.0527350Z | 1 | fox | 13.4 | 06:19 | $3.22 | 1 |
+2026-11-16T23:36:36.0527455Z 
+2026-11-16T23:36:36.0527580Z 「ハード」は次の節の項目の合計(0 が合格)。`—` は計測していない(legacy エンジン)という意味です。
+2026-11-16T23:36:36.0527696Z 
+2026-11-16T23:36:36.0527847Z ## 3. ハード正しさ（すべて0が合格）
+2026-11-16T23:36:36.0527926Z 
+2026-11-16T23:36:36.0527999Z | 項目 | 合計 | 0 でない試合(seed) |
+2026-11-16T23:36:36.0528321Z |---|---|---|
+2026-11-16T23:36:36.0528517Z | 自分だけの根拠を公開発言に出した | 0 | — |
+2026-11-16T23:36:36.0528687Z | 陣営内だけの根拠を公開発言に出した | 0 | — |
+2026-11-16T23:36:36.0528849Z | 死亡者を対象に選んだ | 0 | — |
+2026-11-16T23:36:36.0529010Z | 同じ公開結果の白黒を言い換えた | 0 | — |
+2026-11-16T23:36:36.0529169Z | 出すべき能力結果を出さなかった | 0 | — |
+2026-11-16T23:36:36.0529339Z | 同じ能力結果を重ねて出した | 0 | — |
+2026-11-16T23:36:36.0529498Z | 表示した対象と決めた対象が違った | 0 | — |
+2026-11-16T23:36:36.0529662Z | 訂正済みの古い根拠を公開発言に出した | 0 | — |
+2026-11-16T23:36:36.0529845Z | 説明のつかない投票先の変更 | **1** | 1 |
+2026-11-16T23:36:36.0530008Z | 計画のない人狼の仲間投票 | 0 | — |
+2026-11-16T23:36:36.0530159Z | 同じ夜の行動の重複 | 0 | — |
+2026-11-16T23:36:36.0530235Z 
+2026-11-16T23:36:36.0530347Z **不合格**: 1項目が 0 ではありません(`unexplained_vote_change_count`)。
+2026-11-16T23:36:36.0530479Z 
+2026-11-16T23:36:36.0530638Z 参考: コードが差し戻した誤り(公開記録には届いていないので合否には数えない。多ければ、正しさをモデルではなく検証が支えているということ)
+2026-11-16T23:36:36.0530767Z 
+2026-11-16T23:36:36.0530832Z | 項目 | 合計 |
+2026-11-16T23:36:36.0530943Z |---|---|
+2026-11-16T23:36:36.0531085Z | 死亡者・選べない相手を対象にした | 0 |
+2026-11-16T23:36:36.0531237Z | 公開結果と逆の白黒を書いた | 0 |
+2026-11-16T23:36:36.0531376Z | 投票の記録を読み違えた | 0 |
+2026-11-16T23:36:36.0531541Z | メモ(v3)・発言(v2)の吊り先と違う相手に投票した | 11 |
+2026-11-16T23:36:36.0531640Z 
+2026-11-16T23:36:36.0531732Z ## 4. ルールベース検査(役職整合性・矛盾・人狼の連携)
+2026-11-16T23:36:36.0531821Z 
+2026-11-16T23:36:36.0531902Z | 重要度 | 検査項目 | 件数 |
+2026-11-16T23:36:36.0532027Z |---|---|---|
+2026-11-16T23:36:36.0532173Z | low | 思考メモと投票先の不一致 | 11 |
+2026-11-16T23:36:36.0532264Z 
+2026-11-16T23:36:36.0532325Z ### 具体例
+2026-11-16T23:36:36.0532393Z 
+2026-11-16T23:36:36.0532460Z **思考メモと投票先の不一致** (low)
+2026-11-16T23:36:36.0532542Z 
+2026-11-16T23:36:36.0532642Z - 1日目 `p4`: 思考メモでは p15 を処刑したいとしたが p3 に投票
+2026-11-16T23:36:36.0532847Z   > ユイに入れる。ホノカ待ちを急かす動きが強かったし、マコトの仮指定にも乗る。
+2026-11-16T23:36:36.0533040Z - 1日目 `p2`: 思考メモでは p13 を処刑したいとしたが p3 に投票
+2026-11-16T23:36:36.0533276Z   > マコトの仮指定に乗ってユイに入れる。ホノカ待ちを急かす動きが強めだったし、共有は確定したので前の疑いは外す。
+2026-11-16T23:36:36.0533479Z - 1日目 `p3`: 思考メモでは p13 を処刑したいとしたが p4 に投票
+2026-11-16T23:36:36.0533724Z   > ソウタに入れる。私を指名した理由が「ホノカ待ちを急かした」だけで薄いし、占われた側なのにアオイ以外の疑いも出していない。ホノカは共有確定したからもう疑わない。
+2026-11-16T23:36:36.0533868Z 
+2026-11-16T23:36:36.0533870Z 
+2026-11-16T23:36:36.0533942Z ## 5. 発言の形式指標
+2026-11-16T23:36:36.0534008Z 
+2026-11-16T23:36:36.0534073Z | 指標 | 値 |
+2026-11-16T23:36:36.0534186Z |---|---|
+2026-11-16T23:36:36.0534431Z | 発言数 | 84 |
+2026-11-16T23:36:36.0534577Z | 平均文字数(モデルが書いた部分) | 53.6 |
+2026-11-16T23:36:36.0534748Z | 発言長上限超過(モデルが書いた部分) | 12 (14.6%) |
+2026-11-16T23:36:36.0534922Z | フォールバック定型文 | 0 (0.0%) |
+2026-11-16T23:36:36.0535069Z | 同一発言の繰り返し | 0 |
+2026-11-16T23:36:36.0535210Z | クロスプレイヤー論点重複率 | 0.0% |
+2026-11-16T23:36:36.0535365Z | クロスプレイヤー平均Jaccard | 0.039 |
+2026-11-16T23:36:36.0535544Z | 直前の発言との重複率(Jaccard 0.25以上) | 3.2% |
+2026-11-16T23:36:36.0535716Z | 直前の発言との平均Jaccard | 0.080 |
+2026-11-16T23:36:36.0535872Z | 発言回数ジニ係数 | 0.404 |
+2026-11-16T23:36:36.0536137Z | 返信率(返信先の欄が埋まった公開発言の割合) | 92.5% |
+2026-11-16T23:36:36.0536300Z | 未回答質問残存率 | 60.7% |
+2026-11-16T23:36:36.0536451Z | うち相手に手番が来なかった質問 | 0.0% |
+2026-11-16T23:36:36.0536635Z | うち手番は来たが返信リンクのない質問(本文で答えたか、答えなかった) | 60.7% |
+2026-11-16T23:36:36.0536810Z | 発言長の分散 | 129.9 |
+2026-11-16T23:36:36.0536977Z | 定型句を含むAI発言率(プロンプト由来とコードが書いた文の合計) | 0.0% |
+2026-11-16T23:36:36.0537152Z | うちプロンプトの語彙 | 0.0% |
+2026-11-16T23:36:36.0537319Z | うちコードが文頭に足したCO・結果の文 | 0行 (0.0%) |
+2026-11-16T23:36:36.0537508Z | ID表記(pN)を含むAI発言率 | 0.0% |
+2026-11-16T23:36:36.0537661Z | 1日あたり公開発言数 | 13.4 |
+2026-11-16T23:36:36.0537828Z | 公開発言の平均文字数(AI発言はモデルが書いた部分) | 52.7 |
+2026-11-16T23:36:36.0538045Z | 吊り先の自発的な変更(両方の手番に吊り先があり、元の吊り先が生きていた対) | 3 / 26対(全後続手番 51) |
+2026-11-16T23:36:36.0538369Z | うち同じ日のうちの変更 | 1 |
+2026-11-16T23:36:36.0538514Z | うち相手の発言に返信しての変更 | 3 |
+2026-11-16T23:36:36.0538688Z | うち認める言葉(確かに・認める・撤回…)を伴う変更 | 0 |
+2026-11-16T23:36:36.0538845Z | 吊り先の死亡による変更 | 10 |
+2026-11-16T23:36:36.0538997Z | 認める言葉を言いながら同じ吊り先のまま | 5 |
+2026-11-16T23:36:36.0539180Z | うち逆接と理由を添えた部分的な譲歩 | 0 |
+2026-11-16T23:36:36.0539336Z | うち理由のない空約束 | 5 |
+2026-11-16T23:36:36.0539491Z | 吊り先が片方でも空欄の対(変化を観測できない) | 15 |
+2026-11-16T23:36:36.0539651Z | うち認める言葉を伴う | 2 |
+2026-11-16T23:36:36.0539803Z | うち空欄から吊り先を置いた(認める言葉を伴う) | 1 |
+2026-11-16T23:36:36.0539898Z 
+2026-11-16T23:36:36.0539972Z 直前の発言との重複が大きい組(先頭80字):
+2026-11-16T23:36:36.0540053Z 
+2026-11-16T23:36:36.0540144Z - 2日目 `p12` → `p15` (Jaccard 0.30)
+2026-11-16T23:36:36.0540352Z   > 昨夜はミオさんを占って白でした。ケントさん、アオイさんに白を出したのは対抗同士の確認ですか？理由を聞きたい。
+2026-11-16T23:36:36.0540584Z   > 昨夜はカイトさんを占って白でした。ケントさん、私への白は了解です。ただ占い先の理由は聞きたいです。
+2026-11-16T23:36:36.0540781Z - 1日目 `p12` → `p15` (Jaccard 0.29)
+2026-11-16T23:36:36.0540993Z   > 対抗で占い師CO！0日目夜はシオンを占って白、人狼ではなかった。ケントと2-1だね。結果で白黒つけよう！
+2026-11-16T23:36:36.0541236Z   > 占い師CO。0日目夜はソウタを占って白、人狼ではなかった。発言材料がなく、ランダムで選びました。3-1になりますね。
+2026-11-16T23:36:36.0541363Z 
+2026-11-16T23:36:36.0541435Z ## 6. 日本語の自然さ・人格の維持
+2026-11-16T23:36:36.0541510Z 
+2026-11-16T23:36:36.0541599Z LLM判定は未実行です(`--judge` で有効化)。
+2026-11-16T23:36:36.0541805Z 
+2026-11-16T23:36:36.0541918Z `transcript-*.md` に読みやすい形式の全発言を出力しているので、目視での確認も可能です。
+2026-11-16T23:36:36.0542043Z 
+2026-11-16T23:36:36.0542112Z ==> 出力先: eval-out/
+2026-11-16T23:36:36.3777941Z ##[group]Run if [ -f eval-out/report.md ]; then
+2026-11-16T23:36:36.3778359Z [36;1mif [ -f eval-out/report.md ]; then[0m
+2026-11-16T23:36:36.3778570Z [36;1m  cat eval-out/report.md >> "$GITHUB_STEP_SUMMARY"[0m
+2026-11-16T23:36:36.3778762Z [36;1melse[0m
+2026-11-16T23:36:36.3779234Z [36;1m  echo "シード $SEED のレポートが生成されませんでした(接続確認で失敗した、対戦の途中で止めた、または時間切れ)。上のログを確認してください。途中まで進んでいれば、対戦記録が下と Artifacts の eval-out-seed$SEED に残っています。" >> "$GITHUB_STEP_SUMMARY"[0m
+2026-11-16T23:36:36.3779563Z [36;1mfi[0m
+2026-11-16T23:36:36.3823415Z shell: /usr/bin/bash -e {0}
+2026-11-16T23:36:36.3823575Z env:
+2026-11-16T23:36:36.3823754Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-16T23:36:36.3824022Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.16/x64/lib/pkgconfig
+2026-11-16T23:36:36.3824275Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-16T23:36:36.3824504Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-16T23:36:36.3824779Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-16T23:36:36.3825014Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.16/x64/lib
+2026-11-16T23:36:36.3825214Z   SEED: 1
+2026-11-16T23:36:36.3825336Z ##[endgroup]
+2026-11-16T23:36:36.3960473Z ##[group]Run transcript=$(ls eval-out/transcript-seed*.md 2>/dev/null | head -1)
+2026-11-16T23:36:36.3960872Z [36;1mtranscript=$(ls eval-out/transcript-seed*.md 2>/dev/null | head -1)[0m
+2026-11-16T23:36:36.3961112Z [36;1mif [ -n "$transcript" ]; then[0m
+2026-11-16T23:36:36.3961278Z [36;1m  {[0m
+2026-11-16T23:36:36.3961409Z [36;1m    echo ""[0m
+2026-11-16T23:36:36.3961583Z [36;1m    echo "<details><summary>対戦記録(クリックで展開)</summary>"[0m
+2026-11-16T23:36:36.3961778Z [36;1m    echo ""[0m
+2026-11-16T23:36:36.3961973Z [36;1m    # Keep well under the 1MB step-summary limit; the full log is[0m
+2026-11-16T23:36:36.3962208Z [36;1m    # in the downloadable artifact.[0m
+2026-11-16T23:36:36.3962388Z [36;1m    head -c 400000 "$transcript"[0m
+2026-11-16T23:36:36.3962552Z [36;1m    echo ""[0m
+2026-11-16T23:36:36.3962690Z [36;1m    echo "</details>"[0m
+2026-11-16T23:36:36.3962847Z [36;1m  } >> "$GITHUB_STEP_SUMMARY"[0m
+2026-11-16T23:36:36.3963008Z [36;1mfi[0m
+2026-11-16T23:36:36.4003662Z shell: /usr/bin/bash -e {0}
+2026-11-16T23:36:36.4003821Z env:
+2026-11-16T23:36:36.4003991Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-16T23:36:36.4004251Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.16/x64/lib/pkgconfig
+2026-11-16T23:36:36.4004505Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-16T23:36:36.4004733Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-16T23:36:36.4004966Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-16T23:36:36.4005198Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.16/x64/lib
+2026-11-16T23:36:36.4005397Z ##[endgroup]
+2026-11-16T23:36:36.4207370Z ##[group]Run actions/upload-artifact@v4
+2026-11-16T23:36:36.4207551Z with:
+2026-11-16T23:36:36.4207685Z   name: eval-out-seed1
+2026-11-16T23:36:36.4207831Z   path: backend/eval-out/
+2026-11-16T23:36:36.4207978Z   retention-days: 90
+2026-11-16T23:36:36.4208326Z   if-no-files-found: warn
+2026-11-16T23:36:36.4208474Z   compression-level: 6
+2026-11-16T23:36:36.4208608Z   overwrite: false
+2026-11-16T23:36:36.4208896Z   include-hidden-files: false
+2026-11-16T23:36:36.4209041Z env:
+2026-11-16T23:36:36.4209210Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-16T23:36:36.4209466Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.16/x64/lib/pkgconfig
+2026-11-16T23:36:36.4209716Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-16T23:36:36.4209950Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-16T23:36:36.4210180Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-16T23:36:36.4210441Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.16/x64/lib
+2026-11-16T23:36:36.4210635Z ##[endgroup]
+2026-11-16T23:36:36.5352858Z (node:2437) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+2026-11-16T23:36:36.5353285Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-11-16T23:36:36.5420750Z With the provided path, there will be 4 files uploaded
+2026-11-16T23:36:36.5438627Z Artifact name is valid!
+2026-11-16T23:36:36.5438905Z Root directory input is valid!
+2026-11-16T23:36:36.8770109Z Beginning upload of artifact content to blob storage
+2026-11-16T23:36:36.9016547Z (node:2437) [DEP0169] DeprecationWarning: `url.parse()` behavior is not standardized and prone to errors that have security implications. Use the WHATWG URL API instead. CVEs are not issued for `url.parse()` vulnerabilities.
+2026-11-16T23:36:37.1342791Z Uploaded bytes 61267
+2026-11-16T23:36:37.1837305Z Finished uploading artifact content to blob storage!
+2026-11-16T23:36:37.1837964Z SHA256 digest of uploaded artifact zip is 985ea46b5068cf02fe6b00122989d21a33968b73667fb893cc9ef4141df1c842
+2026-11-16T23:36:37.1838684Z Finalizing artifact upload
+2026-11-16T23:36:37.5537267Z Artifact eval-out-seed1.zip successfully finalized. Artifact ID 14282058620
+2026-11-16T23:36:37.5538005Z Artifact eval-out-seed1 has been successfully uploaded! Final size is 61267 bytes. Artifact ID is 14282058620
+2026-11-16T23:36:37.5542727Z Artifact download URL: https://github.com/dolphin23-jp/Are-you-werewolf/actions/runs/43979667065/artifacts/14282058620
+2026-11-16T23:36:37.5708384Z Post job cleanup.
+2026-11-16T23:36:37.6598258Z (node:2451) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+2026-11-16T23:36:37.6598724Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-11-16T23:36:37.6797846Z Post job cleanup.
+2026-11-16T23:36:37.7425287Z [command]/usr/bin/git version
+2026-11-16T23:36:37.7461935Z git version 2.56.1
+2026-11-16T23:36:37.7493908Z Temporarily overriding HOME='/home/runner/work/_temp/0676878b-23bc-4773-907e-d195258b45ef' before making global git config changes
+2026-11-16T23:36:37.7503691Z Adding repository directory to the temporary git global config as a safe directory
+2026-11-16T23:36:37.7504903Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/Are-you-werewolf/Are-you-werewolf
+2026-11-16T23:36:37.7533296Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-11-16T23:36:37.7571104Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-11-16T23:36:37.7872909Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-11-16T23:36:37.7898341Z http.https://github.com/.extraheader
+2026-11-16T23:36:37.7909068Z [command]/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+2026-11-16T23:36:37.7948382Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-11-16T23:36:37.8210593Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-11-16T23:36:37.8241521Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-11-16T23:36:37.8601602Z Cleaning up orphan processes
+2026-11-16T23:36:37.8854321Z ##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4, actions/setup-python@v5, actions/upload-artifact@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/

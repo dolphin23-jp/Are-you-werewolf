@@ -9,7 +9,6 @@ in place.
 
 from __future__ import annotations
 
-import json
 import re
 
 from app.ai.context import ContextBuilder, DaySummaryManager
@@ -384,18 +383,10 @@ def test_reaction_stage_still_asks_for_an_anchored_target():
     assert "reply_to" in prompt and "quote" in prompt
 
 
-def test_minority_review_requires_countercase_and_alternative():
-    controller = make_controller(seed=4)
-    builder = _builder(controller.state)
-
-    _, messages = builder.build_discussion_context(
-        controller.state, "p2", "minority_review:p0"
-    )
-    prompt = "\n".join(message.content for message in messages)
-
-    assert "Player0(p0)へ集中" in prompt
-    assert "反対仮説" in prompt
-    assert "別の処刑候補" in prompt
+# (The minority-review stage and its text were removed after the owner's
+# review of seed 1: a voice against the majority should emerge from the
+# table, not be appointed. tests/ai/test_day_turn_schedule.py pins that no
+# such turn is scheduled.)
 
 
 # -- v3: the chat register --
@@ -482,10 +473,12 @@ def test_chat_vote_prompt_states_what_the_seat_said_and_uses_names():
     )
     body = messages[0].content
 
-    assert "【昼にあなたが推した吊り先】Player2" in body
-    assert "【投票候補】Player2、Player3" in body
+    # The note's target, labelled as the note, and flagged: p1 never named
+    # Player2 at the table today.
+    assert "【今日のメモの吊り先】Player2(今日の卓ではまだこの名前を出していない)" in body
+    assert "【投票候補】Player2（グレー）、Player3（グレー）" in body
     assert "Player2(p2)" not in body
-    assert "昼に言った吊り先と違う相手に入れるなら" in body
+    assert "卓で名指しした吊り先と違う相手に入れるなら" in body
 
 
 def test_chat_night_prompt_names_the_action_in_japanese_and_carries_the_roster():
@@ -518,9 +511,12 @@ def _every_v3_prompt(state, builder) -> list[str]:  # type: ignore[no-untyped-de
         "reaction",
         "rebuttal_or_reassessment",
         "freemason_confirmation",
-        "minority_review:p2",
         "consensus_summary",
         "human_followup",
+        "open_floor",
+        "facilitator_followup",
+        "provisional_designation",
+        "summary_answer",
     ]
     texts: list[str] = []
     for player_id in state.players:
@@ -603,7 +599,9 @@ def test_chat_discussion_contract_names_the_wire_keys():
     body = messages[0].content
 
     assert "自分の見立てと方針はplan_noteに短く書く" in system
-    assert '"plan_note": {"execution_target"' in body
+    assert '"plan_note": {"plan": "非公開の方針メモ。' in body
+    # The note is listed before the message, the order it is written in.
+    assert body.index('"plan_note"') < body.index('"public_message"')
     assert '"plan": "非公開の方針メモ。' in body
     assert '"team_plan": "非公開。人狼・狂人は陣営としての狙いと次の一手を短く' in body
     assert '"needs_another_statement": このあともう一言続けたいならtrue' in body
@@ -637,17 +635,17 @@ def test_chat_previous_memo_is_shown_under_the_wire_names():
         state, "p1", "initial_view", board_memo="【盤面メモ】"
     )
     body = messages[0].content
-    layer = body.split("【前回の方針メモ】\n", 1)[1].split("\n", 1)[0]
+    layer = body.split("【前回の方針メモ】\n", 1)[1].split("\n\n", 1)[0]
 
-    assert json.loads(layer) == {
-        "execution_target": "p2",
-        "suspects": ["p2"],
-        "trusted": [],
-        "trusted_seer": "p3",
-        "fox_candidates": [],
-        "plan": "継続方針",
-        "team_plan": "",
-    }
+    # Wire names, names for ids (with each seat's status), and no empty team note.
+    assert layer.splitlines() == [
+        "- execution_target: Player2［グレー］",
+        "- suspects: Player2［グレー］",
+        "- trusted: なし",
+        "- trusted_seer: Player3［グレー］",
+        "- fox_candidates: なし",
+        "- plan: 継続方針",
+    ]
     assert "前回の非公開思考メモ" not in body
 
 
@@ -676,7 +674,8 @@ def test_chat_personality_section_avoids_the_thinking_label_but_structured_keeps
     for personality in PERSONALITIES:
         chat = personality.to_prompt_section(chat=True)
         assert "思考" not in chat
-        assert "- 考え方の癖: " in chat
+        # The thinking habit is not in the v3 persona at all (tone and amount only).
+        assert "- 考え方の癖: " not in chat
         assert f"- 思考スタイル: {personality.thinking_style}" in personality.to_prompt_section()
 
 

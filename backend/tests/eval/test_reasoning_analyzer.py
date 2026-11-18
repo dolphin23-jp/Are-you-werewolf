@@ -1,6 +1,7 @@
 import pytest
 
 from app.eval.reasoning_analyzer import (
+    JUSTIFIED_CHANGES,
     ReasoningQualityReport,
     ReasoningTranscriptAnalyzer,
     VoteChangeKind,
@@ -13,6 +14,7 @@ from app.eval.transcript import (
     ResultPublicationAuditRecord,
     TranscriptRecorder,
     Utterance,
+    WolfAllyVotePlan,
 )
 
 
@@ -205,11 +207,11 @@ def test_analyzer_counts_wolf_ally_votes_planned_vs_unplanned():
     transcript = GameTranscript(
         decision_audits=[
             DecisionAuditRecord(
-                game_id="g", day=2, phase="voting", player_id="p1",
+                game_id="g", day=2, phase="voting", player_id="p1", vote_target="p3",
                 ally_vote=True, ally_vote_planned=True,
             ),
             DecisionAuditRecord(
-                game_id="g", day=2, phase="voting", player_id="p2",
+                game_id="g", day=2, phase="voting", player_id="p2", vote_target="p3",
                 ally_vote=True, ally_vote_planned=False,
             ),
         ]
@@ -281,3 +283,59 @@ def test_to_dict_includes_computed_rate_properties():
     d = ReasoningQualityReport(vote_count=2, justified_vote_change_count=1).to_dict()
     assert d["vote_change_rate"] == pytest.approx(0.5)
     assert d["unexplained_vote_change_rate"] == pytest.approx(0.0)
+
+
+def test_a_change_made_after_a_later_public_argument_is_justified():
+    """Persuaded by someone who spoke after you is the listening the game asks for."""
+    transcript = GameTranscript(
+        decision_audits=[
+            DecisionAuditRecord(
+                game_id="g", day=2, phase="voting", player_id="p1",
+                decision_target="p2", displayed_target="p2", vote_target="p3",
+                target_change_classification="public_argument",
+            )
+        ]
+    )
+    report = ReasoningTranscriptAnalyzer().analyze(transcript)
+    assert VoteChangeKind.PUBLIC_ARGUMENT in JUSTIFIED_CHANGES
+    assert report.justified_vote_change_count == 1
+    assert report.unexplained_vote_change_count == 0
+
+
+def test_a_ballot_only_audit_counts_as_a_vote_not_as_a_decision():
+    transcript = GameTranscript(
+        decision_audits=[
+            DecisionAuditRecord(
+                game_id="g", day=2, phase="discussion", player_id="p1",
+                decision_target="p2", displayed_target="p2", vote_target="p2",
+            ),
+            DecisionAuditRecord(
+                game_id="g", day=2, phase="voting", player_id="p3",
+                vote_target="p2", target_change_classification="none", vote_only=True,
+            ),
+        ]
+    )
+    report = ReasoningTranscriptAnalyzer().analyze(transcript)
+    assert report.decision_count == 1
+    assert report.vote_count == 2
+    assert report.displayed_target_mismatch_count == 0
+    assert report.unexplained_vote_change_count == 0
+
+
+def test_an_exported_transcript_without_the_new_fields_still_loads():
+    """Transcripts committed before `vote_only` and `basis` existed stay readable."""
+    data = GameTranscript(
+        decision_audits=[DecisionAuditRecord("g", 1, "voting", "p1")],
+        wolf_ally_vote_plans=[
+            WolfAllyVotePlan("x", "p1", "p2", 1, 1, ("e",), "s", "t", "m1")
+        ],
+    ).to_dict()
+    for item in data["decision_audits"]:
+        item.pop("vote_only")
+    for item in data["wolf_ally_vote_plans"]:
+        item.pop("basis")
+
+    restored = GameTranscript.from_dict(data)
+
+    assert restored.decision_audits[0].vote_only is False
+    assert restored.wolf_ally_vote_plans[0].basis == ""

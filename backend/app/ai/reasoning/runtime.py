@@ -16,6 +16,7 @@ Everything here is deterministic given the same board and seed.
 from __future__ import annotations
 
 import random
+from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 
@@ -50,6 +51,7 @@ from app.ai.reasoning.dialogue import (
 from app.ai.reasoning.facts import PublicFactLedger
 from app.ai.reasoning.observations import ObservationSet
 from app.ai.reasoning.perspectives import (
+    ClaimedStoryPerspective,
     CommonPublicPerspective,
     Perspective,
     PlayerPrivatePerspective,
@@ -62,13 +64,16 @@ from app.ai.reasoning.solver import (
     build_solver,
     has_role,
 )
+from app.ai.reasoning.summaries import day_results_and_claims
+from app.ai.reasoning.timeline import disclosable_result_nights
 from app.engine.roles import RoleName
 from app.engine.state import ChatChannel, GameState
 
-# How many seats open the day. More than this and the morning is a wall of text
-# nobody reads; fewer and the board never gets stated.
-MIN_OPENING_SPEAKERS = 3
-MAX_OPENING_SPEAKERS = 5
+# How many seats without a CO open the day beside the duty speakers (the
+# result holders, the planned COs, the seats with a question to answer). More
+# and the morning is a wall of text nobody reads; the rest are heard when
+# answered, challenged, or in the short turn before the summary.
+MAX_OPENING_SPEAKERS = 3
 
 # Speech-value contributions, in one table so the scheduler's priorities are
 # readable rather than buried in branches.
@@ -119,6 +124,22 @@ class SpeechCandidate:
     player_id: str
     value: float
     reasons: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class PublicMark:
+    """Something the whole table already holds against a seat.
+
+    Either a black published on it, or a role claim the public record proves
+    it cannot hold. Both are public: any seat could cite them, so a werewolf
+    voting a partner marked this way is distancing itself from a lost cause,
+    not betraying a teammate nobody suspected. The id is stable so an audit
+    can point at the mark it relied on.
+    """
+
+    evidence_id: str
+    source_message_id: str
+    explanation: str
 
 
 class ReasoningRuntime:
@@ -412,12 +433,23 @@ class ReasoningRuntime:
         pending_question_targets: Sequence[str] = (),
         pressured_ids: Sequence[str] = (),
         planned_claims: Sequence[str] = (),
+        exclude: Sequence[str] = (),
         limit: int = MAX_OPENING_SPEAKERS,
     ) -> list[str]:
-        """The three to five seats that open the day, in a seeded display order.
+        """Up to three seats without a CO that open the day beside the duty speakers.
 
-        Everyone forms an opinion; only the ones with something new to say get
-        the floor. The rest speak when they are answered or challenged.
+        The duty speakers (a held result, a claim to make, a question to
+        answer) open the day in any case; the caller passes them as
+        `exclude`. They used to count toward a cap of five, so from day 2 on
+        one or two gray seats opened at most. A seat with a verdict on it is
+        still eligible -- it holds no role to speak from, only an opinion.
+
+        Ranked by speech value; a tie goes to the seat with the fewest public
+        lines so far, then to a draw seeded by the game. It went to the seat
+        id's string order, and p10, p11 ... sort before p2: in seed 1 the same
+        three seats were silent four days running. Returned in a seeded
+        display order. The rest speak when answered, challenged, or in the
+        short turn every silent seat gets before the summary.
         """
         candidates = self.speech_candidates(
             state,
@@ -425,10 +457,25 @@ class ReasoningRuntime:
             pressured_ids=pressured_ids,
             planned_claims=planned_claims,
         )
-        if not candidates:
+        ledger = PublicFactLedger(state)
+        excluded = set(exclude)
+        eligible = [
+            item
+            for item in candidates
+            if item.player_id not in excluded and ledger.claimed_role_of(item.player_id) is None
+        ]
+        bounded = max(0, min(limit, MAX_OPENING_SPEAKERS))
+        if not eligible or not bounded:
             return []
-        bounded = max(MIN_OPENING_SPEAKERS, min(limit, MAX_OPENING_SPEAKERS))
-        chosen = [item.player_id for item in candidates[:bounded]]
+        lines_so_far = Counter(
+            message.author_id
+            for message in state.chat_log
+            if message.channel is ChatChannel.PUBLIC
+        )
+        # The draw first, then a stable sort: among equals the draw decides.
+        random.Random(f"{self._seed}:opening-ties:{state.day}").shuffle(eligible)
+        eligible.sort(key=lambda item: (-item.value, lines_so_far[item.player_id]))
+        chosen = [item.player_id for item in eligible[:bounded]]
         order_rng = random.Random(f"{self._seed}:opening:{state.day}")
         order_rng.shuffle(chosen)
         return chosen
@@ -437,10 +484,14 @@ class ReasoningRuntime:
         days = sorted({vote.day for vote in ledger.votes()})
         if not days:
             return None
-        counts: dict[str, int] = {}
-        for vote in ledger.votes_on(days[-1]):
-            counts[vote.target_id] = counts.get(vote.target_id, 0) + 1
-        return max(sorted(counts), key=lambda pid: counts[pid]) if counts else None
+        counts = Counter(vote.target_id for vote in ledger.votes_on(days[-1]))
+        ranked = counts.most_common(2)
+        if not ranked or (len(ranked) > 1 and ranked[0][1] == ranked[1][1]):
+            # A tie has no majority. It used to be broken by seat id, which
+            # made every seat leaning the other way a "dissenter" that opened
+            # the next day ahead of the rest.
+            return None
+        return ranked[0][0]
 
     def holds_unpublished_result(self, state: GameState, player_id: str) -> bool:
         """Whether this seat is sitting on a result the table has not heard.
@@ -470,6 +521,8 @@ class ReasoningRuntime:
         * the freemason leader, until the freemason CO is made;
         * a seer or medium holding a result without the CO it needs;
         * a planned fake claimant, until that claim is actually made;
+        * a standing seer or medium claimant, true or fake, with this
+          morning's result still to announce (see `owes_morning_result`);
         * a bluffer whose story has collapsed and must retract or slide;
         * a seer or medium whose published colour contradicts its own result.
         """
@@ -493,11 +546,112 @@ class ReasoningRuntime:
             planned = (planned_fake_roles or {}).get(player_id)
             if planned is not None and standing is not planned:
                 required.append(player_id)
+            if self.owes_morning_result(state, player_id):
+                required.append(player_id)
             if seat.deception is not None and seat.deception.status is StoryStatus.COLLAPSED:
                 required.append(player_id)
             if self._published_colour_contradicts_own(ledger, observations, seat):
                 required.append(player_id)
         return tuple(dict.fromkeys(required))
+
+    def owes_morning_result(self, state: GameState, player_id: str) -> bool:
+        """A living seer or medium claimant, true or fake, with today's result unsaid.
+
+        The table expects every standing seer to report last night's look and
+        every standing medium to report yesterday's execution, first thing in
+        the morning. A real holder is already a duty speaker through its held
+        result; a fake one used to be one only until its CO, after which its
+        results arrived late or never and nobody noticed (the first Claude
+        game's madman seer reported at line 10 on day 2, at line 6 on day 4
+        after three requests, and not at all on day 3). The claimed role sets
+        the schedule, so the rule is the same whatever the seat really holds.
+
+        Read from public facts only -- the standing claim, the published
+        results and the public calendar -- plus the seat's own held results.
+
+        The published nights are read from the observations, not the raw
+        ledger. The ledger dates a verdict repeated today without a night as a
+        result for last night; the projection dates it by the statement it
+        repeats, as the board memo does. Saying yesterday's white again is not
+        this morning's result, so it must not cancel the duty while the memo
+        still shows last night as 未公開.
+        """
+        if player_id not in self.seats or not state.players[player_id].alive:
+            return False
+        ledger = PublicFactLedger(state)
+        claimed = ledger.claimed_role_of(player_id)
+        if claimed not in (RoleName.SEER, RoleName.MEDIUM):
+            return False
+        if self.holds_unpublished_result(state, player_id):
+            return True
+        last_night = state.day - 1
+        if last_night < 0:
+            return False
+        observations = ObservationSet.from_state(state)
+        published = observations.verdicts_by(player_id)
+        if claimed is RoleName.SEER:
+            if last_night not in disclosable_result_nights(observations, player_id, state.day):
+                return False
+            return not any(
+                r.result_type == "seer" and r.source_night == last_night for r in published
+            )
+        executed = {
+            pid for pid in ledger.executed_ids() if ledger.execution_day(pid) == last_night
+        }
+        return bool(executed) and not any(
+            r.result_type == "medium" and r.target_id in executed for r in published
+        )
+
+    def impossible_claim_reasons(self, state: GameState, player_id: str) -> tuple[str, ...]:
+        """Why the public record proves this seat does not hold the role it claims.
+
+        Empty when it might. The test is the claimant's own public story taken
+        at its word -- the claimed card, and the looks it published as the
+        looks it took -- run through the same hard rules every seat uses. If no
+        world fits, nobody needs private knowledge to call the claim fake:
+        a seer CO whose night-1 look survived a two-body night (one body a
+        cursed fox, so the real seer looked at one of the dead) is out. That
+        was ダイキ in the first Claude game, provable from day 2 on.
+        """
+        claimed = PublicFactLedger(state).claimed_role_of(player_id)
+        if claimed is None:
+            return ()
+        self.refresh(state)
+        solver = build_solver(
+            self.observations, ClaimedStoryPerspective(player_id, claimed), cache=self._cache
+        )
+        result = solver.explain_contradiction()
+        return tuple(result.explanations) if result.is_contradictory else ()
+
+    def public_marks(self, state: GameState, player_id: str) -> tuple[PublicMark, ...]:
+        """Everything public that already marks this seat: blacks, a disproved claim."""
+        ledger = PublicFactLedger(state)
+        marks = [
+            PublicMark(
+                evidence_id=f"black:{result.claimant_id}:{result.result_type}:{player_id}",
+                source_message_id=result.source_message_id,
+                explanation=(
+                    f"{result.claimant_id}の{'霊媒' if result.result_type == 'medium' else '占い'}"
+                    f"結果で{player_id}は黒"
+                ),
+            )
+            for result in ledger.public_results()
+            if result.target_id == player_id and result.is_werewolf
+        ]
+        reasons = self.impossible_claim_reasons(state, player_id)
+        if reasons:
+            claim = next(
+                (c for c in ledger.co_declarations() if c.player_id == player_id), None
+            )
+            role = claim.claimed_role.value if claim is not None else "unknown"
+            marks.append(
+                PublicMark(
+                    evidence_id=f"impossible_claim:{player_id}:{role}",
+                    source_message_id=claim.source_message_id if claim is not None else "",
+                    explanation="".join(reasons),
+                )
+            )
+        return tuple(marks)
 
     def _published_colour_contradicts_own(
         self, ledger: PublicFactLedger, observations: ObservationSet, seat: SeatReasoning
@@ -969,6 +1123,12 @@ class ReasoningRuntime:
         into the message -- and v3 seats read the disagreement from the log.
         """
         ledger = PublicFactLedger(state)
+        if not stated_targets_are_public:
+            # v3 reads the whole board in its memo every turn, so the summary
+            # does not list it again day after day: each day carries the COs
+            # made and the verdicts first published that day, dated by the
+            # night they are about, seer and medium apart (review 1-D3).
+            return day_results_and_claims(ledger, state.day)
         points: list[str] = []
         by_role: dict[RoleName, list[str]] = {}
         for claim in ledger.co_declarations():
@@ -978,17 +1138,16 @@ class ReasoningRuntime:
             # than the role has seats, so a freemason pair is not one.
             if fake_claim_floor(role, len(claimants)):
                 points.append(f"{role_label(role)}CO対抗: {'、'.join(sorted(claimants))}")
-        for result in ledger.public_results():
+        # Dated through the projection, as the board memo is: a verdict said
+        # again today without a night keeps the day it was first published.
+        for result in ObservationSet.from_state(state).verdicts:
             colour = "黒" if result.is_werewolf else "白"
             points.append(
                 f"{result.claimant_id}→{result.target_id}={colour}({result.day}日目)"
             )
-        # Under v3 a stated target is the model's structured answer, which its
-        # message need not name. Only a candidate the seat declared out loud
-        # today is public; a bare mention is no declaration, and a seat with no
-        # declaring sentence is left out rather than guessed at.
-        if not stated_targets_are_public:
-            return points
+        # Only a candidate the seat declared out loud today is public; a bare
+        # mention is no declaration, and a seat with no declaring sentence is
+        # left out rather than guessed at.
         named_today: dict[str, set[str]] = {}
         for message in state.chat_log:
             if message.day == state.day and message.channel is ChatChannel.PUBLIC:

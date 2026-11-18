@@ -41,8 +41,9 @@ cat <<'EOF'
 
   パスワードが空だと anthropic ではサーバーが起動しません。
   モデルを変えるときだけ WEREWOLF_ANTHROPIC_MODEL を登録します
-  (既定 claude-opus-5-5)。キーは、Anthropic Console で月の
-  利用上限を設定した専用ワークスペースで発行するのがおすすめです。
+  (既定 claude-sonnet-5-5。Opus にするなら claude-opus-5-5)。
+  キーは、Anthropic Console で月の利用上限を設定した
+  専用ワークスペースで発行するのがおすすめです。
   luna (gpt-6-luna) を使う場合は README を参照してください。
 
   登録後は Codespace を作り直す(または再起動する)と反映されます。

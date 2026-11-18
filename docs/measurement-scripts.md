@@ -27,6 +27,12 @@
 既定の条件は `claude-opus-5-5:low`、`claude-opus-5-5:medium`、`claude-opus-5-5:low:fast`、
 `claude-sonnet-5-5:low`、`claude-haiku-5-5:low`。
 
+2026-11-16 の最初の測定（`backend/artifacts/latency-sweep-2026-11-16/`）のあと、オーナーは
+ゲームのモデルを Sonnet 5.5 に決めた（approach-reset §11.8）。その測定で Sonnet 5.5 は `low`
+しか測っておらず、Sonnet 5.5 の effort の段階は Opus とも Sonnet 5 とも違う量の思考になるので、
+次に測るなら `--configs claude-sonnet-5-5:low,claude-sonnet-5-5:medium` のように Sonnet の
+effort どうしを比べる（投票・夜行動の既定 `medium` は未測定）。
+
 > **時間だけを測る。発言の質は見ていない。** JSON がスキーマに合うかは数えるが、推理や日本語の
 > 良し悪しは判定しない。速い条件が見つかっても、そのモデル・effort でゲームの評価を回し、
 > 品質が落ちないことを確かめてから既定を変える。**別のモデルに替えるかどうかはオーナーが決める。**
@@ -87,7 +93,7 @@ python scripts/latency_sweep.py --dry-run \
 |---|---|
 | `plan.md` / `plan.json` | 計画: 標本の構成、要求数、条件ごとの最悪・見込みの費用 |
 | `prompts.jsonl` | 標本のプロンプト全文（オフライン対戦のもの。シードとコミットから再現できる） |
-| `rows.jsonl` | 1要求1行の測定値。終わった要求から追記するので、途中で止めても残る |
+| `rows.jsonl` | 1要求1行の測定値。終わった要求から追記するので、途中で止めても残る。本文の JSON がスキーマに合わなかった行は、本文の先頭2000字（`invalid_text`）と最初の検証エラー（`validation_error`）も持つ。2026-11-16 の測定では、fast の議論で1件だけ合わなかった答えの中身が残らず、原因を読めなかったため |
 | `rows.csv` | 同じ内容の CSV |
 | `summary.md` / `summary.json` | 条件 × スキーマごとの集計 |
 

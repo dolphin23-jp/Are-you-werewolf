@@ -20,11 +20,24 @@ class DetectedPublicResult:
 
 
 _TARGET_TRAILER_RE = re.compile(r"^(?:\(p\d+\))?(?:さん|君|ちゃん|氏)?\s*")
+# Right after the colour, these make it an impression ("黒っぽい", "白寄り",
+# "黒目"), a side ("人狼側"), a negation ("黒ではない") or a hypothetical
+# ("黒なら"), not a result. Reading "Xは黒っぽい" as a published black put a
+# binding verdict nobody gave on the record. The list follows claims.py's
+# `_VERDICT_TAIL_REJECT_RE`, minus the bare "い" and "確" that a short
+# verdict can legitimately be followed by here; "ら" and "としたら" close the
+# gap after a full verdict ("人狼だったら"). The colour group is atomic, so a
+# rejected "人狼だった" cannot fall back to "人狼だ" + "ったら" and pass.
+_NOT_A_VERDICT_TAIL = (
+    r"(?![」』\"”)）]*(?:っぽ|ぽい|寄り|より|目|め|く見|視|要素|印象|すぎ|過ぎ|塗|置き|位置"
+    r"|側|陣営|候補|では|じゃ|なら|だったら|だとしたら|として|としたら|とすれば|ら|かも))"
+)
 _WHITE_RE = re.compile(
-    r"^(?:は|が|=|＝|を占って[、，,]?)?\s*(?:人狼ではな(?:い|かった)|白|○)"
+    r"^(?:は|が|=|＝|を占って[、，,]?)?\s*(?>人狼ではな(?:い|かった)|白|○)" + _NOT_A_VERDICT_TAIL
 )
 _BLACK_RE = re.compile(
-    r"^(?:は|が|=|＝|を占って[、，,]?)?\s*(?:人狼(?:でした|だった|です|だ)?|黒|●)"
+    r"^(?:は|が|=|＝|を占って[、，,]?)?\s*(?>人狼(?:でした|だった|です|だ)?|黒|●)"
+    + _NOT_A_VERDICT_TAIL
 )
 _SPECULATION_RE = re.compile(r"(?:と思|に見え|かもしれ|可能性)")
 _HONORIFIC = r"(?:さん|君|ちゃん|氏)?"

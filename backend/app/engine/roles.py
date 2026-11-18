@@ -58,14 +58,14 @@ ROLE_DEFINITIONS: dict[RoleName, RoleDefinition] = {
         has_night_action=True,
     ),
     RoleName.MEDIUM: RoleDefinition(
-        RoleName.MEDIUM, Team.VILLAGE, 1, "霊媒師", "処刑者の正体を自動で知る"
+        RoleName.MEDIUM, Team.VILLAGE, 1, "霊媒師", "処刑された人が人狼かどうかを自動で知る"
     ),
     RoleName.HUNTER: RoleDefinition(
         RoleName.HUNTER,
         Team.VILLAGE,
         1,
         "狩人",
-        "2日目夜から毎夜1人を護衛する",
+        "1日目夜から毎夜1人を護衛する（自分は不可・連続護衛は可）",
         has_night_action=True,
     ),
     RoleName.FOX: RoleDefinition(
@@ -117,13 +117,17 @@ class AlphaWolfTracker:
     def __init__(self, wolf_ids: list[str], seed: int | None = None) -> None:
         if not wolf_ids:
             raise ValueError("wolf_ids must not be empty")
-        rng = random.Random(seed)
+        # One stream for the first pick and every reassignment, so a seeded
+        # game hands the bite to the same wolf on every replay. Reassigning
+        # from an unseeded `random.Random()` made the alpha after a wolf's
+        # death -- and so who bites, and which call the log shows -- differ
+        # between two runs of the same seed.
+        self._rng = random.Random(seed)
         self._alive_wolves = list(wolf_ids)
-        self.alpha_id: str = rng.choice(wolf_ids)
+        self.alpha_id: str = self._rng.choice(wolf_ids)
 
     def on_wolf_death(self, dead_player_id: str, rng: random.Random | None = None) -> None:
         if dead_player_id in self._alive_wolves:
             self._alive_wolves.remove(dead_player_id)
         if dead_player_id == self.alpha_id and self._alive_wolves:
-            rng = rng or random.Random()
-            self.alpha_id = rng.choice(self._alive_wolves)
+            self.alpha_id = (rng or self._rng).choice(self._alive_wolves)
