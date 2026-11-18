@@ -20,7 +20,7 @@ from app.ai.reasoning.board_memo import role_label
 from app.ai.reasoning.facts import MEDIUM_RESULT, SEER_RESULT, PublicFactLedger
 from app.ai.reasoning.observations import _dated_by_first_statement
 from app.engine.roles import RoleName
-from app.engine.state import ChatChannel, GameState, PublicDeathCause
+from app.engine.state import ChatChannel, GameState, PendingQuestion, PublicDeathCause
 
 FACTS_HEADING = "【公開事実】"
 OPINION_HEADING = "【議論の要点(生成)】"
@@ -174,6 +174,69 @@ def render_day_record(
     return "\n".join(lines)
 
 
+# The 問答 block is a reminder, not a transcript: each side of an exchange
+# cut short, and at most this many exchanges, the latest kept.
+_EXCHANGE_QUOTE_MAX_CHARS = 40
+_EXCHANGE_MAX_ROWS = 8
+
+
+def render_question_exchanges(
+    state: GameState, day: int, questions: Sequence[PendingQuestion]
+) -> str:
+    """v3: the day's named questions and what each asked seat said next, for the day after.
+
+    Run 14, seed 1: ケント answered 「理由はない、ランダム」 on day 1, but the
+    day record kept only the executed seat's 「まだ答えてないぞ」. On day 2 the
+    question was asked again as open, he answered 「名前順」, and the hunter
+    read the mismatch. Each question to the same seat answered by the same
+    line is one row; the answer is the asked seat's next public line that
+    day -- said as such, since it may answer something else -- or 未回答.
+    Public lines only, so the same for every seat. Empty when no question
+    was asked.
+    """
+    if not questions:
+        return ""
+    name = PublicFactLedger(state).name_of
+    public = [
+        message
+        for message in state.chat_log
+        if message.channel is ChatChannel.PUBLIC and message.day == day
+    ]
+    position = {message.message_id: index for index, message in enumerate(public)}
+    rows: dict[tuple[str, str | None], list[PendingQuestion]] = {}
+    for question in sorted(
+        (q for q in questions if q.day == day and q.source_message_id in position),
+        key=lambda q: position[q.source_message_id],
+    ):
+        after = position[question.source_message_id]
+        answer_id = next(
+            (m.message_id for m in public[after + 1 :] if m.author_id == question.target),
+            None,
+        )
+        rows.setdefault((question.target, answer_id), []).append(question)
+    if not rows:
+        return ""
+    by_id = {message.message_id: message for message in public}
+    rendered = []
+    for (target, said_next), asked in rows.items():
+        askers = "、".join(dict.fromkeys(f"{name(q.asker)} {q.source_message_id}" for q in asked))
+        asked_line = _quote(asked[0].question, _EXCHANGE_QUOTE_MAX_CHARS)
+        line = f"- {name(target)}へ（{askers}）:{asked_line}"
+        answer = by_id.get(said_next) if said_next is not None else None
+        if answer is None:
+            line += " → 未回答（この日はこのあと発言なし）"
+        else:
+            line += (
+                f" → {name(target)}の次の発言（{answer.message_id}）:"
+                f"{_quote(answer.content, _EXCHANGE_QUOTE_MAX_CHARS)}"
+            )
+        rendered.append(line)
+    omitted = len(rendered) - _EXCHANGE_MAX_ROWS
+    if omitted > 0:
+        rendered = [f"- （先の{omitted}件は省略）", *rendered[omitted:]]
+    return f"【{day}日目の名指しの質問と、聞かれた人の次の発言】\n" + "\n".join(rendered)
+
+
 def day_results_and_claims(ledger: PublicFactLedger, day: int) -> list[str]:
     """v3: the COs made and the verdicts first published on `day`, by role.
 
@@ -242,11 +305,11 @@ def _vote_spread(ledger: PublicFactLedger, day: int, round_number: int) -> str:
     return "、".join(f"{ledger.name_of(pid)}{counts[pid]}票" for pid in ranked)
 
 
-def _quote(text: str) -> str:
+def _quote(text: str, limit: int = _QUOTE_MAX_CHARS) -> str:
     """A line as said, on one line, inside 「」 (its own 「」 become 『』)."""
     flat = " ".join(text.split()).translate(_NESTED_QUOTES)
-    if len(flat) > _QUOTE_MAX_CHARS:
-        flat = flat[: _QUOTE_MAX_CHARS - 1] + "…"
+    if len(flat) > limit:
+        flat = flat[: limit - 1] + "…"
     return f"「{flat}」"
 
 

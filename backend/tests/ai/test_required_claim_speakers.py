@@ -209,10 +209,25 @@ def test_a_seer_whose_published_colour_contradicts_its_own_result_is_required():
 
 
 def test_a_seat_with_nothing_to_claim_is_not_required():
+    """Only the real seer (p4) and medium (p13) have a claim to make on this board."""
     state = _board()
     runtime = ReasoningRuntime(state, AI_IDS, seed=1)
 
-    assert runtime.required_claim_speakers(state) == ()
+    assert runtime.required_claim_speakers(state) == ("p4", "p13")
+
+
+def test_the_real_medium_is_required_until_it_claims_as_a_planned_fake_medium_is():
+    """Run 14, seed 2: the fake medium COed from the morning block (m4), the real
+    one, with no result on day 1, from the roll call (m16). The order said which
+    was fake; both are in the morning block now."""
+    state = _board(day=1)
+    runtime = ReasoningRuntime(state, AI_IDS, seed=1)
+    plan = {"p1": RoleName.MEDIUM}
+
+    required = runtime.required_claim_speakers(state, planned_fake_roles=plan)
+    assert "p13" in required and "p1" in required
+    boards.claim(state, "p13", RoleName.MEDIUM, day=1)
+    assert "p13" not in runtime.required_claim_speakers(state, planned_fake_roles=plan)
 
 
 def test_a_dead_seat_is_never_required():

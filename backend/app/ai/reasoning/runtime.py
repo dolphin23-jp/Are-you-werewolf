@@ -521,6 +521,12 @@ class ReasoningRuntime:
         * the freemason leader, until the freemason CO is made;
         * a seer or medium holding a result without the CO it needs;
         * a planned fake claimant, until that claim is actually made;
+        * the real seer or medium, until it has claimed its role -- the
+          mirror of the planned fake claimant. A fake medium was a morning
+          duty speaker while the real one, with no result on day 1, waited
+          for the roll call (run 14, seed 2: m4 against m16), so the order
+          of the COs said which was fake. Whether to claim stays its call;
+          the turn is in the same block as the fake's;
         * a standing seer or medium claimant, true or fake, with this
           morning's result still to announce (see `owes_morning_result`);
         * a bluffer whose story has collapsed and must retract or slide;
@@ -545,6 +551,9 @@ class ReasoningRuntime:
                 required.append(player_id)
             planned = (planned_fake_roles or {}).get(player_id)
             if planned is not None and standing is not planned:
+                required.append(player_id)
+            real_role = state.players[player_id].role
+            if real_role in (RoleName.SEER, RoleName.MEDIUM) and standing is not real_role:
                 required.append(player_id)
             if self.owes_morning_result(state, player_id):
                 required.append(player_id)

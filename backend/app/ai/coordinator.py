@@ -175,6 +175,19 @@ _OPEN_FLOOR_STAGE = "open_floor"
 # answer the day is about to be decided on.
 _SUMMARY_ANSWER_STAGE = "summary_answer"
 
+# The stage a day summary written in code is recorded under.
+_CODE_SUMMARY_STAGE = "code"
+
+# A seat asked something by name during the day, answering it. Its own 60-character
+# stage: run 14 answered named questions in the 30-character reaction slot, and
+# 17 of 20 such lines overran it.
+_QUESTION_ANSWER_STAGE = "question_answer"
+
+# How many answers a seat is owed outside the follow-up budget in one day. Each
+# is one per batch of questions -- every question put to the seat before it
+# answers -- so two seats asking each other back and forth still end.
+_MAX_OWED_ANSWERS_PER_SEAT = 2
+
 # The facilitator's second try when the summary named nobody: a candidate,
 # then that seat's defence, then the final designation. Once a day.
 _PROVISIONAL_STAGE = "provisional_designation"
@@ -546,6 +559,8 @@ class _RoundBook:
     closed: bool = False
     # The seats offered a silent-seat turn today, drawn once and walked once.
     unheard_plan: list[str] | None = None
+    # Answers given outside the budget to seats asked by name, per seat.
+    owed_answers_given: dict[str, int] = field(default_factory=dict)
 
 
 def _unwrap_provider(provider: object) -> object:
@@ -1078,12 +1093,8 @@ class AICoordinator:
         """
         assert self.reasoning is not None
         self.reasoning.refresh(state)
-        duty = [
-            pid
-            for pid in alive
-            if self.reasoning.holds_unpublished_result(state, pid)
-            or self._open_questions(pid)
-        ]
+        holders = [pid for pid in alive if self.reasoning.holds_unpublished_result(state, pid)]
+        answering = [pid for pid in alive if self._open_questions(pid)]
         # Every seat with a claim to make, change or correct -- the freemason
         # leader, a result holder without its CO, a planned fake claimant, a
         # bluffer whose story collapsed. Only the freemason leader used to be
@@ -1108,7 +1119,24 @@ class AICoordinator:
         # One turn per seat, however many duties it holds. A result holder
         # without its CO is also a required claimant, and counting it twice made
         # `immediate_count` outrun the speakers actually in the order.
-        duty = list(dict.fromkeys([*duty, *planned_claims]))
+        #
+        # The results and the COs come in an order drawn per game and day.
+        # They used to come result holders first, planned claimants after: the
+        # real seer opened day 1 in all three games of run 14, and on day 2 the
+        # real medium reported before the fakes -- an order that says who is
+        # real. The seats answering yesterday's questions follow, and a
+        # freemason's own report (the hidden partner's takeover CO, the
+        # leader's word that the partner died) closes the block, where the
+        # table expects it, as a named partner's confirmation does.
+        order_rng = random.Random(f"{self._seed}:morning:{state.day}")
+        reports = [pid for pid in alive if self._owes_freemason_report(state, pid)]
+        speakers = [
+            pid for pid in dict.fromkeys([*holders, *planned_claims]) if pid not in reports
+        ]
+        order_rng.shuffle(speakers)
+        answering = [pid for pid in answering if pid not in speakers and pid not in reports]
+        order_rng.shuffle(answering)
+        duty = [*speakers, *answering, *reports]
         # The duty speakers, then up to three seats without a CO. The three
         # used to share a cap of five with the duty speakers, so a morning
         # with three results and two planned COs heard no gray seat at all.
@@ -1175,19 +1203,23 @@ class AICoordinator:
                 if book.facilitator_due and pid == self._facilitator(state):
                     book.facilitator_due = False
                     return pid, _FACILITATOR_FOLLOWUP_STAGE
-                limit = max(1, round(2.5 * self._personalities[pid].talkativeness))
-                if pid in round_state.major_targets:
-                    limit = max(limit, 4)
-                if state.players[pid].alive and round_state.speech_counts.get(pid, 0) < limit:
-                    if (
-                        pid in round_state.major_targets
-                        and round_state.speech_counts.get(pid, 0) < 2
-                    ):
-                        return pid, "rebuttal_or_reassessment"
-                    return (
-                        pid,
-                        "reaction" if self._rng.random() < 0.35 else "rebuttal_or_reassessment",
-                    )
+                if not self._may_schedule(state, pid):
+                    continue
+                # No per-seat cap. It used to be the persona's talkativeness
+                # (round(2.5 x talkativeness) replies), and a quiet villager
+                # asked five times by name reached it, answered only after the
+                # summary, and was hanged 13-1 for his silence (run 14, seed
+                # 2, day 2). A persona sets tone and amount in words; whether
+                # to say more is the seat's own call (`needs_another_statement`),
+                # and the round's total keeps the day bounded.
+                if pid in round_state.major_targets and round_state.speech_counts.get(pid, 0) < 2:
+                    return pid, "rebuttal_or_reassessment"
+                if self._asked_today(state, pid):
+                    return pid, _QUESTION_ANSWER_STAGE
+                return (
+                    pid,
+                    "reaction" if self._rng.random() < 0.35 else "rebuttal_or_reassessment",
+                )
             # The queue is empty, but the most-pressured execution candidates still
             # owe the table a rebuttal. Re-queue them rather than returning them
             # directly, so the pop above stays the single source of progress.
@@ -1203,6 +1235,13 @@ class AICoordinator:
             round_state.major_target_sweeps += 1
             for target in owed:
                 self._round_queue_reply(state, round_state, target)
+        # A seat asked something by name today answers before the close, even
+        # once the replies have used the budget: one turn for every question
+        # put to it before it speaks, at most `_MAX_OWED_ANSWERS_PER_SEAT` such
+        # turns a day.
+        answering = self._take_owed_answer(state, round_state, book)
+        if answering is not None:
+            return answering, _QUESTION_ANSWER_STAGE
         if state.day >= 2:
             # Before the close, every seat that has not spoken today speaks once.
             unheard = self._take_unheard_seat(state, round_state, book)
@@ -1216,21 +1255,20 @@ class AICoordinator:
         # defence and the close, so a day the replies used up still gets it --
         # given outside the budget and counted, as an owed answer is. Gating it
         # on the budget closed a sixth of the days with nobody named at all.
+        #
+        # Only a facilitator gives it: a living freemason claimant. With none,
+        # the day has no summary and no designation -- the floor has had its
+        # turns, and the vote follows. The fallback that used to appoint one
+        # (the last seat ready to vote, else the first in the day's order) made
+        # a wolf's fake claimant the summariser in all three games of run 14,
+        # and its lines reached every ballot as 【進行役の方針】. Who leads
+        # after that is for the table to settle in talk; code does not pick.
         if not round_state.summary_done:
-            if len(round_state.outputs) >= round_state.max_total:
-                self._grant_extra_turn(round_state)
-            leader = self._facilitator(state)
-            if leader is None:
-                leader = next(
-                    (
-                        pid
-                        for pid, output in reversed(round_state.outputs)
-                        if output.ready_to_vote and state.players[pid].alive
-                    ),
-                    round_state.order[0] if round_state.order else None,
-                )
             round_state.summary_done = True
+            leader = self._facilitator(state)
             if leader is not None:
+                if len(round_state.outputs) >= round_state.max_total:
+                    self._grant_extra_turn(round_state)
                 book.summary_speaker = leader
                 return leader, "consensus_summary"
             self._record_event("summary_without_speaker")
@@ -1561,6 +1599,47 @@ class AICoordinator:
                 return pid
         return None
 
+    def _asked_today(self, state: GameState, player_id: str) -> bool:
+        """The seat has a question put to it by name today that it has not had a turn to answer."""
+        return any(question.day == state.day for question in self._open_questions(player_id))
+
+    def _take_owed_answer(
+        self, state: GameState, round_state: DiscussionRoundState, book: _RoundBook
+    ) -> str | None:
+        """The next AI seat asked by name today and not yet given a turn to answer.
+
+        The reply queue answers questions while the budget lasts; this is for
+        the rest, so a seat is never hanged for a silence the scheduler
+        imposed (run 14, seed 2: マコト was asked five times and answered only
+        after the summary). The seat asked first answers first. Every
+        question put to a seat before it speaks is answered in one turn (its
+        prompt shows them all), and a seat gets at most
+        `_MAX_OWED_ANSWERS_PER_SEAT` such turns a day, so questions passed
+        back and forth cannot hold the day open. Each turn is outside the
+        follow-up budget and counted in the round's total. The human and
+        observers are never scheduled.
+        """
+        asked: list[tuple[int, str]] = []
+        positions = {message.message_id: index for index, message in enumerate(state.chat_log)}
+        for pid in self._ai_player_ids:
+            if not self._may_schedule(state, pid):
+                continue
+            if book.owed_answers_given.get(pid, 0) >= _MAX_OWED_ANSWERS_PER_SEAT:
+                continue
+            open_today = [q for q in self._open_questions(pid) if q.day == state.day]
+            if open_today:
+                first = min(positions.get(q.source_message_id, len(positions)) for q in open_today)
+                asked.append((first, pid))
+        if not asked:
+            return None
+        _first, pid = min(asked)
+        book.owed_answers_given[pid] = book.owed_answers_given.get(pid, 0) + 1
+        if pid in round_state.queued:
+            round_state.queued.discard(pid)
+            round_state.reply_queue.remove(pid)
+        self._grant_extra_turn(round_state)
+        return pid
+
     def _open_summary_followups(
         self,
         state: GameState,
@@ -1772,9 +1851,9 @@ class AICoordinator:
         """
         for question in output.directed_questions:
             self._round_queue_reply(state, round_state, question.target_id)
-        if output.needs_another_statement and self._rng.random() < min(
-            0.95, self._personalities[speaker_id].talkativeness / 1.5
-        ):
+        # The seat says whether it has more to say; its persona does not get
+        # to overrule it (it used to, at odds of talkativeness / 1.5).
+        if output.needs_another_statement:
             self._round_queue_reply(state, round_state, speaker_id)
         facilitator = self._facilitator(state)
         if facilitator is None or round_state.summary_done:
@@ -1806,8 +1885,11 @@ class AICoordinator:
     def _facilitator(self, state: GameState) -> str | None:
         """The living AI seat that leads the day: the first standing freemason CO.
 
-        The same seat the summary falls to. A seat leading only because it
-        was the last to be ready to vote is no facilitator.
+        The only seat the summary and the designations fall to. With none,
+        the day has no facilitator (owner's decision, 2026-11-18): a seat
+        ready to vote, a result holder or a medium is not appointed in its
+        place. One may still come to lead because the table asks it to in
+        talk; that is the table's to settle, not the scheduler's.
         """
         return next(
             (
@@ -2374,6 +2456,9 @@ class AICoordinator:
                     topic=topic,
                 )
             )
+            # The engine drops a pending question once it is answered; the
+            # day's record keeps every one, for tomorrow's 問答 block.
+            self._context.record_question(existing[-1])
         self._context.record_key_point(
             state.day, message_id, player_id, output.key_point, stage=stage
         )
@@ -2565,6 +2650,22 @@ class AICoordinator:
             status = "死亡した" if not state.players[leader].alive else ""
             return f"共有者CO。相方は{status}{self._spoken_label(state, leader)}です。"
         return None
+
+    def _owes_freemason_report(self, state: GameState, player_id: str) -> bool:
+        """A freemason of the AI-only plan whose next line is a report code writes.
+
+        The hidden partner's takeover CO once the leader is dead (or the
+        partner is blacked), and the claimed leader's word that the hidden
+        partner died. Not the leader's first CO: that is a planned claim.
+        """
+        if self._freemason_public_plan is None:
+            return False
+        leader, _partner, _full_reveal = self._freemason_public_plan
+        opening = self._freemason_opening(state, player_id)
+        if opening is None:
+            return False
+        claimed = any(claim.player_id == player_id for claim in state.co_declarations)
+        return claimed or player_id != leader
 
     def _spoken_label(self, state: GameState, player_id: str) -> str:
         """A player as the coded lines name them: `名前(pN)` for legacy and v2,
@@ -3232,6 +3333,8 @@ class AICoordinator:
             if self.model_decides
             else render_public_fact_summary(PublicFactLedger(state), state.day)
         )
+        if self.model_decides:
+            self._day_summaries.set_exchanges(state.day, self._context.question_exchanges(state))
         alive_ai = [pid for pid in self._ai_player_ids if state.players[pid].alive]
         if not alive_ai:
             self._day_summaries.set_summary(state.day, "", facts)
@@ -3249,7 +3352,9 @@ class AICoordinator:
             )
             if self.model_decides:
                 commentary = namify(commentary, PublicFactLedger(state))
-            self._record(state, narrator_id, "summary", text=commentary)
+            # Written in code: the seat is only where the record files it, and
+            # the stage says so, so no transcript names it as the author.
+            self._record(state, narrator_id, "summary", text=commentary, stage=_CODE_SUMMARY_STAGE)
             self._day_summaries.set_summary(state.day, commentary, facts)
             self._day_summaries.compress_if_needed()
             return
@@ -3448,6 +3553,8 @@ class AICoordinator:
             for pid in self._ai_player_ids
             if state.players[pid].alive and state.players[pid].role == RoleName.WEREWOLF
         ]
+        if not self._channel_has_company(state, RoleName.WEREWOLF):
+            return
         if self._decides_in_code and wolf_ids:
             # v2: one plan for the team, not one soliloquy each. Wolves share
             # every fact they have, so N requests bought N restatements of it.
@@ -3478,6 +3585,8 @@ class AICoordinator:
             for pid in self._ai_player_ids
             if state.players[pid].alive and state.players[pid].role == RoleName.FREEMASON
         ]
+        if not self._channel_has_company(state, RoleName.FREEMASON):
+            return
         if self._decides_in_code and mason_ids:
             await self._run_team_plan(controller, state, mason_ids, "freemason")
             return
@@ -3498,6 +3607,16 @@ class AICoordinator:
                 controller.chat(pid, output.message, "freemason")  # type: ignore[attr-defined]
             except Exception:
                 pass
+
+    @staticmethod
+    def _channel_has_company(state: GameState, role: RoleName) -> bool:
+        """A private channel with at least two living members, the human counted.
+
+        A lone survivor has nobody to talk to: the last wolf and the freemason
+        whose partner died were each asked for a line to a dead teammate once
+        a night in all three games of run 14.
+        """
+        return sum(1 for player in state.players_by_role(role) if player.alive) >= 2
 
     async def _run_team_plan(
         self, controller: object, state: GameState, member_ids: list[str], channel: str

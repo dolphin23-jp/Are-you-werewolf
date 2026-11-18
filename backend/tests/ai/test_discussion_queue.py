@@ -238,8 +238,11 @@ def test_concentrated_pressure_no_longer_assigns_a_minority_reviewer():
     # the plan notes named one seat. The owner removed it (seed-1 review,
     # 3-A3): when talk piles onto one person, someone pushing back should
     # emerge from the table, not be appointed by code. Every silent seat now
-    # gets its own short turn before the summary instead.
+    # gets its own short turn before the summary instead. p1 leads as the
+    # freemason: a day with no facilitator has no summary at all.
     controller = make_controller(seed=4)
+    controller.state.phase = Phase.DISCUSSION
+    controller.co("p1", "freemason")
     coordinator = AICoordinator(
         controller.state, ["p1", "p2", "p3", "p4"], MorningPriorityProvider(), seed=1
     )
@@ -310,10 +313,11 @@ def test_direct_reply_queue_is_globally_bounded_and_returns_control():
 
     asyncio.run(coordinator.run_discussion_round(session))
 
-    # Five, plus the facilitator's one provisional designation: the summary
-    # here questions only its own speaker, which names nobody, and since the
-    # seed-1 review such a summary no longer ends the day on its own.
-    assert provider.calls <= 6
+    # Bounded: the round's five turns, then at most two owed answers a seat
+    # (each line asks the other seat something, so one is always owed). No
+    # summary: neither seat claimed freemason, so the day has no facilitator.
+    assert provider.calls <= 5 + 2 * 2
+    assert session.discussion_round.complete is True
     # Questions now reach targets even before their first turn; the target can
     # therefore be queued for a focused follow-up rather than being discarded.
     authors = [message.author_id for message in controller.state.chat_log]
@@ -356,6 +360,8 @@ def test_immediate_morning_intent_speaks_before_normal_seating_order():
 
 def test_major_targets_reply_twice_before_one_consensus_summary():
     controller = make_controller(seed=4)
+    controller.state.phase = Phase.DISCUSSION
+    controller.co("p1", "freemason")
     coordinator = AICoordinator(controller.state, ["p1", "p2"], MorningPriorityProvider(), seed=1)
     accused = DiscussionOutput(public_message="accuse")
     accused.reasoning_memo.execution_target = "p2"
@@ -376,8 +382,7 @@ def test_major_targets_reply_twice_before_one_consensus_summary():
     round_state.queued.clear()
 
     speaker, stage = coordinator._next_discussion_speaker(controller.state, round_state)
-    assert stage == "consensus_summary"
-    assert speaker in {"p1", "p2"}
+    assert (speaker, stage) == ("p1", "consensus_summary")
     assert round_state.summary_done is True
 
 

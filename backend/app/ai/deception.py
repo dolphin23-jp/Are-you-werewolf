@@ -78,11 +78,24 @@ class FakeClaimGuard:
     wolf_team_ids: set[str]
     _claimed_targets_by_faker: dict[str, set[str]] = field(default_factory=dict)
 
-    def can_claim_result(self, faker_id: str, target_id: str, claimed_is_werewolf: bool) -> bool:
+    def can_claim_result(
+        self,
+        faker_id: str,
+        target_id: str,
+        claimed_is_werewolf: bool,
+        *,
+        target_alive: bool = True,
+    ) -> bool:
+        """Whether a fake claimant may report this result. Either colour is allowed.
+
+        A black on a living teammate outs it and is refused. A black on an
+        executed teammate is the result the real medium sees too, so a fake
+        medium may report it (owner's decision on run 14).
+        """
         already_claimed = target_id in self._claimed_targets_by_faker.get(faker_id, set())
         if already_claimed:
             return False
-        if claimed_is_werewolf and target_id in self.wolf_team_ids:
+        if claimed_is_werewolf and target_id in self.wolf_team_ids and target_alive:
             # A fake-seer/fake-medium must never accidentally out a teammate.
             return False
         return True
