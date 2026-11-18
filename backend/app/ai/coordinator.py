@@ -170,6 +170,15 @@ _CONFIRMATION_STAGE = "freemason_confirmation"
 # turn is the opportunity, what is said in it is the seat's own.
 _OPEN_FLOOR_STAGE = "open_floor"
 
+# Day 1 (v3): once every seat has given its first view, each seat without a CO
+# that has said fewer than two lines gets one more turn before the summary, to
+# say how the grey looks now that the grey has spoken. Day 1 used to give each
+# grey one 60-character line said before most greys had spoken, so the only
+# ground a day-1 ballot could find was 「その一行で疑い先を出していない」 (15 or
+# 16 of 16 day-1 ballots in all four games of runs 14-15). Each turn is outside
+# the follow-up budget and counted in the round's total.
+_GREY_VIEW_STAGE = "grey_view"
+
 # A seat the closing summary put a question to, answering it. It used to be
 # the 30-character reaction for any seat not under pressure, too short for an
 # answer the day is about to be decided on.
@@ -559,6 +568,8 @@ class _RoundBook:
     closed: bool = False
     # The seats offered a silent-seat turn today, drawn once and walked once.
     unheard_plan: list[str] | None = None
+    # Day 1: the seats offered a grey-view turn, drawn once and walked once.
+    grey_view_plan: list[str] | None = None
     # Answers given outside the budget to seats asked by name, per seat.
     owed_answers_given: dict[str, int] = field(default_factory=dict)
 
@@ -661,6 +672,11 @@ class AICoordinator:
             fake_claim_guard=fake_claim_guard,
             observer_player_ids=self._observer_player_ids,
             engine=self._engine,
+            skills=(
+                {pid: skill.value for pid, skill in reasoning.skills.items()}
+                if reasoning is not None
+                else None
+            ),
         )
 
         # v3 seats speak through the compact chat wire schema: the full
@@ -1247,8 +1263,14 @@ class AICoordinator:
         answering = self._take_owed_answer(state, round_state, book)
         if answering is not None:
             return answering, _QUESTION_ANSWER_STAGE
+        if state.day == 1 and self.model_decides:
+            # Every seat has had its first-view turn by now (the roll call).
+            grey_view = self._take_grey_view_seat(state, round_state, book)
+            if grey_view is not None:
+                return grey_view, _GREY_VIEW_STAGE
         if state.day >= 2:
             # Before the close, every seat that has not spoken today speaks once.
+            # Day 1 needs no such turn: its roll call gave every seat one.
             unheard = self._take_unheard_seat(state, round_state, book)
             if unheard is not None:
                 return unheard, _OPEN_FLOOR_STAGE
@@ -1457,6 +1479,38 @@ class AICoordinator:
                 continue
             if pid in round_state.queued:
                 # One turn, not this one and a queued reply right after it.
+                round_state.queued.discard(pid)
+                round_state.reply_queue.remove(pid)
+            self._grant_extra_turn(round_state)
+            return pid
+        return None
+
+    def _take_grey_view_seat(
+        self, state: GameState, round_state: DiscussionRoundState, book: _RoundBook
+    ) -> str | None:
+        """Day 1: the next living AI seat without a CO and with fewer than two lines today.
+
+        Offered once each, in an order drawn per game, after the first views
+        and the replies they opened; a seat that has said two lines by the
+        time its turn comes (answering a question, say), or has claimed a
+        role meanwhile, is passed over. So this ends after at most one turn
+        per living seat. The human and observers are never offered one.
+        """
+        if book.grey_view_plan is None:
+            plan = [pid for pid in self._ai_player_ids if self._may_schedule(state, pid)]
+            random.Random(f"{self._seed}:grey-view:{state.day}").shuffle(plan)
+            book.grey_view_plan = plan
+        claimed = {claim.player_id for claim in state.co_declarations}
+        lines_today = Counter(
+            message.author_id
+            for message in state.chat_log
+            if message.day == state.day and message.channel is ChatChannel.PUBLIC
+        )
+        while book.grey_view_plan:
+            pid = book.grey_view_plan.pop(0)
+            if not self._may_schedule(state, pid) or pid in claimed or lines_today[pid] >= 2:
+                continue
+            if pid in round_state.queued:
                 round_state.queued.discard(pid)
                 round_state.reply_queue.remove(pid)
             self._grant_extra_turn(round_state)

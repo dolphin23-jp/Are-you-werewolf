@@ -14,7 +14,8 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Iterable, Sequence
+from collections import Counter
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Any
 
@@ -48,7 +49,7 @@ from app.engine.state import (
     PendingQuestion,
     PublicDeathCause,
 )
-from app.eval.reasoning_analyzer import stance_excuse
+from app.eval.reasoning_analyzer import named_seat_ids, split_sentences, stance_excuse
 
 # Night 0 has no attack: the scripted first victim dies (and is never listed
 # here), and the only other way to die that night is a seer divining the fox.
@@ -120,6 +121,13 @@ def _has_living_freemason_claimant(state: GameState) -> bool:
         and state.players[claim.player_id].alive
         for claim in state.co_declarations
     )
+
+
+def _ids(value: object) -> list[str]:
+    """The seat ids in a stored note field: the strings of a list, nothing else."""
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, str)]
 
 
 # What a fake claimant may report, said to the wolf and the madman alike: a
@@ -209,8 +217,10 @@ CHAT_DISCUSSION_OUTPUT_INSTRUCTION = """次のJSONだけを返してください
 plan_noteを先に書き、そのメモに沿ってpublic_messageを書く:
 {"plan_note": {"plan": "非公開の方針メモ。内訳の見立て、候補の比べ合い、今日の方針を2〜3文で", \
 "execution_target": "今日投票するつもりの相手のplayer_id。決めきれていなくても今の\
-いちばんを書き、材料が何もないときだけnull", \
-"suspects": ["卓で疑いを向ける順のplayer_id"], "trusted": ["信用しているplayer_id"], \
+いちばんを書き、材料が何もないときだけnull。まだ手番が来ていない席を、話していないことで\
+選ばない", \
+"suspects": ["卓で疑いを向ける順のplayer_id"], \
+"trusted": ["白く見ていて、今日の吊り位置ではないと置くplayer_id(確定白や真と見る役職者も)"], \
 "trusted_seer": "真と見ている占いCO者のplayer_idまたはnull", \
 "fox_candidates": ["妖狐候補のplayer_id"], \
 "team_plan": "非公開。人狼・狂人は陣営としての狙いと次の一手を短く。それ以外は空文字"}, \
@@ -226,12 +236,13 @@ plan_noteを先に書き、そのメモに沿ってpublic_messageを書く:
 player_idは【名簿】で引いてください。public_messageの中にはplayer_idを書きません。
 public_resultsは本当に自分が持っている結果（騙りなら騙りとして出す結果）だけを入れます。"""
 
-# Wolf and madman seats only, after the contract above. execution_target and
-# suspects are the seat's position at the table for every role (the vote
-# prompt and its audit read them as that); a seat whose real read differs
-# from its position is told where the read goes. The schema is unchanged.
+# Wolf and madman seats only, after the contract above. execution_target,
+# suspects and trusted are the seat's position at the table for every role (the
+# vote prompt and its audit read the first two as that, the seer's night prompt
+# reads all three: `_grey_table_layer`); a seat whose real read differs from
+# its position is told where the read goes. The schema is unchanged.
 CHAT_TEAM_READ_LINE = (
-    "execution_targetとsuspectsは卓での立場。"
+    "execution_target・suspects・trustedは卓での立場。"
     "本当の見立て（真占い・狩人・狐の候補）はteam_planに書く。"
 )
 
@@ -320,6 +331,21 @@ class DaySummaryManager:
 
 
 @dataclass(frozen=True)
+class _LineStance:
+    """A posted line, with the stance its turn's plan note held on the seats it names.
+
+    `trusted` is the note's white placements (not today's hang position);
+    `doubted` its suspects and hang target. Read with the line itself by
+    `_grey_table_layer`: only a seat the line names counts.
+    """
+
+    message_id: str
+    author_id: str
+    trusted: frozenset[str]
+    doubted: frozenset[str]
+
+
+@dataclass(frozen=True)
 class _NoteSource:
     """Where a seat's plan note was written: the day, the turn's stage and, once
     the line is posted, its message id."""
@@ -339,8 +365,13 @@ class ContextBuilder:
         fake_claim_guard: FakeClaimGuard,
         observer_player_ids: set[str] | None = None,
         engine: str = "legacy",
+        skills: Mapping[str, str] | None = None,
     ) -> None:
         self._personalities = personalities
+        # Each seat's skill (`reasoning.skill.Skill` values): which grey-reading
+        # doctrine it reads. A seat with none reads as expert, as the runtime's
+        # own default does.
+        self._skills = dict(skills or {})
         self._day_summaries = day_summaries
         self._analyzer = StrategyAnalyzer()
         # v3 speaks in the chat register: names only, short lines, the board
@@ -361,6 +392,9 @@ class ContextBuilder:
         # Day -> every named question recorded that day, answered or not. The
         # engine drops a pending question once answered; this keeps them.
         self._questions: dict[int, list[PendingQuestion]] = {}
+        # Day -> each posted line whose turn wrote a plan note, with that note's
+        # stance on seats (`_LineStance`), for the seer's night prompt.
+        self._line_stances: dict[int, list[_LineStance]] = {}
         self._knowledge = KnowledgeBase()
 
     def record_question(self, question: PendingQuestion) -> None:
@@ -414,6 +448,18 @@ class ContextBuilder:
             and (source.day, source.stage) == (day, stage)
         ):
             self._note_sources[player_id] = replace(source, message_id=message_id)
+            memo = self._reasoning_memos.get(player_id, {})
+            target = memo.get("execution_target")
+            self._line_stances.setdefault(day, []).append(
+                _LineStance(
+                    message_id=message_id,
+                    author_id=player_id,
+                    trusted=frozenset(_ids(memo.get("trusted"))),
+                    doubted=frozenset(
+                        [*_ids(memo.get("suspects")), *_ids([target] if target else [])]
+                    ),
+                )
+            )
         if stage in _DIRECTION_STAGES:
             self._direction_ids.setdefault(day, {})[stage] = message_id
 
@@ -1159,6 +1205,11 @@ class ContextBuilder:
             )
         elif stage == "open_floor":
             stage_instruction = "今日はまだ発言していません。いま言いたいことを述べてください。"
+        elif stage == "grey_view":
+            stage_instruction = (
+                "全員が一度ずつ発言しました。ここまでの発言から、白く見える人(今日の吊り位置では"
+                "ないと置く人)や気になる人を、理由を添えて述べてください。"
+            )
         elif stage == "summary_answer":
             stage_instruction = (
                 "進行役のまとめで名指しで質問されています。まずその質問に直接答えてください。"
@@ -1255,6 +1306,7 @@ class ContextBuilder:
             *filter(None, [self._layer_last_night_team_chat(state, player_id)]),
             self._layer_previous_memo(state, player_id),
             self._layer_e_current_log(state, ChatChannel.PUBLIC),
+            *filter(None, [self._waiting_seats_layer(state, player_id)]),
             *filter(None, [self._no_facilitator_layer(state)]),
             f"【いまの場面】{self._stage_label(stage)}。{stage_instruction}"
             "当日のログは各行の先頭に[mN]の発言IDが付いている。誰かの発言を受けて話すなら"
@@ -1270,6 +1322,25 @@ class ContextBuilder:
         return self._assemble(
             [self._layer_a_system(state, player_id), self._layer_b_role(state, player_id)],
             user_layers,
+        )
+
+    def _waiting_seats_layer(self, state: GameState, player_id: str) -> str:
+        """The AI seats whose turn has not come yet today, said as the schedule it is.
+
+        Run 15's day 1: サクラ put ソウタ down as the day's hang at m12, before
+        ソウタ's first line (m14) -- six of eight first-view hang targets named a
+        seat that had not spoken yet. The discussion prompt only showed who had
+        spoken, so "not in the log" read as silence. The vote prompt already
+        carried this list; the discussion now carries it too. The human seat
+        speaks when it chooses and is never listed.
+        """
+        waiting = [pid for pid in self._seats_without_a_turn(state) if pid != player_id]
+        if not waiting:
+            return ""
+        return (
+            f"【今日まだ手番が来ていない席】{self._labels(state, waiting)}"
+            "（AI席の手番は進行が割り振る。まだ話していないのは手番が来ていないためで、"
+            "黙っているのではない。人間の席は含めない）"
         )
 
     @staticmethod
@@ -1346,6 +1417,27 @@ class ContextBuilder:
             # The seat has had no turn today. The turn is its opportunity;
             # nothing here suggests what to use it for.
             return f"今日はまだ話していない。いま言いたいことを言う。{cap}字以内。"
+        if stage == "grey_view":
+            # Day 1, after every seat has given its first view: the turn the
+            # table reads the grey in (owner's decisions of 2026-11-18, 3-5).
+            # White placements are named beside doubts, so trust has a place
+            # to be said; which seats and why are the seat's own.
+            return (
+                "全員が一度ずつ話したあとの、灰の見え方。ここまでの発言から、"
+                "白く見える人(今日の吊り位置ではないと置く人)や気になる人を、"
+                f"理由を添えて一言。{cap}字以内。"
+            )
+        if stage == "initial_view" and state.day == 1:
+            # Day 1's menu used to read 「内訳の見立て、吊り方針、誰かへの質問」
+            # over a board whose only entries were night-0 results: the only
+            # question to ask was a seer's reason, raised in all four games of
+            # runs 14-15 and answered "random" every time. The seat's own way
+            # of reading the grey is on the menu now; nothing is taken off it.
+            return (
+                "初日の最初の発言。役職COがあるならそれ。なければ、いま一番言いたいことを一つ"
+                "(内訳の見立て、今日の方針、灰をどう見ていくか、誰かへの質問など)。"
+                f"{cap}字以内。"
+            )
         return (
             "今日の最初の発言。盤面を見て一番言いたいこと(役職COがあるならそれ、内訳の見立て、"
             f"吊り方針、誰かへの質問のどれか)を一つ。{cap}字以内。"
@@ -1595,6 +1687,8 @@ class ContextBuilder:
         ]
         if self._chat:
             user_layers.append(self._layer_todays_public_discussion(state))
+            if action_type == "divine":
+                user_layers.append(self._grey_table_layer(state, player_id))
         user_layers += [
             self._layer_previous_memo(state, player_id),
             f"【夜行動: {action_label}({action_type})】候補: {candidates}{extra}",
@@ -1605,6 +1699,80 @@ class ContextBuilder:
         return self._assemble(
             [self._layer_a_system(state, player_id), self._layer_b_role(state, player_id)],
             user_layers,
+        )
+
+    def _grey_table_layer(self, state: GameState, player_id: str) -> str:
+        """The day just discussed, as the table placed each unclaimed seat: for the seer.
+
+        The genuine seer's night-1 reason in all four games of runs 14-15 was
+        suspicion or "stood out", never the seat the table would not hang --
+        the seer's night prompt had the day's log but no picture of who was
+        trusted and who was a hang candidate (owner's decision 7: the seer
+        divides the grey with the hang). Per living unclaimed seat: its lines
+        today, who named it at the table while placing it white or doubting
+        it, and the first ballot's votes on it.
+
+        Read by rule, as `_named_closing_target` reads a designation: a line
+        counts for a seat it names (whole, in a sentence that does not only
+        ask that seat something) when the note the same turn wrote holds the
+        seat as trusted (白置き) or as a suspect or the hang target (疑い).
+        A seat named both ways in one line counts as white. Lines whose turn
+        wrote no note (code-written, the brief contract) count for nothing.
+        """
+        ledger = PublicFactLedger(state)
+        claimed = {claim.player_id for claim in ledger.co_declarations()}
+        seats = [
+            pid
+            for pid in state.alive_ids()
+            if pid not in claimed and pid != player_id and pid not in self._observer_player_ids
+        ]
+        if not seats:
+            return ""
+        names = {pid: player.name for pid, player in state.players.items()}
+        posted = {
+            message.message_id: message
+            for message in state.chat_log
+            if message.channel is ChatChannel.PUBLIC and message.day == state.day
+        }
+        white: dict[str, list[str]] = {pid: [] for pid in seats}
+        doubt: dict[str, list[str]] = {pid: [] for pid in seats}
+        for stance in self._line_stances.get(state.day, []):
+            message = posted.get(stance.message_id)
+            if message is None:
+                continue
+            for sentence in split_sentences(message.content):
+                for seat in named_seat_ids(sentence, names):
+                    if seat not in white or seat == stance.author_id:
+                        continue
+                    if stance_excuse(sentence, seat, names):
+                        continue
+                    if seat in stance.trusted:
+                        bucket = white[seat]
+                    elif seat in stance.doubted:
+                        bucket = doubt[seat]
+                    else:
+                        continue
+                    if stance.author_id not in bucket:
+                        bucket.append(stance.author_id)
+        lines_today = Counter(message.author_id for message in posted.values())
+        votes = Counter(
+            vote.target_id
+            for vote in state.vote_records
+            if vote.day == state.day and vote.round == 1
+        )
+        rows = []
+        for pid in seats:
+            parts = [
+                f"発言{lines_today[pid]}回",
+                f"白置き: {self._labels(state, white[pid])}",
+                f"疑い: {self._labels(state, doubt[pid])}",
+                f"票{votes[pid]}",
+            ]
+            seat = f"{self._label(state, pid)}（{public_status(state, pid)}）"
+            rows.append(f"- {seat}: " + " / ".join(parts))
+        return (
+            f"【{state.day}日目の卓での置かれ方】CO無しの生存者ごとに、その日の発言数、"
+            "卓で名前を出して白く置いた人・疑った人、その日の投票で入った票\n" + "\n".join(rows)
         )
 
     def build_wolf_chat_context(
@@ -1757,6 +1925,7 @@ class ContextBuilder:
             fake_role=fake_role,
             perspective_needed=perspective_needed,
             engine=self._engine,
+            skill=self._skills.get(player_id, ""),
         )
         return [doctrine.body for doctrine in self._knowledge.select(context)]
 
@@ -1772,6 +1941,7 @@ class ContextBuilder:
             "final_designation": "本指定",
             "human_followup": "人間発言への応答",
             "open_floor": "ひとこと",
+            "grey_view": "灰の見え方",
             "summary_answer": "まとめへの回答",
             "question_answer": "質問への回答",
             "provisional_designation": "仮指定",
