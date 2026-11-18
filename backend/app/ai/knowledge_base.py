@@ -31,6 +31,11 @@ class KnowledgeContext:
     # Which reasoning engine is asking. A doctrine may name the engines it is
     # written for (`engines: v3`); one that names none applies to all of them.
     engine: str = ""
+    # The seat's skill (`reasoning.skill.Skill` value). A doctrine may name the
+    # skills it is written for (`skills: expert, average`); one that names none
+    # applies to every seat. An unknown skill reads as expert, as the runtime's
+    # own default does.
+    skill: str = ""
 
 
 def parse_doctrine(text: str) -> Doctrine:
@@ -100,6 +105,9 @@ class KnowledgeBase:
             return False
         engines = _csv(meta.get("engines"))
         if engines and context.engine not in engines:
+            return False
+        skills = _csv(meta.get("skills"))
+        if skills and (context.skill or "expert") not in skills:
             return False
         return True
 
