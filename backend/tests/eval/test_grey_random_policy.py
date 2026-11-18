@@ -64,13 +64,27 @@ def _facts(
     )
 
 
-# Run 14, seed 1 day 1, as a shape: the seat waits on a seer claimant, the
-# facilitator then closes the day as grey random, the seat votes a grey seat.
+# Run 14, seed 1 day 1, as a shape: the seat speaks about a seer claimant,
+# the facilitator then closes the day as grey random, the seat votes a grey
+# seat. In run 14 the seat only waited for the claimant's answer (「ハルトの
+# 回答待ちだね」); that is no stance since the X10 fix (see
+# `test_waiting_on_a_claimants_answer_is_no_stance_to_leave`), so the shape
+# says the name as a stance.
 DAY = [
     ("p1", "占いCO。0日目夜の結果はマコトが白。"),
-    ("p4", "ハルトの回答待ちだね。答えを聞いてから決めたい。"),
+    ("p4", "ハルトの対抗は怪しい。答えを聞いてから決めたい。"),
     ("p5", "えっと、今日はグレランでお願いします…。"),
 ]
+
+
+def test_waiting_on_a_claimants_answer_is_no_stance_to_leave():
+    """Run 14's own line: the name only as the seat asked, so not judged at all."""
+    day = [DAY[0], ("p4", "ハルトの回答待ちだね。答えを聞いてから決めたい。"), DAY[2]]
+
+    kind, why = classify_vote_change(_facts("p1", "p3", day, closing=("m3",)))
+
+    assert kind is VoteChangeKind.MEMO_TARGET_ONLY_REPORTED_OR_ASKED
+    assert "「ハルトの回答待ちだね」" in why
 
 
 def test_leaving_a_claimant_for_a_grey_seat_after_a_grey_random_close_is_explained():
@@ -145,7 +159,15 @@ def _load(seed: int) -> GameTranscript:
 
 @pytest.mark.parametrize(("seed", "live", "now"), [(1, 4, 1), (2, 2, 0), (3, 1, 0)])
 def test_run14_reclassified(seed: int, live: int, now: int):
-    """The live gate counted 4/2/1; six of the seven followed a grey-random close."""
+    """The live gate counted 4/2/1; six of the seven followed a grey-random close.
+
+    Since the X10 reading, four of those six are not compared at all: the
+    seat had named the claimant only in its own result (ダイキ 「0日目夜の結果
+    はシオンが白」, レン 「0日目夜はソウタさんを占って、結果は白でした」) or in
+    a question to it (ハルト 「ケントの回答待ちだね」, アオイ 「まずレンさんと
+    ケントさんの答えを聞きたいです」) -- `memo_target_only_reported_or_asked`.
+    The gate's count is the same either way.
+    """
     transcript = _load(seed)
     live_count = sum(
         audit.target_change_classification == "unexplained"

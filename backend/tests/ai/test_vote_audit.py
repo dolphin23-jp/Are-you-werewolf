@@ -657,4 +657,8 @@ def test_on_the_first_games_boards_no_move_with_a_vague_reason_counts_as_persuas
     # 43 moves leave a memo target nobody heard, and are not judged.)
     assert kinds[VoteChangeKind.NEW_PUBLIC_EVIDENCE] == 13
     assert kinds[VoteChangeKind.MEMO_TARGET_UNSPOKEN] == 43
-    assert kinds[VoteChangeKind.UNEXPLAINED] == 201
+    # アカリ on day 3 named her candidate ダイキ only in a question to him
+    # (「ダイキさん、この点はどう説明されますか？」): no stance on him the table
+    # heard (`stance_excuse`), so her 10 moves are listed, not judged.
+    assert kinds[VoteChangeKind.MEMO_TARGET_ONLY_REPORTED_OR_ASKED] == 10
+    assert kinds[VoteChangeKind.UNEXPLAINED] == 191

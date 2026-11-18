@@ -68,6 +68,9 @@ _CHANGE_KIND = {
     # Compared with nothing: no turn that day, or a memo that named nobody.
     "no_basis": "比較できない",
     "memo_target_unspoken": "卓で言っていないメモの吊り先からの変更（合否に数えない）",
+    "memo_target_only_reported_or_asked": (
+        "メモの吊り先に自分の結果の発表か本人への質問でだけ触れた変更（合否に数えない）"
+    ),
 }
 
 # A discussion utterance's private note, field by field, in reading order.

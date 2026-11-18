@@ -14,6 +14,7 @@ from typing import Any, Literal
 from app.eval.analyzers import AnalysisResult
 from app.eval.reasoning_analyzer import AllyVoteKind, VoteChangeKind, audit_ballots
 from app.eval.release_gate import HARD_FAILURE_FIELDS
+from app.eval.table_tells import TABLE_TELLS_HEADING, render_table_tells
 from app.eval.transcript import GameTranscript
 from app.eval.transcript_render import team_label
 
@@ -215,6 +216,11 @@ def render_report(
         )
     else:
         add(_render_judge(judge_summary))
+
+    table_tells = render_table_tells([transcript for transcript, _analysis in games])
+    if table_tells:
+        add(f"\n## 7. {TABLE_TELLS_HEADING}\n")
+        add(table_tells)
 
     return "\n".join(lines) + "\n"
 
@@ -513,7 +519,8 @@ def _render_ballot_lists(games: list[tuple[GameTranscript, AnalysisResult]]) -> 
 
     The gate measures a seat's public stance against its vote. A ballot with
     no basis was compared with nothing; a change off a memo target the seat
-    never said aloud left no stance the table saw; a change with a cause the
+    never said aloud, or said only in its own result about that seat or in a
+    question to it, left no stance the table saw; a change with a cause the
     table could see is justified. None of them fails the gate, and each is
     listed so a reader can check the reading rather than trust a count. The
     unexplained changes the gate does fail come first, quoted the same way.
@@ -535,19 +542,24 @@ def _render_ballot_lists(games: list[tuple[GameTranscript, AnalysisResult]]) -> 
         "",
         "比較できた票／全票（その日の手番がない票と、メモの吊り先が空の票は比較できません）:",
         "",
-        "| seed | 比較できた票／全票 | 比較できない | 卓で言っていない吊り先からの変更 |",
-        "|---|---|---|---|",
+        "| seed | 比較できた票／全票 | 比較できない | 卓で言っていない吊り先からの変更 "
+        "| 結果の発表・本人への質問でだけ触れた吊り先からの変更 |",
+        "|---|---|---|---|---|",
     ]
     for transcript, verdicts in audited:
         no_basis = sum(v.kind is VoteChangeKind.NO_BASIS for v in verdicts)
         unspoken = sum(v.kind is VoteChangeKind.MEMO_TARGET_UNSPOKEN for v in verdicts)
+        excused = sum(
+            v.kind is VoteChangeKind.MEMO_TARGET_ONLY_REPORTED_OR_ASKED for v in verdicts
+        )
         out.append(
             f"| {_seed(transcript)} | {len(verdicts) - no_basis} / {len(verdicts)} | "
-            f"{no_basis} | {unspoken} |"
+            f"{no_basis} | {unspoken} | {excused} |"
         )
 
     unexplained_rows: list[str] = []
     unspoken_rows: list[str] = []
+    excused_rows: list[str] = []
     justified_rows: list[str] = []
     designated_rows: list[str] = []
     mismatch_rows: list[str] = []
@@ -585,6 +597,14 @@ def _render_ballot_lists(games: list[tuple[GameTranscript, AnalysisResult]]) -> 
                 unspoken_rows.append(
                     f"| {_seed(transcript)} | {day} | {voter} | {basis} → {target} | "
                     f"{_quote(last_line)} | {_quote(verdict.reason)} |"
+                )
+            elif verdict.kind is VoteChangeKind.MEMO_TARGET_ONLY_REPORTED_OR_ASKED:
+                sentences = " ／ ".join(
+                    f"「{sentence}」（{excuse}）" for sentence, excuse in verdict.excused_sentences
+                )
+                excused_rows.append(
+                    f"| {_seed(transcript)} | {day} | {voter} | {basis} → {target} | "
+                    f"{_quote(sentences)} | {_quote(verdict.reason)} |"
                 )
             elif verdict.kind in _JUSTIFIED_LABELS:
                 justified_rows.append(
@@ -637,6 +657,27 @@ def _render_ballot_lists(games: list[tuple[GameTranscript, AnalysisResult]]) -> 
             "| seed | 日 | 投票者 | メモの吊り先 → 票 | その日の自分の最後の発言 | 票の理由 |",
             "|---|---|---|---|---|---|",
             *unspoken_rows,
+        ]
+    else:
+        out.append("(ありません)")
+    out += [
+        "",
+        "#### 結果の発表・本人への質問でだけ触れたメモの吊り先からの変更"
+        "（`memo_target_only_reported_or_asked`）",
+        "",
+        "メモの吊り先の名前がその日の自分の発言に出ているが、どの文も、その席についての"
+        "自分の能力結果の発表（結果が登録された発言の中で、名前の後に白・黒などの判定を"
+        "述べ、吊り・投票・指定の語を含まない文）か、その席への質問（問いかけ・回答待ち・"
+        "回答の要求で、名前が呼びかけか回答を求められる側として出る文）だったものです。"
+        "文の形だけで読み、意図は読みません。卓には離れる立場が見えていないので、"
+        "合否に数えません。読み違いがないか確かめられるよう、該当する文をすべて引きます。",
+        "",
+    ]
+    if excused_rows:
+        out += [
+            "| seed | 日 | 投票者 | メモの吊り先 → 票 | 名前が出た文（読み） | 票の理由 |",
+            "|---|---|---|---|---|---|",
+            *excused_rows,
         ]
     else:
         out.append("(ありません)")

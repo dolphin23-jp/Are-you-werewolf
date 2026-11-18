@@ -201,6 +201,14 @@ def test_a_question_to_the_target_quotes_the_sentence_that_names_it():
 # pushed the name in words the old detector lacked, and it flagged them; each
 # now sees the sentence it said. Every other line is labelled an excerpt, except
 # the pairs in SHOWN_WHOLE.
+#
+# Since the X10 reading (owner's review of run 14), a sentence that names the
+# target only as the seat's own result about it, or as the seat asked, is not
+# quoted (`reasoning_analyzer.stance_excuse`, the ballot audit's reading):
+# アオイ's 「昨夜はツムギさんを占って、結果は黒です」, マコト's 「ツムギさん、
+# アオイさんの黒にどう反論しますか？」 and the like. The next sentence by
+# position takes its place, and マコト's day-4 designation is now quoted.
+# アカリ on day 3 named ダイキ only in a question to him: ONLY_REPORTED_OR_ASKED.
 FIRST_GAME: dict[tuple[int, str, str], tuple[str, ...]] = {
     (2, "p3", "p6"): (  # ユイ, memo target レン; a push the old detector missed
         "灰はレン優先のまま押す！",
@@ -225,9 +233,8 @@ FIRST_GAME: dict[tuple[int, str, str], tuple[str, ...]] = {
         "アオイさんのグレー詰めの意見も分かるので、ホノカさんと相談して、"
         "ダイキさん吊りか灰吊りかを仮指定で出しますね",
     ),
-    (3, "p1", "p12"): (  # アカリ, memo target ダイキ
-        "ダイキさん、この点はどう説明されますか？",
-    ),
+    # アカリ, memo target ダイキ: only 「ダイキさん、この点はどう説明されますか？」
+    (3, "p1", "p12"): (),
     (3, "p5", "p11"): (  # ミオ, memo target ツムギ
         "1日目時点でハルトさんへの決め手が弱く、"
         "ツムギさんの発言が様子見に寄っていたのが気になったためです",
@@ -242,12 +249,11 @@ FIRST_GAME: dict[tuple[int, str, str], tuple[str, ...]] = {
     ),
     (3, "p12", "p15"): (  # ダイキ, memo target アオイ
         "でもアオイのソウタ結果が出たのは二死体を見た後の2日目朝だ",
-        "アオイ、俺が白を出したソウタを重ねて占ったのはなぜだ？",
+        "ソウタ・ケントの二死体は、偽占いの狐ケントが俺かアオイに呪殺されたと見る",
     ),
     (3, "p15", "p11"): (),  # アオイ, memo target ツムギ
-    (4, "p0", "p11"): (  # マコト, memo target ツムギ; its designation is left out
-        "ツムギさん、アオイさんの黒にどう反論しますか？",
-        "ただ、ツムギさんの反論はまだ聞けていないので、先に聞かせてください…",
+    (4, "p0", "p11"): (  # マコト, memo target ツムギ; her questions to ツムギ left out
+        "ツムギ黒で、今日はツムギさん吊りが第一候補だと思います",
     ),
     (4, "p8", "p11"): (  # カイト, memo target ツムギ
         "ツムギ吊りで検証、白ならアオイ狐か狂で即処理",
@@ -258,7 +264,6 @@ FIRST_GAME: dict[tuple[int, str, str], tuple[str, ...]] = {
     ),
     (4, "p15", "p11"): (  # アオイ, memo target ツムギ
         "今日はツムギさん吊りをお願いしたいです",
-        "お待たせしました、昨夜はツムギさんを占って、結果は黒です",
     ),
     (5, "p0", "p15"): (  # マコト, memo target アオイ
         "でも霊媒対抗が一度も出てないので、変えずにアオイさん本指定のままにします",
@@ -266,7 +271,7 @@ FIRST_GAME: dict[tuple[int, str, str], tuple[str, ...]] = {
     ),
     (5, "p1", "p15"): (  # アカリ, memo target アオイ
         "それでもアオイさん吊りは変えません",
-        "アオイさん、反論があれば聞かせてください",
+        "狐の可能性が残る以上、今日はアオイさんを吊るのが一番安全だと思うの",
     ),
     (5, "p3", "p15"): (  # ユイ, memo target アオイ
         "流れは変えない、今日はアオイで押す！",
@@ -311,25 +316,30 @@ FIRST_GAME: dict[tuple[int, str, str], tuple[str, ...]] = {
     (6, "p14", "p8"): (  # シオン, memo target カイト; the first sentence is cut at its end
         "カイトさんのミオさん挙げは、偽陣営の票を根拠にしている点は理解しますが、"
         "ツムギさんは霊白なので押し付けの説明としては弱…",
-        "カイトさん、1日目にマコトさんと同じくレンさんへ投票した理由を聞かせてください",
+        "私から見て、カイトさんの白はダイキさんとアオイさんという偽目の二人から出たもので、"
+        "囲いの線が残ります",
     ),
 }
 # The pairs whose quote is every sentence naming the target, each whole.
 SHOWN_WHOLE = {
     (2, "p11", "p5"),
-    (3, "p1", "p12"),
     (3, "p5", "p11"),
     (4, "p11", "p8"),
     (6, "p5", "p8"),
     (6, "p8", "p5"),
 }
 
+# The pair whose target is named only in a question to it.
+ONLY_REPORTED_OR_ASKED = {(3, "p1", "p12")}
+ONLY_REPORTED_OR_ASKED_NOTE = "(今日の卓でこの名前を出したのは、自分の結果の発表か本人への質問だけ)"
+
 # The review's seat-days where the seat put its memo target up in a sentence
 # other than the one it closed with. With one sentence per line, none of these
 # was quoted. The second sentence now comes from the same line when no earlier
 # line names the target, which brings in リク's and ユイ's. マコト's stay out:
-# an earlier line names the target (days 3 and 6), or two later sentences in
-# the line do (day 4). On day 5 リク, and on day 6 マコト, wrote a true
+# an earlier line names the target (days 3 and 6). On day 4 two later
+# sentences in the line, both questions to ツムギ, kept hers out until the X10
+# reading set questions aside; it is quoted now. On day 5 リク, and on day 6 マコト, wrote a true
 # 『昼に言った通り』 in their vote reasons. The instruction allows it: the
 # designation is in the day's log, and the line says the quote is an excerpt.
 DESIGNATIONS: dict[tuple[int, str, str], str] = {
@@ -341,7 +351,9 @@ DESIGNATIONS: dict[tuple[int, str, str], str] = {
     ),
     (6, "p3", "p8"): "ただ流れはカイトで押す",
 }
-QUOTED_FROM_THE_SAME_LINE = {(5, "p10", "p15"), (6, "p3", "p8")}
+# マコト's day-4 designation is quoted since her questions to ツムギ, the two
+# later sentences that hid it, are no stance (X10).
+QUOTED_FROM_THE_SAME_LINE = {(4, "p0", "p11"), (5, "p10", "p15"), (6, "p3", "p8")}
 
 
 def _memo_targets() -> dict[tuple[int, str], str]:
@@ -389,7 +401,9 @@ def test_the_first_game_line_is_pinned(day: int, seat: str, target: str) -> None
     name = load_transcript()["names"][target]
     sentences = FIRST_GAME[(day, seat, target)]
 
-    if not sentences:
+    if (day, seat, target) in ONLY_REPORTED_OR_ASKED:
+        assert line == f"{HEADING}{name}{ONLY_REPORTED_OR_ASKED_NOTE}"
+    elif not sentences:
         assert line == flagged(name)
     elif (day, seat, target) in SHOWN_WHOLE:
         assert line == quoted(name, *sentences)
@@ -398,7 +412,11 @@ def test_the_first_game_line_is_pinned(day: int, seat: str, target: str) -> None
 
 
 def test_the_first_game_flags_only_the_four_seats_that_never_said_the_name():
-    never_said = sorted(key for key, sentences in FIRST_GAME.items() if not sentences)
+    never_said = sorted(
+        key
+        for key, sentences in FIRST_GAME.items()
+        if not sentences and key not in ONLY_REPORTED_OR_ASKED
+    )
 
     assert never_said == [(2, "p12", "p6"), (2, "p15", "p6"), (2, "p5", "p6"), (3, "p15", "p11")]
 
@@ -440,6 +458,9 @@ def test_the_first_game_line_states_facts_about_the_seats_own_lines(
         assert line == flagged(name)
         return
     assert NOT_SAID not in line
+    if (day, seat, target) in ONLY_REPORTED_OR_ASKED:
+        assert line.endswith(ONLY_REPORTED_OR_ASKED_NOTE)
+        return
     quotes = line.split(":", 1)[1].removesuffix(")").removeprefix("「").removesuffix("」")
     nested = [content.translate(str.maketrans("「」", "『』")) for content in own]
     for quote in quotes.split("」「"):

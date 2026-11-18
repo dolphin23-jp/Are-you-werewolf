@@ -47,6 +47,7 @@ from app.engine.state import (
     PendingQuestion,
     PublicDeathCause,
 )
+from app.eval.reasoning_analyzer import stance_excuse
 
 # Night 0 has no attack: the scripted first victim dies (and is never listed
 # here), and the only other way to die that night is a seer divining the fox.
@@ -1396,18 +1397,39 @@ class ContextBuilder:
         reads its words for itself. When the quote is not every such sentence
         whole, the line says it is an excerpt: the vote instruction scopes
         『昼に言った』 to the day's log, and the quote must not read as all of it.
+
+        A sentence that names the target only as the seat's own result about
+        it, or as the seat asked, is no stance on it, by the same reading the
+        ballot audit applies (`reasoning_analyzer.stance_excuse`): run 14
+        quoted 「0日目夜はソウタさんを占って、結果は白でした」 as the stance the
+        seer should explain leaving. Such sentences are not quoted, and when
+        they are all the seat said, the line says so.
         """
         if target_id is None or target_id not in state.players:
             return "【今日のメモの吊り先】なし"
+        result_lines = {
+            event.source_message_id
+            for event in state.speech_events
+            if event.event_type in _RESULT_EVENTS
+            and event.is_binding
+            and event.day == state.day
+            and event.actor_id == player_id
+            and event.target_id == target_id
+        }
         lines = [
-            message.content
+            (message.content, message.message_id in result_lines)
             for message in state.chat_log
             if message.channel == ChatChannel.PUBLIC
             and message.day == state.day
             and message.author_id == player_id
         ]
         label = self._label(state, target_id)
-        quotes, whole = _own_sentences_naming(state, lines, target_id)
+        quotes, whole, excused = _own_sentences_naming(state, lines, target_id)
+        if not quotes and excused:
+            return (
+                f"【今日のメモの吊り先】{label}"
+                "(今日の卓でこの名前を出したのは、自分の結果の発表か本人への質問だけ)"
+            )
         if not quotes:
             return f"【今日のメモの吊り先】{label}(今日の卓ではまだこの名前を出していない)"
         said = "".join(f"「{quote}」" for quote in quotes)
@@ -1637,6 +1659,9 @@ _QUOTE_LIMIT = 60
 _QUOTE_LEAD = 20
 _ELLIPSIS = "…"
 _SENTENCE_ENDS = frozenset("。！？!?")
+# The events a seat's own result line is known by (as the ballot audit's
+# `PublishedResult`s are): a verdict stated, or a stated one corrected.
+_RESULT_EVENTS = (SpeechEventType.ABILITY_RESULT, SpeechEventType.RESULT_CORRECTION)
 _QUOTE_OPENS = frozenset("「『")
 _QUOTE_CLOSES = frozenset("」』")
 # The seat's sentence goes inside 「」; quotes inside it take the inner form.
@@ -1655,10 +1680,15 @@ _CALL_RESIDUE = re.compile(r"さん|くん|ちゃん|様|[、,。！？!?\s…�
 
 
 def _own_sentences_naming(
-    state: GameState, lines: Sequence[str], target_id: str
-) -> tuple[list[str], bool]:
-    """The seat's sentences that name `target_id`, most recent first, and
-    whether those are all of them, each whole.
+    state: GameState, lines: Sequence[tuple[str, bool]], target_id: str
+) -> tuple[list[str], bool, bool]:
+    """The seat's sentences that name `target_id` as its stance, most recent
+    first; whether those are all the sentences naming it, each whole; and
+    whether any sentence naming it was set aside.
+
+    `lines` are the seat's lines, each with whether its own result about
+    `target_id` was registered from it. A sentence that names the target
+    only as that result or as the seat asked (`stance_excuse`) is set aside.
 
     At most two, picked by position, never by what they say. The first is the
     day's last sentence naming the target. The second is the last one in the
@@ -1667,17 +1697,23 @@ def _own_sentences_naming(
     the seat closed its line with does not hide the rest of that line. Each is
     cut to `_QUOTE_LIMIT` characters around the name.
     """
+    names = {pid: player.name for pid, player in state.players.items()}
     naming: list[list[tuple[str, int]]] = []
-    for line in lines:
-        found = [
-            (sentence, start)
-            for sentence in _sentences(line)
-            if (start := _first_mention(state, sentence, target_id)) is not None
-        ]
+    excused = False
+    for line, result_line in lines:
+        found: list[tuple[str, int]] = []
+        for sentence in _sentences(line):
+            start = _first_mention(state, sentence, target_id)
+            if start is None:
+                continue
+            if stance_excuse(sentence, target_id, names, result_line=result_line):
+                excused = True
+                continue
+            found.append((sentence, start))
         if found:
             naming.append(found)
     if not naming:
-        return [], True
+        return [], True, excused
     *earlier, latest = naming
     chosen = [latest[-1]]
     for group in [*(line[::-1] for line in reversed(earlier)), latest[:-1][::-1]]:
@@ -1687,10 +1723,14 @@ def _own_sentences_naming(
             break
     quotes = [_excerpt(sentence, start) for sentence, start in chosen]
     distinct = {sentence for line in naming for sentence, _start in line}
-    whole = len(distinct) == len(chosen) and all(
-        quote == sentence for quote, (sentence, _start) in zip(quotes, chosen, strict=True)
+    whole = (
+        not excused
+        and len(distinct) == len(chosen)
+        and all(
+            quote == sentence for quote, (sentence, _start) in zip(quotes, chosen, strict=True)
+        )
     )
-    return [quote.translate(_NESTED_QUOTES) for quote in quotes], whole
+    return [quote.translate(_NESTED_QUOTES) for quote in quotes], whole, excused
 
 
 def _first_mention(state: GameState, sentence: str, target_id: str) -> int | None:

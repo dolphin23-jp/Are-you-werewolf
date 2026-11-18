@@ -25,7 +25,15 @@ from app.ai.context import CHAT_VOTE_OUTPUT_INSTRUCTION, ContextBuilder, DaySumm
 from app.ai.deception import FakeClaimGuard, WolfDeceptionAssignment
 from app.ai.personalities import assign_personalities
 from app.engine.roles import RoleName
+from app.engine.speech_events import SpeechEvent, SpeechEventType
 from app.engine.state import ChatChannel, ChatMessage, GameState
+from app.eval.reasoning_analyzer import (
+    BallotFacts,
+    PublishedResult,
+    SpokenLine,
+    VoteChangeKind,
+    classify_vote_change,
+)
 from tests.conftest import make_controller
 
 MEMO = "【盤面メモ】"
@@ -300,27 +308,28 @@ def test_when_no_earlier_line_names_the_target_the_second_comes_from_the_same_li
 
 def test_a_designation_before_a_closing_question_to_the_target_is_quoted():
     """A facilitator names the hang mid-line, then asks the target to answer.
-    The question alone would hide the seat's own designation."""
+    The questions to the target are no stance on it (the audit's
+    `stance_excuse`): only the designation is quoted, as an excerpt."""
     line = _line_after(
         "Player2さん、昨日の投票理由は？今日はPlayer2吊りでいいと思う。Player2さん、反論ある？"
     )
 
-    assert line == excerpted("Player2", "Player2さん、反論ある？", "今日はPlayer2吊りでいいと思う")
+    assert line == excerpted("Player2", "今日はPlayer2吊りでいいと思う")
 
 
 @pytest.mark.parametrize(
     "middle", ["今日はPlayer2吊りでいいと思う", "Player2は吊らない", "Player2の白は固い"]
 )
 def test_the_second_sentence_is_picked_by_position_not_by_what_it_says(middle: str) -> None:
-    line = _line_after(f"Player2さん、昨日は？{middle}。Player2さん、反論ある？")
+    line = _line_after(f"Player2が気になる。{middle}。Player2の反論は弱かった。")
 
-    assert line == excerpted("Player2", "Player2さん、反論ある？", middle)
+    assert line == excerpted("Player2", "Player2の反論は弱かった", middle)
 
 
 def test_an_earlier_line_that_names_the_target_gives_the_second_sentence():
-    line = _line_after("Player2が怪しい。", "今日はPlayer2吊り。Player2さん、反論ある？")
+    line = _line_after("Player2が怪しい。", "今日はPlayer2吊り。Player2の反論は弱い。")
 
-    assert line == excerpted("Player2", "Player2さん、反論ある？", "Player2が怪しい")
+    assert line == excerpted("Player2", "Player2の反論は弱い", "Player2が怪しい")
 
 
 def test_an_earlier_line_that_only_repeats_the_first_sentence_gives_no_second():
@@ -423,6 +432,95 @@ def test_the_memo_line_is_bounded_however_much_the_seat_said():
 
     assert len(line) <= len(excerpted("Player2", "x" * 60, "x" * 60))
     assert line.count("「") == 2
+
+
+# -- a name only reported or asked (owner's review of run 14, X10) --
+#
+# The prompt reads the seat's stance the way the ballot audit does
+# (`reasoning_analyzer.stance_excuse`): its own result about the target, in
+# the line the result was registered from, and a question to the target are
+# no stance on it. Run 14 quoted 「0日目夜はソウタさんを占って、結果は白でした」
+# to a seer as the stance it should explain leaving.
+
+ONLY_REPORTED_OR_ASKED = "(今日の卓でこの名前を出したのは、自分の結果の発表か本人への質問だけ)"
+
+
+def _with_result(state: GameState, *, actor: str = "p1", target: str = "p2") -> None:
+    """Register the seat's own seer result about `target` from its latest line."""
+    state.speech_events.append(
+        SpeechEvent(
+            event_id=f"e{len(state.speech_events) + 1}",
+            source_message_id=state.chat_log[-1].message_id,
+            actor_id=actor,
+            event_type=SpeechEventType.ABILITY_RESULT,
+            day=state.day,
+            target_id=target,
+            role=RoleName.SEER,
+            result_is_werewolf=False,
+            referenced_day=state.day - 1,
+        )
+    )
+
+
+def _audit_kind(state: GameState, voter: str = "p1", basis: str = "p2", vote: str = "p11"):  # type: ignore[no-untyped-def]
+    """The ballot audit's reading of the same day, as the coordinator hands it over."""
+    facts = BallotFacts(
+        voter_id=voter,
+        basis=basis,
+        vote_target=vote,
+        reason="気が変わった。",
+        names={pid: player.name for pid, player in state.players.items()},
+        day_lines=tuple(
+            SpokenLine(m.message_id, m.author_id, m.content)
+            for m in state.chat_log
+            if m.day == state.day and m.channel is ChatChannel.PUBLIC
+        ),
+        results=tuple(
+            PublishedResult(e.actor_id, e.target_id, e.source_message_id)
+            for e in state.speech_events
+            if e.target_id is not None
+        ),
+        alive_ids=frozenset(state.alive_ids()),
+    )
+    return classify_vote_change(facts)[0]
+
+
+def test_the_seats_own_result_is_not_quoted_as_its_stance():
+    state = _day_two()
+    _say(state, "p1", "占いCO。昨夜はPlayer2を占って白でした。", day=2)
+    _with_result(state)
+
+    assert _memo_line(_vote_body(state, "p2")) == f"{HEADING}Player2{ONLY_REPORTED_OR_ASKED}"
+    assert _audit_kind(state) is VoteChangeKind.MEMO_TARGET_ONLY_REPORTED_OR_ASKED
+
+
+def test_the_same_sentence_without_a_result_of_its_own_is_quoted():
+    state = _day_two()
+    _say(state, "p1", "昨夜はPlayer2を占って白でした。", day=2)
+
+    assert _memo_line(_vote_body(state, "p2")) == quoted("Player2", "昨夜はPlayer2を占って白でした")
+    assert _audit_kind(state) is VoteChangeKind.UNEXPLAINED
+
+
+@pytest.mark.parametrize(
+    "said", ["Player2の回答待ちだね。", "Player2さん、昨日の投票理由は？", "Player2に聞きたい。"]
+)
+def test_a_question_to_the_target_is_not_quoted_as_the_seats_stance(said: str) -> None:
+    state = _day_two()
+    _say(state, "p1", said, day=2)
+
+    assert _memo_line(_vote_body(state, "p2")) == f"{HEADING}Player2{ONLY_REPORTED_OR_ASKED}"
+    assert _audit_kind(state) is VoteChangeKind.MEMO_TARGET_ONLY_REPORTED_OR_ASKED
+
+
+def test_a_stance_beside_its_own_result_is_quoted_as_an_excerpt():
+    """The result sentence is set aside, so the quote is not every sentence naming it."""
+    state = _day_two()
+    _say(state, "p1", "昨夜はPlayer2を占って白でした。でもPlayer2の票は気になる。", day=2)
+    _with_result(state)
+
+    assert _memo_line(_vote_body(state, "p2")) == excerpted("Player2", "でもPlayer2の票は気になる")
+    assert _audit_kind(state) is VoteChangeKind.UNEXPLAINED
 
 
 # -- the instruction --
