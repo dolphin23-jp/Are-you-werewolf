@@ -54,6 +54,9 @@ _NIGHT_ACTION = {
     RoleName.WEREWOLF.value: "襲撃",
 }
 
+# Each seat's skill (`app/ai/reasoning/skill.py`), as the cast table shows it.
+_SKILL_LABELS = {"expert": "熟練", "average": "普通", "novice": "初心者"}
+
 _CHANGE_KIND = {
     "none": "変更なし",
     "new_public_evidence": "新しい公開情報による変更",
@@ -213,8 +216,8 @@ class _Renderer:
     def _roster(self) -> list[str]:
         lines = [
             "## 配役\n",
-            "| プレイヤー | 役職 | 陣営 | 人格 | 騙り役 |",
-            "|---|---|---|---|---|",
+            "| プレイヤー | 役職 | 陣営 | 人格 | 腕前 | 騙り役 |",
+            "|---|---|---|---|---|---|",
         ]
         deception = self.t.deception or {}
         fake_roles = deception.get("fake_role_by_player", {})
@@ -225,7 +228,8 @@ class _Renderer:
             team = team_label(self.t.teams.get(pid, "-"))
             lines.append(
                 f"| {name} (`{pid}`) | {role_label(self.t.roles.get(pid))} | {team} | "
-                f"{self.t.personalities.get(pid, '-')} | {label} |"
+                f"{self.t.personalities.get(pid, '-')} | "
+                f"{_SKILL_LABELS.get(self.t.skills.get(pid, ''), '-')} | {label} |"
             )
         lines.append(f"\n人狼陣営の方針: {deception.get('wolf_pattern_label', '-')}\n")
         return lines

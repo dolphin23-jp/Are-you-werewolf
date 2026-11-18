@@ -50,6 +50,21 @@ class RoleCountIs:
 
 
 @dataclass(frozen=True)
+class RoleCountAmong:
+    """Between `at_least` and `at_most` of these seats hold `role`.
+
+    `RoleCountIs` counts the whole table; this counts a subset -- "of the six
+    alive, one or two are wolves" is what the game still running says, and it
+    is a statement about a group, not about any one seat.
+    """
+
+    player_ids: tuple[str, ...]
+    role: RoleName
+    at_least: int = 0
+    at_most: int | None = None
+
+
+@dataclass(frozen=True)
 class Unsatisfiable:
     """An assumption the observations already contradict.
 
@@ -75,7 +90,9 @@ class AnyOf:
     options: tuple[Constraint, ...]
 
 
-Constraint = RoleIs | RoleIsNot | RoleIsOneOf | RoleCountIs | Unsatisfiable | AnyOf
+Constraint = (
+    RoleIs | RoleIsNot | RoleIsOneOf | RoleCountIs | RoleCountAmong | Unsatisfiable | AnyOf
+)
 
 
 @dataclass(frozen=True)
@@ -156,6 +173,9 @@ def render_constraint(constraint: Constraint) -> str:
             return f"{pid}in{{{','.join(sorted(r.value for r in roles))}}}"
         case RoleCountIs(role=role, count=count):
             return f"#{role.value}={count}"
+        case RoleCountAmong(player_ids=pids, role=role, at_least=low, at_most=high):
+            upper = "" if high is None else str(high)
+            return f"#{role.value}in{{{','.join(sorted(pids))}}}:{low}..{upper}"
         case Unsatisfiable(reason=reason):
             return f"false({reason})"
         case AnyOf(options=options):

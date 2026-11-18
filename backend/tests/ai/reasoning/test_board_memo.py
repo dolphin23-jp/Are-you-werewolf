@@ -156,8 +156,14 @@ def test_a_named_partner_is_pending_until_the_pair_confirms_each_other():
     assert "Player7とPlayer8が互いに相方と確認済み" in _public_part(_memo(state, "p3"))
 
 
+def _without_grey(public: str) -> str:
+    """The table without each night's grey cell, which has tests of its own
+    (test_board_memo_run14.py)."""
+    return re.sub(r"〔[^〕]*〕", "", public)
+
+
 def test_seer_verdicts_are_tabled_night_by_night_with_the_day_they_were_published():
-    public = _public_part(_memo(_board(), "p3"))
+    public = _without_grey(_public_part(_memo(_board(), "p3")))
 
     assert (
         "0日目夜（初日犠牲者: Player16）: Player4→Player1=黒[1日目公開] / "
@@ -278,7 +284,7 @@ def test_day_two_says_daiki_cannot_be_the_real_seer_and_why():
 
 
 def test_day_two_tables_each_claimants_nights_and_marks_what_was_never_published():
-    public = _public_part(_g1_memo(g1.day_two_morning(), g1.YUI))
+    public = _without_grey(_public_part(_g1_memo(g1.day_two_morning(), g1.YUI)))
 
     assert (
         "0日目夜（初日犠牲者: ノゾミ）: ケント→リク=白[1日目公開] / "
@@ -294,7 +300,7 @@ def test_day_two_tables_each_claimants_nights_and_marks_what_was_never_published
 
 
 def test_day_four_keeps_the_dead_and_drops_nights_a_claimant_could_not_act():
-    public = _public_part(_g1_memo(g1.day_four_morning(), g1.YUI))
+    public = _without_grey(_public_part(_g1_memo(g1.day_four_morning(), g1.YUI)))
 
     # ケント died on night 1 and ダイキ was hanged on day 3: no cell for nights
     # they could not divine. アオイ skipped night 2, and the table shows it.
@@ -312,7 +318,7 @@ def test_a_verdict_said_again_stays_on_the_night_and_day_it_was_first_published(
     boards.verdict(state, g1.DAIKI, "seer", g1.SHION, False, day=3)  # mentioned again
     state.day = 3
 
-    public = _public_part(_g1_memo(state, g1.YUI))
+    public = _without_grey(_public_part(_g1_memo(state, g1.YUI)))
 
     assert "ダイキ→シオン=白[2日目公開]" in public
     assert "2日目夜（死体なし）: ダイキ→カイト=白[3日目公開] / アオイ→未公開" in public

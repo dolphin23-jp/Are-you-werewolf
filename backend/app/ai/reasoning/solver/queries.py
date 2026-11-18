@@ -60,11 +60,21 @@ class RoleSolver:
         builder.constraints.extend(assumption_rules.expand(self.assumptions, observations))
         self._signature = builder.signature()
         self._stats = SolverStats(constraint_ids=list(builder.constraint_ids()))
-        self._backend = Z3ConstraintBackend(
-            observations.player_ids, builder.constraints, stats=self._stats
-        )
+        self._constraints = tuple(builder.constraints)
+        # Built on the first question the cache cannot answer: a memo rendered
+        # for the sixteenth seat on the same board asks only cached questions,
+        # and building a z3 instance it never queries was most of its cost.
+        self._z3: Z3ConstraintBackend | None = None
         self.explanations = ExplanationRegistry(builder.constraints)
         self._cache = cache if cache is not None else SolverCache()
+
+    @property
+    def _backend(self) -> Z3ConstraintBackend:
+        if self._z3 is None:
+            self._z3 = Z3ConstraintBackend(
+                self.observations.player_ids, self._constraints, stats=self._stats
+            )
+        return self._z3
 
     @property
     def stats(self) -> SolverStats:

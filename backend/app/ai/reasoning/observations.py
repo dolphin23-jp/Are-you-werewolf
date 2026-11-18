@@ -159,6 +159,10 @@ class ObservationSet:
     # most valuable thing a village-side deduction could accidentally reach.
     divine_results: tuple[PrivateDivineResult, ...] = ()
     medium_results: tuple[PrivateMediumResult, ...] = ()
+    # The victory check has ended the game. Public: the table is told. Until
+    # then every check the engine ran found the game still going, which is a
+    # fact about the living (`GameRunningRuleModule`).
+    victory_decided: bool = False
 
     @classmethod
     def from_state(cls, state: GameState) -> ObservationSet:
@@ -227,6 +231,7 @@ class ObservationSet:
                 )
                 for r in state.medium_records
             ),
+            victory_decided=state.winner is not None,
         )
 
     # -- night lookups --

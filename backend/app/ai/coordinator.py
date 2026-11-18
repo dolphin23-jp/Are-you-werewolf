@@ -690,6 +690,11 @@ class AICoordinator:
                 roles={pid: p.role.value for pid, p in state.players.items()},
                 teams={pid: p.team.value for pid, p in state.players.items()},
                 personalities={pid: p.name for pid, p in self._personalities.items()},
+                skills=(
+                    {pid: skill.value for pid, skill in reasoning.skills.items()}
+                    if reasoning is not None
+                    else {}
+                ),
                 deception={
                     "wolf_pattern": wolf_deception.pattern_name,
                     "wolf_pattern_label": wolf_deception.pattern_label,
