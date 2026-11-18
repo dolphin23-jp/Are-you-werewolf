@@ -12,6 +12,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any, Literal
 
 from app.eval.analyzers import AnalysisResult
+from app.eval.grey_reading import GREY_READING_HEADING, render_grey_reading
 from app.eval.reasoning_analyzer import AllyVoteKind, VoteChangeKind, audit_ballots
 from app.eval.release_gate import HARD_FAILURE_FIELDS
 from app.eval.table_tells import TABLE_TELLS_HEADING, render_table_tells
@@ -217,10 +218,15 @@ def render_report(
     else:
         add(_render_judge(judge_summary))
 
-    table_tells = render_table_tells([transcript for transcript, _analysis in games])
+    transcripts = [transcript for transcript, _analysis in games]
+    table_tells = render_table_tells(transcripts)
     if table_tells:
         add(f"\n## 7. {TABLE_TELLS_HEADING}\n")
         add(table_tells)
+    grey_reading = render_grey_reading(transcripts)
+    if grey_reading:
+        add(f"\n## 8. {GREY_READING_HEADING}\n")
+        add(grey_reading)
 
     return "\n".join(lines) + "\n"
 
