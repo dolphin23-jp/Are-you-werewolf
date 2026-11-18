@@ -34,6 +34,8 @@ CHAT_STAGE_MAX_CHARS: dict[str, int] = {
     "open_floor": 60,
     # A seat the summary named, answering it: never the reaction's 30.
     "summary_answer": 60,
+    # A seat asked by name during the day, answering it: never the reaction's 30.
+    "question_answer": 60,
     # The facilitator's candidate when the summary named nobody.
     "provisional_designation": 60,
     # The facilitator, after the seats it asked by name have answered.

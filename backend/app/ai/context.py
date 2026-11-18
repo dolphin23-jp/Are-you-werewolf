@@ -29,8 +29,9 @@ from app.ai.personalities import (
 )
 from app.ai.provider.base import Message
 from app.ai.reasoning.board_memo import namify, render_roster, role_label
-from app.ai.reasoning.facts import SEER_RESULT, PublicFactLedger
-from app.ai.reasoning.summaries import render_day_record
+from app.ai.reasoning.facts import MEDIUM_RESULT, SEER_RESULT, PublicFactLedger
+from app.ai.reasoning.observations import ObservationSet
+from app.ai.reasoning.summaries import render_day_record, render_question_exchanges
 from app.ai.schemas import PLAN_NOTE_MEMO_FIELDS
 from app.ai.strategy import (
     StrategyAnalyzer,
@@ -79,7 +80,8 @@ _TEAM_CHANNELS: dict[RoleName, ChatChannel] = {
 # every night by `VictoryChecker`; the madman and the fox count as non-wolves.
 _WIN_LINES: dict[Team, str] = {
     Team.VILLAGE: (
-        "【勝利条件】人狼が0人になった時点で村の勝ち。ただし妖狐が生きていれば妖狐の勝ち"
+        "【勝利条件】人狼が0人になった時点で村の勝ち。ただし妖狐が生きていれば妖狐の勝ち。"
+        "人狼が人狼以外（狂人・妖狐も数える）と同数以上になれば負け"
     ),
     Team.WEREWOLF: (
         "【勝利条件】人狼が人狼以外（狂人・妖狐も数える）と同数以上になった時点で人狼陣営の勝ち。"
@@ -90,6 +92,38 @@ _WIN_LINES: dict[Team, str] = {
         "生きていれば妖狐の勝ち（村・人狼の勝ちを奪う）"
     ),
 }
+
+# A day with no living freemason claimant has no facilitator: code appoints
+# none (owner's decision 5, after run 14 made a wolf's fake claimant the
+# summariser in all three games). The day's turns still come; nobody sums up
+# or designates. Said as fact, with no 進行役 to defer to.
+_NO_FACILITATOR_DISCUSSION = (
+    "【進行役】生存している共有CO者がいないため、今日は進行役がいない"
+    "（まとめ・指定の手番はない）。全員が話し、名指しの質問への答えが出たら投票に入る。"
+)
+_NO_FACILITATOR_VOTE = (
+    "【進行役】生存している共有CO者がいないため、今日は進行役のまとめ・指定はなかった。"
+    "投票先は各自が決める。"
+)
+
+
+def _has_living_freemason_claimant(state: GameState) -> bool:
+    """A living seat that claimed freemason: the only kind of seat that facilitates.
+
+    Read as `AICoordinator._facilitator` reads it, the human counted: a
+    living human claimant is not scheduled to sum up, but may lead in talk.
+    """
+    return any(
+        claim.claimed_role == RoleName.FREEMASON
+        and claim.player_id in state.players
+        and state.players[claim.player_id].alive
+        for claim in state.co_declarations
+    )
+
+
+# What a fake claimant may report, said to the wolf and the madman alike: a
+# rule of the game, not a choice of colour.
+_FAKE_RESULT_COLOURS = "騙りの結果は、白でも黒でも出せます（本当の色に縛られません）。"
 
 # The turns that steer a day, and how a prompt quotes them: the summary and
 # the closing designation. A day with several of one keeps the last.
@@ -228,11 +262,20 @@ class DaySummaryManager:
     def __init__(self) -> None:
         self.summaries: dict[int, str] = {}
         self.facts: dict[int, str] = {}
+        # v3: each day's named questions and what was said after them
+        # (`render_question_exchanges`). Only the latest day's is shown.
+        self.exchanges: dict[int, str] = {}
 
     def set_summary(self, day: int, summary: str, facts: str = "") -> None:
         self.summaries[day] = summary
         if facts:
             self.facts[day] = facts
+
+    def set_exchanges(self, day: int, exchanges: str) -> None:
+        if exchanges:
+            self.exchanges[day] = exchanges
+        else:
+            self.exchanges.pop(day, None)
 
     def compress_if_needed(self, max_total_chars: int = 3000) -> None:
         for day in sorted(self.summaries):
@@ -261,6 +304,12 @@ class DaySummaryManager:
                 blocks.append(f"{day}日目:\n{body}")
             else:
                 blocks.append(f"{day}日目: {summary}")
+        if chat and self.exchanges.get(days[-1]):
+            # Yesterday's questions and answers, so an answered question is
+            # not asked again as if open (run 14, seed 1: the executed seat's
+            # 「まだ答えてないぞ」 survived; the answer that followed did not).
+            # Older days' are left out: the day after is when they are used.
+            blocks.append(self.exchanges[days[-1]])
         return "\n".join(blocks)
 
     def _total_chars(self) -> int:
@@ -308,7 +357,18 @@ class ContextBuilder:
         # Day -> stage -> the message posted at that stage, for the stages
         # that steer the day (`_DIRECTION_STAGES`). The last one wins.
         self._direction_ids: dict[int, dict[str, str]] = {}
+        # Day -> every named question recorded that day, answered or not. The
+        # engine drops a pending question once answered; this keeps them.
+        self._questions: dict[int, list[PendingQuestion]] = {}
         self._knowledge = KnowledgeBase()
+
+    def record_question(self, question: PendingQuestion) -> None:
+        """Keep a named question for the day's 問答 block."""
+        self._questions.setdefault(question.day, []).append(question)
+
+    def question_exchanges(self, state: GameState) -> str:
+        """v3: today's named questions and what each asked seat said next."""
+        return render_question_exchanges(state, state.day, self._questions.get(state.day, ()))
 
     def set_reasoning_memo(
         self,
@@ -518,17 +578,14 @@ class ContextBuilder:
             "ローラー、囲い、身内切り、噛み、呪殺、GJ、縄、PP、狐ケア など)\n"
             "- 「AIとして」「言語モデル」「プロンプト」などのメタ発言は絶対に禁止\n"
             "【聞き入れ方】\n"
-            "- 【前回の発言のあとに出たこと】を読み、筋が通っている指摘や新しい事実があれば、"
-            "認めて考えを変える。認めたなら疑い先・吊り先も実際に変え、誰のどの指摘で変えたかを"
+            "- 【前回の発言のあとに出たこと】の指摘や新しい事実に筋が通っているか、"
+            "それで考えを変えるかは、自分で決める。指摘の一部を認めることと、結論を変えることは別\n"
+            "- 考えを変えたなら、疑い先・吊り先も実際に変え、誰のどの指摘で変えたかを"
             "一言で言い、その発言にreply_toを向ける\n"
-            "- 筋が通らない、根拠が薄いと思うときは、変えずに理由を短く言う。強く言われただけで"
-            "折れない。多数に合わせるだけで変えることもしない\n"
-            "- 「認める」「撤回する」と言ったなら、そのとおりに動く。考えを変えないなら、"
-            "同意の言葉を前置きせず、残る理由だけを言う\n"
+            "- 変えないなら、同意の言葉を前置きせず、残る理由だけを短く言う。"
+            "強く言われただけで折れない。多数に合わせるだけで変えることもしない\n"
             "- 直前の人と同じ結論なら『〇〇に同意』と一言で。同じ理由を言い直さない\n"
             "- 一度答えたことは繰り返さない。同じ反論には「さっきの通り」と短く返す\n"
-            "- 人狼・狂人・妖狐は陣営の目的を優先する。聞き入れたふりをするか、変えないかは"
-            "戦術として選ぶ\n"
             "【考え方】\n"
             "- 【盤面メモ】の事実(CO・判定・投票・死亡)は正確に使う。メモにない判定や投票を"
             "作らない。思い込みで誰かのCOや結果を言い換えない\n"
@@ -570,9 +627,18 @@ class ContextBuilder:
             lines.append(f"あなたたちの欺瞞方針: {self._wolf_deception.pattern_label}")
             if player_id in self._wolf_deception.fake_role_by_player:
                 fake_role = self._wolf_deception.fake_role_by_player[player_id]
+                # The rule is about outing a living partner, not about the
+                # colour a fake may give. 「仲間を黒だと嘘の結果で名指ししては
+                # いけません」 read as "a fake result cannot be black": run 14's
+                # wolf medium said 「リク吊りで霊結果は白を出すしかない」 and
+                # later called its executed partner white, which proved it
+                # fake. A medium's black on an executed partner is the result
+                # the real medium sees too (owner's decision 3).
                 lines.append(
                     f"あなたは「{ROLE_DEFINITIONS[fake_role].label_ja}」を騙る担当です。"
-                    "仲間を黒だと嘘の結果で名指ししてはいけません。"
+                    f"{_FAKE_RESULT_COLOURS}"
+                    "生きている仲間を黒と名指ししてはいけません"
+                    "（処刑された仲間の霊媒結果を黒と言うのは、本物の霊媒と同じ結果なので構いません）。"
                 )
             else:
                 lines.append("あなたは潜伏担当です。無理にCOせず村人として振る舞ってください。")
@@ -591,7 +657,7 @@ class ContextBuilder:
 
         if player.role == RoleName.MADMAN and self._madman_fake_role is not None:
             fake_label = ROLE_DEFINITIONS[self._madman_fake_role].label_ja
-            lines.append(f"あなたの戦略: 「{fake_label}」を騙ってください。")
+            lines.append(f"あなたの戦略: 「{fake_label}」を騙ってください。{_FAKE_RESULT_COLOURS}")
 
         if player.role == RoleName.FREEMASON:
             partners = [
@@ -620,12 +686,55 @@ class ContextBuilder:
             lines.append("【あなただけが知る霊媒結果】" + "、".join(rendered))
             black_count = sum(1 for result in medium_results if result.is_werewolf)
             if black_count >= 2:
+                # A fact about the rules, not a role: the medium is no
+                # facilitator for having seen two blacks (owner's decision 5).
                 lines.append(
-                    "【霊媒の仕事終了】人狼判定を2回出したため、ゲームが続く限り今後の"
-                    "処刑結果は白です。自分の価値は結果ではなく確定白・進行役である点です。"
+                    "【霊媒の仕事終了】人狼判定を2回見た（3狼村）。ゲームが続く限り、今後の"
+                    "処刑結果は白になる（3人目の人狼が処刑されれば、その時点で試合が終わるため）。"
+                )
+
+        if self._chat and player.role == RoleName.HUNTER:
+            counts = self._medium_claimant_black_counts(state)
+            if counts:
+                lines.append(
+                    "【霊媒CO者が公開した黒の数】"
+                    + "、".join(f"{self._label(state, pid)}={count}回" for pid, count in counts)
+                    + "（「仕事終了」は3狼村で黒を2回出した霊媒だけ）"
                 )
 
         return "\n".join(lines)
+
+    @staticmethod
+    def _medium_claimant_black_counts(state: GameState) -> list[tuple[str, int]]:
+        """Each living medium claimant and the distinct seats it has publicly called black.
+
+        Run 14's hunters dropped the doctrine's condition (two blacks): one
+        applied it to a medium with two whites, another after one black,
+        and the medium was bitten that night both times. The count is a
+        public fact; whether it decides the guard is the hunter's call.
+        """
+        ledger = PublicFactLedger(state)
+        observations = ObservationSet.from_state(state)
+        claimants = [
+            claim.player_id
+            for claim in ledger.co_declarations()
+            if claim.claimed_role is RoleName.MEDIUM
+            and ledger.claimed_role_of(claim.player_id) is RoleName.MEDIUM
+            and state.players[claim.player_id].alive
+        ]
+        return [
+            (
+                pid,
+                len(
+                    {
+                        verdict.target_id
+                        for verdict in observations.verdicts_by(pid)
+                        if verdict.result_type == MEDIUM_RESULT and verdict.is_werewolf
+                    }
+                ),
+            )
+            for pid in dict.fromkeys(claimants)
+        ]
 
     def _status_label(self, state: GameState, player_id: str) -> str:
         player = state.players[player_id]
@@ -1053,6 +1162,8 @@ class ContextBuilder:
             stage_instruction = (
                 "進行役のまとめで名指しで質問されています。まずその質問に直接答えてください。"
             )
+        elif stage == "question_answer":
+            stage_instruction = "名指しで質問されています。まずその質問に直接答えてください。"
         elif stage == "facilitator_followup":
             stage_instruction = (
                 "名指しで質問した相手から回答がありました。それを受けて、進行役として"
@@ -1143,6 +1254,7 @@ class ContextBuilder:
             *filter(None, [self._layer_last_night_team_chat(state, player_id)]),
             self._layer_previous_memo(state, player_id),
             self._layer_e_current_log(state, ChatChannel.PUBLIC),
+            *filter(None, [self._no_facilitator_layer(state)]),
             f"【いまの場面】{self._stage_label(stage)}。{stage_instruction}"
             "当日のログは各行の先頭に[mN]の発言IDが付いている。誰かの発言を受けて話すなら"
             "そのIDをreply_toに入れる。",
@@ -1158,6 +1270,17 @@ class ContextBuilder:
             [self._layer_a_system(state, player_id), self._layer_b_role(state, player_id)],
             user_layers,
         )
+
+    @staticmethod
+    def _no_facilitator_layer(state: GameState) -> str:
+        """From day 2, on a day no living seat holds a freemason claim: the day has no facilitator.
+
+        Said as the schedule it is. Day 1's freemasons have not claimed yet
+        when the morning opens, so day 1 says nothing.
+        """
+        if state.day < 2 or _has_living_freemason_claimant(state):
+            return ""
+        return _NO_FACILITATOR_DISCUSSION
 
     def _chat_stage_instruction(self, state: GameState, stage: str) -> str:
         """What this turn is for, and its length cap.
@@ -1204,6 +1327,8 @@ class ContextBuilder:
             return f"人間のプレイヤーの発言に応答する。{cap}字以内。"
         if stage == "summary_answer":
             return f"進行役のまとめで名指しで聞かれた。まずその問いに答える。{cap}字以内。"
+        if stage == "question_answer":
+            return f"名指しで聞かれた。まずその問いに答える。{cap}字以内。"
         if stage == "facilitator_followup":
             return (
                 "名指しで聞いた問いに答えが返ってきた。それを受けて進行役として一言。"
@@ -1334,7 +1459,13 @@ class ContextBuilder:
         )
 
     def _direction_layer(self, state: GameState) -> str:
-        """Today's summary and designation, quoted as said; empty if neither."""
+        """Today's summary and designation, quoted as said.
+
+        A day with no living freemason claimant has no facilitator and no
+        such lines; the ballot is told so in plain words instead of being
+        handed some other seat's line under the facilitator's heading.
+        Empty when a facilitator gave no closing line.
+        """
         posted = {message.message_id: message for message in state.chat_log}
         lines = [
             f"- {label}（{self._label(state, message.author_id)} {message_id}）:"
@@ -1342,7 +1473,11 @@ class ContextBuilder:
             for label, message_id in self.direction_lines(state.day)
             if (message := posted.get(message_id)) is not None
         ]
-        return "【進行役の方針】\n" + "\n".join(lines) if lines else ""
+        if lines:
+            return "【進行役の方針】\n" + "\n".join(lines)
+        if not _has_living_freemason_claimant(state):
+            return _NO_FACILITATOR_VOTE
+        return ""
 
     def _seats_without_a_turn(self, state: GameState) -> list[str]:
         """Living AI seats that have not posted in public today, in seat order.
@@ -1616,6 +1751,7 @@ class ContextBuilder:
             "human_followup": "人間発言への応答",
             "open_floor": "ひとこと",
             "summary_answer": "まとめへの回答",
+            "question_answer": "質問への回答",
             "provisional_designation": "仮指定",
             "facilitator_followup": "進行役の受け",
         }.get(stage, "議論")

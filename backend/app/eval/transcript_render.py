@@ -294,7 +294,10 @@ class _Renderer:
             prefix = f"`{mid}` " if mid else ""
             return [f"- {prefix}[{channel}] **{who}**: {_flat(u.text)}"]
         if u.kind == "summary":
-            return [f"- 要約（{u.player_name}）: {_flat(u.text)}"]
+            # A summary written in code has no author at the table; the seat it
+            # is filed under did not write it.
+            author = "コードが作成" if u.stage == "code" else f"{u.player_name}が作成"
+            return [f"- 要約（{author}）: {_flat(u.text)}"]
         return [f"- [{u.kind}] {who}: {_flat(u.text)}"]
 
     def _discussion(self, index: int, u: Utterance, who: str) -> list[str]:

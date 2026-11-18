@@ -241,9 +241,10 @@ def test_a_seat_holding_a_result_is_never_left_out_of_the_opening():
 
     round_state = asyncio.run(coordinator._start_discussion_round(state))
 
-    # A duty speaker is never dropped by the value ranking, and goes first.
-    assert "p4" in round_state.order
-    assert round_state.order[0] == "p4"
+    # A duty speaker is never dropped by the value ranking, and speaks in the
+    # morning block -- not necessarily first: the block's order is drawn, so
+    # the real seer opening every day does not say which seer is real.
+    assert "p4" in round_state.order[: round_state.immediate_count]
 
 
 # -- human arguments, parsed once --
