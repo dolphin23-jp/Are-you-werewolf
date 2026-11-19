@@ -70,6 +70,18 @@ own pace (`skill.py`). So the public section now splits the two:
   Code computes them every time; `skill` and `clock` decide whether this seat
   is shown them yet. A hidden one is not restated in the private tail either.
 
+The owner's review of run #16 added, under the same split:
+
+* records -- the confirmed freemason pair beside a third claim (it used to
+  vanish behind the count), and each execution's push: the first line naming
+  the seat with a suspicion or a hang word, the freemason claimant's last
+  designation, the count;
+* derived -- what each freemason claim being real makes of the others
+  (`ClaimedPartnerRuleModule`), and, for a seat about to publish a fake seer
+  account, what a real seer's account of a curse night must say;
+* the grey line as this seat reads the board: a seer claimant it has been
+  shown cannot be genuine settles nothing, and its targets are grey again.
+
 The reader is 自分 in its own memo, past the header.
 """
 
@@ -121,7 +133,7 @@ from app.ai.reasoning.timeline import (
 )
 from app.engine.phases import Phase
 from app.engine.roles import ROLE_DEFINITIONS, TOTAL_PLAYERS, RoleName
-from app.engine.state import GameState, PublicDeathCause
+from app.engine.state import ChatChannel, GameState, PublicDeathCause
 from app.engine.vote import DEFAULT_MAX_VOTE_ROUNDS
 
 MEMO_HEADING = "【盤面メモ】"
@@ -259,24 +271,22 @@ def render_board_memo(
     seat_solver: RoleSolver | None = None,
     skill: Skill = Skill.EXPERT,
     clock: DerivationClock | None = None,
+    planned_claim: RoleName | None = None,
 ) -> str:
     """The full memo for one seat. Pure function of the board and the seat,
     except that `clock`, when given, records when each derived conclusion was
     first computed -- the runtime keeps it across the game so a seat's `skill`
-    can decide when it is shown one (`app/ai/reasoning/skill.py`)."""
+    can decide when it is shown one (`app/ai/reasoning/skill.py`).
+
+    `planned_claim` is the role this seat's side has it bluff and that it has
+    not claimed yet (the wolf told to fake the seer): a fake seer has to choose
+    its results before it claims, and the curse sets what a real seer's could
+    be (`_curse_claim_lines`)."""
     lines: list[str] = [
         f"{MEMO_HEADING}{state.day}日目 / あなた: {PublicFactLedger(state).name_of(player_id)}"
     ]
     ledger = _SeatLedger(state, player_id)
     plain_solver = _plain_solver(public_solver)
-    lines.extend(_rules_lines())
-    lines.extend(_roster_lines(ledger, plain_solver))
-    lines.extend(_claim_lines(state, ledger))
-    lines.extend(_claimant_death_lines(ledger, observations))
-    lines.extend(_verdict_lines(ledger, observations))
-    lines.extend(_night_lines(ledger, observations))
-    lines.extend(_grey_lines(ledger, observations))
-    lines.extend(_vote_lines(ledger))
     board = _derived_board(ledger, observations, public_solver, plain_solver)
     if clock is not None:
         clock.observe(board.items, state)
@@ -285,7 +295,17 @@ def render_board_memo(
     def shown(item: DerivedItem) -> bool:
         return is_visible(item, skill, state, clock, names)
 
-    lines.extend(_logic_lines(board.visible_facts(shown)))
+    facts = board.visible_facts(shown)
+    lines.extend(_rules_lines())
+    lines.extend(_roster_lines(ledger, plain_solver))
+    lines.extend(_claim_lines(state, ledger))
+    lines.extend(_claimant_death_lines(ledger, observations))
+    lines.extend(_verdict_lines(ledger, observations))
+    lines.extend(_execution_record_lines(state, ledger))
+    lines.extend(_night_lines(ledger, observations))
+    lines.extend(_grey_lines(ledger, observations, void=_void_seer_claimants(facts)))
+    lines.extend(_vote_lines(ledger))
+    lines.extend(_logic_lines(facts))
     lines.extend(_conditional_block(board.visible_rows(shown)))
     lines.extend(board.visible_execution(shown))
     lines.extend(_timeline_lines(ledger, observations))
@@ -298,6 +318,9 @@ def render_board_memo(
             seat_solver,
             public_keys=board.fact_keys,
             public_solver=public_solver,
+            curse_claims=_curse_claim_lines(
+                state, player_id, ledger, observations, board, shown, planned_claim
+            ),
         )
     )
     return "\n".join(lines)
@@ -460,10 +483,10 @@ def _claim_lines(state: GameState, ledger: PublicFactLedger) -> list[str]:
         capacity = ROLE_DEFINITIONS[role].count
         note = ""
         fakes = fake_claim_floor(role, len(claimants))
-        if fakes:
+        if role is RoleName.FREEMASON:
+            note = _freemason_note(state, ledger, claimants, fakes)
+        elif fakes:
             note = f"（{_ROLE_LABELS[role]}は{capacity}人なので少なくとも{fakes}人は偽）"
-        elif role is RoleName.FREEMASON:
-            note = _freemason_note(state, ledger, claimants)
         parts.append(f"{_ROLE_LABELS[role]}={rendered}{note}")
     for role, claimants in by_role.items():
         if role in _CLAIM_ROLE_ORDER:
@@ -496,7 +519,11 @@ def _co_count_lines(ledger: PublicFactLedger, by_role: dict[RoleName, list[str]]
     ]
 
 
-def _freemason_note(state: GameState, ledger: PublicFactLedger, claimants: list[str]) -> str:
+def _freemason_note(
+    state: GameState, ledger: PublicFactLedger, claimants: list[str], fakes: int
+) -> str:
+    if fakes:
+        return _contested_freemason_note(state, ledger, claimants, fakes)
     partner_claims = state.freemason_partner_claims
     named = set(claimants) | {
         claim.partner_id for claim in partner_claims if claim.claimant_id in claimants
@@ -521,6 +548,150 @@ def _freemason_note(state: GameState, ledger: PublicFactLedger, claimants: list[
     if len(claimants) == 1:
         return "（相方は未公開）"
     return f"（{both_out.removeprefix('。')}）" if both_out else ""
+
+
+def _contested_freemason_note(
+    state: GameState, ledger: PublicFactLedger, claimants: list[str], fakes: int
+) -> str:
+    """More freemason claims than seats: the count, and who named whom.
+
+    Run #16 (X24-2): with a third claim on the table the count replaced the
+    record of マコト and ホノカ confirming each other, and the table argued
+    from "マコト or カイト is fake" with the confirmed pair out of view. The
+    namings are the record a reader needs to weigh a third claim; what follows
+    from them is derived (`ClaimedPartnerRuleModule`, the freemason rows).
+    """
+    parts = [f"共有は{ROLE_DEFINITIONS[RoleName.FREEMASON].count}人なので少なくとも{fakes}人は偽"]
+    named: set[str] = set()
+    for claim in state.freemason_partner_claims:
+        if claim.claimant_id not in claimants:
+            continue
+        named.update((claim.claimant_id, claim.partner_id))
+        a, b = ledger.name_of(claim.claimant_id), ledger.name_of(claim.partner_id)
+        if claim.confirmed:
+            parts.append(f"{a}と{b}が互いに相方と確認済み")
+        else:
+            parts.append(f"{a}は相方を{b}と名指ししたが本人の確認待ち")
+    unpaired = [pid for pid in claimants if pid not in named]
+    if unpaired:
+        parts.append(f"{_names(ledger, unpaired)}は相方の名指しなし")
+    return f"（{'。'.join(parts)}）"
+
+
+# A public line names a seat as a hang target when one of these, in a sentence,
+# goes with the seat's name (`_names_word`): the hang itself, a designation, or
+# a ballot still to be cast (「入れた」, a ballot already cast, is not one).
+_HANG_RE = re.compile(
+    r"吊|処刑|指定|投票先|(?:に|へ)(?:一票|投票(?:する|したい|しよう|します)|"
+    r"(?:票を)?入れ(?:る|たい|よう|ます|ましょう|て))"
+)
+# ... and as a suspect with one of these. Read only to show where a day's
+# push began when it began before anyone said 吊.
+_SUSPECT_RE = re.compile(
+    r"気になる|気になり|怪しい|怪しく|疑わし|疑い|疑う|疑って|黒め|黒寄り|狼っぽ"
+)
+_SENTENCE_RE = re.compile(r"[^。！？!?\n]+")
+
+
+def _names_word(
+    sentence: str, seat_name: str, names: Iterable[str], pattern: re.Pattern[str]
+) -> bool:
+    """Whether a word of `pattern` in the sentence is about the seat: the
+    nearest name before the word (after it, when none comes before) is the
+    seat's. 「リクさん、昨日カイトさんに入れた理由を、ダイキさん吊りの話とは別に」
+    is about ダイキ's hanging, not リク's."""
+    spots = [
+        (match.start(), name)
+        for name in names
+        for match in re.finditer(re.escape(name), sentence)
+    ]
+    if not spots:
+        return False
+    spots.sort()
+    for word in pattern.finditer(sentence):
+        before = [name for start, name in spots if start < word.start()]
+        nearest = before[-1] if before else spots[0][1]
+        if nearest == seat_name:
+            return True
+    return False
+
+
+def _first_line_naming(
+    lines: Iterable[tuple[str, str, str]],
+    seat_name: str,
+    names: Iterable[str],
+    pattern: re.Pattern[str],
+) -> tuple[str, str] | None:
+    """(author, message id) of the first line with a sentence that puts a
+    word of `pattern` on the seat (`_names_word`)."""
+    every = tuple(names)
+    for author, message_id, content in lines:
+        for sentence in _SENTENCE_RE.findall(content):
+            if seat_name in sentence and _names_word(sentence, seat_name, every, pattern):
+                return author, message_id
+    return None
+
+
+def _execution_record_lines(state: GameState, ledger: PublicFactLedger) -> list[str]:
+    """Each execution: where the day's push on the seat began, the freemason
+    claimant's designation, and the ballots it got.
+
+    Run #16 (X23-3): レン was hanged on day 1 and read white on day 2, and the
+    board held nothing to look back at who had driven it. A record, read by
+    rule from the public lines of that day (never by intent, like the table
+    statement rule in `skill.py`): the first line naming the seat with a word
+    of suspicion, when it came before any hang word; the first naming it with
+    a hang word; the last such line by a freemason claimant (the designation,
+    since a freemason claimant is the one who designates); and the count from
+    the deciding ballot, whose voters the vote section lists.
+    """
+    executions = ledger.executions()
+    if not executions:
+        return []
+    masons = {
+        claim.player_id
+        for claim in ledger.co_declarations()
+        if claim.claimed_role is RoleName.FREEMASON
+    }
+    names = [player.name for player in state.players.values()]
+    rows: list[str] = []
+    for execution in executions:
+        seat, day = execution.player_id, execution.day
+        seat_name = state.players[seat].name
+        said = [
+            (message.author_id, message.message_id, message.content)
+            for message in state.chat_log
+            if message.channel is ChatChannel.PUBLIC
+            and message.day == day
+            and message.author_id != seat
+        ]
+        hang = _first_line_naming(said, seat_name, names, _HANG_RE)
+        suspect = _first_line_naming(said, seat_name, names, _SUSPECT_RE)
+        designation = _first_line_naming(
+            reversed([line for line in said if line[0] in masons]), seat_name, names, _HANG_RE
+        )
+        order = [message_id for _author, message_id, _content in said]
+        cells: list[str] = []
+        if suspect is not None and (hang is None or order.index(suspect[1]) < order.index(hang[1])):
+            cells.append(f"最初に疑い {ledger.name_of(suspect[0])} {suspect[1]}")
+        if hang is not None:
+            cells.append(f"最初に吊り先 {ledger.name_of(hang[0])} {hang[1]}")
+        else:
+            cells.append("吊り先として名前を出した発言なし")
+        if designation is not None:
+            cells.append(f"指定 {ledger.name_of(designation[0])} {designation[1]}")
+        else:
+            cells.append("指定なし")
+        rounds = sorted({vote.round for vote in ledger.votes_on(day)})
+        ballots = ledger.votes_on(day, rounds[-1]) if rounds else ()
+        got = sum(1 for vote in ballots if vote.target_id == seat)
+        tally = f"（{got}票/{len(ballots)}票）" if ballots else ""
+        rows.append(f"  - {day}日目 {ledger.name_of(seat)}{tally}: " + "、".join(cells))
+    return [
+        "- 処刑の経緯（その日の発言から語で拾った最初の疑い・最初の吊り先と、"
+        "共有COの最後の指定。投票者は投票の行）:",
+        *rows,
+    ]
 
 
 def _claimant_death_lines(ledger: PublicFactLedger, observations: ObservationSet) -> list[str]:
@@ -787,29 +958,62 @@ def _night_lines(ledger: PublicFactLedger, observations: ObservationSet) -> list
     return [line]
 
 
-def _grey_lines(ledger: PublicFactLedger, observations: ObservationSet) -> list[str]:
+def _void_seer_claimants(facts: Iterable[_Fact]) -> frozenset[str]:
+    """Seer claimants the memo, as this seat reads it, says cannot be genuine."""
+    return frozenset(fact.key[1] for fact in facts if fact.key[0] == "not_seer")
+
+
+def _grey_lines(
+    ledger: PublicFactLedger,
+    observations: ObservationSet,
+    *,
+    void: frozenset[str] = frozenset(),
+) -> list[str]:
     """The grey -- alive, no claim, judged by no seer claimant -- and, apart
     from it, the unclaimed seats somebody has judged, with whose verdict.
 
     The review's day 2 argued over "the grey" with two definitions in play and
     no list on the board (2-B5). One definition, computed: a seat stays grey
     until some seer claimant publishes a verdict on it, whoever that is.
+
+    A claimant this seat has been shown cannot be the real seer (`void`, the
+    derived "真の占い師ではありえない" as this seat's skill lets it read
+    them) settles nothing with its verdicts: the seats it judged are grey like
+    the unjudged, and the verdicts are listed apart as not counted. Run #16
+    (X25): アオイ was out from day 2, and her whites on ハルト -- a wolf -- and
+    ユイ kept both out of the grey for the rest of the game.
     """
     claimed = {claim.player_id for claim in ledger.co_declarations()}
     judged: dict[str, list[str]] = defaultdict(list)
+    uncounted: dict[str, list[str]] = defaultdict(list)
     for verdict in sorted(observations.verdicts, key=lambda v: (v.day, v.source_night)):
-        if verdict.result_type == SEER_RESULT:
-            colour = "黒" if verdict.is_werewolf else "白"
-            judged[verdict.target_id].append(f"{ledger.name_of(verdict.claimant_id)}の{colour}")
+        if verdict.result_type != SEER_RESULT:
+            continue
+        colour = "黒" if verdict.is_werewolf else "白"
+        target = verdict.target_id
+        if verdict.claimant_id in void:
+            if ledger.is_alive(target) and target not in claimed:
+                uncounted[verdict.claimant_id].append(f"{ledger.name_of(target)}={colour}")
+            continue
+        judged[target].append(f"{ledger.name_of(verdict.claimant_id)}の{colour}")
     unclaimed = [pid for pid in ledger.alive_ids() if pid not in claimed]
-    if not claimed and not judged:
+    if not claimed and not judged and not uncounted:
         return []
     grey = [pid for pid in unclaimed if pid not in judged]
-    line = f"- グレー(生存・CO無し・どの占いCOの判定も無し): {_names(ledger, grey) or 'なし'}"
+    scope = "真でありうる占いCOの判定も無し" if uncounted else "どの占いCOの判定も無し"
+    line = f"- グレー(生存・CO無し・{scope}): {_names(ledger, grey) or 'なし'}"
     seen = [pid for pid in unclaimed if pid in judged]
     if seen:
         line += " / 判定を受けた非CO者: " + "、".join(
             f"{ledger.name_of(pid)}({'・'.join(judged[pid])})" for pid in seen
+        )
+    if uncounted:
+        line += (
+            " / 真の占い師ではありえない占いCOの判定は何も決めない（判定された席もグレー）: "
+            + "、".join(
+                f"{ledger.name_of(claimant)}→{'、'.join(uncounted[claimant])}"
+                for claimant in _seat_ordered_ids(ledger, uncounted)
+            )
         )
     return [line]
 
@@ -1004,6 +1208,7 @@ def _settled_facts(
     facts: list[_Fact] = []
     if refute_claims:
         facts.extend(_refuted_claim_facts(ledger, observations, solver, exclude, viewer_id))
+    facts.extend(_refuted_freemason_facts(ledger, solver, exclude, viewer_id))
     filled = _filled_role_facts(ledger, solver)
     facts.extend(filled)
     fox_settled = ("filled", RoleName.FOX.value) in {fact.key for fact in filled}
@@ -1070,6 +1275,64 @@ def _refuted_claim_facts(
             )
         )
     return facts
+
+
+def _refuted_freemason_facts(
+    ledger: PublicFactLedger,
+    solver: RoleSolver,
+    exclude: frozenset[str],
+    viewer_id: str | None,
+) -> list[_Fact]:
+    """Freemason claimants who cannot hold the card, each with the reason.
+
+    Asked of every viewpoint, the real seer's included: unlike a rival seer
+    claim, a fake freemason claim is not something the seer knows from its own
+    card. A claimant whose role the solver settles outright is left to that
+    line. Run #16 (X24-2): マコト knew from his partner that カイト's claim was
+    false, and his memo said so only under "if no village seat bluffs".
+    """
+    mason = RoleName.FREEMASON
+    claimants = [
+        claim.player_id for claim in ledger.co_declarations() if claim.claimed_role is mason
+    ]
+    facts: list[_Fact] = []
+    for claimant in claimants:
+        if claimant in exclude or claimant == viewer_id:
+            continue
+        if solver.is_possible(has_role(claimant, mason)) or solver.certain_role(claimant):
+            continue
+        dead = "" if ledger.is_alive(claimant) else "(死亡)"
+        facts.append(
+            _Fact(
+                ("not_freemason", claimant),
+                f"{ledger.name_of(claimant)}{dead}は真の共有者ではありえない"
+                + _freemason_refutation_reason(ledger, solver, claimant),
+                seats=(claimant,),
+            )
+        )
+    return facts
+
+
+def _freemason_refutation_reason(
+    ledger: PublicFactLedger, solver: RoleSolver, claimant: str
+) -> str:
+    """Why: both freemason seats are settled elsewhere, or the namings say so."""
+    mason = RoleName.FREEMASON
+    holders = [
+        pid
+        for pid in ledger.known_player_ids()
+        if pid != claimant and solver.is_forced(has_role(pid, mason))
+    ]
+    if len(holders) == ROLE_DEFINITIONS[mason].count:
+        pair = "と".join(ledger.name_of(pid) for pid in _seat_ordered_ids(ledger, holders))
+        return f"（共有者は{len(holders)}人で、{pair}で埋まっている）"
+    core = solver.explain_contradiction(has_role(claimant, mason))
+    reasons = [
+        namify(text, ledger)
+        for cid, text in zip(core.constraint_ids, core.explanations, strict=True)
+        if cid.startswith("claimed_partner:")
+    ]
+    return f"（{reasons[0].rstrip('。')}）" if reasons else ""
 
 
 def _refutation_text(
@@ -1389,6 +1652,10 @@ class _DerivedBoard:
     derived_facts: tuple[tuple[_Fact, DerivedItem], ...] = ()
     rows: tuple[_ConditionalRow, ...] = ()
     execution: DerivedItem | None = None
+    # Per curse night: what a real seer's account of that night must say.
+    # Derived, and computed for every seat so the clock stamps it when the
+    # corpses appear; only a seat about to publish a fake account reads it.
+    curse_targets: tuple[tuple[int, DerivedItem], ...] = ()
 
     @property
     def items(self) -> tuple[DerivedItem, ...]:
@@ -1397,6 +1664,7 @@ class _DerivedBoard:
             found.extend(row.items)
         if self.execution is not None:
             found.append(self.execution)
+        found.extend(item for _night, item in self.curse_targets)
         return tuple(found)
 
     @property
@@ -1441,8 +1709,9 @@ def _derived_board(
     plain_solver: RoleSolver | None,
 ) -> _DerivedBoard:
     plain = _public_logic_facts(ledger, observations, plain_solver)
+    curse_targets = _curse_target_items(ledger, observations)
     if public_solver is None:
-        return _DerivedBoard(plain_facts=tuple(plain))
+        return _DerivedBoard(plain_facts=tuple(plain), curse_targets=curse_targets)
     plain_keys = {fact.key for fact in plain}
     derived = [
         (
@@ -1472,7 +1741,94 @@ def _derived_board(
             )
         ),
         execution=_execution_item(ledger, public_solver, public_end),
+        curse_targets=curse_targets,
     )
+
+
+def _curse_target_items(
+    ledger: PublicFactLedger, observations: ObservationSet
+) -> tuple[tuple[int, DerivedItem], ...]:
+    """What a real seer's account of each curse night must say.
+
+    The corpses of a curse night include the cursed fox (a record), so the
+    real seer divined one of them that night and saw white; an account naming
+    any other seat for that night cannot be the real seer's. That last step
+    reads the curse against a claimant's account, as `ClaimedDivinationRuleModule`
+    does, so it is derived.
+    """
+    items: list[tuple[int, DerivedItem]] = []
+    for night, corpses in sorted(curse_nights(observations).items()):
+        names = _seat_ordered_ids(ledger, corpses)
+        if night == 0:
+            if len(names) != 1:
+                continue
+            target = ledger.name_of(names[0])
+            text = (
+                f"0日目夜は襲撃がなく、初日犠牲者以外の死体の{target}は呪殺された妖狐なので、"
+                f"真の占い師の0日目夜の占い先は{target}で、結果は白。"
+                "ほかの席を0日目夜の占い先と公開した占いCOは、真の占い師ではありえない"
+            )
+        elif len(names) == 2:
+            either = "か".join(ledger.name_of(pid) for pid in names)
+            text = (
+                f"{night}日目夜は死体が2つ（{_names(ledger, names)}）で片方は呪殺された妖狐なので、"
+                f"真の占い師の{night}日目夜の占い先は{either}のどちらかで、結果は白。"
+                f"死体でない席を{night}日目夜の占い先と公開した占いCOは、真の占い師ではありえない"
+            )
+        else:
+            continue
+        items.append(
+            (
+                night,
+                DerivedItem(key=("curse_target", str(night)), text=text, seats=tuple(names)),
+            )
+        )
+    return tuple(items)
+
+
+def _curse_claim_lines(
+    state: GameState,
+    player_id: str,
+    ledger: PublicFactLedger,
+    observations: ObservationSet,
+    board: _DerivedBoard,
+    shown: Callable[[DerivedItem], bool],
+    planned_claim: RoleName | None,
+) -> list[str]:
+    """For a seat about to publish a fake seer account: what a real seer's
+    account of each curse night it has not yet published must say.
+
+    Run #16 (X12-1/X12-3): ケント, the real seer, cursed the fox and was bitten
+    the same night. アオイ (madman, standing on a seer claim) and ダイキ (the
+    wolf told to fake the seer) then each published a living night-1 target,
+    which proved both fake. Their memos had the two corpses and "one is the
+    cursed fox", and nothing about what that made of the real seer's night.
+
+    Only the fact, never what to publish; and it is the derived conclusion the
+    public section states about published accounts, so it reaches the seat
+    when its skill does -- an expert before it chooses, a novice once the table
+    has said it. A seat holding the seer card knows its own target and is not
+    told.
+    """
+    if state.players[player_id].role is RoleName.SEER or not board.curse_targets:
+        return []
+    standing = ledger.claimed_role_of(player_id)
+    if standing is not RoleName.SEER and not (
+        standing is None and planned_claim is RoleName.SEER
+    ):
+        return []
+    published = {
+        verdict.source_night
+        for verdict in observations.verdicts_by(player_id)
+        if verdict.result_type == SEER_RESULT
+    }
+    return [
+        f"- 占いCOの{night}日目夜の結果について: {item.text}"
+        for night, item in board.curse_targets
+        if night not in published
+        and can_act_on_night(observations, player_id, night)
+        and shown(item)
+    ]
 
 
 def _conditional_block(rows: list[str]) -> list[str]:
@@ -1559,7 +1915,136 @@ def _conditional_rows(
                 ),
             )
         )
+    rows.extend(_freemason_rows(ledger, public_solver))
     return rows
+
+
+def _dead_mark(ledger: PublicFactLedger, player_id: str) -> str:
+    return ledger.name_of(player_id) + ("" if ledger.is_alive(player_id) else "(死亡)")
+
+
+_VILLAGE_BLUFF_ROLES = (
+    RoleName.VILLAGER,
+    RoleName.SEER,
+    RoleName.MEDIUM,
+    RoleName.HUNTER,
+)
+
+
+def _freemason_rows(ledger: PublicFactLedger, public_solver: RoleSolver) -> list[_ConditionalRow]:
+    """With more freemason claims than seats: what each claim being real makes
+    of the others.
+
+    A pair that confirmed each other is one supposition -- under
+    `ClaimedPartnerRuleModule` either of them real makes both real -- and every
+    other claimant is one of its own. Run #16 (X24-2): マコト and ホノカ named
+    each other on day 1, カイト claimed third, and ホノカ was bitten on night
+    3. The rows say that カイト real makes both of the pair fake, and that
+    ホノカ, dead at night with the fox already dead, would then be neither wolf
+    nor fox. Only rows that settle something; nothing with two claims.
+    """
+    mason = RoleName.FREEMASON
+    claimants = [
+        claim.player_id for claim in ledger.co_declarations() if claim.claimed_role is mason
+    ]
+    if len(claimants) <= ROLE_DEFINITIONS[mason].count:
+        return []
+    pairs = [
+        (claim.claimant_id, claim.partner_id)
+        for claim in ledger.freemason_partner_claims()
+        if claim.confirmed and {claim.claimant_id, claim.partner_id} <= set(claimants)
+    ]
+    paired = {pid for pair in pairs for pid in pair}
+    groups: list[tuple[str, ...]] = [
+        *pairs,
+        *((pid,) for pid in claimants if pid not in paired),
+    ]
+    rows: list[_ConditionalRow] = []
+    for group in groups:
+        if any(not public_solver.is_possible(has_role(pid, mason)) for pid in group):
+            continue
+        head = "と".join(_dead_mark(ledger, pid) for pid in group) + "が真の共有なら"
+        head += "（互いに相方と確認済み）: " if len(group) == 2 else ": "
+        supposed = public_solver.assuming(*(GenuineClaim(pid, mason) for pid in group))
+        if not supposed.is_possible(Hypothesis()):
+            core = supposed.explain_contradiction(Hypothesis())
+            reasons = [
+                namify(text, ledger)
+                for cid, text in zip(core.constraint_ids, core.explanations, strict=True)
+                if not cid.startswith(("genuine:", "role_count:"))
+            ]
+            reason = reasons[0].rstrip("。") if reasons else "公開情報と矛盾する"
+            item = DerivedItem(
+                key=("broken", *group, mason.value), text=f"成り立たない（{reason}）", seats=group
+            )
+            rows.append(_ConditionalRow(head=head, items=(item,)))
+            continue
+        clauses = _freemason_clauses(ledger, supposed, group, claimants, pairs)
+        if clauses:
+            rows.append(
+                _ConditionalRow(
+                    head=head,
+                    items=tuple(
+                        DerivedItem(
+                            key=("if", *group, mason.value, clause.kind, *clause.seats),
+                            text=clause.text,
+                            seats=(*group, *clause.seats),
+                        )
+                        for clause in clauses
+                    ),
+                )
+            )
+    return rows
+
+
+def _freemason_clauses(
+    ledger: PublicFactLedger,
+    supposed: RoleSolver,
+    group: tuple[str, ...],
+    claimants: list[str],
+    pairs: list[tuple[str, str]],
+) -> list[_Clause]:
+    """The other claimants under one supposition: forced real, forced fake,
+    and, for a forced fake who can be neither wolf nor fox, what is left."""
+    mason = RoleName.FREEMASON
+    others = [pid for pid in claimants if pid not in group]
+    fake = [pid for pid in others if not supposed.is_possible(has_role(pid, mason))]
+    real = [
+        pid for pid in others if pid not in fake and supposed.is_forced(has_role(pid, mason))
+    ]
+    clauses: list[_Clause] = []
+    if real:
+        names = "と".join(_dead_mark(ledger, pid) for pid in real)
+        clauses.append(_Clause("mason_real", f"{names}も真の共有", tuple(real)))
+    if not fake:
+        return clauses
+    names = "と".join(_dead_mark(ledger, pid) for pid in fake)
+    both = "どちらも" if len(fake) == 2 else ""
+    why = ""
+    broken_pair = next((pair for pair in pairs if set(pair) <= set(fake)), None)
+    if broken_pair is not None:
+        a, b = (ledger.name_of(pid) for pid in broken_pair)
+        why = f"（{a}と{b}は互いに相方と名指ししているので、片方が真ならもう片方も真になる）"
+    clauses.append(_Clause("mason_fake", f"{names}は{both}真の共有ではない{why}", tuple(fake)))
+    for pid in fake:
+        if supposed.is_possible(has_role(pid, RoleName.WEREWOLF)) or supposed.is_possible(
+            has_role(pid, RoleName.FOX)
+        ):
+            continue
+        left = []
+        if supposed.is_possible(has_role(pid, RoleName.MADMAN)):
+            left.append("狂人")
+        if any(supposed.is_possible(has_role(pid, role)) for role in _VILLAGE_BLUFF_ROLES):
+            left.append("村側の騙り")
+        if left:
+            clauses.append(
+                _Clause(
+                    "mason_fake_role",
+                    f"{_dead_mark(ledger, pid)}は人狼でも妖狐でもないので、{'か'.join(left)}",
+                    (pid,),
+                )
+            )
+    return clauses
 
 
 def _broken_reason(
@@ -1815,6 +2300,7 @@ def _private_lines(
     *,
     public_keys: frozenset[tuple[str, ...]],
     public_solver: RoleSolver | None = None,
+    curse_claims: Iterable[str] = (),
 ) -> list[str]:
     perspective = PlayerPrivatePerspective(player_id)
     own_role = state.players[player_id].role
@@ -1823,11 +2309,13 @@ def _private_lines(
     allies = sorted(pid for pid in known if pid != player_id)
     if allies:
         label = "仲間の人狼" if own_role is RoleName.WEREWOLF else "共有の相方"
+        mason = own_role is RoleName.FREEMASON
         lines.append(
             f"- {label}: "
             + "、".join(
                 f"{ledger.name_of(pid)}{'' if ledger.is_alive(pid) else '(死亡)'}" for pid in allies
             )
+            + (_other_mason_claims(ledger, player_id, allies) if mason else "")
         )
     for result in perspective.known_divine_results(observations):
         colour = "黒(人狼)" if result.is_werewolf else "白(人狼ではない)"
@@ -1868,6 +2356,7 @@ def _private_lines(
                 for night, target in sorted(nights.attacks.items())
             )
         )
+    lines.extend(curse_claims)
     false_colours = (
         _false_colours(player_id, ledger, observations, allies, seat_solver)
         if seat_solver is not None
@@ -2124,7 +2613,14 @@ def _private_certainty_lines(
         viewer_id=player_id,
         fox_view=own_role is RoleName.FOX,
     )
-    texts = _fact_texts(fact for fact in facts if fact.key not in public_keys)
+    # A freemason's own card says which claims are fake, and it may say so
+    # (the partner line); it is no conclusion to keep off the table.
+    texts = _fact_texts(
+        fact
+        for fact in facts
+        if fact.key not in public_keys
+        and not (own_role is RoleName.FREEMASON and fact.key[0] == "not_freemason")
+    )
     texts.extend(extra)
     if not texts:
         return []
@@ -2132,6 +2628,21 @@ def _private_certainty_lines(
         f"- あなたの視点で論理的に確定すること（卓には言えない根拠を含む。{_KEEP_UNSAID}）: "
         + " / ".join(texts)
     ]
+
+
+def _other_mason_claims(ledger: PublicFactLedger, player_id: str, allies: Iterable[str]) -> str:
+    """For a freemason: the other freemason claims, which its card makes fake."""
+    known = {player_id, *allies}
+    others = [
+        claim.player_id
+        for claim in ledger.co_declarations()
+        if claim.claimed_role is RoleName.FREEMASON and claim.player_id not in known
+    ]
+    if not others:
+        return ""
+    names = "、".join(_dead_mark(ledger, pid) for pid in _seat_ordered_ids(ledger, others))
+    count = ROLE_DEFINITIONS[RoleName.FREEMASON].count
+    return f"（共有者は{count}人なので、ほかの共有COの{names}は偽）"
 
 
 __all__ = [

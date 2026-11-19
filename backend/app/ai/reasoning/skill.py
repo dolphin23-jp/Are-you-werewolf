@@ -6,7 +6,9 @@ The owner's decision after run #14 splits the board memo in two:
   at night is not a wolf", which claimants died at night, each seer
   claimant's account. Every seat reads them at once.
 * **Derived conclusions** -- a claimant's account breaking down (破綻), what
-  ends the game, what a curse says about a claimant. Code always computes them
+  ends the game, what a curse says about a claimant (and, to a fake seer about
+  to publish, what a real seer's account of the curse night must say), what a
+  freemason's naming makes of a rival claim. Code always computes them
   correctly; *when a seat is shown them* depends on its skill.
 
 Skill is separate from the persona (tone and amount only) and is dealt per game

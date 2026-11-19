@@ -37,7 +37,7 @@ from app.ai.reasoning.belief import (
     summarise,
 )
 from app.ai.reasoning.belief.state import EvidenceRecord, tiebreak
-from app.ai.reasoning.board_memo import fake_claim_floor, render_board_memo, role_label
+from app.ai.reasoning.board_memo import fake_claim_floor, namify, render_board_memo, role_label
 from app.ai.reasoning.citations import VoteCitation, parse_vote_citations
 from app.ai.reasoning.dialogue import (
     ArgumentEvent,
@@ -169,6 +169,10 @@ class ReasoningRuntime:
         # clock remembers when each conclusion first became derivable.
         self.skills: dict[str, Skill] = assign_skills(list(ai_player_ids), seed=seed)
         self.derivation_clock = DerivationClock()
+        # The role each bluffer's side has it claim (the wolf told to fake the
+        # seer, the madman's fake role), set by whoever deals the bluffs. Read
+        # only into that seat's own memo, before it claims.
+        self.planned_claims: dict[str, RoleName] = {}
         self.seats: dict[str, SeatReasoning] = {}
         for player_id in ai_player_ids:
             perspective = PlayerPrivatePerspective(player_id)
@@ -639,15 +643,21 @@ class ReasoningRuntime:
         return tuple(result.explanations) if result.is_contradictory else ()
 
     def public_marks(self, state: GameState, player_id: str) -> tuple[PublicMark, ...]:
-        """Everything public that already marks this seat: blacks, a disproved claim."""
+        """Everything public that already marks this seat: blacks, a disproved claim.
+
+        Explanations are written in names: they reach the transcript as the
+        audit's reason (run #16's read 「1日目に占ったのはp14なのでp4は…」).
+        """
         ledger = PublicFactLedger(state)
+        name = ledger.name_of
         marks = [
             PublicMark(
                 evidence_id=f"black:{result.claimant_id}:{result.result_type}:{player_id}",
                 source_message_id=result.source_message_id,
                 explanation=(
-                    f"{result.claimant_id}の{'霊媒' if result.result_type == 'medium' else '占い'}"
-                    f"結果で{player_id}は黒"
+                    f"{name(result.claimant_id)}の"
+                    f"{'霊媒' if result.result_type == 'medium' else '占い'}"
+                    f"結果で{name(player_id)}は黒"
                 ),
             )
             for result in ledger.public_results()
@@ -663,7 +673,7 @@ class ReasoningRuntime:
                 PublicMark(
                     evidence_id=f"impossible_claim:{player_id}:{role}",
                     source_message_id=claim.source_message_id if claim is not None else "",
-                    explanation="".join(reasons),
+                    explanation=namify("".join(reasons), ledger),
                 )
             )
         return tuple(marks)
@@ -911,6 +921,7 @@ class ReasoningRuntime:
             seat_solver=seat.solver,
             skill=self.skills.get(player_id, Skill.EXPERT),
             clock=self.derivation_clock,
+            planned_claim=self.planned_claims.get(player_id),
         )
 
     def record_stated_target(self, player_id: str, target: str | None, day: int) -> None:

@@ -35,7 +35,13 @@ from app.engine.speech_events import (
     result_versions,
     role_claim_history,
 )
-from app.engine.state import DeathCause, GameState, PublicDeathCause, public_death_cause
+from app.engine.state import (
+    DeathCause,
+    FreemasonPartnerClaim,
+    GameState,
+    PublicDeathCause,
+    public_death_cause,
+)
 
 # Re-exported so the reasoning layer has one import site for public-claim
 # vocabulary, whether it comes from the engine's event model or from here.
@@ -281,6 +287,10 @@ class PublicFactLedger:
 
     def current_role_claim(self, player_id: str) -> RoleClaimState | None:
         return current_role_claim(self._state.speech_events, player_id)
+
+    def freemason_partner_claims(self) -> tuple[FreemasonPartnerClaim, ...]:
+        """Who named whom as freemason partner, and which pairs confirmed."""
+        return self._state.freemason_partner_claims
 
     def result_versions(
         self,
