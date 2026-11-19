@@ -91,7 +91,14 @@ class _Table:
         return output
 
     def watch(self, coordinator: AICoordinator) -> None:
+        """Record each turn as it is posted, and attribute each request to its seat.
+
+        A turn is written by `_compose_turn` and said by `_speak`; day 1's grey
+        views are all written before the first is said, so the request's seat
+        is set where the turn is written, the turn where it is said.
+        """
         original = coordinator._speak
+        original_compose = coordinator._compose_turn
 
         async def speak(controller: Any, state: GameState, player_id: str, stage: str) -> Any:
             self.turns.append((player_id, stage))
@@ -99,7 +106,13 @@ class _Table:
             self.speaker = player_id
             return await original(controller, state, player_id, stage)
 
+        async def compose(controller: Any, state: GameState, player_id: str, stage: str) -> Any:
+            self.stage = stage
+            self.speaker = player_id
+            return await original_compose(controller, state, player_id, stage)
+
         coordinator._speak = speak  # type: ignore[method-assign]
+        coordinator._compose_turn = compose  # type: ignore[method-assign]
 
 
 def _session(controller: Any) -> SimpleNamespace:
