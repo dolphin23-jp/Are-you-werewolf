@@ -1,0 +1,397 @@
+{
+  "provider": "anthropic",
+  "model": "claude-sonnet-5-5",
+  "reasoning_engine": "v3",
+  "commit": "a022b755d904032a5d99a04b50e6a8e0960bea47",
+  "games": 1,
+  "games_played": 1,
+  "stopped_by_budget": false,
+  "budget_stop": null,
+  "budget_stop_phase": null,
+  "budget": {
+    "max_requests": 10000000,
+    "used_requests": 199,
+    "max_estimated_cost": 12.0,
+    "input_price_per_million": null,
+    "output_price_per_million": null,
+    "prompt_tokens": 0,
+    "completion_tokens": 0,
+    "estimated_cost": 4.931499999999998,
+    "pricing_supplied": true,
+    "spent_cost": 4.931499999999998,
+    "reserved_cost": 5.551115123125783e-17,
+    "settled_attempts": 199
+  },
+  "metrics": {
+    "total_calls": 199,
+    "http_requests": 199,
+    "success_rate": 1.0,
+    "parse_path_counts": {
+      "strict_schema": 199,
+      "json_object": 0,
+      "permissive": 0,
+      "failed": 0
+    },
+    "strict_schema_rate": 1.0,
+    "strict_schema_failures": 0,
+    "json_object_successes": 0,
+    "complete_failures": 0,
+    "retry_calls": 0,
+    "finish_reason_counts": {
+      "end_turn": 199
+    },
+    "truncated_calls": 0,
+    "truncated_failure_rate": 0.0,
+    "reasoning_tokens": 0,
+    "reasoning_token_share": 0.0,
+    "latency_seconds": {
+      "mean": 3.682,
+      "p50": 3.546,
+      "p95": 6.114,
+      "max": 6.648
+    },
+    "by_schema": {
+      "ChatDiscussionOutput": {
+        "calls": 110,
+        "success_rate": 1.0,
+        "mean_latency_seconds": 3.574,
+        "effort": "low"
+      },
+      "NightActionOutput": {
+        "calls": 11,
+        "success_rate": 1.0,
+        "mean_latency_seconds": 2.18,
+        "effort": "medium"
+      },
+      "VoteOutput": {
+        "calls": 64,
+        "success_rate": 1.0,
+        "mean_latency_seconds": 4.506,
+        "effort": "medium"
+      },
+      "WolfChatOutput": {
+        "calls": 14,
+        "success_rate": 1.0,
+        "mean_latency_seconds": 1.941,
+        "effort": "low"
+      }
+    },
+    "errors": [],
+    "discussion_generation_attempts": 110,
+    "discussion_skips": 0,
+    "discussion_skip_rate": 0.0,
+    "total_game_wall_time": 470.78746495200005,
+    "time_per_game_day": 94.15749299040002,
+    "time_per_public_utterance": 4.203459508500001,
+    "time_waiting_for_llm": 732.6277238359999,
+    "time_spent_in_solver": 37.72657839900674,
+    "solver_query_count": 141243,
+    "solver_cache_hit_rate": 0.7218906423681174,
+    "events": {},
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 0,
+    "cache_read_share": 0.0,
+    "refusals": {},
+    "served_model_counts": {
+      "claude-sonnet-5-5": 199
+    },
+    "fallback_served_calls": 0,
+    "tokens": {
+      "prompt": 2208680,
+      "completion": 51414,
+      "total": 2260094
+    },
+    "estimated_cost": 4.9315,
+    "pricing_supplied": true,
+    "pricing_source": "table"
+  },
+  "per_game": [
+    {
+      "seed": 1,
+      "winner": "village",
+      "finished": true,
+      "wall_time_seconds": 470.787,
+      "public_utterances": 112,
+      "days": 5,
+      "metrics": {
+        "total_calls": 199,
+        "http_requests": 199,
+        "success_rate": 1.0,
+        "parse_path_counts": {
+          "strict_schema": 199,
+          "json_object": 0,
+          "permissive": 0,
+          "failed": 0
+        },
+        "strict_schema_rate": 1.0,
+        "strict_schema_failures": 0,
+        "json_object_successes": 0,
+        "complete_failures": 0,
+        "retry_calls": 0,
+        "finish_reason_counts": {
+          "end_turn": 199
+        },
+        "truncated_calls": 0,
+        "truncated_failure_rate": 0.0,
+        "reasoning_tokens": 0,
+        "reasoning_token_share": 0.0,
+        "latency_seconds": {
+          "mean": 3.682,
+          "p50": 3.546,
+          "p95": 6.114,
+          "max": 6.648
+        },
+        "by_schema": {
+          "ChatDiscussionOutput": {
+            "calls": 110,
+            "success_rate": 1.0,
+            "mean_latency_seconds": 3.574,
+            "effort": "low"
+          },
+          "NightActionOutput": {
+            "calls": 11,
+            "success_rate": 1.0,
+            "mean_latency_seconds": 2.18,
+            "effort": "medium"
+          },
+          "VoteOutput": {
+            "calls": 64,
+            "success_rate": 1.0,
+            "mean_latency_seconds": 4.506,
+            "effort": "medium"
+          },
+          "WolfChatOutput": {
+            "calls": 14,
+            "success_rate": 1.0,
+            "mean_latency_seconds": 1.941,
+            "effort": "low"
+          }
+        },
+        "errors": [],
+        "discussion_generation_attempts": 110,
+        "discussion_skips": 0,
+        "discussion_skip_rate": 0.0,
+        "total_game_wall_time": 470.78746495200005,
+        "time_per_game_day": 94.15749299040002,
+        "time_per_public_utterance": 4.203459508500001,
+        "time_waiting_for_llm": 732.6277238359999,
+        "time_spent_in_solver": 37.72657839900674,
+        "solver_query_count": 141243,
+        "solver_cache_hit_rate": 0.7218906423681174,
+        "events": {},
+        "cache_creation_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_read_share": 0.0,
+        "refusals": {},
+        "served_model_counts": {
+          "claude-sonnet-5-5": 199
+        },
+        "fallback_served_calls": 0,
+        "tokens": {
+          "prompt": 2208680,
+          "completion": 51414,
+          "total": 2260094
+        },
+        "estimated_cost": 4.9315,
+        "pricing_supplied": true,
+        "pricing_source": "table"
+      },
+      "hard_failures": {
+        "private_evidence_exposed_count": 0,
+        "team_private_evidence_exposed_count": 0,
+        "dead_target_selection_count": 0,
+        "public_fact_flip_count": 0,
+        "missing_required_result_count": 0,
+        "duplicate_required_result_count": 0,
+        "displayed_target_mismatch_count": 0,
+        "stale_evidence_publicly_emitted_count": 0,
+        "unexplained_vote_change_count": 0,
+        "unplanned_wolf_ally_vote_count": 0,
+        "duplicate_night_action_count": 0,
+        "undeclared_record_count": 0
+      },
+      "reasoning_quality": {
+        "decision_count": 112,
+        "vote_count": 64,
+        "dead_target_selection_count": 0,
+        "invalid_action_target_count": 0,
+        "public_fact_flip_count": 0,
+        "vote_history_fabrication_count": 0,
+        "private_evidence_exposed_count": 0,
+        "team_private_evidence_exposed_count": 0,
+        "displayed_target_mismatch_count": 0,
+        "missing_required_result_count": 0,
+        "duplicate_required_result_count": 0,
+        "stale_evidence_used_in_brief_count": 0,
+        "stale_evidence_cited_publicly_count": 0,
+        "stale_evidence_attempt_count": 0,
+        "stale_evidence_blocked_count": 0,
+        "stale_evidence_publicly_emitted_count": 0,
+        "justified_vote_change_count": 1,
+        "unexplained_vote_change_count": 0,
+        "no_basis_vote_count": 1,
+        "compared_vote_count": 63,
+        "memo_target_unspoken_count": 11,
+        "memo_target_only_reported_or_asked_count": 1,
+        "wolf_ally_vote_count": 1,
+        "planned_wolf_ally_vote_count": 0,
+        "designated_wolf_ally_vote_count": 1,
+        "unplanned_wolf_ally_vote_count": 0,
+        "vote_reason_names_other_count": 0,
+        "illegal_timeline_claim_count": 0,
+        "duplicate_night_action_count": 0,
+        "undeclared_record_count": 0,
+        "correction_messages_heard": 0,
+        "corrections_confirmed": 0,
+        "corrections_refuted": 0,
+        "corrections_unverifiable": 0,
+        "confirmed_corrections_with_effect": 0,
+        "seat_evidence_retractions": 0,
+        "affected_seat_count": 0,
+        "mean_belief_delta_per_affected_seat": 0.0,
+        "median_belief_delta_per_affected_seat": 0.0,
+        "vote_change_rate": 0.015625,
+        "unexplained_vote_change_rate": 0.0
+      },
+      "validation": {
+        "dead_target_selections": 0,
+        "public_fact_flips": 0,
+        "vote_history_misreads": 0,
+        "vote_plan_mismatches": 13
+      },
+      "budget_stop": null
+    }
+  ],
+  "judge": {
+    "summary": null,
+    "per_player": {},
+    "metrics": null
+  },
+  "findings": [
+    {
+      "seed": 1,
+      "winner": "village",
+      "counts": {
+        "wolf_voted_teammate": 1,
+        "wolf_named_teammate_with_wolf_word": 1,
+        "vote_contradicts_stated_intent": 13,
+        "wolf_memo_suspects_teammate": 3
+      },
+      "stats": {
+        "wolf_plan_execution": {
+          "p12": {
+            "assigned": "fake_seer",
+            "executed": true
+          },
+          "p15": {
+            "assigned": "fake_seer",
+            "executed": true
+          },
+          "p2": {
+            "assigned": "lurker",
+            "executed": true
+          },
+          "p8": {
+            "assigned": "lurker",
+            "executed": true
+          }
+        },
+        "wolf_pattern": "偽占い1+潜伏2",
+        "stance": {
+          "follow_up_turns": 96,
+          "observable_follow_ups": 68,
+          "forced_changes": 23,
+          "voluntary_changes": 12,
+          "voluntary_changes_same_day": 4,
+          "voluntary_changes_replying": 9,
+          "voluntary_changes_acknowledged": 2,
+          "acknowledged_without_change": 9,
+          "acknowledged_without_change_with_reason": 2,
+          "acknowledged_without_change_no_reason": 7,
+          "target_unstated_follow_ups": 5,
+          "target_unstated_acknowledged": 0,
+          "target_adopted_acknowledged": 0
+        },
+        "speech": {
+          "utterances": 126,
+          "length_lines": 124,
+          "mean_length": 53.1,
+          "median_length": 54,
+          "max_length": 75,
+          "over_length_limit": 16,
+          "fallback_lines": 0,
+          "fallback_rate": 0.0,
+          "verbatim_repeat_players": 0,
+          "length_variance": 83.3,
+          "speech_count_gini": 0.2589,
+          "reply_rate": 0.9018,
+          "unanswered_question_rate": 0.1379,
+          "unanswered_never_served_rate": 0.0,
+          "unanswered_served_without_reply_link_rate": 0.1379,
+          "cross_player_topic_overlap_rate": 0.0002,
+          "cross_player_mean_jaccard": 0.0394,
+          "adjacent_pairs": 105,
+          "adjacent_mean_jaccard": 0.0864,
+          "adjacent_overlap_rate": 0.0381,
+          "adjacent_overlap_examples": [
+            {
+              "day": 2,
+              "first": "p14",
+              "second": "p7",
+              "jaccard": 0.3291,
+              "first_text": "ダイキさんの指摘に同意します。噛まれた人への白は材料になりません。占い三人の真偽は決めず、今日はグレーの発言を見たいです。",
+              "second_text": "アカリの霊結果でカイトは黒。ダイキの言う通り、噛まれた人への白は材料にならない。今日はグレーの発言を見たい。"
+            },
+            {
+              "day": 3,
+              "first": "p14",
+              "second": "p5",
+              "jaccard": 0.3247,
+              "first_text": "少し整理させてください。ハルト黒の根拠が結果だけで検証手順も出ないので、私は今のところケント偽寄りで見ています。",
+              "second_text": "マコトさん、私は今のところケントさんが一番怪しいと見ています。黒の根拠が結果だけで、検証の材料が出ていないためです。"
+            },
+            {
+              "day": 5,
+              "first": "p13",
+              "second": "p0",
+              "jaccard": 0.2667,
+              "first_text": "マコト、私もハルト寄り！ツムギを見たい理由が順番だけって本人も認めたし、黒も消えてないから今日はハルトかな。",
+              "second_text": "えっと、今日はハルトさんに入れたいです…。黒が消えていないのに、ツムギさんを見たい理由が順番だけだったので…。"
+            }
+          ],
+          "utterances_by_stage": {
+            "immediate": 16,
+            "freemason_confirmation": 1,
+            "initial_view": 22,
+            "rebuttal_or_reassessment": 19,
+            "question_answer": 16,
+            "grey_view": 8,
+            "consensus_summary": 5,
+            "open_floor": 18,
+            "final_designation": 4,
+            "reaction": 1,
+            "facilitator_followup": 2
+          },
+          "template_phrase_rate": 0.0,
+          "prompt_template_phrase_rate": 0.0,
+          "code_fact_sentence_lines": 0,
+          "code_fact_sentence_rate": 0.0,
+          "id_mention_rate": 0.0,
+          "public_messages_per_day": 22.4,
+          "public_mean_length": 52.7
+        }
+      }
+    }
+  ],
+  "settings": {
+    "anthropic_effort_by_kind": {
+      "discussion": "low",
+      "vote": "medium",
+      "night": "medium",
+      "chat": "low",
+      "default": "medium"
+    },
+    "anthropic_fallbacks": "default",
+    "anthropic_max_tokens": 12000
+  }
+}
