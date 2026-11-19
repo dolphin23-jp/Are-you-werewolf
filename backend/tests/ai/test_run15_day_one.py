@@ -266,7 +266,8 @@ def test_the_register_says_day_one_is_about_the_grey_and_night_zero_reasons_are_
     assert "話題の中心は灰の発言" in body
     assert "理由は「なんとなく」が普通で、聞くとしても一度で足りる" in body
     assert "白く見える人を「今日の吊り位置ではない」と置くこともする" in body
-    assert "発言が薄い人(中身のない同意や様子見だけの人)はグレランの投票先になりやすい" in body
+    # Convention 5; what "thin" means is pinned in test_run16_reviews.py (X24-1).
+    assert "発言が薄い人はグレランの投票先になりやすい" in body
     assert "まだ手番が来ていない人は黙っているのではない" in body
 
 

@@ -1,8 +1,10 @@
 """AICoordinator: orchestrates all AI players through each game phase with
 a phase-appropriate concurrency policy:
 
-  - discussion: strictly sequential (each AI reads prior messages before
-    speaking, for coherence)
+  - discussion: sequential (each AI reads prior messages before speaking,
+    for coherence), except day 1's grey-view round: every seat in it writes
+    from the table as the round began, in parallel, and the lines are then
+    posted one by one in a seeded order
   - voting: parallel (independent judgments), looped across runoff rounds
   - night: independent actions (divine/guard/wolf-chat/freemason-chat) run
     in parallel, then the alpha werewolf's attack decision runs afterward,
@@ -176,7 +178,8 @@ _OPEN_FLOOR_STAGE = "open_floor"
 # grey one 60-character line said before most greys had spoken, so the only
 # ground a day-1 ballot could find was 「その一行で疑い先を出していない」 (15 or
 # 16 of 16 day-1 ballots in all four games of runs 14-15). Each turn is outside
-# the follow-up budget and counted in the round's total.
+# the follow-up budget and counted in the round's total. The round's lines are
+# written together, none seeing the others (`_draft_grey_view_round`).
 _GREY_VIEW_STAGE = "grey_view"
 
 # A seat the closing summary put a question to, answering it. It used to be
@@ -518,6 +521,28 @@ def _leading_vocatives(
         position = found_group.end()
 
 
+@dataclass
+class _ComposedTurn:
+    """A discussion turn written but not yet posted (`AICoordinator._compose_turn`).
+
+    What the posting half needs from the moment the prompt was built: what the
+    seat was shown and what the turn owes. Kept with the line because day 1's
+    grey-view round writes every seat's turn from the same table and posts
+    them afterwards, when the table has moved on by the lines before.
+    """
+
+    output: DiscussionOutput | None
+    decision: DiscussionDecision | None
+    shown_questions: list[PendingQuestion]
+    freemason_opening: str | None
+    freemason_must_hide: bool
+    pending_relation: FreemasonPartnerClaim | None
+    code_writes_line: bool
+    brief_turn: bool
+    owes_coded_line: bool
+    epoch: tuple[Phase, int]
+
+
 @dataclass(eq=False)
 class _RoundBook:
     """What the speaker scheduler tracks about one round, beside `DiscussionRoundState`.
@@ -568,8 +593,10 @@ class _RoundBook:
     closed: bool = False
     # The seats offered a silent-seat turn today, drawn once and walked once.
     unheard_plan: list[str] | None = None
-    # Day 1: the seats offered a grey-view turn, drawn once and walked once.
+    # Day 1: the seats given a grey-view turn, drawn once at the round's start
+    # and walked once; and each one's turn, written before any is posted.
     grey_view_plan: list[str] | None = None
+    grey_view_drafts: dict[str, _ComposedTurn | None] | None = None
     # Answers given outside the budget to seats asked by name, per seat.
     owed_answers_given: dict[str, int] = field(default_factory=dict)
 
@@ -806,7 +833,18 @@ class AICoordinator:
                 if ledger.execution_day(pid) == yesterday
             )
             return f"霊媒COを続けるなら、{yesterday}日目に処刑された{executed}の霊媒結果を出す"
-        return f"占いCOを続けるなら、{yesterday}日目夜の占い結果(誰を占って白か黒か)を出す"
+        line = f"占いCOを続けるなら、{yesterday}日目夜の占い結果(誰を占って白か黒か)を出す"
+        if yesterday >= 1:
+            # The rule, at the moment the result is made up: run 16's fake
+            # seer passed over a seat found dead that morning as 「死亡済みで
+            # 占えない」, though it was alive when that night's divination was
+            # made. Night 0's first victim cannot be divined, so night 0 is
+            # left to the register's general rule.
+            line += (
+                "。占いは夜のうちに行うので、占い先はその夜に生きていた人"
+                "(今朝の死体も、その夜の占いの時点では生きていた)"
+            )
+        return line
 
     def _deception_role(self, player_id: str) -> str | None:
         if player_id in self._wolf_deception.fake_role_by_player:
@@ -958,6 +996,10 @@ class AICoordinator:
                 if pid is None:
                     round_state.complete = True
                     break
+                if stage == _GREY_VIEW_STAGE:
+                    # Day 1's grey views are written together, from the table
+                    # as the round began, before the first is posted.
+                    await self._draft_grey_view_round(controller, state, round_state, pid)
                 output = await self._speak(controller, state, pid, stage)
                 if output is None:
                     consecutive_failures += 1
@@ -1194,6 +1236,12 @@ class AICoordinator:
             return confirming, _CONFIRMATION_STAGE
         if book.closed:
             return None, "consensus_summary"
+        if book.grey_view_plan:
+            # A grey-view round under way is said whole: its lines were all
+            # written before the first was posted, so no reply comes between them.
+            grey_view = self._take_grey_view_seat(state, round_state, book)
+            if grey_view is not None:
+                return grey_view, _GREY_VIEW_STAGE
         if round_state.summary_done:
             # The wrap-up has been given. Only what it opened is left: its
             # addressees' answers, anyone it left freshly accused, the close.
@@ -1488,27 +1536,34 @@ class AICoordinator:
     def _take_grey_view_seat(
         self, state: GameState, round_state: DiscussionRoundState, book: _RoundBook
     ) -> str | None:
-        """Day 1: the next living AI seat without a CO and with fewer than two lines today.
+        """Day 1: the next seat of the grey-view round, or None once it is over.
 
-        Offered once each, in an order drawn per game, after the first views
-        and the replies they opened; a seat that has said two lines by the
-        time its turn comes (answering a question, say), or has claimed a
-        role meanwhile, is passed over. So this ends after at most one turn
-        per living seat. The human and observers are never offered one.
+        The round is every living AI seat without a CO that has said fewer
+        than two lines today when it begins -- after the first views and the
+        replies they opened -- in an order drawn per game. It is settled then,
+        not seat by seat: every seat's line is written from the table as it
+        stood at that moment (`_draft_grey_view_round`) and the lines are
+        posted one after another, before anything else is said
+        (`_next_discussion_speaker`). Run 16's views were written in turn, each
+        after the ones before it, and seven of eight came back as the first
+        one's wording (「ハルトの見方に同意」). So this ends after at most one
+        turn per living seat. The human and observers are never in it.
         """
         if book.grey_view_plan is None:
             plan = [pid for pid in self._ai_player_ids if self._may_schedule(state, pid)]
             random.Random(f"{self._seed}:grey-view:{state.day}").shuffle(plan)
-            book.grey_view_plan = plan
-        claimed = {claim.player_id for claim in state.co_declarations}
-        lines_today = Counter(
-            message.author_id
-            for message in state.chat_log
-            if message.day == state.day and message.channel is ChatChannel.PUBLIC
-        )
+            claimed = {claim.player_id for claim in state.co_declarations}
+            lines_today = Counter(
+                message.author_id
+                for message in state.chat_log
+                if message.day == state.day and message.channel is ChatChannel.PUBLIC
+            )
+            book.grey_view_plan = [
+                pid for pid in plan if pid not in claimed and lines_today[pid] < 2
+            ]
         while book.grey_view_plan:
             pid = book.grey_view_plan.pop(0)
-            if not self._may_schedule(state, pid) or pid in claimed or lines_today[pid] >= 2:
+            if not self._may_schedule(state, pid):
                 continue
             if pid in round_state.queued:
                 round_state.queued.discard(pid)
@@ -1516,6 +1571,33 @@ class AICoordinator:
             self._grant_extra_turn(round_state)
             return pid
         return None
+
+    async def _draft_grey_view_round(
+        self,
+        controller: object,
+        state: GameState,
+        round_state: DiscussionRoundState,
+        first: str,
+    ) -> None:
+        """Write every grey view of the round at once, from the table as it stands.
+
+        Called with the round's first seat, before its line is posted; once a
+        round. The rest of the round is what `_take_grey_view_seat` has left
+        in the plan. People at a chat table type their reads at the same
+        time, nobody waiting to read the others' first: each seat here is
+        shown the table as it was when the round began, none of the round's
+        other lines, and the lines are posted afterwards in the drawn order
+        (`_speak`). The requests go out together, as a ballot's do; the
+        number of requests is the same as one turn each.
+        """
+        book = self._book_for(round_state)
+        if book.grey_view_drafts is not None:
+            return
+        seats = [first, *(book.grey_view_plan or [])]
+        turns = await asyncio.gather(
+            *(self._compose_turn(controller, state, seat, _GREY_VIEW_STAGE) for seat in seats)
+        )
+        book.grey_view_drafts = dict(zip(seats, turns, strict=True))
 
     @staticmethod
     def _accusation_signature(state: GameState) -> tuple[tuple[str, ...], tuple[str, ...]]:
@@ -2095,6 +2177,34 @@ class AICoordinator:
     async def _speak(
         self, controller: object, state: GameState, player_id: str, stage: str
     ) -> DiscussionOutput | None:
+        """One discussion turn: written from the table as it stands, then posted.
+
+        A day-1 grey view drafted with its round (`_draft_grey_view_round`) is
+        posted as drafted: it was written from the table as the round began.
+        """
+        turn: _ComposedTurn | None
+        book = self._round_book
+        if (
+            stage == _GREY_VIEW_STAGE
+            and book is not None
+            and book.grey_view_drafts is not None
+            and player_id in book.grey_view_drafts
+        ):
+            turn = book.grey_view_drafts.pop(player_id)
+        else:
+            turn = await self._compose_turn(controller, state, player_id, stage)
+        if turn is None:
+            return None
+        return await self._post_turn(controller, state, player_id, stage, turn)
+
+    async def _compose_turn(
+        self, controller: object, state: GameState, player_id: str, stage: str
+    ) -> _ComposedTurn | None:
+        """Build the turn's prompt from the table as it stands and ask for the line.
+
+        Nothing is posted or recorded here: `_post_turn` does that, so a turn
+        can be written now and said later, as the grey-view round's are.
+        """
         if state.phase != Phase.DISCUSSION:
             return None
         # What this turn's prompt will put to the seat. Only these are served by
@@ -2174,6 +2284,38 @@ class AICoordinator:
         owes_coded_line = decision is not None and self._owes_coded_line(
             state, player_id, decision, freemason_opening
         )
+        return _ComposedTurn(
+            output=output,
+            decision=decision,
+            shown_questions=shown_questions,
+            freemason_opening=freemason_opening,
+            freemason_must_hide=freemason_must_hide,
+            pending_relation=pending_relation,
+            code_writes_line=code_writes_line,
+            brief_turn=brief_turn,
+            owes_coded_line=owes_coded_line,
+            epoch=epoch,
+        )
+
+    async def _post_turn(
+        self,
+        controller: object,
+        state: GameState,
+        player_id: str,
+        stage: str,
+        turn: _ComposedTurn,
+    ) -> DiscussionOutput | None:
+        """Post a composed turn, checked against the table as it is now."""
+        output = turn.output
+        decision = turn.decision
+        shown_questions = turn.shown_questions
+        freemason_opening = turn.freemason_opening
+        freemason_must_hide = turn.freemason_must_hide
+        pending_relation = turn.pending_relation
+        code_writes_line = turn.code_writes_line
+        brief_turn = turn.brief_turn
+        owes_coded_line = turn.owes_coded_line
+        epoch = turn.epoch
         if (state.phase, state.day) != epoch or not state.players[player_id].alive:
             # Dropped unseen: nothing is posted, and nothing is recorded as said.
             if output is not None or owes_coded_line:
@@ -2983,6 +3125,15 @@ class AICoordinator:
         except Exception:
             return
         actual_target = state.pending_votes.get(player_id)
+        if actual_target is not None and actual_target == output.vote_target:
+            # The seat's own night prompt quotes it (`_layer_own_day`).
+            self._context.record_ballot(
+                player_id,
+                day=state.day,
+                round_number=state.vote_round,
+                target_id=actual_target,
+                reason=output.reason,
+            )
         if self._recorder is not None and hasattr(
             self._recorder, "update_latest_decision"
         ):
@@ -3499,9 +3650,16 @@ class AICoordinator:
                 system, messages, candidates, preferred_targets=self._belief_targets(seer_id)
             )
         self._record(state, seer_id, "night_action", text=output.reason, target=output.target)
-        self._submit_audited_night_action(
+        if self._submit_audited_night_action(
             controller, state, seer_id, "divine", output.target, candidates
-        )
+        ):
+            self._context.record_night_action(
+                seer_id,
+                day=state.day,
+                action_type="divine",
+                target_id=output.target,
+                reason=output.reason,
+            )
 
     async def _cast_guard(self, controller: object, state: GameState, hunter_id: str) -> None:
         candidates = [pid for pid in state.alive_ids() if pid != hunter_id]
@@ -3527,9 +3685,16 @@ class AICoordinator:
                 system, messages, candidates, preferred_targets=trusted
             )
         self._record(state, hunter_id, "night_action", text=output.reason, target=output.target)
-        self._submit_audited_night_action(
+        if self._submit_audited_night_action(
             controller, state, hunter_id, "guard", output.target, candidates
-        )
+        ):
+            self._context.record_night_action(
+                hunter_id,
+                day=state.day,
+                action_type="guard",
+                target_id=output.target,
+                reason=output.reason,
+            )
 
     async def _cast_attack(self, controller: object, state: GameState, alpha_id: str) -> None:
         candidates = [
@@ -3550,9 +3715,16 @@ class AICoordinator:
                 system, messages, candidates, preferred_targets=self._belief_targets(alpha_id)
             )
         self._record(state, alpha_id, "night_action", text=output.reason, target=output.target)
-        self._submit_audited_night_action(
+        if self._submit_audited_night_action(
             controller, state, alpha_id, "attack", output.target, candidates
-        )
+        ):
+            self._context.record_night_action(
+                alpha_id,
+                day=state.day,
+                action_type="attack",
+                target_id=output.target,
+                reason=output.reason,
+            )
 
     def _attack_anyone(self, controller: object, state: GameState, alpha_id: str) -> None:
         """The bite the night must have when the AI alpha's own went nowhere.
@@ -3581,7 +3753,8 @@ class AICoordinator:
         action_type: str,
         target_id: str,
         candidates: list[str],
-    ) -> None:
+    ) -> bool:
+        """Submit a night action and audit it; whether the engine took it."""
         accepted = False
         rejection = ""
         try:
@@ -3605,6 +3778,7 @@ class AICoordinator:
                     target_was_legal=target_id in candidates,
                 )
             )
+        return accepted
 
     async def _run_wolf_chat_round(self, controller: object, state: GameState) -> None:
         wolf_ids = [

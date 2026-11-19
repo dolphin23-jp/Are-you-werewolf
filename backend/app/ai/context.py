@@ -72,6 +72,21 @@ _MAX_KEY_POINTS_SHOWN = 12
 _DIGEST_ITEMS = 3
 _DIGEST_QUOTE_CHARS = 70
 
+# Day 1's log: how much the table had heard from seats without a CO when each
+# such seat first spoke (`_day_one_first_line_marks`). Run 16's first view
+# (レン, m7) came when one line from a seat without a CO had been said, and
+# the grey views called it 「聞いてから決めるだけで薄い」; the log did not show
+# that it was said before there was a grey to read. A count, not a reading.
+_FIRST_LINE_MARK = "〈この時点でCO無しの発言{count}件〉"
+_FIRST_LINE_MARK_LEGEND = (
+    "（〈この時点でCO無しの発言N件〉は、CO無しの席が今日はじめて話したとき、"
+    "それより前にCO無しの席の発言が何件出ていたか）"
+)
+
+# The seat's own lines, ballot reasons and night reasons, as its own later
+# prompts quote them: one line each, cut here.
+_OWN_LINE_CHARS = 100
+
 # The team channel a role reads, for the next day's carry-over.
 _TEAM_CHANNELS: dict[RoleName, ChatChannel] = {
     RoleName.WEREWOLF: ChatChannel.WOLF,
@@ -346,6 +361,22 @@ class _LineStance:
 
 
 @dataclass(frozen=True)
+class _OwnAct:
+    """A ballot or a night action a seat took, with the reason it gave then.
+
+    `day` is the day the act belongs to: a ballot's day, or the night's
+    (night N is taken while `state.day` is still N). `round` is the ballot's
+    round (1, or a runoff's); 0 for a night action.
+    """
+
+    day: int
+    kind: str
+    target_id: str
+    reason: str
+    round: int = 0
+
+
+@dataclass(frozen=True)
 class _NoteSource:
     """Where a seat's plan note was written: the day, the turn's stage and, once
     the line is posted, its message id."""
@@ -395,6 +426,11 @@ class ContextBuilder:
         # Day -> each posted line whose turn wrote a plan note, with that note's
         # stance on seats (`_LineStance`), for the seer's night prompt.
         self._line_stances: dict[int, list[_LineStance]] = {}
+        # Each seat's own ballots and night actions with the reasons it gave,
+        # for that seat's own later prompts only: the night prompt quotes the
+        # day's ballots, the next day's prompts the night's action.
+        self._own_ballots: dict[str, list[_OwnAct]] = {}
+        self._own_night_acts: dict[str, _OwnAct] = {}
         self._knowledge = KnowledgeBase()
 
     def record_question(self, question: PendingQuestion) -> None:
@@ -426,6 +462,80 @@ class ContextBuilder:
         """The player's last persisted memo. Free-text fields in it are opinion,
         not fact -- only the validated id fields may be relied on."""
         return self._reasoning_memos.get(player_id)
+
+    def record_ballot(
+        self, player_id: str, *, day: int, round_number: int, target_id: str, reason: str
+    ) -> None:
+        """Keep a ballot the engine took, with the reason the seat gave, for the
+        seat's own night prompt (`_layer_own_day`)."""
+        self._own_ballots.setdefault(player_id, []).append(
+            _OwnAct(
+                day=day, kind="vote", target_id=target_id, reason=reason, round=round_number
+            )
+        )
+
+    def record_night_action(
+        self, player_id: str, *, day: int, action_type: str, target_id: str, reason: str
+    ) -> None:
+        """Keep the night action the engine took from this seat, with its reason,
+        for the seat's own prompts the next day (`_layer_own_last_night`)."""
+        self._own_night_acts[player_id] = _OwnAct(
+            day=day, kind=action_type, target_id=target_id, reason=reason
+        )
+
+    def _layer_own_day(self, state: GameState, player_id: str) -> str:
+        """v3, at night: what this seat said at the table today and how it voted.
+
+        Run 16's hunter voted out one seer claimant on day 2 because 「昨夜の
+        占い先が生きている以上、真の占いではありえない」 and guarded the other
+        claimant, in the same position, that night as one 「真なら占い能力が
+        残る」. The night prompt carried the whole day's log, the seat's own
+        lines unmarked among two dozen, and not the ballot's reason at all.
+        The seat's own words only, quoted as it said them (cut at
+        `_OWN_LINE_CHARS`); what follows from them is the seat's.
+        """
+        if not self._chat:
+            return ""
+        lines = [
+            f"- [{message.message_id}] {_cut(message.content)}"
+            for message in state.chat_log
+            if message.channel is ChatChannel.PUBLIC
+            and message.day == state.day
+            and message.author_id == player_id
+        ]
+        for ballot in self._own_ballots.get(player_id, []):
+            if ballot.day != state.day:
+                continue
+            when = "投票" if ballot.round <= 1 else f"決選投票({ballot.round}回目)"
+            reason = f"（そのとき書いた理由: {_cut(ballot.reason)}）" if ballot.reason else ""
+            lines.append(f"- {when}: {self._label(state, ballot.target_id)}{reason}")
+        if not lines:
+            return ""
+        return (
+            "【今日の自分の発言と投票】自分が今日の卓で言ったことと入れた票"
+            "（票の理由は卓には出ていない）\n" + "\n".join(lines)
+        )
+
+    def _layer_own_last_night(self, state: GameState, player_id: str) -> str:
+        """v3, by day: the night action this seat took last night, and why it said so then.
+
+        Run 16's hunter guarded マコト on night 4 as 「本物の共有と思われる」 and
+        voted リク out on day 5 for trusting マコト. The day prompt listed whom
+        it had guarded, never why. The seat's own act and reason, in its own
+        prompts only -- no other seat's night reaches here, a wolf partner's
+        included.
+        """
+        if not self._chat:
+            return ""
+        act = self._own_night_acts.get(player_id)
+        if act is None or act.day != state.day - 1:
+            return ""
+        label = {"divine": "占い", "guard": "護衛", "attack": "襲撃"}.get(act.kind, act.kind)
+        reason = f"（そのとき書いた理由: {_cut(act.reason)}）" if act.reason else ""
+        return (
+            f"【昨夜の自分の行動】{act.day}日目夜 {label} → "
+            f"{self._label(state, act.target_id)}{reason}。卓には出ていないこと"
+        )
 
     def record_key_point(
         self,
@@ -915,7 +1025,17 @@ class ContextBuilder:
         todays = [m for m in state.chat_log if m.channel == channel and m.day == state.day]
         if not todays:
             return f"{heading}(まだ発言はありません)"
-        lines = [self._format_chat_line(state, message) for message in todays]
+        marks = (
+            _day_one_first_line_marks(state, todays)
+            if self._chat and channel is ChatChannel.PUBLIC and state.day == 1
+            else {}
+        )
+        lines = [
+            self._format_chat_line(state, message, mark=marks.get(message.message_id))
+            for message in todays
+        ]
+        if marks:
+            heading += f"\n{_FIRST_LINE_MARK_LEGEND}"
         return f"{heading}\n" + "\n".join(lines)
 
     def _layer_todays_public_discussion(self, state: GameState) -> str:
@@ -965,12 +1085,15 @@ class ContextBuilder:
         lines = [f"{m.day}日目 {self._format_chat_line(state, m)}" for m in messages[-30:]]
         return "【過去を含む内輪ログ】\n" + "\n".join(lines)
 
-    def _format_chat_line(self, state: GameState, message: ChatMessage) -> str:
+    def _format_chat_line(
+        self, state: GameState, message: ChatMessage, *, mark: int | None = None
+    ) -> str:
         reply = f" →{message.reply_to}" if message.reply_to else ""
         references = f" refs={','.join(message.references)}" if message.references else ""
+        heard = _FIRST_LINE_MARK.format(count=mark) if mark is not None else ""
         return (
             f"[{message.message_id}{reply}{references}] "
-            f"{self._label(state, message.author_id)}: {message.content}"
+            f"{self._label(state, message.author_id)}{heard}: {message.content}"
         )
 
     def _layer_pending_questions(self, state: GameState, player_id: str) -> str:
@@ -1305,6 +1428,7 @@ class ContextBuilder:
             self._layer_d_summaries(),
             *filter(None, [self._layer_last_night_team_chat(state, player_id)]),
             self._layer_previous_memo(state, player_id),
+            *filter(None, [self._layer_own_last_night(state, player_id)]),
             self._layer_e_current_log(state, ChatChannel.PUBLIC),
             *filter(None, [self._waiting_seats_layer(state, player_id)]),
             *filter(None, [self._no_facilitator_layer(state)]),
@@ -1528,6 +1652,7 @@ class ContextBuilder:
             self._layer_d_summaries(),
             *filter(None, [self._layer_last_night_team_chat(state, player_id)]),
             self._layer_previous_memo(state, player_id),
+            *filter(None, [self._layer_own_last_night(state, player_id)]),
             self._layer_e_current_log(state, ChatChannel.PUBLIC),
         ]
         direction = self._direction_layer(state)
@@ -1691,6 +1816,7 @@ class ContextBuilder:
                 user_layers.append(self._grey_table_layer(state, player_id))
         user_layers += [
             self._layer_previous_memo(state, player_id),
+            *filter(None, [self._layer_own_day(state, player_id)]),
             f"【夜行動: {action_label}({action_type})】候補: {candidates}{extra}",
         ]
         if self._chat:
@@ -1861,6 +1987,7 @@ class ContextBuilder:
             ]
         user_layers += [
             self._layer_previous_memo(state, player_id),
+            *filter(None, [self._layer_own_day(state, player_id)]),
             self._layer_private_history(state, channel),
         ]
         if self._chat:
@@ -2172,3 +2299,47 @@ def public_status(state: GameState, player_id: str) -> str:
     )
     parts.extend(verdicts)
     return "・".join(parts) or "グレー"
+
+
+def _cut(text: str, limit: int = _OWN_LINE_CHARS) -> str:
+    """One line of the seat's own words: whitespace folded, cut at `limit`."""
+    flat = " ".join(text.split())
+    return flat if len(flat) <= limit else flat[: limit - 1] + "…"
+
+
+# -- day 1: what the table had heard when each seat first spoke --
+
+
+def _day_one_first_line_marks(
+    state: GameState, todays: Sequence[ChatMessage]
+) -> dict[str, int]:
+    """Each seat's first line of the day said without a CO, and how many lines
+    from seats without a CO came before it, by message id.
+
+    A seat counts as claimed from the line that made its CO on (that line
+    included), so the morning's claims are not counted as grey lines. The
+    human's lines count like any seat's. Facts of order only: what a seat
+    could have read when it spoke is left to the reader.
+    """
+    claims = [
+        event
+        for event in state.speech_events
+        if event.event_type is SpeechEventType.ROLE_CLAIM and event.is_binding
+    ]
+    claim_lines = {event.source_message_id for event in claims}
+    claimed = {event.actor_id for event in claims if event.day < state.day}
+    spoken: set[str] = set()
+    heard = 0
+    marks: dict[str, int] = {}
+    for message in todays:
+        author = message.author_id
+        if message.message_id in claim_lines:
+            claimed.add(author)
+        first = author not in spoken
+        spoken.add(author)
+        if author in claimed:
+            continue
+        if first:
+            marks[message.message_id] = heard
+        heard += 1
+    return marks

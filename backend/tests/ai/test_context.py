@@ -434,8 +434,9 @@ def test_chat_discussion_prompt_hands_over_the_memo_and_asks_for_names_only():
     assert "第一処刑候補" not in body
     assert "role_hypotheses" not in body
     assert "reassessments" not in body
-    # The log is written in names, not `名前(pN)`.
-    assert "] Player2: おはよう。" in body
+    # The log is written in names, not `名前(pN)` (day 1 marks a seat's first
+    # line with what the table had heard: test_run16_reviews.py, X23-2).
+    assert "] Player2〈この時点でCO無しの発言0件〉: おはよう。" in body
     assert "Player2(p2)" not in body
 
 
@@ -730,8 +731,8 @@ def test_chat_night_action_prompt_carries_the_days_public_discussion():
     body = messages[0].content
 
     assert "【今日の公開議論のログ】\n" in body
-    assert "] Player2: Player5の票の理由が気になる。" in body
-    assert "] Player5: 昨日は情報がなかっただけ。" in body
+    assert "] Player2〈この時点でCO無しの発言0件〉: Player5の票の理由が気になる。" in body
+    assert "] Player5〈この時点でCO無しの発言1件〉: 昨日は情報がなかっただけ。" in body
     # Placed right after the past-day summaries, before the seat's own memo.
     assert _in_order(body, "【過去日の要約】", "【今日の公開議論のログ】", "【前回の方針メモ】")
 
@@ -748,7 +749,7 @@ def test_chat_private_chat_prompts_carry_summaries_and_the_days_public_discussio
     _, mason_messages = builder.build_freemason_chat_context(state, mason, board_memo=memo)
 
     for body in (wolf_messages[0].content, mason_messages[0].content):
-        assert "] Player2: Player5の票の理由が気になる。" in body
+        assert "] Player2〈この時点でCO無しの発言0件〉: Player5の票の理由が気になる。" in body
         assert _in_order(
             body, "【過去日の要約】", "【今日の公開議論のログ】", "【過去を含む内輪ログ】"
         )
