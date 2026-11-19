@@ -32,18 +32,40 @@ _NOT_A_VERDICT_TAIL = (
     r"(?![」』\"”)）]*(?:っぽ|ぽい|寄り|より|目|め|く見|視|要素|印象|すぎ|過ぎ|塗|置き|位置"
     r"|側|陣営|候補|では|じゃ|なら|だったら|だとしたら|として|としたら|とすれば|ら|かも))"
 )
-_WHITE_RE = re.compile(
-    r"^(?:は|が|=|＝|を占って[、，,]?)?\s*(?>人狼ではな(?:い|かった)|白|○)" + _NOT_A_VERDICT_TAIL
-)
-_BLACK_RE = re.compile(
-    r"^(?:は|が|=|＝|を占って[、，,]?)?\s*(?>人狼(?:でした|だった|です|だ)?|黒|●)"
-    + _NOT_A_VERDICT_TAIL
-)
+# A bare colour followed by a particle is a verdict being talked about, not one
+# being given: 「リク黒が外れたのはダイキさんの問題」 (run 15: ダイキ's black on
+# リク, registered as the speaker's own), 「ミオ白を出した」, 「ソウタ白は信用でき
+# ない」, 「ハルト黒と私の霊結果が一致」. A verdict the speaker gives ends its
+# clause (「ソウタ白。」「ソウタ白、ケント黒」) or goes on as a predicate
+# (「白でした」「白と出た」). Only the bare forms are checked: after 「人狼でした」
+# the clause has already ended as a verdict. The speaker's own possessive keeps
+# the verdict theirs whatever follows (「私のカイト黒を覆す根拠にはならない」).
+_TALKED_ABOUT = r"(?!が|を|の|は|も|に|へ|から|まで|って|と(?!出))"
+_VERDICT_LEAD = r"^(?:は|が|=|＝|を占って[、，,]?)?\s*"
+
+
+def _verdict_re(white: bool, *, talked_about_ok: bool) -> re.Pattern[str]:
+    after_bare = "" if talked_about_ok else _TALKED_ABOUT
+    colour = (
+        rf"(?>人狼ではな(?:い|かった)|(?:白|○){after_bare})"
+        if white
+        else rf"(?>人狼(?:でした|だった|です|だ)|(?:人狼|黒|●){after_bare})"
+    )
+    return re.compile(_VERDICT_LEAD + colour + _NOT_A_VERDICT_TAIL)
+
+
+_WHITE_RE = _verdict_re(True, talked_about_ok=False)
+_BLACK_RE = _verdict_re(False, talked_about_ok=False)
+_OWN_WHITE_RE = _verdict_re(True, talked_about_ok=True)
+_OWN_BLACK_RE = _verdict_re(False, talked_about_ok=True)
 _SPECULATION_RE = re.compile(r"(?:と思|に見え|かもしれ|可能性)")
 _HONORIFIC = r"(?:さん|君|ちゃん|氏)?"
-# "アオイの占い結果", "(p15)の霊判定": the verdict that follows is that player's.
-_RESULT_NOUN = r"(?:真|偽)?(?:占い|霊媒|霊能|霊)(?:師)?(?:結果|判定)"
+# "アオイの占い結果", "(p15)の霊判定", "ケントの結果": the verdict that follows is
+# that player's.
+_RESULT_NOUN = r"(?:(?:真|偽)?(?:占い|霊媒|霊能|霊)(?:師)?)?(?:結果|判定)"
 _FIRST_PERSON_RE = re.compile(r"(?:私|僕|俺|自分|わたし|あたし|ワイ|うち)")
+# 「私の」 right before the target: the verdict is the speaker's own.
+_OWN_POSSESSIVE_RE = re.compile(rf"{_FIRST_PERSON_RE.pattern}の\s*$")
 
 
 def detect_public_result(
@@ -113,9 +135,11 @@ def detect_public_results(
             result_text = _TARGET_TRAILER_RE.sub("", result_text, count=1)
             if _SPECULATION_RE.search(result_text):
                 continue
-            if _WHITE_RE.match(result_text) is not None:
+            own = _OWN_POSSESSIVE_RE.search(sentence[:start]) is not None
+            white_re, black_re = (_OWN_WHITE_RE, _OWN_BLACK_RE) if own else (_WHITE_RE, _BLACK_RE)
+            if white_re.match(result_text) is not None:
                 found.append(DetectedPublicResult(effective_role.value, target_id, False))
-            elif _BLACK_RE.match(result_text) is not None:
+            elif black_re.match(result_text) is not None:
                 found.append(DetectedPublicResult(effective_role.value, target_id, True))
     return found
 

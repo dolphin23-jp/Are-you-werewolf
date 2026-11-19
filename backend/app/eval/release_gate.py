@@ -29,6 +29,10 @@ HARD_FAILURE_FIELDS = (
     "unexplained_vote_change_count",
     "unplanned_wolf_ally_vote_count",
     "duplicate_night_action_count",
+    # A CO or result on the public record that its own line did not declare:
+    # code put a fact on the record nobody stated, and the table reads the
+    # record as fact (run 16, 「共有CO二人は了解」 -> a third freemason).
+    "undeclared_record_count",
 )
 
 

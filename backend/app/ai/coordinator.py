@@ -82,6 +82,7 @@ from app.eval.reasoning_analyzer import (
     SpokenLine,
     classify_vote_change,
     declares_grey_random,
+    final_designation,
     named_seat_ids,
     sentence_naming,
 )
@@ -3079,22 +3080,29 @@ class AICoordinator:
         verdicts read as news to it at the vote.
         """
         corrections: tuple[str, ...] = ()
+        names = {pid: player.name for pid, player in state.players.items()}
+        day_lines = tuple(
+            SpokenLine(message.message_id, message.author_id, message.content)
+            for message in state.chat_log
+            if message.day == state.day and message.channel is ChatChannel.PUBLIC
+        )
+        designation: tuple[str | None, str | None] = (None, None)
         recorder = self._recorder
         if recorder is not None and hasattr(recorder, "transcript"):
             corrections = tuple(
                 item.source_message_id for item in recorder.transcript.correction_audits
+            )
+            # Read from the recorded turns, as the offline audit reads them.
+            designation = final_designation(
+                recorder.transcript.utterances, state.day, day_lines, names
             )
         facts = BallotFacts(
             voter_id=player_id,
             basis=stated_target,
             vote_target=actual_target,
             reason=reason,
-            names={pid: player.name for pid, player in state.players.items()},
-            day_lines=tuple(
-                SpokenLine(message.message_id, message.author_id, message.content)
-                for message in state.chat_log
-                if message.day == state.day and message.channel is ChatChannel.PUBLIC
-            ),
+            names=names,
+            day_lines=day_lines,
             results=tuple(
                 PublishedResult(event.actor_id, event.target_id, event.source_message_id)
                 for event in state.speech_events
@@ -3111,6 +3119,8 @@ class AICoordinator:
                 message_id for _label, message_id in self._context.direction_lines(state.day)
             ),
             grey_ids=self._grey_ids(state),
+            designation_message_id=designation[0],
+            designated_target=designation[1],
         )
         kind, why = classify_vote_change(facts)
         return kind.value, why

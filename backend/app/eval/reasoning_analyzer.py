@@ -9,7 +9,8 @@ from dataclasses import asdict, dataclass
 from enum import StrEnum
 from typing import Any
 
-from app.eval.transcript import DecisionAuditRecord, GameTranscript
+from app.eval.public_record import undeclared_records
+from app.eval.transcript import DecisionAuditRecord, GameTranscript, Utterance
 
 
 class VoteChangeKind(StrEnum):
@@ -51,6 +52,13 @@ class VoteChangeKind(StrEnum):
     # it. The policy the table heard says where the votes go; run 14 failed
     # six ballots that followed it from a seer claimant to a grey seat.
     GREY_RANDOM_POLICY = "grey_random_policy"
+    # After the seat's last word, the day's final designation -- the last of
+    # the closing lines -- named exactly the seat the ballot went to. The
+    # designation is what the table votes on; following it is a cause the
+    # table saw, whatever the reason says. Run 16, day 2: カイト voted the
+    # designated アオイ with 「進行に乗る」 and was failed, while four seats
+    # that wrote 「マコトの本指定どおり」 passed as `public_argument`.
+    FINAL_DESIGNATION = "final_designation"
 
 
 # Changes with a cause the table could see. `no_basis` compared nothing, and
@@ -423,6 +431,11 @@ class BallotFacts:
     # The grey at the vote: alive, no claim, no seer claimant's verdict.
     # None when it is not known; the grey-random cause is then never found.
     grey_ids: frozenset[str] | None = None
+    # The day's final designation (`final_designation`): the last closing
+    # line, and the seat it designates. None when the day closed on no line,
+    # or on one that designates nobody the table heard.
+    designation_message_id: str | None = None
+    designated_target: str | None = None
 
     def stance_on(self, seat: str) -> PublicStance:
         """The voter's own sentences today that name `seat`, as stance or excused.
@@ -480,9 +493,10 @@ def classify_vote_change(facts: BallotFacts) -> tuple[VoteChangeKind, str]:
     spoke: a runoff that left the candidate off the ballot, the candidate's
     death, a correction, another seat arguing about the old or the new target
     whom the reason names, a new ability result about either target or by
-    either of them, or a closing line declaring a grey-random day when the
-    ballot left a seat outside the grey for one in it. Only a change none of
-    them covers is unexplained. The
+    either of them, a closing line declaring a grey-random day when the
+    ballot left a seat outside the grey for one in it, or the day's final
+    designation naming the very seat the ballot went to, whatever the reason
+    says of it. Only a change none of them covers is unexplained. The
     reason the seat wrote is kept either way, but it is not a cause on its
     own -- the vote prompt asks every ballot for one.
 
@@ -563,6 +577,18 @@ def classify_vote_change(facts: BallotFacts) -> tuple[VoteChangeKind, str]:
             VoteChangeKind.GREY_RANDOM_POLICY,
             f"発言後に進行役がグレランを宣言({'、'.join(declared)})。"
             f"{facts.names.get(basis, basis)}はグレー外、票はグレー: {facts.reason}",
+        )
+    designation = facts.designation_message_id
+    if (
+        designation is not None
+        and designation in later_ids
+        and facts.designated_target is not None
+        and facts.designated_target == target
+    ):
+        return (
+            VoteChangeKind.FINAL_DESIGNATION,
+            f"発言後の進行役の最後の指定({designation})が"
+            f"{facts.names.get(target or '', target)}を指定: {facts.reason}",
         )
     return VoteChangeKind.UNEXPLAINED, facts.reason
 
@@ -695,6 +721,58 @@ _NEW_RESULT_EVENT_TYPES = frozenset({"ability_result", "result_correction"})
 # and the summary before it).
 _CLOSING_STAGES = frozenset({"final_designation", "provisional_designation", "consensus_summary"})
 _BINDING_CONFIDENCE = 0.8  # `speech_events.CLAIM_CONFIDENCE_THRESHOLD`
+
+
+def day_closing_line(utterances: Sequence[Utterance], day: int) -> Utterance | None:
+    """The day's last closing turn (designation, or the summary the round closed on)."""
+    closing = [
+        u
+        for u in utterances
+        if u.kind == "discussion" and u.day == day and u.stage in _CLOSING_STAGES
+    ]
+    return closing[-1] if closing else None
+
+
+def designated_by(line: Utterance, names: Mapping[str, str]) -> str | None:
+    """The seat a closing line designates: its speaker's memo hang target, said in the line.
+
+    A target the line does not name is no designation the table heard.
+    """
+    target = (line.reasoning_memo or {}).get("execution_target")
+    if isinstance(target, str) and target in named_seat_ids(line.text, names):
+        return target
+    return None
+
+
+def final_designation(
+    utterances: Sequence[Utterance],
+    day: int,
+    day_lines: Sequence[SpokenLine],
+    names: Mapping[str, str],
+) -> tuple[str | None, str | None]:
+    """`BallotFacts.designation_message_id` and `designated_target` for one day.
+
+    The day's last closing line, as the message the table saw, and the seat
+    it designates. A line that declares a grey-random day designates nobody
+    even when it names its speaker's lean (「今日はグレランで、シオンさんの答えを
+    聞いてから」): the policy it states is grey random (`declares_grey_random`).
+    The live coordinator and the offline audit both read it here, from the
+    utterances the transcript records and the day's public lines.
+    """
+    line = day_closing_line(utterances, day)
+    if line is None:
+        return None, None
+    message_id = next(
+        (
+            spoken.message_id
+            for spoken in reversed(day_lines)
+            if spoken.author_id == line.player_id and spoken.content == line.text
+        ),
+        None,
+    )
+    if message_id is None or declares_grey_random(line.text):
+        return message_id, None
+    return message_id, designated_by(line, names)
 
 
 class _Record:
@@ -860,18 +938,10 @@ class _Record:
         仮指定. Its target is the speaker's memo target, when the line says the
         name; a line that does not name it designated nobody the table heard.
         """
-        closing = [
-            u
-            for u in self.t.utterances
-            if u.kind == "discussion" and u.day == day and u.stage in _CLOSING_STAGES
-        ]
-        if not closing:
+        last = day_closing_line(self.t.utterances, day)
+        if last is None:
             return None, ""
-        last = closing[-1]
-        target = (last.reasoning_memo or {}).get("execution_target")
-        if isinstance(target, str) and target in named_seat_ids(last.text, self.names):
-            return target, last.text
-        return None, last.text
+        return designated_by(last, self.names), last.text
 
     def ally_vote(self, audit: DecisionAuditRecord, round_number: int) -> dict[str, Any]:
         """`BallotVerdict`'s ally fields for a ballot on the voter's partner."""
@@ -921,6 +991,9 @@ class _Record:
             candidates = tuple(
                 seat for seat in _top(self.tally(day, round_number - 1)) if seat != audit.player_id
             )
+        designation_id, designated = final_designation(
+            self.t.utterances, day, self.lines.get(day, ()), self.names
+        )
         return BallotFacts(
             voter_id=audit.player_id,
             basis=self.basis(audit.player_id, day),
@@ -937,6 +1010,8 @@ class _Record:
             ),
             closing_message_ids=self.closing.get(day, ()),
             grey_ids=self.grey(day),
+            designation_message_id=designation_id,
+            designated_target=designated,
         )
 
 
@@ -990,6 +1065,11 @@ class ReasoningQualityReport:
     vote_reason_names_other_count: int = 0
     illegal_timeline_claim_count: int = 0
     duplicate_night_action_count: int = 0
+    # COs, results and partner namings on the public record that their own
+    # line did not declare (`public_record.undeclared_records`), counting only
+    # those that changed what the record says. A restatement of what already
+    # stood is listed in the report, not counted.
+    undeclared_record_count: int = 0
     correction_messages_heard: int = 0
     corrections_confirmed: int = 0
     corrections_refuted: int = 0
@@ -1109,6 +1189,9 @@ class ReasoningTranscriptAnalyzer:
             + sum(count - 1 for count in result_nights.values() if count > 1),
             duplicate_night_action_count=len(accepted_night_keys)
             - len(set(accepted_night_keys)),
+            undeclared_record_count=sum(
+                record.changed_record for record in undeclared_records(transcript)
+            ),
             stale_evidence_used_in_brief_count=stale_attempts,
             stale_evidence_cited_publicly_count=stale_emitted,
             stale_evidence_attempt_count=stale_attempts,
