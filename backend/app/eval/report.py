@@ -12,8 +12,11 @@ from collections.abc import Mapping, Sequence
 from typing import Any, Literal
 
 from app.eval.analyzers import AnalysisResult
+from app.eval.grey_reading import GREY_READING_HEADING, render_grey_reading
+from app.eval.public_record import describe_record, undeclared_records
 from app.eval.reasoning_analyzer import AllyVoteKind, VoteChangeKind, audit_ballots
 from app.eval.release_gate import HARD_FAILURE_FIELDS
+from app.eval.table_tells import TABLE_TELLS_HEADING, render_table_tells
 from app.eval.transcript import GameTranscript
 from app.eval.transcript_render import team_label
 
@@ -71,6 +74,7 @@ HARD_FAILURE_LABELS: dict[str, str] = {
         "計画のない人狼の仲間投票（指定に従わない、指定がない、または処刑を決めた票）"
     ),
     "duplicate_night_action_count": "同じ夜の行動の重複",
+    "undeclared_record_count": "本人が宣言していないCO・結果が公開の記録に載った",
 }
 
 # The validation-log repairs `scripts/live_reasoning_check.py` reports. The
@@ -186,6 +190,9 @@ def render_report(
 
     add(f"\n## 3. {HARD_CORRECTNESS_HEADING}\n")
     add(_render_hard_correctness(per_game))
+    undeclared = _render_undeclared_records(games)
+    if undeclared:
+        add(f"\n{undeclared}")
     wolf_chat_plans = _render_wolf_chat_plans(games)
     if wolf_chat_plans:
         add(f"\n{wolf_chat_plans}")
@@ -215,6 +222,16 @@ def render_report(
         )
     else:
         add(_render_judge(judge_summary))
+
+    transcripts = [transcript for transcript, _analysis in games]
+    table_tells = render_table_tells(transcripts)
+    if table_tells:
+        add(f"\n## 7. {TABLE_TELLS_HEADING}\n")
+        add(table_tells)
+    grey_reading = render_grey_reading(transcripts)
+    if grey_reading:
+        add(f"\n## 8. {GREY_READING_HEADING}\n")
+        add(grey_reading)
 
     return "\n".join(lines) + "\n"
 
@@ -441,6 +458,65 @@ def _render_hard_correctness(per_game: Sequence[Mapping[str, Any]] | None) -> st
     return "\n".join(out)
 
 
+UNDECLARED_RECORDS_HEADING = "### 本人が宣言していないのに公開の記録に載ったCO・結果（引用つき）"
+
+
+def _render_undeclared_records(games: list[tuple[GameTranscript, AnalysisResult]]) -> str:
+    """Every CO, result and partner naming on the record that its own line did not declare.
+
+    The gate counts the ones that changed what the record says
+    (`undeclared_record_count`); one that only repeated what already stood is
+    listed after them and not counted. Each is quoted with the line it was
+    registered from, so a reader checks the reading rather than a count.
+    """
+    audited = [
+        (transcript, undeclared_records(transcript))
+        for transcript, _analysis in games
+        if (transcript.final_state or {}).get("chat_log")
+    ]
+    if not audited:
+        return ""
+    counted: list[str] = []
+    repeated: list[str] = []
+    for transcript, records in audited:
+        for record in records:
+            row = (
+                f"| {_seed(transcript)} | {record.day} | {record.source_message_id or '—'} | "
+                f"{describe_record(record, transcript.names)} | {_quote(record.text)} |"
+            )
+            (counted if record.changed_record else repeated).append(row)
+    out = [
+        UNDECLARED_RECORDS_HEADING,
+        "",
+        "公開の記録（COの一覧・公開結果・相方の名指し）に載ったもののうち、載った発言そのものが"
+        "それを宣言していないものです。宣言とは、その発言の構造化出力（`public_claim_role`・"
+        "`public_results`）か、本人のこととして言い切った本文（「占い師CO。」「霊媒COします」"
+        "「俺は本物の共有だ」「0日目夜はミオを占って白」）です。他人のCOの受け答え"
+        "（「共有CO二人は了解」）や、他人の結果への言及（「リク黒が外れたのは…」）は宣言では"
+        "ありません。卓は記録を事実として読むので、合否に数えます"
+        "（`undeclared_record_count`）。",
+        "",
+    ]
+    if counted:
+        out += [
+            "| seed | 日 | 発言 | 記録 | 記録の元になった発言 |",
+            "|---|---|---|---|---|",
+            *counted,
+        ]
+    else:
+        out.append("(ありません)")
+    if repeated:
+        out += [
+            "",
+            "すでに記録にあったものを繰り返しただけで、記録を変えなかったもの（合否に数えません）:",
+            "",
+            "| seed | 日 | 発言 | 記録 | 記録の元になった発言 |",
+            "|---|---|---|---|---|",
+            *repeated,
+        ]
+    return "\n".join(out)
+
+
 WOLF_CHAT_PLANS_HEADING = "### 人狼チャットの文から「計画あり」と読んだ仲間への投票"
 
 
@@ -499,6 +575,7 @@ _JUSTIFIED_LABELS: dict[VoteChangeKind, str] = {
     VoteChangeKind.GREY_RANDOM_POLICY: (
         "発言後に進行役がグレランを宣言し、グレー外からグレーへ移した"
     ),
+    VoteChangeKind.FINAL_DESIGNATION: "発言後の進行役の最後の指定どおりに入れた",
 }
 
 
@@ -513,7 +590,8 @@ def _render_ballot_lists(games: list[tuple[GameTranscript, AnalysisResult]]) -> 
 
     The gate measures a seat's public stance against its vote. A ballot with
     no basis was compared with nothing; a change off a memo target the seat
-    never said aloud left no stance the table saw; a change with a cause the
+    never said aloud, or said only in its own result about that seat or in a
+    question to it, left no stance the table saw; a change with a cause the
     table could see is justified. None of them fails the gate, and each is
     listed so a reader can check the reading rather than trust a count. The
     unexplained changes the gate does fail come first, quoted the same way.
@@ -531,23 +609,29 @@ def _render_ballot_lists(games: list[tuple[GameTranscript, AnalysisResult]]) -> 
         "票を比べる基準は、その日の最後の手番のメモの吊り先です。ハードな失敗になるのは、"
         "その名前を自分の公開発言で言っていて、発言後にどちらの吊り先にも関わる新しい"
         "公開情報がなく、理由が後の発言者の論を挙げておらず、進行役のグレラン宣言で"
-        "グレー外からグレーへ移したのでもない変更だけです。",
+        "グレー外からグレーへ移したのでも、発言後の進行役の最後の指定どおりに入れたのでもない"
+        "変更だけです。",
         "",
         "比較できた票／全票（その日の手番がない票と、メモの吊り先が空の票は比較できません）:",
         "",
-        "| seed | 比較できた票／全票 | 比較できない | 卓で言っていない吊り先からの変更 |",
-        "|---|---|---|---|",
+        "| seed | 比較できた票／全票 | 比較できない | 卓で言っていない吊り先からの変更 "
+        "| 結果の発表・本人への質問でだけ触れた吊り先からの変更 |",
+        "|---|---|---|---|---|",
     ]
     for transcript, verdicts in audited:
         no_basis = sum(v.kind is VoteChangeKind.NO_BASIS for v in verdicts)
         unspoken = sum(v.kind is VoteChangeKind.MEMO_TARGET_UNSPOKEN for v in verdicts)
+        excused = sum(
+            v.kind is VoteChangeKind.MEMO_TARGET_ONLY_REPORTED_OR_ASKED for v in verdicts
+        )
         out.append(
             f"| {_seed(transcript)} | {len(verdicts) - no_basis} / {len(verdicts)} | "
-            f"{no_basis} | {unspoken} |"
+            f"{no_basis} | {unspoken} | {excused} |"
         )
 
     unexplained_rows: list[str] = []
     unspoken_rows: list[str] = []
+    excused_rows: list[str] = []
     justified_rows: list[str] = []
     designated_rows: list[str] = []
     mismatch_rows: list[str] = []
@@ -586,6 +670,14 @@ def _render_ballot_lists(games: list[tuple[GameTranscript, AnalysisResult]]) -> 
                     f"| {_seed(transcript)} | {day} | {voter} | {basis} → {target} | "
                     f"{_quote(last_line)} | {_quote(verdict.reason)} |"
                 )
+            elif verdict.kind is VoteChangeKind.MEMO_TARGET_ONLY_REPORTED_OR_ASKED:
+                sentences = " ／ ".join(
+                    f"「{sentence}」（{excuse}）" for sentence, excuse in verdict.excused_sentences
+                )
+                excused_rows.append(
+                    f"| {_seed(transcript)} | {day} | {voter} | {basis} → {target} | "
+                    f"{_quote(sentences)} | {_quote(verdict.reason)} |"
+                )
             elif verdict.kind in _JUSTIFIED_LABELS:
                 justified_rows.append(
                     f"| {_seed(transcript)} | {day} | {voter} | {basis} → {target} | "
@@ -611,7 +703,8 @@ def _render_ballot_lists(games: list[tuple[GameTranscript, AnalysisResult]]) -> 
         UNEXPLAINED_LIST_HEADING,
         "",
         "その日の自分の発言でメモの吊り先の名前を出し、発言後に関わる公開情報も、"
-        "理由が挙げる後の発言者の論も、グレー外からグレーへ移す進行役のグレラン宣言も"
+        "理由が挙げる後の発言者の論も、グレー外からグレーへ移す進行役のグレラン宣言も、"
+        "票の相手を名指した進行役の最後の指定も"
         "ないまま、別の相手に入れた票です（`unexplained_vote_change_count`）。",
         "",
     ]
@@ -637,6 +730,27 @@ def _render_ballot_lists(games: list[tuple[GameTranscript, AnalysisResult]]) -> 
             "| seed | 日 | 投票者 | メモの吊り先 → 票 | その日の自分の最後の発言 | 票の理由 |",
             "|---|---|---|---|---|---|",
             *unspoken_rows,
+        ]
+    else:
+        out.append("(ありません)")
+    out += [
+        "",
+        "#### 結果の発表・本人への質問でだけ触れたメモの吊り先からの変更"
+        "（`memo_target_only_reported_or_asked`）",
+        "",
+        "メモの吊り先の名前がその日の自分の発言に出ているが、どの文も、その席についての"
+        "自分の能力結果の発表（結果が登録された発言の中で、名前の後に白・黒などの判定を"
+        "述べ、吊り・投票・指定の語を含まない文）か、その席への質問（問いかけ・回答待ち・"
+        "回答の要求で、名前が呼びかけか回答を求められる側として出る文）だったものです。"
+        "文の形だけで読み、意図は読みません。卓には離れる立場が見えていないので、"
+        "合否に数えません。読み違いがないか確かめられるよう、該当する文をすべて引きます。",
+        "",
+    ]
+    if excused_rows:
+        out += [
+            "| seed | 日 | 投票者 | メモの吊り先 → 票 | 名前が出た文（読み） | 票の理由 |",
+            "|---|---|---|---|---|---|",
+            *excused_rows,
         ]
     else:
         out.append("(ありません)")

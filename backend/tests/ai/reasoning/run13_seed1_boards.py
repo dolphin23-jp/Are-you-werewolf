@@ -35,22 +35,8 @@ from app.ai.reasoning.board_memo import PRIVATE_HEADING, SELF, render_board_memo
 from app.ai.reasoning.observations import ObservationSet
 from app.ai.reasoning.perspectives import CommonPublicPerspective, PlayerPrivatePerspective
 from app.ai.reasoning.solver import build_solver
-from app.engine.phases import Phase
-from app.engine.roles import RoleName
-from app.engine.speech_events import SpeechEvent, SpeechEventType
-from app.engine.state import (
-    AttackRecord,
-    ChatChannel,
-    ChatMessage,
-    DeathCause,
-    DeathRecord,
-    DivineRecord,
-    GameState,
-    GuardRecord,
-    MediumRecord,
-    PlayerState,
-    VoteRecord,
-)
+from app.engine.state import GameState
+from tests.ai.reasoning.record_boards import board_from_record
 
 TRANSCRIPT = (
     Path(__file__).resolve().parents[3]
@@ -79,96 +65,7 @@ def record() -> dict[str, Any]:
 
 def board(day: int, at: str = "morning") -> GameState:
     """The board of `day` at `at`: 'morning', 'vote', 'night' or a message id."""
-    final = record()["final_state"]
-    players = {
-        entry["player_id"]: PlayerState(
-            player_id=entry["player_id"], name=entry["name"], role=RoleName(entry["role"])
-        )
-        for entry in final["players"]
-    }
-    phase = {"vote": Phase.VOTING, "night": Phase.NIGHT}.get(at, Phase.DISCUSSION)
-    state = GameState(session_id="run13-seed1", players=players, phase=phase, day=day)
-
-    for entry in final["death_records"]:
-        executed_today = entry["day"] == day and entry["cause"] == DeathCause.EXECUTED.value
-        if entry["day"] < day or (at == "night" and executed_today):
-            cause = DeathCause(entry["cause"])
-            player = players[entry["player_id"]]
-            player.alive = False
-            player.death_cause = cause
-            player.death_day = entry["day"]
-            state.death_records.append(
-                DeathRecord(player_id=entry["player_id"], cause=cause, day=entry["day"])
-            )
-            if cause is DeathCause.FIRST_VICTIM:
-                state.first_victim_id = entry["player_id"]
-
-    # Night records are dated by the night; a night is resolved by the morning
-    # after it. The medium reads day N's execution during night N.
-    state.divine_records = [DivineRecord(**r) for r in final["divine_records"] if r["day"] < day]
-    state.medium_records = [MediumRecord(**r) for r in final["medium_records"] if r["day"] < day]
-    state.guard_records = [GuardRecord(**r) for r in final["guard_records"] if r["day"] < day]
-    state.attack_records = [AttackRecord(**r) for r in final["attack_records"] if r["day"] < day]
-    state.vote_records = [
-        VoteRecord(**r)
-        for r in final["vote_records"]
-        if r["day"] < day or (at == "night" and r["day"] == day)
-    ]
-
-    order = {message["message_id"]: index for index, message in enumerate(final["chat_log"])}
-    cut = _cut(final["chat_log"], order, day, at)
-
-    def seen(message_id: str, message_day: int) -> bool:
-        if message_day != day:
-            return message_day < day
-        return message_id in order and order[message_id] <= cut
-
-    for message in final["chat_log"]:
-        if seen(message["message_id"], message["day"]):
-            state.chat_log.append(
-                ChatMessage(
-                    message_id=message["message_id"],
-                    author_id=message["author_id"],
-                    content=message["content"],
-                    channel=ChatChannel(message["channel"]),
-                    day=message["day"],
-                    reply_to=message.get("reply_to"),
-                    quote=message.get("quote"),
-                    references=message.get("references") or [],
-                )
-            )
-    for event in final["speech_events"]:
-        if seen(event["source_message_id"], event["day"]):
-            state.speech_events.append(
-                SpeechEvent(
-                    event_id=event["event_id"],
-                    source_message_id=event["source_message_id"],
-                    actor_id=event["actor_id"],
-                    event_type=SpeechEventType(event["event_type"]),
-                    day=event["day"],
-                    target_id=event.get("target_id"),
-                    role=RoleName(event["role"]) if event.get("role") else None,
-                    result_is_werewolf=event.get("result_is_werewolf"),
-                    referenced_day=event.get("referenced_day"),
-                    confidence=event.get("confidence", 1.0),
-                )
-            )
-    return state
-
-
-def _cut(chat_log: list[dict[str, Any]], order: dict[str, int], day: int, at: str) -> int:
-    """Index of the last message of `day` that is on the board at `at`."""
-    if at == "morning":
-        return -1
-    todays = [message for message in chat_log if message["day"] == day]
-    if at == "night":
-        return max((order[message["message_id"]] for message in todays), default=-1)
-    if at == "vote":
-        public = [m for m in todays if m["channel"] == ChatChannel.PUBLIC.value]
-        return order[public[-1]["message_id"]] if public else -1
-    if at not in order:
-        raise KeyError(f"no message {at} in the record")
-    return order[at]
+    return board_from_record(record()["final_state"], "run13-seed1", day, at)
 
 
 def memo(state: GameState, seat: str) -> str:

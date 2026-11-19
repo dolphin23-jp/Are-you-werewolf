@@ -257,6 +257,47 @@ def test_the_seats_own_later_words_are_not_someone_elses_argument():
     assert audit.target_change_classification == VoteChangeKind.UNEXPLAINED
 
 
+def _after_a_closing_line(designated: str, stage: str = "final_designation"):  # type: ignore[no-untyped-def]
+    """The seat names `plan`; a facilitator's closing turn then names `designated`;
+    the seat votes `other` with a reason that cites nobody (run 16's カイト)."""
+    controller, state, coordinator, provider, recorder, speaker, plan, other = _v3_table()
+    asyncio.run(coordinator._speak(controller, state, speaker, "initial_view"))
+    facilitator = next(
+        pid
+        for pid in state.alive_ids()
+        if pid not in (speaker, plan, other, "p0")
+        and state.players[pid].role is not RoleName.FREEMASON
+    )
+    target = {"plan": plan, "other": other}[designated]
+    provider.plan = target
+    provider.line = f"本指定は{_name(state, target)}さん。投票をお願いします。"
+    asyncio.run(coordinator._speak(controller, state, facilitator, stage))
+    provider.vote = other
+    provider.reason = "進行に乗る。"
+    state.phase = Phase.VOTING
+
+    asyncio.run(coordinator._cast_vote(controller, state, speaker))
+
+    return _latest_audit(recorder, speaker, state.day), recorder
+
+
+def test_following_the_final_designation_is_a_cause_the_live_audit_sees():
+    """X10 (run 16, day 2): the live audit reads the designation as the offline one does."""
+    audit, recorder = _after_a_closing_line("other")
+
+    assert audit.target_change_classification == VoteChangeKind.FINAL_DESIGNATION
+    assert "進行に乗る。" in audit.target_change_reason
+    report = ReasoningTranscriptAnalyzer().analyze(recorder.transcript)
+    assert report.unexplained_vote_change_count == 0
+    assert report.justified_vote_change_count == 1
+
+
+def test_a_designation_of_the_seats_own_candidate_does_not_explain_leaving_it():
+    audit, _recorder = _after_a_closing_line("plan")
+
+    assert audit.target_change_classification == VoteChangeKind.UNEXPLAINED
+
+
 def test_the_v3_change_record_calls_the_baseline_a_note_not_a_statement():
     """Under v3 the stated target is the private plan note; nobody said it aloud."""
     controller, state, coordinator, provider, recorder, speaker, plan, other = _v3_table()
@@ -267,7 +308,8 @@ def test_the_v3_change_record_calls_the_baseline_a_note_not_a_statement():
     asyncio.run(coordinator._cast_vote(controller, state, speaker))
 
     change = next(u for u in recorder.transcript.utterances if u.kind == "vote_change")
-    assert change.text.startswith(f"メモでは{plan}を第一候補としたが")
+    assert change.text.startswith(f"メモでは{state.players[plan].name}を第一候補としたが")
+    assert f"最終判断で{state.players[other].name}へ変更した" in change.text
     assert "公開発言では" not in change.text
 
 
@@ -657,4 +699,8 @@ def test_on_the_first_games_boards_no_move_with_a_vague_reason_counts_as_persuas
     # 43 moves leave a memo target nobody heard, and are not judged.)
     assert kinds[VoteChangeKind.NEW_PUBLIC_EVIDENCE] == 13
     assert kinds[VoteChangeKind.MEMO_TARGET_UNSPOKEN] == 43
-    assert kinds[VoteChangeKind.UNEXPLAINED] == 201
+    # アカリ on day 3 named her candidate ダイキ only in a question to him
+    # (「ダイキさん、この点はどう説明されますか？」): no stance on him the table
+    # heard (`stance_excuse`), so her 10 moves are listed, not judged.
+    assert kinds[VoteChangeKind.MEMO_TARGET_ONLY_REPORTED_OR_ASKED] == 10
+    assert kinds[VoteChangeKind.UNEXPLAINED] == 191

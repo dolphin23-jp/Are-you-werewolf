@@ -54,6 +54,7 @@ _STAGES = (
     "consensus_summary",
     "human_followup",
     "open_floor",
+    "grey_view",
     "facilitator_followup",
     "provisional_designation",
     "summary_answer",
@@ -119,6 +120,7 @@ def test_each_stage_carries_its_own_cap():
         "immediate": 120,
         "consensus_summary": 120,
         "open_floor": 60,
+        "grey_view": 80,
         "facilitator_followup": 60,
         "provisional_designation": 60,
         "summary_answer": 60,
@@ -225,7 +227,7 @@ def test_the_chat_prompt_keeps_the_listening_rules_and_asks_for_a_one_word_agree
     system = _system_for(PERSONALITIES[0])
 
     assert "【聞き入れ方】" in system
-    assert "認めたなら疑い先・吊り先も実際に変え" in system
+    assert "考えを変えたなら、疑い先・吊り先も実際に変え" in system
     assert "強く言われただけで折れない" in system
     assert "直前の人と同じ結論なら『〇〇に同意』と一言で" in system
 

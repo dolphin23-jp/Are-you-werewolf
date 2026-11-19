@@ -169,7 +169,7 @@ def test_the_v3_system_prompt_teaches_listening_and_the_older_prompts_are_untouc
     v3 = builder._layer_a_system(state, "p1")
 
     assert "【聞き入れ方】" in v3
-    assert "認めたなら疑い先・吊り先も実際に変え" in v3
+    assert "考えを変えたなら、疑い先・吊り先も実際に変え" in v3
     assert "強く言われただけで折れない" in v3
 
     legacy = ContextBuilder(

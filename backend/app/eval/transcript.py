@@ -163,6 +163,9 @@ class GameTranscript:
     roles: dict[str, str] = field(default_factory=dict)
     teams: dict[str, str] = field(default_factory=dict)
     personalities: dict[str, str] = field(default_factory=dict)
+    # v3: each AI seat's skill (熟練/普通/初心者), which sets when it is shown a
+    # derived conclusion (`app/ai/reasoning/skill.py`). Empty in older records.
+    skills: dict[str, str] = field(default_factory=dict)
     deception: dict[str, Any] = field(default_factory=dict)
     utterances: list[Utterance] = field(default_factory=list)
     final_state: dict[str, Any] = field(default_factory=dict)
@@ -183,6 +186,7 @@ class GameTranscript:
             "roles": self.roles,
             "teams": self.teams,
             "personalities": self.personalities,
+            "skills": self.skills,
             "deception": self.deception,
             "utterances": [asdict(u) for u in self.utterances],
             "final_state": self.final_state,
@@ -208,6 +212,7 @@ class GameTranscript:
             roles=dict(data.get("roles", {})),
             teams=dict(data.get("teams", {})),
             personalities=dict(data.get("personalities", {})),
+            skills=dict(data.get("skills", {})),
             deception=dict(data.get("deception", {})),
             utterances=[Utterance(**item) for item in data.get("utterances", [])],
             final_state=dict(data.get("final_state", {})),
@@ -253,10 +258,12 @@ class TranscriptRecorder:
         deception: dict[str, Any],
         seed: int | None,
         provider: str,
+        skills: dict[str, str] | None = None,
     ) -> None:
         t = self.transcript
         t.names, t.roles, t.teams = names, roles, teams
         t.personalities, t.deception = personalities, deception
+        t.skills = dict(skills or {})
         t.seed, t.provider = seed, provider
 
     def record(self, utterance: Utterance) -> None:

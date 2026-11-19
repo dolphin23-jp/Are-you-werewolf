@@ -167,3 +167,52 @@ def test_a_plain_verdict_is_still_read(text: str, expected: list[tuple[str, bool
     )
 
     assert [(item.target_id, item.is_werewolf) for item in found] == expected
+
+
+# -- a verdict talked about is not a verdict given (run 15, X13 / X22) --
+
+RUN15 = {"p1": "アカリ", "p10": "リク", "p12": "ダイキ", "p5": "ミオ", "p16": "ケント"}
+
+
+@pytest.mark.parametrize(
+    ("role", "text"),
+    [
+        # run 15, day 5, m115: アオイ (madman, seer claim) about ダイキ's black on
+        # リク. The record gained アオイ→リク=黒.
+        (
+            RoleName.SEER,
+            "アカリさんの白は私の占い結果です。信用できるかは霊結果の整合で見ます。"
+            "リク黒が外れたのはダイキさんの問題なので、話をそらさないでください。",
+        ),
+        # the same day, アカリ (the real medium) about the same black
+        (
+            RoleName.MEDIUM,
+            "ダイキさん、私は本物の霊媒で、結果は見たままを出してるよ。"
+            "信じてもらうしかないけど、リク黒が外れたのは事実だよ。",
+        ),
+        (RoleName.SEER, "占い結果を見ると、ミオ白を出したのはケントだけ。"),
+        (RoleName.SEER, "占いで言うと、ミオ白は信用できない。"),
+        (RoleName.MEDIUM, "2日目はリク黒と私の霊媒結果が一致した。"),
+        (RoleName.SEER, "占いの話だけど、ケントの結果はミオ白。"),
+    ],
+)
+def test_a_verdict_talked_about_is_not_the_speakers_result(role: RoleName, text: str):
+    assert detect_public_results(text, role, RUN15, role_claimed_in_message=False) == []
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("占いCO。0日目夜はミオを占って白。", [("p5", False)]),
+        ("占い結果、リクは黒(人狼)です。", [("p10", True)]),
+        ("占い結果はミオ白、リク黒でした。", [("p10", True), ("p5", False)]),
+        ("占いはリクで、白と出た。", []),  # 「リクで、」 is no verdict on リク
+        ("占い結果、リクは白と出た。", [("p10", False)]),
+        # the speaker's own possessive keeps the verdict theirs
+        ("占いの話、私のリク黒を覆す根拠にはならない。", [("p10", True)]),
+    ],
+)
+def test_a_verdict_given_is_still_read(text: str, expected: list[tuple[str, bool]]):
+    found = detect_public_results(text, RoleName.SEER, RUN15, role_claimed_in_message=True)
+
+    assert sorted((item.target_id, item.is_werewolf) for item in found) == expected

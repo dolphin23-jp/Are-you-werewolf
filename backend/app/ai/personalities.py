@@ -32,8 +32,13 @@ CHAT_STAGE_MAX_CHARS: dict[str, int] = {
     "human_followup": 60,
     # From day 2, a seat with no line yet, once, before the summary.
     "open_floor": 60,
+    # Day 1, every seat without a CO once, after the first views: how the grey
+    # looks, a white placement or a doubt with its reason -- room for a reason.
+    "grey_view": 80,
     # A seat the summary named, answering it: never the reaction's 30.
     "summary_answer": 60,
+    # A seat asked by name during the day, answering it: never the reaction's 30.
+    "question_answer": 60,
     # The facilitator's candidate when the summary named nobody.
     "provisional_designation": 60,
     # The facilitator, after the seats it asked by name have answered.

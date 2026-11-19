@@ -9,7 +9,8 @@ from dataclasses import asdict, dataclass
 from enum import StrEnum
 from typing import Any
 
-from app.eval.transcript import DecisionAuditRecord, GameTranscript
+from app.eval.public_record import undeclared_records
+from app.eval.transcript import DecisionAuditRecord, GameTranscript, Utterance
 
 
 class VoteChangeKind(StrEnum):
@@ -39,20 +40,36 @@ class VoteChangeKind(StrEnum):
     # public stance against the vote, and the table saw no stance to leave;
     # the report lists these with quotes instead of failing them.
     MEMO_TARGET_UNSPOKEN = "memo_target_unspoken"
+    # The seat said its memo target that day, but only in its own result about
+    # that seat or in a question to it (`stance_excuse`): 「0日目夜はソウタさん
+    # を占って、結果は白でした」, 「ケントの回答待ちだね」. A name the seat
+    # reported or asked is no hang target it put to the table, so, like
+    # `memo_target_unspoken`, the change is listed with the sentences instead
+    # of failing (owner's review of run 14, X10).
+    MEMO_TARGET_ONLY_REPORTED_OR_ASKED = "memo_target_only_reported_or_asked"
     # After the seat's last word, a closing line of the day declared a
     # grey-random day, and the ballot left a seat outside the grey for one in
     # it. The policy the table heard says where the votes go; run 14 failed
     # six ballots that followed it from a seer claimant to a grey seat.
     GREY_RANDOM_POLICY = "grey_random_policy"
+    # After the seat's last word, the day's final designation -- the last of
+    # the closing lines -- named exactly the seat the ballot went to. The
+    # designation is what the table votes on; following it is a cause the
+    # table saw, whatever the reason says. Run 16, day 2: カイト voted the
+    # designated アオイ with 「進行に乗る」 and was failed, while four seats
+    # that wrote 「マコトの本指定どおり」 passed as `public_argument`.
+    FINAL_DESIGNATION = "final_designation"
 
 
 # Changes with a cause the table could see. `no_basis` compared nothing, and
-# `memo_target_unspoken` left a stance nobody heard: neither is judged.
+# `memo_target_unspoken` / `memo_target_only_reported_or_asked` left a stance
+# nobody heard: none of them is judged.
 JUSTIFIED_CHANGES = frozenset(VoteChangeKind) - {
     VoteChangeKind.NONE,
     VoteChangeKind.UNEXPLAINED,
     VoteChangeKind.NO_BASIS,
     VoteChangeKind.MEMO_TARGET_UNSPOKEN,
+    VoteChangeKind.MEMO_TARGET_ONLY_REPORTED_OR_ASKED,
 }
 
 
@@ -180,9 +197,118 @@ def sentence_naming(text: str, seat: str, names: Mapping[str, str]) -> str:
     return naming[-1] if naming else ""
 
 
-# -- a ballot's reason that names another seat as where it goes --
+# -- a name in the seat's own sentence that is no stance on it --
+#
+# The gate measures the seat's public stance against its vote, and a name in
+# its own line is the stance it took. Two sentence shapes name a seat without
+# taking one, and run 14 counted both (owner's review, X10):
+#
+# * its own result about the seat, stated in the very line the result was
+#   registered from: 「0日目夜はソウタさんを占って、結果は白でした」,
+#   「0日目夜の結果はシオンが白」;
+# * a question to the seat: 「ケントの回答待ちだね」, 「レンさんとケントさんの
+#   答えを聞きたい」, 「ハルトさん、なぜそこを占ったの？」.
+#
+# Both are read from the sentence's form, not from what it meant. Anything
+# else that names the seat stays its stance, however it reads -- 「ダイキさん
+# は吊れません」 too, and 「レンの真偽はまだ決め打てん」: telling a refusal or a
+# withheld judgement from a push is reading intent. The vote prompt quotes the
+# seat's stance through the same predicate (`app.ai.context`), so the prompt
+# and the gate never disagree about what the seat said.
 
 _HONORIFIC = r"(?:さん|くん|君|ちゃん|氏|様)?"
+
+STANCE_EXCUSE_RESULT = "自分の結果の発表"
+STANCE_EXCUSE_QUESTION = "本人への質問"
+
+# A verdict stated: 白／黒 and the words a result is said in, after the seat's
+# name (「ソウタを占って白」, 「シオンが白」) -- in 「昨日狼のハルトの票がシオンに
+# 入ってたから」 the 狼 is ハルト's, not シオン's.
+_VERDICT_WORD = re.compile(r"白|黒|シロ|クロ|人狼|狼|人間|村人|村側")
+# A word about the hang or the ballot: a result sentence that carries one
+# (「偽占いが黒だったので、今日はダイキを吊るでいいよね」) says more than the result.
+_HANG_WORD = re.compile(r"吊|投票|指定|入れ|一票")
+# The sentence asks for something: it ends as a question, or it waits for,
+# asks to hear, or asks for an answer.
+_ASKING = re.compile(
+    r"[？?]\s*$|聞きたい|聞いて(?:から|み)|知りたい|待ち"
+    # A request -- 「答えて」 -- not thanks for one done (「答えてくれてありがとう」)
+    # nor a charge that none came (「答えてないよね」, 「答えていません」).
+    r"|(?:聞かせ|教え|答え|説明し)て(?!くれ[てた]|もら[っえ]て|もらった|な|いな|いま?せ)"
+)
+# What follows a seat asked to answer: its answer (「ケントの回答」), or a
+# question put to it (「ケントに聞きたい」, 「ケントへの質問」).
+_ANSWER_OWNED = re.compile(
+    r"\s*の\s*(?:回答|答え|返答|返事|説明|弁明|釈明|意見|見解|考え|理由|反論)"
+)
+# Not 「Xに答え」: in 「リクさん、レンさんに答えを迫る前に…」 the one asked is リク.
+_ASKED_OF = re.compile(r"\s*(?:に|へ)の?\s*(?:質問|聞|訊|確認)")
+# Two seats asked together: 「レンさんとケントさんの答え」.
+_JOINED = re.compile(r"\s*[と、,，や・]\s*")
+# A call: the name (with an honorific) and a comma or an exclamation.
+_CALL = re.compile(_HONORIFIC + r"\s*[、,，！!]\s*")
+# What follows a seat in a list of seats, not a call: 「レン、ソウタが怪しい」.
+_LISTED = re.compile(_HONORIFIC + r"\s*[、,，とやがはも・]")
+
+
+def stance_excuse(
+    sentence: str, seat: str, names: Mapping[str, str], *, result_line: bool = False
+) -> str:
+    """Why a sentence of the seat's own that names `seat` is no stance on it, or "".
+
+    `STANCE_EXCUSE_RESULT` when `result_line` -- the line is where the
+    speaker's own result about `seat` was registered -- and the sentence
+    states a verdict after the name without a word about the hang.
+    `STANCE_EXCUSE_QUESTION` when the sentence asks (`_ASKING`) and every
+    mention of `seat` in it is the one asked: called by name at the head of
+    the sentence (「ケント、…？」), or asked for its answer (「ケントの回答
+    待ち」, 「ケントに聞きたい」), alone or joined to another seat asked with
+    it. "" for any other sentence, and for a sentence that does not name
+    `seat`.
+    """
+    spans = mention_spans(sentence, names)
+    mine = [index for index, span in enumerate(spans) if span[2] == seat]
+    if not mine:
+        return ""
+    if (
+        result_line
+        and _VERDICT_WORD.search(sentence, spans[mine[0]][1])
+        and not _HANG_WORD.search(sentence)
+    ):
+        return STANCE_EXCUSE_RESULT
+    if _ASKING.search(sentence) and all(_asked(sentence, spans, index) for index in mine):
+        return STANCE_EXCUSE_QUESTION
+    return ""
+
+
+def _asked(sentence: str, spans: Sequence[tuple[int, int, str]], index: int) -> bool:
+    """Whether the mention at `spans[index]` is the seat the sentence asks."""
+    # Asked for its answer, alone or with the seats joined after it.
+    position, following = spans[index][1], index + 1
+    while True:
+        honorific = re.match(_HONORIFIC, sentence[position:])
+        after = position + (honorific.end() if honorific else 0)
+        if _ANSWER_OWNED.match(sentence, after) or _ASKED_OF.match(sentence, after):
+            return True
+        if following < len(spans) and _JOINED.fullmatch(sentence, after, spans[following][0]):
+            position, following = spans[following][1], following + 1
+            continue
+        break
+    # Called by name at the head of the sentence, not as the first of a list.
+    start, end, _seat = spans[index]
+    head = sentence[:start]
+    if index != 0 or (head.strip() and not re.search(r"[、,，\s…]$", head)):
+        return False
+    call = _CALL.match(sentence, end)
+    if call is None:
+        return False
+    if index + 1 < len(spans) and spans[index + 1][0] == call.end():
+        return not _LISTED.match(sentence, spans[index + 1][1])
+    return True
+
+
+# -- a ballot's reason that names another seat as where it goes --
+
 # The voter's own ballot, in the forms that state or propose it: 入れる / 入れます /
 # 入れよう / 入れとく / 入れておく / 入れちゃう, 投票する / します / しよう / しとく /
 # しておく, or 一票 (に一票。 / に一票入れる).
@@ -264,6 +390,17 @@ class PublishedResult:
 
 
 @dataclass(frozen=True)
+class PublicStance:
+    """A seat's own sentences of the day that name one seat, split by `stance_excuse`."""
+
+    # Sentences that name the seat as the speaker's stance.
+    sentences: tuple[str, ...] = ()
+    # Sentences that name it only as the speaker's own result or as the seat
+    # asked, each with its excuse.
+    excused: tuple[tuple[str, str], ...] = ()
+
+
+@dataclass(frozen=True)
 class BallotFacts:
     """Everything a ballot's change of target is judged on, as plain data.
 
@@ -294,6 +431,42 @@ class BallotFacts:
     # The grey at the vote: alive, no claim, no seer claimant's verdict.
     # None when it is not known; the grey-random cause is then never found.
     grey_ids: frozenset[str] | None = None
+    # The day's final designation (`final_designation`): the last closing
+    # line, and the seat it designates. None when the day closed on no line,
+    # or on one that designates nobody the table heard.
+    designation_message_id: str | None = None
+    designated_target: str | None = None
+
+    def stance_on(self, seat: str) -> PublicStance:
+        """The voter's own sentences today that name `seat`, as stance or excused.
+
+        A line counts as the voter's result line for `seat` when one of the
+        day's results by the voter about `seat` was registered from it.
+        """
+        result_lines = {
+            result.source_message_id
+            for result in self.results
+            if result.claimant_id == self.voter_id and result.target_id == seat
+        }
+        stance: list[str] = []
+        excused: list[tuple[str, str]] = []
+        for line in self.day_lines:
+            if line.author_id != self.voter_id:
+                continue
+            for sentence in split_sentences(line.content):
+                if seat not in named_seat_ids(sentence, self.names):
+                    continue
+                excuse = stance_excuse(
+                    sentence,
+                    seat,
+                    self.names,
+                    result_line=line.message_id in result_lines,
+                )
+                if excuse:
+                    excused.append((sentence, excuse))
+                else:
+                    stance.append(sentence)
+        return PublicStance(tuple(stance), tuple(excused))
 
     def lines_after_voter(self) -> Sequence[SpokenLine]:
         """The day's lines after the voter's last one: what it heard since it spoke."""
@@ -312,15 +485,18 @@ def classify_vote_change(facts: BallotFacts) -> tuple[VoteChangeKind, str]:
     with is `no_basis`. A memo candidate the seat never said at the table
     that day is no public stance, so leaving it is `memo_target_unspoken`
     -- after the runoff and the death, which explain any change whatever
-    the stance was.
+    the stance was. Nor is a name the seat said only in its own result
+    about that seat or in a question to it (`stance_excuse`): leaving it is
+    `memo_target_only_reported_or_asked`, listed with those sentences.
 
     Each cause is something the table could see happen after the seat last
     spoke: a runoff that left the candidate off the ballot, the candidate's
     death, a correction, another seat arguing about the old or the new target
     whom the reason names, a new ability result about either target or by
-    either of them, or a closing line declaring a grey-random day when the
-    ballot left a seat outside the grey for one in it. Only a change none of
-    them covers is unexplained. The
+    either of them, a closing line declaring a grey-random day when the
+    ballot left a seat outside the grey for one in it, or the day's final
+    designation naming the very seat the ballot went to, whatever the reason
+    says of it. Only a change none of them covers is unexplained. The
     reason the seat wrote is kept either way, but it is not a cause on its
     own -- the vote prompt asks every ballot for one.
 
@@ -346,11 +522,19 @@ def classify_vote_change(facts: BallotFacts) -> tuple[VoteChangeKind, str]:
         return VoteChangeKind.RUNOFF_RESTRICTION, "決選投票の対象制限"
     if basis not in facts.alive_ids:
         return VoteChangeKind.TARGET_BECAME_INVALID, "発言後に対象が無効化"
-    if not any(basis in named_seat_ids(line, facts.names) for line in own_lines):
+    stance = facts.stance_on(basis)
+    if not stance.sentences:
         name = facts.names.get(basis, basis)
+        if not stance.excused:
+            return (
+                VoteChangeKind.MEMO_TARGET_UNSPOKEN,
+                f"メモの吊り先{name}は、その日の自分の発言に一度も出ていない",
+            )
+        excuses = "か".join(dict.fromkeys(excuse for _sentence, excuse in stance.excused))
+        quoted = "".join(f"「{sentence}」" for sentence, _excuse in stance.excused)
         return (
-            VoteChangeKind.MEMO_TARGET_UNSPOKEN,
-            f"メモの吊り先{name}は、その日の自分の発言に一度も出ていない",
+            VoteChangeKind.MEMO_TARGET_ONLY_REPORTED_OR_ASKED,
+            f"メモの吊り先{name}は、その日の自分の発言では{excuses}にだけ出ている: {quoted}",
         )
     later = facts.lines_after_voter()
     later_ids = {line.message_id for line in later}
@@ -393,6 +577,18 @@ def classify_vote_change(facts: BallotFacts) -> tuple[VoteChangeKind, str]:
             VoteChangeKind.GREY_RANDOM_POLICY,
             f"発言後に進行役がグレランを宣言({'、'.join(declared)})。"
             f"{facts.names.get(basis, basis)}はグレー外、票はグレー: {facts.reason}",
+        )
+    designation = facts.designation_message_id
+    if (
+        designation is not None
+        and designation in later_ids
+        and facts.designated_target is not None
+        and facts.designated_target == target
+    ):
+        return (
+            VoteChangeKind.FINAL_DESIGNATION,
+            f"発言後の進行役の最後の指定({designation})が"
+            f"{facts.names.get(target or '', target)}を指定: {facts.reason}",
         )
     return VoteChangeKind.UNEXPLAINED, facts.reason
 
@@ -447,6 +643,10 @@ class BallotVerdict:
     # Seats other than the target the reason says the ballot goes to
     # (`seats_reason_votes_for`). Listed in the report, never judged.
     reason_names_other: tuple[str, ...] = ()
+    # The seat's sentences that day naming its memo target only as its own
+    # result or as the seat asked (`stance_excuse`), each with its excuse:
+    # what a reader checks a `memo_target_only_reported_or_asked` against.
+    excused_sentences: tuple[tuple[str, str], ...] = ()
 
     @property
     def hard_change(self) -> bool:
@@ -479,6 +679,7 @@ def audit_ballots(transcript: GameTranscript) -> tuple[BallotVerdict, ...]:
             facts = record.facts(audit, round_number, reason)
             kind, why = classify_vote_change(facts)
             basis = facts.basis
+            excused = facts.stance_on(basis).excused if basis is not None else ()
             own_lines = tuple(
                 line.content for line in facts.day_lines if line.author_id == audit.player_id
             )
@@ -486,6 +687,7 @@ def audit_ballots(transcript: GameTranscript) -> tuple[BallotVerdict, ...]:
             kind, why = _change_kind(audit), audit.target_change_reason
             basis = audit.decision_target
             own_lines = record.own_lines_from_utterances(audit.player_id, audit.day)
+            excused = ()
         ally: dict[str, Any] = {}
         if audit.ally_vote:
             ally = record.ally_vote(audit, round_number)
@@ -507,6 +709,7 @@ def audit_ballots(transcript: GameTranscript) -> tuple[BallotVerdict, ...]:
                 reason_names_other=seats_reason_votes_for(
                     reason, audit.player_id, audit.vote_target, record.names
                 ),
+                excused_sentences=excused,
                 **ally,
             )
         )
@@ -518,6 +721,58 @@ _NEW_RESULT_EVENT_TYPES = frozenset({"ability_result", "result_correction"})
 # and the summary before it).
 _CLOSING_STAGES = frozenset({"final_designation", "provisional_designation", "consensus_summary"})
 _BINDING_CONFIDENCE = 0.8  # `speech_events.CLAIM_CONFIDENCE_THRESHOLD`
+
+
+def day_closing_line(utterances: Sequence[Utterance], day: int) -> Utterance | None:
+    """The day's last closing turn (designation, or the summary the round closed on)."""
+    closing = [
+        u
+        for u in utterances
+        if u.kind == "discussion" and u.day == day and u.stage in _CLOSING_STAGES
+    ]
+    return closing[-1] if closing else None
+
+
+def designated_by(line: Utterance, names: Mapping[str, str]) -> str | None:
+    """The seat a closing line designates: its speaker's memo hang target, said in the line.
+
+    A target the line does not name is no designation the table heard.
+    """
+    target = (line.reasoning_memo or {}).get("execution_target")
+    if isinstance(target, str) and target in named_seat_ids(line.text, names):
+        return target
+    return None
+
+
+def final_designation(
+    utterances: Sequence[Utterance],
+    day: int,
+    day_lines: Sequence[SpokenLine],
+    names: Mapping[str, str],
+) -> tuple[str | None, str | None]:
+    """`BallotFacts.designation_message_id` and `designated_target` for one day.
+
+    The day's last closing line, as the message the table saw, and the seat
+    it designates. A line that declares a grey-random day designates nobody
+    even when it names its speaker's lean (「今日はグレランで、シオンさんの答えを
+    聞いてから」): the policy it states is grey random (`declares_grey_random`).
+    The live coordinator and the offline audit both read it here, from the
+    utterances the transcript records and the day's public lines.
+    """
+    line = day_closing_line(utterances, day)
+    if line is None:
+        return None, None
+    message_id = next(
+        (
+            spoken.message_id
+            for spoken in reversed(day_lines)
+            if spoken.author_id == line.player_id and spoken.content == line.text
+        ),
+        None,
+    )
+    if message_id is None or declares_grey_random(line.text):
+        return message_id, None
+    return message_id, designated_by(line, names)
 
 
 class _Record:
@@ -683,18 +938,10 @@ class _Record:
         仮指定. Its target is the speaker's memo target, when the line says the
         name; a line that does not name it designated nobody the table heard.
         """
-        closing = [
-            u
-            for u in self.t.utterances
-            if u.kind == "discussion" and u.day == day and u.stage in _CLOSING_STAGES
-        ]
-        if not closing:
+        last = day_closing_line(self.t.utterances, day)
+        if last is None:
             return None, ""
-        last = closing[-1]
-        target = (last.reasoning_memo or {}).get("execution_target")
-        if isinstance(target, str) and target in named_seat_ids(last.text, self.names):
-            return target, last.text
-        return None, last.text
+        return designated_by(last, self.names), last.text
 
     def ally_vote(self, audit: DecisionAuditRecord, round_number: int) -> dict[str, Any]:
         """`BallotVerdict`'s ally fields for a ballot on the voter's partner."""
@@ -744,6 +991,9 @@ class _Record:
             candidates = tuple(
                 seat for seat in _top(self.tally(day, round_number - 1)) if seat != audit.player_id
             )
+        designation_id, designated = final_designation(
+            self.t.utterances, day, self.lines.get(day, ()), self.names
+        )
         return BallotFacts(
             voter_id=audit.player_id,
             basis=self.basis(audit.player_id, day),
@@ -760,6 +1010,8 @@ class _Record:
             ),
             closing_message_ids=self.closing.get(day, ()),
             grey_ids=self.grey(day),
+            designation_message_id=designation_id,
+            designated_target=designated,
         )
 
 
@@ -799,6 +1051,9 @@ class ReasoningQualityReport:
     # Changes off a memo target the seat never said at the table that day.
     # Listed with quotes in the report; not a gate failure.
     memo_target_unspoken_count: int = 0
+    # Changes off a memo target the seat said only in its own result about
+    # it or in a question to it. Listed with those sentences; not a failure.
+    memo_target_only_reported_or_asked_count: int = 0
     wolf_ally_vote_count: int = 0
     planned_wolf_ally_vote_count: int = 0
     # Unplanned, but following the day's final designation without deciding
@@ -810,6 +1065,11 @@ class ReasoningQualityReport:
     vote_reason_names_other_count: int = 0
     illegal_timeline_claim_count: int = 0
     duplicate_night_action_count: int = 0
+    # COs, results and partner namings on the public record that their own
+    # line did not declare (`public_record.undeclared_records`), counting only
+    # those that changed what the record says. A restatement of what already
+    # stood is listed in the report, not counted.
+    undeclared_record_count: int = 0
     correction_messages_heard: int = 0
     corrections_confirmed: int = 0
     corrections_refuted: int = 0
@@ -929,6 +1189,9 @@ class ReasoningTranscriptAnalyzer:
             + sum(count - 1 for count in result_nights.values() if count > 1),
             duplicate_night_action_count=len(accepted_night_keys)
             - len(set(accepted_night_keys)),
+            undeclared_record_count=sum(
+                record.changed_record for record in undeclared_records(transcript)
+            ),
             stale_evidence_used_in_brief_count=stale_attempts,
             stale_evidence_cited_publicly_count=stale_emitted,
             stale_evidence_attempt_count=stale_attempts,
@@ -939,6 +1202,9 @@ class ReasoningTranscriptAnalyzer:
             no_basis_vote_count=no_basis,
             compared_vote_count=len(ballots) - no_basis,
             memo_target_unspoken_count=change_kinds.count(VoteChangeKind.MEMO_TARGET_UNSPOKEN),
+            memo_target_only_reported_or_asked_count=change_kinds.count(
+                VoteChangeKind.MEMO_TARGET_ONLY_REPORTED_OR_ASKED
+            ),
             wolf_ally_vote_count=len(ally_votes),
             planned_wolf_ally_vote_count=planned_ally,
             designated_wolf_ally_vote_count=len(ally_votes) - planned_ally - unplanned_ally,

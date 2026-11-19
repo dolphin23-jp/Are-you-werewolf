@@ -27,6 +27,7 @@ from app.engine.speech_events import (
     SpeechEventType,
     role_claim_history,
 )
+from app.eval.public_record import describe_record, undeclared_records
 from app.eval.reasoning_analyzer import AllyVoteKind, audit_ballots
 from app.eval.transcript import DecisionAuditRecord, GameTranscript, Utterance
 
@@ -54,6 +55,9 @@ _NIGHT_ACTION = {
     RoleName.WEREWOLF.value: "襲撃",
 }
 
+# Each seat's skill (`app/ai/reasoning/skill.py`), as the cast table shows it.
+_SKILL_LABELS = {"expert": "熟練", "average": "普通", "novice": "初心者"}
+
 _CHANGE_KIND = {
     "none": "変更なし",
     "new_public_evidence": "新しい公開情報による変更",
@@ -64,10 +68,14 @@ _CHANGE_KIND = {
     "strategic_team_decision": "陣営の方針",
     "public_argument": "公開の論による変更",
     "grey_random_policy": "進行役のグレラン宣言に沿った変更（グレー外からグレーへ）",
+    "final_designation": "進行役の最後の指定に沿った変更",
     "unexplained": "理由のない変更",
     # Compared with nothing: no turn that day, or a memo that named nobody.
     "no_basis": "比較できない",
     "memo_target_unspoken": "卓で言っていないメモの吊り先からの変更（合否に数えない）",
+    "memo_target_only_reported_or_asked": (
+        "メモの吊り先に自分の結果の発表か本人への質問でだけ触れた変更（合否に数えない）"
+    ),
 }
 
 # A discussion utterance's private note, field by field, in reading order.
@@ -180,6 +188,8 @@ class _Renderer:
             for plan in transcript.wolf_ally_vote_plans
         }
         self.claim_history = role_claim_history(_speech_events(state))
+        # Claims, results and partner namings their own line did not declare.
+        self.undeclared = {record.event_id: record for record in undeclared_records(transcript)}
         self.claims_by_message: dict[str, list[RoleClaimState]] = defaultdict(list)
         for claim in self.claim_history:
             self.claims_by_message[claim.source_message_id].append(claim)
@@ -210,8 +220,8 @@ class _Renderer:
     def _roster(self) -> list[str]:
         lines = [
             "## 配役\n",
-            "| プレイヤー | 役職 | 陣営 | 人格 | 騙り役 |",
-            "|---|---|---|---|---|",
+            "| プレイヤー | 役職 | 陣営 | 人格 | 腕前 | 騙り役 |",
+            "|---|---|---|---|---|---|",
         ]
         deception = self.t.deception or {}
         fake_roles = deception.get("fake_role_by_player", {})
@@ -222,7 +232,8 @@ class _Renderer:
             team = team_label(self.t.teams.get(pid, "-"))
             lines.append(
                 f"| {name} (`{pid}`) | {role_label(self.t.roles.get(pid))} | {team} | "
-                f"{self.t.personalities.get(pid, '-')} | {label} |"
+                f"{self.t.personalities.get(pid, '-')} | "
+                f"{_SKILL_LABELS.get(self.t.skills.get(pid, ''), '-')} | {label} |"
             )
         lines.append(f"\n人狼陣営の方針: {deception.get('wolf_pattern_label', '-')}\n")
         return lines
@@ -294,7 +305,10 @@ class _Renderer:
             prefix = f"`{mid}` " if mid else ""
             return [f"- {prefix}[{channel}] **{who}**: {_flat(u.text)}"]
         if u.kind == "summary":
-            return [f"- 要約（{u.player_name}）: {_flat(u.text)}"]
+            # A summary written in code has no author at the table; the seat it
+            # is filed under did not write it.
+            author = "コードが作成" if u.stage == "code" else f"{u.player_name}が作成"
+            return [f"- 要約（{author}）: {_flat(u.text)}"]
         return [f"- [{u.kind}] {who}: {_flat(u.text)}"]
 
     def _discussion(self, index: int, u: Utterance, who: str) -> list[str]:
@@ -529,6 +543,13 @@ class _Renderer:
                 f"{seat_label(names, record['target_id'])}"
             )
         lines += self._claim_records()
+        for record in self.undeclared.values():
+            counted = "" if record.changed_record else "・記録は変わらず、合否に数えない"
+            lines.append(
+                f"- {record.day}日目: 本人が宣言していない記録"
+                f"（{record.source_message_id or '-'}{counted}）: "
+                f"{describe_record(record, names)}"
+            )
         audits = [
             audit
             for audit in self.t.decision_audits
@@ -579,7 +600,8 @@ class _Renderer:
                 kind = f"CO（{role_label(claim.previous_role.value)}から乗り換え）"
             else:
                 kind = "CO"
-            lines.append(f"- {claim.day}日目の{kind}: {seat} = {role}（{source}）")
+            undeclared = "【本人の宣言なし】" if claim.event_id in self.undeclared else ""
+            lines.append(f"- {claim.day}日目の{kind}: {seat} = {role}（{source}）{undeclared}")
         return lines
 
     def _result(self) -> list[str]:

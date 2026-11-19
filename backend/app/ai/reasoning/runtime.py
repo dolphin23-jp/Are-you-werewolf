@@ -37,7 +37,7 @@ from app.ai.reasoning.belief import (
     summarise,
 )
 from app.ai.reasoning.belief.state import EvidenceRecord, tiebreak
-from app.ai.reasoning.board_memo import fake_claim_floor, render_board_memo, role_label
+from app.ai.reasoning.board_memo import fake_claim_floor, namify, render_board_memo, role_label
 from app.ai.reasoning.citations import VoteCitation, parse_vote_citations
 from app.ai.reasoning.dialogue import (
     ArgumentEvent,
@@ -57,6 +57,7 @@ from app.ai.reasoning.perspectives import (
     PlayerPrivatePerspective,
 )
 from app.ai.reasoning.rendering import declared_candidates
+from app.ai.reasoning.skill import DerivationClock, Skill, assign_skills
 from app.ai.reasoning.solver import (
     AccurateTimeline,
     RoleSolver,
@@ -163,6 +164,15 @@ class ReasoningRuntime:
         self._reported_solver_hits = 0
         self._reported_solver_seconds = 0.0
         self._traits = assign_traits(list(ai_player_ids), seed=seed)
+        # How soon each seat notices a derived conclusion on the board memo --
+        # separate from the persona, dealt from the seed (`skill.py`). The
+        # clock remembers when each conclusion first became derivable.
+        self.skills: dict[str, Skill] = assign_skills(list(ai_player_ids), seed=seed)
+        self.derivation_clock = DerivationClock()
+        # The role each bluffer's side has it claim (the wolf told to fake the
+        # seer, the madman's fake role), set by whoever deals the bluffs. Read
+        # only into that seat's own memo, before it claims.
+        self.planned_claims: dict[str, RoleName] = {}
         self.seats: dict[str, SeatReasoning] = {}
         for player_id in ai_player_ids:
             perspective = PlayerPrivatePerspective(player_id)
@@ -521,6 +531,12 @@ class ReasoningRuntime:
         * the freemason leader, until the freemason CO is made;
         * a seer or medium holding a result without the CO it needs;
         * a planned fake claimant, until that claim is actually made;
+        * the real seer or medium, until it has claimed its role -- the
+          mirror of the planned fake claimant. A fake medium was a morning
+          duty speaker while the real one, with no result on day 1, waited
+          for the roll call (run 14, seed 2: m4 against m16), so the order
+          of the COs said which was fake. Whether to claim stays its call;
+          the turn is in the same block as the fake's;
         * a standing seer or medium claimant, true or fake, with this
           morning's result still to announce (see `owes_morning_result`);
         * a bluffer whose story has collapsed and must retract or slide;
@@ -545,6 +561,9 @@ class ReasoningRuntime:
                 required.append(player_id)
             planned = (planned_fake_roles or {}).get(player_id)
             if planned is not None and standing is not planned:
+                required.append(player_id)
+            real_role = state.players[player_id].role
+            if real_role in (RoleName.SEER, RoleName.MEDIUM) and standing is not real_role:
                 required.append(player_id)
             if self.owes_morning_result(state, player_id):
                 required.append(player_id)
@@ -624,15 +643,21 @@ class ReasoningRuntime:
         return tuple(result.explanations) if result.is_contradictory else ()
 
     def public_marks(self, state: GameState, player_id: str) -> tuple[PublicMark, ...]:
-        """Everything public that already marks this seat: blacks, a disproved claim."""
+        """Everything public that already marks this seat: blacks, a disproved claim.
+
+        Explanations are written in names: they reach the transcript as the
+        audit's reason (run #16's read 「1日目に占ったのはp14なのでp4は…」).
+        """
         ledger = PublicFactLedger(state)
+        name = ledger.name_of
         marks = [
             PublicMark(
                 evidence_id=f"black:{result.claimant_id}:{result.result_type}:{player_id}",
                 source_message_id=result.source_message_id,
                 explanation=(
-                    f"{result.claimant_id}の{'霊媒' if result.result_type == 'medium' else '占い'}"
-                    f"結果で{player_id}は黒"
+                    f"{name(result.claimant_id)}の"
+                    f"{'霊媒' if result.result_type == 'medium' else '占い'}"
+                    f"結果で{name(player_id)}は黒"
                 ),
             )
             for result in ledger.public_results()
@@ -648,7 +673,7 @@ class ReasoningRuntime:
                 PublicMark(
                     evidence_id=f"impossible_claim:{player_id}:{role}",
                     source_message_id=claim.source_message_id if claim is not None else "",
-                    explanation="".join(reasons),
+                    explanation=namify("".join(reasons), ledger),
                 )
             )
         return tuple(marks)
@@ -880,7 +905,8 @@ class ReasoningRuntime:
         private knowledge; the final section is the seat's own card, results and
         allies, read through its perspective. The seat's private solver adds
         only hard conclusions. Nothing here is a conclusion about whom to
-        suspect -- that is what the model is being asked for.
+        suspect -- that is what the model is being asked for. Derived public
+        conclusions reach the seat when its skill allows (`skill.py`).
         """
         self.refresh(state)
         seat = self.seats[player_id]
@@ -893,6 +919,9 @@ class ReasoningRuntime:
             observations=self.observations,
             public_solver=public_solver,
             seat_solver=seat.solver,
+            skill=self.skills.get(player_id, Skill.EXPERT),
+            clock=self.derivation_clock,
+            planned_claim=self.planned_claims.get(player_id),
         )
 
     def record_stated_target(self, player_id: str, target: str | None, day: int) -> None:
