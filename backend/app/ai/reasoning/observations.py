@@ -72,6 +72,18 @@ class PublicVerdict:
 
 
 @dataclass(frozen=True)
+class PublicPartnerClaim:
+    """A freemason claimant named their partner; `confirmed` once the named
+    seat named them back. Said, not established, like a verdict."""
+
+    claimant_id: str
+    partner_id: str
+    day: int
+    confirmed: bool = False
+    source_message_id: str = ""
+
+
+@dataclass(frozen=True)
 class Execution:
     """Announced to the whole table, so the day is public knowledge."""
 
@@ -143,6 +155,7 @@ class ObservationSet:
     alive: Mapping[str, bool] = field(default_factory=dict)
     claims: tuple[PublicClaim, ...] = ()
     verdicts: tuple[PublicVerdict, ...] = ()
+    partner_claims: tuple[PublicPartnerClaim, ...] = ()
     executed_ids: tuple[str, ...] = ()
     executions: tuple[Execution, ...] = ()
     night_deaths: tuple[NightDeath, ...] = ()
@@ -185,6 +198,16 @@ class ObservationSet:
             ),
             verdicts=tuple(
                 _dated_by_first_statement(ledger, result) for result in ledger.public_results()
+            ),
+            partner_claims=tuple(
+                PublicPartnerClaim(
+                    claimant_id=claim.claimant_id,
+                    partner_id=claim.partner_id,
+                    day=claim.day,
+                    confirmed=claim.confirmed,
+                    source_message_id=claim.source_message_id,
+                )
+                for claim in state.freemason_partner_claims
             ),
             executed_ids=ledger.executed_ids(),
             executions=tuple(

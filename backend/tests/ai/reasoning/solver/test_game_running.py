@@ -112,7 +112,7 @@ def test_the_derived_rules_are_left_out_of_the_plain_ones():
     plain = {module.module_id for module in plain_rule_modules()}
     every = {module.module_id for module in default_rule_modules()}
 
-    assert DERIVED_RULE_MODULE_IDS == {"claimed_divination", "game_running"}
+    assert DERIVED_RULE_MODULE_IDS == {"claimed_divination", "claimed_partner", "game_running"}
     assert plain == every - DERIVED_RULE_MODULE_IDS
 
 

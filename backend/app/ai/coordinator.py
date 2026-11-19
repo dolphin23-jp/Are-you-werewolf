@@ -662,6 +662,10 @@ class AICoordinator:
         self._madman_fake_role_by_player = {
             player.player_id: madman_fake_role for player in madman if madman_fake_role is not None
         }
+        if reasoning is not None:
+            reasoning.planned_claims.update(
+                {**wolf_deception.fake_role_by_player, **self._madman_fake_role_by_player}
+            )
 
         self._day_summaries = DaySummaryManager()
         self._context = ContextBuilder(
