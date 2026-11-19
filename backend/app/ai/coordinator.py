@@ -3187,13 +3187,19 @@ class AICoordinator:
             # own plan note, which nobody else ever saw -- calling it a public
             # statement made the record claim something no one said.
             baseline = "公開発言では" if self._decides_in_code else "メモでは"
+
+            def _name(seat: str) -> str:
+                # The record is read by people: names, as every other line has them.
+                player = state.players.get(seat)
+                return player.name if player is not None else seat
+
             self._record(
                 state,
                 player_id,
                 "vote_change",
                 text=(
-                    f"{baseline}{mismatch.stated_target}を第一候補としたが、"
-                    f"最終判断で{mismatch.actual_target}へ変更した。{output.reason}"
+                    f"{baseline}{_name(mismatch.stated_target)}を第一候補としたが、"
+                    f"最終判断で{_name(mismatch.actual_target)}へ変更した。{output.reason}"
                 ),
                 target=mismatch.actual_target,
                 alternative_target=mismatch.stated_target,

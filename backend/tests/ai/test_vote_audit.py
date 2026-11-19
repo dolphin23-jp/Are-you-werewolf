@@ -308,7 +308,8 @@ def test_the_v3_change_record_calls_the_baseline_a_note_not_a_statement():
     asyncio.run(coordinator._cast_vote(controller, state, speaker))
 
     change = next(u for u in recorder.transcript.utterances if u.kind == "vote_change")
-    assert change.text.startswith(f"メモでは{plan}を第一候補としたが")
+    assert change.text.startswith(f"メモでは{state.players[plan].name}を第一候補としたが")
+    assert f"最終判断で{state.players[other].name}へ変更した" in change.text
     assert "公開発言では" not in change.text
 
 
